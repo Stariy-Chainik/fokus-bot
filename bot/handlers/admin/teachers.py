@@ -50,29 +50,10 @@ async def cb_pick_user(callback: CallbackQuery, state: FSMContext) -> None:
     if value == "manual":
         await state.set_state(AddTeacherStates.entering_tg_id)
         await callback.message.edit_text("Введите Telegram ID педагога (число) или 0 если неизвестен:")
-        await callback.answer()
-        return
-
-    tg_id = int(value)
-    await state.update_data(tg_id=tg_id)
-
-    # Получаем имя из Telegram
-    try:
-        chat = await callback.bot.get_chat(tg_id)
-        parts = [chat.first_name or "", chat.last_name or ""]
-        name = " ".join(p for p in parts if p).strip() or chat.username or ""
-    except Exception:
-        name = ""
-
-    if name:
-        await state.update_data(name=name)
-        await state.set_state(AddTeacherStates.entering_rate_group)
-        await callback.message.edit_text(
-            f"Имя педагога: <b>{name}</b>\n\nСтавка за групповое занятие (руб. за 45 мин):"
-        )
     else:
+        await state.update_data(tg_id=int(value))
         await state.set_state(AddTeacherStates.entering_name)
-        await callback.message.edit_text("Не удалось получить имя. Введите имя педагога вручную:")
+        await callback.message.edit_text("Введите имя педагога:")
     await callback.answer()
 
 
@@ -83,27 +64,9 @@ async def add_teacher_tg_id(message: Message, state: FSMContext) -> None:
     except ValueError:
         await message.answer("Введите число или 0:")
         return
-
-    tg_id_val = tg_id if tg_id != 0 else None
-    await state.update_data(tg_id=tg_id_val)
-
-    # Пробуем получить имя из Telegram
-    name = ""
-    if tg_id_val:
-        try:
-            chat = await message.bot.get_chat(tg_id_val)
-            parts = [chat.first_name or "", chat.last_name or ""]
-            name = " ".join(p for p in parts if p).strip() or chat.username or ""
-        except Exception:
-            pass
-
-    if name:
-        await state.update_data(name=name)
-        await state.set_state(AddTeacherStates.entering_rate_group)
-        await message.answer(f"Имя педагога: <b>{name}</b>\n\nСтавка за групповое занятие (руб. за 45 мин):")
-    else:
-        await state.set_state(AddTeacherStates.entering_name)
-        await message.answer("Введите имя педагога:")
+    await state.update_data(tg_id=tg_id if tg_id != 0 else None)
+    await state.set_state(AddTeacherStates.entering_name)
+    await message.answer("Введите имя педагога:")
 
 
 @router.message(AddTeacherStates.entering_name)
