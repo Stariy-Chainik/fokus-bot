@@ -6,9 +6,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.models import User
-from bot.repositories import TeacherRepository
+from bot.repositories import TeacherRepository, UserRepository
 from bot.states import AddTeacherStates, EditTeacherRatesStates
-from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_confirm, kb_back
+from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_user_list, kb_confirm, kb_back
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_teachers")
@@ -40,14 +40,41 @@ async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state
 
 
 @router.message(AddTeacherStates.entering_name)
-async def add_teacher_name(message: Message, state: FSMContext) -> None:
+async def add_teacher_name(message: Message, state: FSMContext, user_repo: UserRepository) -> None:
     name = message.text.strip() if message.text else ""
     if not name:
         await message.answer("Имя не может быть пустым:")
         return
     await state.update_data(name=name)
-    await state.set_state(AddTeacherStates.entering_tg_id)
-    await message.answer("Введите Telegram ID педагога (число) или 0 если неизвестен:")
+
+    # Показываем список пользователей без teacher_id (уже написали /start боту)
+    all_users = await user_repo.get_all()
+    unlinked = [u for u in all_users if not u.teacher_id and not u.is_admin]
+    await state.set_state(AddTeacherStates.choosing_user)
+    if unlinked:
+        await message.answer(
+            "Выберите пользователя из тех, кто уже написал /start боту, или введите ID вручную:",
+            reply_markup=kb_user_list(unlinked, "pick_user"),
+        )
+    else:
+        await message.answer(
+            "Нет пользователей без роли. Введите Telegram ID вручную или 0 если неизвестен:",
+            reply_markup=kb_user_list([], "pick_user"),
+        )
+
+
+@router.callback_query(F.data.startswith("pick_user:"), AddTeacherStates.choosing_user)
+async def cb_pick_user(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":", 1)[1]
+    if value == "manual":
+        await state.set_state(AddTeacherStates.entering_tg_id)
+        await callback.message.edit_text("Введите Telegram ID педагога (число) или 0 если неизвестен:")
+    else:
+        tg_id = int(value)
+        await state.update_data(tg_id=tg_id)
+        await state.set_state(AddTeacherStates.entering_rate_group)
+        await callback.message.edit_text(f"Telegram ID: {tg_id} выбран.\n\nСтавка за групповое занятие (руб. за 45 мин):")
+    await callback.answer()
 
 
 @router.message(AddTeacherStates.entering_tg_id)
