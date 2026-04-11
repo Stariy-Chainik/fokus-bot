@@ -5,9 +5,9 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import LessonRepository
+from bot.repositories import LessonRepository, StudentRepository, TeacherStudentRepository
 from bot.services import LessonService
-from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu
+from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu, kb_student_search_results, PAGE_SIZE as STUDENT_PAGE_SIZE
 from bot.utils.dates import format_date_display
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,50 @@ PAGE_SIZE = 5
 
 def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
+
+
+@router.callback_query(F.data == "teacher:my_students")
+async def cb_my_students(
+    callback: CallbackQuery, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_ids = await ts_repo.get_students_for_teacher(user.teacher_id)
+    all_students = await student_repo.get_all()
+    students = sorted(
+        [s for s in all_students if s.student_id in student_ids],
+        key=lambda s: s.name,
+    )
+    if not students:
+        await callback.message.edit_text("У вас нет привязанных учеников.", reply_markup=kb_teacher_menu())
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        f"Ваши ученики ({len(students)}):",
+        reply_markup=kb_student_search_results(students[:STUDENT_PAGE_SIZE], "my_student_page", page=0, total=len(students)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("page:my_student_page:"))
+async def cb_my_students_page(
+    callback: CallbackQuery, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    page = int(callback.data.split(":")[-1])
+    student_ids = await ts_repo.get_students_for_teacher(user.teacher_id)
+    all_students = await student_repo.get_all()
+    students = sorted(
+        [s for s in all_students if s.student_id in student_ids],
+        key=lambda s: s.name,
+    )
+    start = page * STUDENT_PAGE_SIZE
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_student_search_results(students[start:start + STUDENT_PAGE_SIZE], "my_student_page", page=page, total=len(students))
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "teacher:my_lessons")
