@@ -187,13 +187,15 @@ async def cb_delete_teacher_confirm(
 
 @router.callback_query(F.data.startswith("confirm_del_teacher:"))
 async def cb_delete_teacher_do(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository, user_repo,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
     ok = await teacher_repo.delete(teacher_id)
+    if ok:
+        await user_repo.clear_teacher_id(teacher_id)
     text = f"Педагог {teacher_id} удалён." if ok else "Педагог не найден."
     await callback.message.edit_text(text, reply_markup=kb_back("admin:teachers"))
     await callback.answer()
