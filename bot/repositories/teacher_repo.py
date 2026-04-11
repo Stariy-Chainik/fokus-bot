@@ -7,7 +7,7 @@ from .base import BaseRepository
 def _row_to_teacher(row: dict) -> Teacher:
     return Teacher(
         teacher_id=str(row["teacher_id"]),
-        tg_id=int(row["tg_id"]) if row.get("tg_id") else None,
+        tg_id=int(float(str(row["tg_id"]).strip())) if row.get("tg_id") else None,
         name=str(row["name"]),
         rate_group=int(row.get("rate_group") or 0),
         rate_for_teacher=int(row.get("rate_for_teacher") or 0),

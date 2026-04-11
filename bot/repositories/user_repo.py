@@ -10,10 +10,18 @@ def _to_bool(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes")
 
 
+def _parse_tg_id(value) -> Optional[int]:
+    """Парсит tg_id из ячейки — Google Sheets может вернуть float (826576855.0)."""
+    try:
+        return int(float(str(value).strip()))
+    except (ValueError, TypeError):
+        return None
+
+
 def _row_to_user(row: dict) -> User:
     return User(
         user_id=str(row["user_id"]),
-        tg_id=int(row["tg_id"]),
+        tg_id=_parse_tg_id(row["tg_id"]),
         is_admin=_to_bool(row.get("is_admin", False)),
         teacher_id=str(row["teacher_id"]) if row.get("teacher_id") else None,
     )
@@ -23,7 +31,7 @@ class UserRepository(BaseRepository):
     async def get_by_tg_id(self, tg_id: int) -> Optional[User]:
         records = await self._all_records()
         for row in records:
-            if str(row.get("tg_id", "")).strip() == str(tg_id):
+            if _parse_tg_id(row.get("tg_id")) == tg_id:
                 return _row_to_user(row)
         return None
 
