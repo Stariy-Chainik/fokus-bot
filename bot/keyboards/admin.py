@@ -65,6 +65,15 @@ def kb_student_list(students: list, action_prefix: str, back_cb: str = "admin:st
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_student: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Групповое: {rate_group} руб.", callback_data=f"edit_rate:group:{teacher_id}")],
+        [InlineKeyboardButton(text=f"Инд. педагогу: {rate_teacher} руб.", callback_data=f"edit_rate:teacher:{teacher_id}")],
+        [InlineKeyboardButton(text=f"Инд. ученику: {rate_student} руб.", callback_data=f"edit_rate:student:{teacher_id}")],
+        [InlineKeyboardButton(text="« Отмена", callback_data="admin:teachers")],
+    ])
+
+
 def kb_user_list(users: list, action_prefix: str) -> InlineKeyboardMarkup:
     """Список незарегистрированных пользователей для привязки к педагогу."""
     buttons = [

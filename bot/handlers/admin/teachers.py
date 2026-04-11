@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.models import User
 from bot.repositories import TeacherRepository, UserRepository
 from bot.states import AddTeacherStates, EditTeacherRatesStates
-from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_user_list, kb_confirm, kb_back
+from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_user_list, kb_rate_select, kb_confirm, kb_back
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_teachers")
@@ -221,6 +221,13 @@ async def cb_delete_teacher_do(
 
 # ─── Изменение ставок ─────────────────────────────────────────────────────────
 
+_RATE_LABELS = {
+    "group":   "Групповое",
+    "teacher": "Инд. педагогу",
+    "student": "Инд. ученику",
+}
+
+
 @router.callback_query(F.data == "teachers:edit_rates")
 async def cb_edit_rates_start(
     callback: CallbackQuery, user: User | None, state: FSMContext, teacher_repo: TeacherRepository,
@@ -241,56 +248,69 @@ async def cb_edit_rates_start(
 
 
 @router.callback_query(F.data.startswith("edit_rates_teacher:"), EditTeacherRatesStates.choosing_teacher)
-async def cb_edit_rates_chosen(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(teacher_id=callback.data.split(":", 1)[1])
-    await state.set_state(EditTeacherRatesStates.entering_rate_group)
-    await callback.message.edit_text("Новая ставка за групповое занятие (руб. за 45 мин):")
+async def cb_edit_rates_chosen(
+    callback: CallbackQuery, state: FSMContext, teacher_repo: TeacherRepository,
+) -> None:
+    teacher_id = callback.data.split(":", 1)[1]
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    if not teacher:
+        await callback.answer("Педагог не найден", show_alert=True)
+        return
+    await state.update_data(
+        teacher_id=teacher_id,
+        rate_group=teacher.rate_group,
+        rate_for_teacher=teacher.rate_for_teacher,
+        rate_for_student=teacher.rate_for_student,
+    )
+    await state.set_state(EditTeacherRatesStates.choosing_rate)
+    await callback.message.edit_text(
+        f"Педагог: <b>{teacher.name}</b>\n\nКакую ставку изменить?",
+        reply_markup=kb_rate_select(
+            teacher_id, teacher.rate_group, teacher.rate_for_teacher, teacher.rate_for_student
+        ),
+    )
     await callback.answer()
 
 
-@router.message(EditTeacherRatesStates.entering_rate_group)
-async def edit_rate_group(message: Message, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith("edit_rate:"), EditTeacherRatesStates.choosing_rate)
+async def cb_edit_rate_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    _, rate_type, teacher_id = callback.data.split(":", 2)
+    await state.update_data(rate_type=rate_type)
+    label = _RATE_LABELS.get(rate_type, rate_type)
+    await state.set_state(EditTeacherRatesStates.entering_rate)
+    await callback.message.edit_text(f"Новая ставка «{label}» (руб. за 45 мин):")
+    await callback.answer()
+
+
+@router.message(EditTeacherRatesStates.entering_rate)
+async def edit_rate_value(message: Message, state: FSMContext) -> None:
     try:
         rate = int((message.text or "").strip())
         assert rate >= 0
     except (ValueError, AssertionError):
         await message.answer("Введите положительное целое число:")
         return
-    await state.update_data(rate_group=rate)
-    await state.set_state(EditTeacherRatesStates.entering_rate_for_teacher)
-    await message.answer("Новая ставка педагогу за индивидуальное (руб. за 45 мин):")
-
-
-@router.message(EditTeacherRatesStates.entering_rate_for_teacher)
-async def edit_rate_teacher(message: Message, state: FSMContext) -> None:
-    try:
-        rate = int((message.text or "").strip())
-        assert rate >= 0
-    except (ValueError, AssertionError):
-        await message.answer("Введите положительное целое число:")
-        return
-    await state.update_data(rate_for_teacher=rate)
-    await state.set_state(EditTeacherRatesStates.entering_rate_for_student)
-    await message.answer("Новая ставка для счёта ученика (руб. за 45 мин):")
-
-
-@router.message(EditTeacherRatesStates.entering_rate_for_student)
-async def edit_rate_student(message: Message, state: FSMContext) -> None:
-    try:
-        rate = int((message.text or "").strip())
-        assert rate >= 0
-    except (ValueError, AssertionError):
-        await message.answer("Введите положительное целое число:")
-        return
-    await state.update_data(rate_for_student=rate)
     data = await state.get_data()
+    rate_type = data["rate_type"]
+    # Обновляем только нужную ставку, остальные оставляем
+    updated = {
+        "rate_group": data["rate_group"],
+        "rate_for_teacher": data["rate_for_teacher"],
+        "rate_for_student": data["rate_for_student"],
+    }
+    updated[f"rate_{rate_type}" if rate_type != "teacher" else "rate_for_teacher"] = rate
+    if rate_type == "group":
+        updated["rate_group"] = rate
+    elif rate_type == "teacher":
+        updated["rate_for_teacher"] = rate
+    elif rate_type == "student":
+        updated["rate_for_student"] = rate
+    await state.update_data(**updated)
     await state.set_state(EditTeacherRatesStates.confirming)
+    label = _RATE_LABELS.get(rate_type, rate_type)
     await message.answer(
-        f"Новые ставки для {data['teacher_id']}:\n"
-        f"Групп: {data['rate_group']} руб.\n"
-        f"Педагогу (инд.): {data['rate_for_teacher']} руб.\n"
-        f"Ученику (инд.): {rate} руб.",
-        reply_markup=kb_confirm("confirm_edit_rates", "admin:teachers"),
+        f"Изменить ставку «{label}» → <b>{rate} руб.</b>?",
+        reply_markup=kb_confirm("confirm_edit_rates", f"edit_rates_teacher:{data['teacher_id']}"),
     )
 
 
@@ -306,6 +326,6 @@ async def cb_confirm_edit_rates(
     ok = await teacher_repo.update_rates(
         data["teacher_id"], data["rate_group"], data["rate_for_teacher"], data["rate_for_student"]
     )
-    text = "Ставки обновлены." if ok else "Педагог не найден."
+    text = "Ставка обновлена." if ok else "Педагог не найден."
     await callback.message.edit_text(text, reply_markup=kb_back("admin:teachers"))
     await callback.answer()

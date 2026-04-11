@@ -13,9 +13,8 @@ class AddTeacherStates(StatesGroup):
 
 class EditTeacherRatesStates(StatesGroup):
     choosing_teacher = State()
-    entering_rate_group = State()
-    entering_rate_for_teacher = State()
-    entering_rate_for_student = State()
+    choosing_rate = State()
+    entering_rate = State()
     confirming = State()
 
 
