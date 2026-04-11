@@ -56,12 +56,11 @@ class UserRepository(BaseRepository):
                 return True
         return False
 
-    async def clear_teacher_id(self, teacher_id: str) -> bool:
-        """Очищает teacher_id у пользователя при удалении педагога."""
+    async def delete_by_teacher_id(self, teacher_id: str) -> bool:
+        """Удаляет пользователя из таблицы при удалении педагога."""
         records = await self._all_records()
         for i, row in enumerate(records):
             if str(row.get("teacher_id", "")).strip() == teacher_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 4, "")
+                await self._delete_row(i + 2)
                 return True
         return False

@@ -195,7 +195,7 @@ async def cb_delete_teacher_do(
     teacher_id = callback.data.split(":", 1)[1]
     ok = await teacher_repo.delete(teacher_id)
     if ok:
-        await user_repo.clear_teacher_id(teacher_id)
+        await user_repo.delete_by_teacher_id(teacher_id)
     text = f"Педагог {teacher_id} удалён." if ok else "Педагог не найден."
     await callback.message.edit_text(text, reply_markup=kb_back("admin:teachers"))
     await callback.answer()
