@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Педагог: FSM «Отметить занятие».
 Защита от двойного нажатия — set _confirming_lesson_ids по tg_id.
