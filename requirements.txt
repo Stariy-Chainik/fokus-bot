@@ -1,0 +1,9 @@
+aiogram==3.13.1
+aiohttp==3.10.11
+gspread==6.1.2
+google-auth==2.35.0
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+python-dateutil==2.9.0
+redis==5.2.0
