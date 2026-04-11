@@ -7,8 +7,11 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.models import User
 from bot.repositories import StudentRepository, TeacherRepository, TeacherStudentRepository
-from bot.states import AddStudentStates, LinkTeacherStudentStates
-from bot.keyboards.admin import kb_students_menu, kb_teacher_list, kb_student_list, kb_confirm, kb_back
+from bot.states import AddStudentStates, LinkTeacherStudentStates, StudentListStates
+from bot.keyboards.admin import (
+    kb_students_menu, kb_teacher_list, kb_student_list,
+    kb_student_paged, kb_student_card, kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_students")
@@ -24,6 +27,99 @@ async def cb_students_menu(callback: CallbackQuery, user: User | None) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.edit_text("Управление учениками:", reply_markup=kb_students_menu())
+    await callback.answer()
+
+
+# ─── Список учеников с поиском ───────────────────────────────────────────────
+
+def _filter_and_page(students: list, query: str, page: int):
+    if query:
+        filtered = [s for s in students if query.lower() in s.name.lower()]
+    else:
+        filtered = students
+    start = page * _STUDENT_PAGE_SIZE
+    return filtered[start:start + _STUDENT_PAGE_SIZE], len(filtered)
+
+
+@router.callback_query(F.data == "students:list")
+async def cb_students_list(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.set_state(StudentListStates.searching)
+    await state.update_data(student_query="")
+    await callback.message.edit_text(
+        "Введите имя или часть имени ученика для поиска.\n"
+        "Чтобы показать всех — отправьте <b>*</b>"
+    )
+    await callback.answer()
+
+
+@router.message(StudentListStates.searching)
+async def handle_student_search(
+    message: Message, state: FSMContext, student_repo: StudentRepository,
+) -> None:
+    query = message.text.strip() if message.text else ""
+    if query == "*":
+        query = ""
+    await state.update_data(student_query=query)
+    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    page_students, total = _filter_and_page(all_students, query, 0)
+    if not page_students:
+        await message.answer("Ничего не найдено. Попробуйте другой запрос.")
+        return
+    label = f"Найдено: {total}" if query else f"Всего учеников: {total}"
+    await message.answer(
+        f"{label}. Страница 1:",
+        reply_markup=kb_student_paged(page_students, 0, total, query),
+    )
+
+
+@router.callback_query(F.data.startswith("spage:"))
+async def cb_student_page(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    query = parts[1].replace("_", ":") if parts[1] != "" else ""
+    page = int(parts[2])
+    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    page_students, total = _filter_and_page(all_students, query, page)
+    await callback.message.edit_text(
+        f"Страница {page + 1}:",
+        reply_markup=kb_student_paged(page_students, page, total, query),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("student_card:"))
+async def cb_student_card(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository, ts_repo: TeacherStudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    teacher_ids = await ts_repo.get_teachers_for_student(student_id)
+    if teacher_ids:
+        all_teachers = await teacher_repo.get_all()
+        teachers_map = {t.teacher_id: t.name for t in all_teachers}
+        teachers_text = "\n".join(f"  • {teachers_map.get(tid, tid)}" for tid in teacher_ids)
+    else:
+        teachers_text = "  не привязан"
+    text = (
+        f"👩‍🎓 <b>{student.name}</b>\n"
+        f"ID: {student.student_id}\n\n"
+        f"Педагоги:\n{teachers_text}"
+    )
+    await callback.message.edit_text(text, reply_markup=kb_student_card(student_id))
     await callback.answer()
 
 

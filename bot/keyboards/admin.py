@@ -24,11 +24,39 @@ def kb_teachers_menu() -> InlineKeyboardMarkup:
 
 def kb_students_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список учеников", callback_data="students:list")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],
         [InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="students:delete")],
         [InlineKeyboardButton(text="🔗 Привязать ученика к педагогу", callback_data="students:link")],
         [InlineKeyboardButton(text="✂️ Убрать связь педагог-ученик", callback_data="students:unlink")],
         [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
+    ])
+
+
+_STUDENT_PAGE_SIZE = 8
+
+
+def kb_student_paged(students: list, page: int, total: int, query: str = "") -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=s.name, callback_data=f"student_card:{s.student_id}")]
+        for s in students
+    ]
+    nav = []
+    q = query.replace(":", "_")
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="← Пред.", callback_data=f"spage:{q}:{page - 1}"))
+    if (page + 1) * _STUDENT_PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton(text="След. →", callback_data=f"spage:{q}:{page + 1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="students:list")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def kb_student_card(student_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Назад к списку", callback_data="students:list")],
     ])
 
 
