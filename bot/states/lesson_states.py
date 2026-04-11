@@ -4,10 +4,8 @@ from aiogram.fsm.state import State, StatesGroup
 class RecordLessonStates(StatesGroup):
     choosing_date = State()
     choosing_type = State()
-    searching_student_1 = State()
     choosing_student_1 = State()
     asking_second_student = State()
-    searching_student_2 = State()
     choosing_student_2 = State()
     choosing_duration = State()
     confirming = State()

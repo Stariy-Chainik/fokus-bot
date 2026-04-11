@@ -114,55 +114,50 @@ async def msg_lesson_date_manual(message: Message, state: FSMContext) -> None:
 # ─── Тип занятия ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("lesson_type:"), RecordLessonStates.choosing_type)
-async def cb_lesson_type_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_lesson_type_chosen(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
     lesson_type = callback.data.split(":", 1)[1]
     await state.update_data(lesson_type=lesson_type)
     if lesson_type == "group":
         await state.set_state(RecordLessonStates.choosing_duration)
         await callback.message.edit_text("Групповое занятие.\n\nВыберите длительность:", reply_markup=kb_duration())
     else:
-        await state.set_state(RecordLessonStates.searching_student_1)
+        students = await _linked_students(user.teacher_id, ts_repo, student_repo)
+        if not students:
+            await callback.message.edit_text(
+                "Нет привязанных учеников. Обратитесь к администратору.",
+                reply_markup=kb_teacher_menu(),
+            )
+            await callback.answer()
+            return
+        await state.set_state(RecordLessonStates.choosing_student_1)
         await callback.message.edit_text(
-            "Введите первые буквы имени ученика\n(или пробел для просмотра всего списка):"
+            "Выберите ученика:",
+            reply_markup=kb_student_search_results(students[:PAGE_SIZE], "pick_student_1", page=0, total=len(students)),
         )
     await callback.answer()
 
 
 # ─── Поиск ученика 1 ──────────────────────────────────────────────────────────
 
-async def _linked_students(teacher_id: str, prefix: str, ts_repo, student_repo):
+async def _linked_students(teacher_id: str, ts_repo, student_repo, exclude_id: str | None = None):
     student_ids = await ts_repo.get_students_for_teacher(teacher_id)
     all_students = await student_repo.get_all()
     linked = [s for s in all_students if s.student_id in student_ids]
-    if prefix.strip():
-        linked = [s for s in linked if s.name.lower().startswith(prefix.lower())]
-    return linked
-
-
-@router.message(RecordLessonStates.searching_student_1)
-async def msg_search_student_1(
-    message: Message, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    prefix = (message.text or "").strip()
-    students = await _linked_students(user.teacher_id, prefix, ts_repo, student_repo)
-    if not students:
-        await message.answer("Ученики не найдены. Попробуйте другой запрос:")
-        return
-    await state.update_data(search_results_1=[s.student_id for s in students])
-    await state.set_state(RecordLessonStates.choosing_student_1)
-    await message.answer(
-        f"Найдено {len(students)}. Выберите:",
-        reply_markup=kb_student_search_results(students[:PAGE_SIZE], "pick_student_1", page=0, total=len(students)),
-    )
+    if exclude_id:
+        linked = [s for s in linked if s.student_id != exclude_id]
+    return sorted(linked, key=lambda s: s.name)
 
 
 @router.callback_query(F.data.startswith("page:pick_student_1:"))
-async def cb_page_student_1(callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository) -> None:
+async def cb_page_student_1(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
     page = int(callback.data.split(":")[-1])
-    data = await state.get_data()
-    ids = data.get("search_results_1", [])
-    students = [s for s in await student_repo.get_all() if s.student_id in ids]
+    students = await _linked_students(user.teacher_id, ts_repo, student_repo)
     start = page * PAGE_SIZE
     await callback.message.edit_reply_markup(
         reply_markup=kb_student_search_results(students[start:start + PAGE_SIZE], "pick_student_1", page=page, total=len(students))
@@ -197,38 +192,28 @@ async def cb_no_second_student(callback: CallbackQuery, state: FSMContext) -> No
 
 
 @router.callback_query(F.data == "second_student:yes", RecordLessonStates.asking_second_student)
-async def cb_yes_second_student(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(RecordLessonStates.searching_student_2)
-    await callback.message.edit_text("Введите первые буквы имени второго ученика:")
+async def cb_yes_second_student(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    data = await state.get_data()
+    students = await _linked_students(user.teacher_id, ts_repo, student_repo, exclude_id=data.get("student_1_id"))
+    await state.set_state(RecordLessonStates.choosing_student_2)
+    await callback.message.edit_text(
+        f"Ученик 1: {data.get('student_1_name')}\n\nВыберите второго ученика:",
+        reply_markup=kb_student_search_results(students[:PAGE_SIZE], "pick_student_2", page=0, total=len(students)),
+    )
     await callback.answer()
 
 
-@router.message(RecordLessonStates.searching_student_2)
-async def msg_search_student_2(
-    message: Message, state: FSMContext, user: User | None,
+@router.callback_query(F.data.startswith("page:pick_student_2:"))
+async def cb_page_student_2(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
     ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
 ) -> None:
-    prefix = (message.text or "").strip()
-    data = await state.get_data()
-    students = await _linked_students(user.teacher_id, prefix, ts_repo, student_repo)
-    students = [s for s in students if s.student_id != data.get("student_1_id")]
-    if not students:
-        await message.answer("Ученики не найдены. Попробуйте другой запрос:")
-        return
-    await state.update_data(search_results_2=[s.student_id for s in students])
-    await state.set_state(RecordLessonStates.choosing_student_2)
-    await message.answer(
-        f"Найдено {len(students)}. Выберите второго:",
-        reply_markup=kb_student_search_results(students[:PAGE_SIZE], "pick_student_2", page=0, total=len(students)),
-    )
-
-
-@router.callback_query(F.data.startswith("page:pick_student_2:"))
-async def cb_page_student_2(callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository) -> None:
     page = int(callback.data.split(":")[-1])
     data = await state.get_data()
-    ids = data.get("search_results_2", [])
-    students = [s for s in await student_repo.get_all() if s.student_id in ids]
+    students = await _linked_students(user.teacher_id, ts_repo, student_repo, exclude_id=data.get("student_1_id"))
     start = page * PAGE_SIZE
     await callback.message.edit_reply_markup(
         reply_markup=kb_student_search_results(students[start:start + PAGE_SIZE], "pick_student_2", page=page, total=len(students))
