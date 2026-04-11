@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
 from bot.models import User
-from bot.repositories import UserRepository
+from bot.repositories import UserRepository, TeacherRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ router = Router(name="common")
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, user: User | None, user_repo: UserRepository) -> None:
+async def cmd_start(message: Message, user: User | None, user_repo: UserRepository, teacher_repo: TeacherRepository) -> None:
     if user is None:
         # Автоматически регистрируем нового пользователя
         tg_user = message.from_user
@@ -56,6 +56,15 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
         return
 
     if user.teacher_id:
+        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
+        return
+
+    # Пользователь зарегистрирован, но teacher_id не привязан.
+    # Проверяем — может педагог уже добавлен в таблицу teachers по tg_id.
+    teacher = await teacher_repo.get_by_tg_id(message.from_user.id)
+    if teacher:
+        await user_repo.update_teacher_id(message.from_user.id, teacher.teacher_id)
+        logger.info("Авто-привязка teacher_id=%s для tg_id=%s", teacher.teacher_id, message.from_user.id)
         await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
         return
 
