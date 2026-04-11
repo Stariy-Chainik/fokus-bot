@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.models import User
 from bot.repositories import TeacherRepository, UserRepository
 from bot.states import AddTeacherStates, EditTeacherRatesStates
-from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_user_list, kb_rate_select, kb_confirm, kb_back
+from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_teacher_card, kb_user_list, kb_rate_select, kb_confirm, kb_back
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_teachers")
@@ -24,6 +24,81 @@ async def cb_teachers_menu(callback: CallbackQuery, user: User | None) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.edit_text("Управление педагогами:", reply_markup=kb_teachers_menu())
+    await callback.answer()
+
+
+# ─── Список педагогов ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "teachers:list")
+async def cb_teachers_list(
+    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teachers = await teacher_repo.get_all()
+    if not teachers:
+        await callback.message.edit_text("Педагогов нет.", reply_markup=kb_back("admin:teachers"))
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        "Выберите педагога:",
+        reply_markup=kb_teacher_list(teachers, "teacher_card", back_cb="admin:teachers"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("teacher_card:"))
+async def cb_teacher_card(
+    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    if not teacher:
+        await callback.answer("Педагог не найден", show_alert=True)
+        return
+    tg_info = f"@tg_id: {teacher.tg_id}" if teacher.tg_id else "Telegram не привязан"
+    text = (
+        f"👨‍🏫 <b>{teacher.name}</b>\n"
+        f"ID: {teacher.teacher_id}\n"
+        f"{tg_info}\n\n"
+        f"📊 Ставки (руб. за 45 мин):\n"
+        f"  Групповое: <b>{teacher.rate_group}</b>\n"
+        f"  Инд. педагогу: <b>{teacher.rate_for_teacher}</b>\n"
+        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>"
+    )
+    await callback.message.edit_text(text, reply_markup=kb_teacher_card(teacher_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("card_edit_rates:"))
+async def cb_card_edit_rates(
+    callback: CallbackQuery, user: User | None, state: FSMContext, teacher_repo: TeacherRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    if not teacher:
+        await callback.answer("Педагог не найден", show_alert=True)
+        return
+    await state.update_data(
+        teacher_id=teacher_id,
+        rate_group=teacher.rate_group,
+        rate_for_teacher=teacher.rate_for_teacher,
+        rate_for_student=teacher.rate_for_student,
+    )
+    await state.set_state(EditTeacherRatesStates.choosing_rate)
+    await callback.message.edit_text(
+        f"Педагог: <b>{teacher.name}</b>\n\nКакую ставку изменить?",
+        reply_markup=kb_rate_select(
+            teacher_id, teacher.rate_group, teacher.rate_for_teacher, teacher.rate_for_student
+        ),
+    )
     await callback.answer()
 
 

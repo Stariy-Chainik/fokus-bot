@@ -14,6 +14,7 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
 
 def kb_teachers_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список педагогов", callback_data="teachers:list")],
         [InlineKeyboardButton(text="➕ Добавить педагога", callback_data="teachers:add")],
         [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data="teachers:delete")],
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data="teachers:edit_rates")],
@@ -46,14 +47,21 @@ def kb_bills_menu() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_teacher_list(teachers: list, action_prefix: str) -> InlineKeyboardMarkup:
+def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:teachers") -> InlineKeyboardMarkup:
     """Список педагогов для выбора. action_prefix например 'del_teacher' → callback_data='del_teacher:TCH-0001'"""
     buttons = [
         [InlineKeyboardButton(text=t.name, callback_data=f"{action_prefix}:{t.teacher_id}")]
         for t in teachers
     ]
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data="admin:teachers")])
+    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
+        [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
+    ])
 
 
 def kb_student_list(students: list, action_prefix: str, back_cb: str = "admin:students") -> InlineKeyboardMarkup:
