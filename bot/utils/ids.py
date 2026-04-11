@@ -37,3 +37,7 @@ def generate_billing_id(existing: list[str]) -> str:
 
 def generate_payment_id(existing: list[str]) -> str:
     return _next_id("PAY", 6, existing)
+
+
+def generate_user_id(existing: list[str]) -> str:
+    return _next_id("USR", 4, existing)

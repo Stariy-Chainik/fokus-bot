@@ -1,5 +1,6 @@
 from typing import Optional
 from bot.models import User
+from bot.utils import generate_user_id
 from .base import BaseRepository
 
 
@@ -28,6 +29,13 @@ class UserRepository(BaseRepository):
 
     async def get_all(self) -> list[User]:
         return [_row_to_user(r) for r in await self._all_records()]
+
+    async def add(self, tg_id: int) -> User:
+        """Создаёт нового пользователя без роли."""
+        existing_ids = [u.user_id for u in await self.get_all()]
+        user_id = generate_user_id(existing_ids)
+        await self._append_row([user_id, tg_id, False, ""])
+        return User(user_id=user_id, tg_id=tg_id, is_admin=False, teacher_id=None)
 
     async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:
         """Привязывает teacher_id к пользователю по его tg_id."""

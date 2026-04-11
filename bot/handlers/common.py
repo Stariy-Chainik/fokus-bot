@@ -6,6 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
 from bot.models import User
+from bot.repositories import UserRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
 
 logger = logging.getLogger(__name__)
@@ -13,9 +14,17 @@ router = Router(name="common")
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, user: User | None) -> None:
+async def cmd_start(message: Message, user: User | None, user_repo: UserRepository) -> None:
     if user is None:
-        await message.answer("Вы не зарегистрированы. Обратитесь к администратору.")
+        # Автоматически регистрируем нового пользователя
+        try:
+            await user_repo.add(tg_id=message.from_user.id)
+            logger.info("Новый пользователь зарегистрирован: tg_id=%s", message.from_user.id)
+        except Exception as exc:
+            logger.error("Ошибка авторегистрации tg_id=%s: %s", message.from_user.id, exc)
+        await message.answer(
+            "Добро пожаловать!\n\nВы зарегистрированы. Ожидайте, пока администратор назначит вам роль."
+        )
         return
 
     if user.is_admin and user.teacher_id:
@@ -31,7 +40,7 @@ async def cmd_start(message: Message, user: User | None) -> None:
         return
 
     logger.warning("Пользователь tg_id=%s без роли", message.from_user.id if message.from_user else "?")
-    await message.answer("Ваша роль не определена. Обратитесь к администратору.")
+    await message.answer("Ожидайте, пока администратор назначит вам роль.")
 
 
 @router.callback_query(F.data == "mode:admin")
