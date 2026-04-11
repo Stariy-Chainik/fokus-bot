@@ -17,11 +17,31 @@ router = Router(name="common")
 async def cmd_start(message: Message, user: User | None, user_repo: UserRepository) -> None:
     if user is None:
         # Автоматически регистрируем нового пользователя
+        tg_user = message.from_user
         try:
-            await user_repo.add(tg_id=message.from_user.id)
-            logger.info("Новый пользователь зарегистрирован: tg_id=%s", message.from_user.id)
+            await user_repo.add(tg_id=tg_user.id)
+            logger.info("Новый пользователь зарегистрирован: tg_id=%s", tg_user.id)
         except Exception as exc:
-            logger.error("Ошибка авторегистрации tg_id=%s: %s", message.from_user.id, exc)
+            logger.error("Ошибка авторегистрации tg_id=%s: %s", tg_user.id, exc)
+
+        # Уведомляем всех администраторов
+        name_parts = [tg_user.first_name or "", tg_user.last_name or ""]
+        full_name = " ".join(p for p in name_parts if p).strip() or "—"
+        username = f"@{tg_user.username}" if tg_user.username else "нет"
+        notify_text = (
+            f"🆕 Новый пользователь зарегистрировался:\n\n"
+            f"Имя: {full_name}\n"
+            f"Username: {username}\n"
+            f"Telegram ID: <code>{tg_user.id}</code>\n\n"
+            f"Добавьте его как педагога через меню Администратора → Педагоги → Добавить"
+        )
+        admins = [u for u in await user_repo.get_all() if u.is_admin]
+        for admin in admins:
+            try:
+                await message.bot.send_message(admin.tg_id, notify_text)
+            except Exception:
+                pass  # Если администратор недоступен — не прерываем
+
         await message.answer(
             "Добро пожаловать!\n\nВы зарегистрированы. Ожидайте, пока администратор назначит вам роль."
         )
