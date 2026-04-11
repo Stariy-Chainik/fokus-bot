@@ -2,9 +2,9 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class AddTeacherStates(StatesGroup):
-    entering_name = State()
     choosing_user = State()   # выбор из зарегистрированных пользователей
     entering_tg_id = State()  # ручной ввод, если нужного нет в списке
+    entering_name = State()
     entering_rate_group = State()
     entering_rate_for_teacher = State()
     entering_rate_for_student = State()
