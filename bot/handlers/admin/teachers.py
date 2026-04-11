@@ -112,7 +112,8 @@ async def add_teacher_rate_student(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "confirm_add_teacher")
 async def cb_confirm_add_teacher(
-    callback: CallbackQuery, state: FSMContext, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, user_repo,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -127,8 +128,16 @@ async def cb_confirm_add_teacher(
             rate_for_teacher=data["rate_for_teacher"],
             rate_for_student=data["rate_for_student"],
         )
+        # Автоматически привязываем teacher_id к пользователю в таблице users
+        linked = False
+        if teacher.tg_id:
+            linked = await user_repo.update_teacher_id(teacher.tg_id, teacher.teacher_id)
+
+        note = "\n✅ Аккаунт педагога привязан." if linked else (
+            "\n⚠️ Telegram ID не найден в таблице users — привяжите teacher_id вручную." if teacher.tg_id else ""
+        )
         await callback.message.edit_text(
-            f"Педагог добавлен!\nID: {teacher.teacher_id}\nИмя: {teacher.name}",
+            f"Педагог добавлен!\nID: {teacher.teacher_id}\nИмя: {teacher.name}{note}",
             reply_markup=kb_back("admin:teachers"),
         )
     except Exception as exc:

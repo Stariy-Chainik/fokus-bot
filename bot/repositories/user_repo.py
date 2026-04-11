@@ -28,3 +28,14 @@ class UserRepository(BaseRepository):
 
     async def get_all(self) -> list[User]:
         return [_row_to_user(r) for r in await self._all_records()]
+
+    async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:
+        """Привязывает teacher_id к пользователю по его tg_id."""
+        records = await self._all_records()
+        for i, row in enumerate(records):
+            if str(row.get("tg_id", "")).strip() == str(tg_id):
+                row_idx = i + 2
+                # колонка teacher_id — 4-я (user_id, tg_id, is_admin, teacher_id)
+                await self._update_cell(row_idx, 4, teacher_id)
+                return True
+        return False
