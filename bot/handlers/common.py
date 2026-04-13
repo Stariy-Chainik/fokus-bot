@@ -6,7 +6,6 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
 from bot.models import User
-from bot.repositories import UserRepository, TeacherRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
 
 logger = logging.getLogger(__name__)
@@ -14,36 +13,12 @@ router = Router(name="common")
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, user: User | None, user_repo: UserRepository, teacher_repo: TeacherRepository) -> None:
+async def cmd_start(message: Message, user: User | None) -> None:
     if user is None:
-        # Автоматически регистрируем нового пользователя
-        tg_user = message.from_user
-        try:
-            await user_repo.add(tg_id=tg_user.id)
-            logger.info("Новый пользователь зарегистрирован: tg_id=%s", tg_user.id)
-        except Exception as exc:
-            logger.error("Ошибка авторегистрации tg_id=%s: %s", tg_user.id, exc)
-
-        # Уведомляем всех администраторов
-        name_parts = [tg_user.first_name or "", tg_user.last_name or ""]
-        full_name = " ".join(p for p in name_parts if p).strip() or "—"
-        username = f"@{tg_user.username}" if tg_user.username else "нет"
-        notify_text = (
-            f"🆕 Новый пользователь зарегистрировался:\n\n"
-            f"Имя: {full_name}\n"
-            f"Username: {username}\n"
-            f"Telegram ID: <code>{tg_user.id}</code>\n\n"
-            f"Добавьте его как педагога через меню Администратора → Педагоги → Добавить"
-        )
-        admins = [u for u in await user_repo.get_all() if u.is_admin]
-        for admin in admins:
-            try:
-                await message.bot.send_message(admin.tg_id, notify_text)
-            except Exception:
-                pass  # Если администратор недоступен — не прерываем
-
+        tg_id = message.from_user.id if message.from_user else "?"
+        logger.info("Отказано в доступе tg_id=%s (не в users)", tg_id)
         await message.answer(
-            "Добро пожаловать!\n\nВы зарегистрированы. Ожидайте, пока администратор назначит вам роль."
+            "Нет доступа. Обратитесь к администратору школы Фокус."
         )
         return
 
@@ -56,15 +31,6 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
         return
 
     if user.teacher_id:
-        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
-        return
-
-    # Пользователь зарегистрирован, но teacher_id не привязан.
-    # Проверяем — может педагог уже добавлен в таблицу teachers по tg_id.
-    teacher = await teacher_repo.get_by_tg_id(message.from_user.id)
-    if teacher:
-        await user_repo.update_teacher_id(message.from_user.id, teacher.teacher_id)
-        logger.info("Авто-привязка teacher_id=%s для tg_id=%s", teacher.teacher_id, message.from_user.id)
         await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
         return
 

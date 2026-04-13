@@ -41,12 +41,12 @@ class UserRepository(BaseRepository):
     async def get_all(self) -> list[User]:
         return [_row_to_user(r) for r in await self._all_records()]
 
-    async def add(self, tg_id: int) -> User:
-        """Создаёт нового пользователя без роли."""
+    async def add(self, tg_id: int, teacher_id: Optional[str] = None, is_admin: bool = False) -> User:
+        """Создаёт нового пользователя. При добавлении педагога сразу привязываем teacher_id."""
         existing_ids = [u.user_id for u in await self.get_all()]
         user_id = generate_user_id(existing_ids)
-        await self._append_row([user_id, tg_id, False, ""])
-        return User(user_id=user_id, tg_id=tg_id, is_admin=False, teacher_id=None)
+        await self._append_row([user_id, tg_id, is_admin, teacher_id or ""])
+        return User(user_id=user_id, tg_id=tg_id, is_admin=is_admin, teacher_id=teacher_id)
 
     async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:
         """Привязывает teacher_id к пользователю по его tg_id."""

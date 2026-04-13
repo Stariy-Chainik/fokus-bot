@@ -54,7 +54,13 @@ class LessonService:
         await self._lesson_repo.add(lesson)
         logger.info("Создано занятие %s teacher=%s date=%s", lesson_id, teacher.teacher_id, lesson_date)
 
-        await self._billing_service.create_for_lesson(lesson, teacher)
+        try:
+            await self._billing_service.create_for_lesson(lesson, teacher)
+        except Exception:
+            logger.error("Ошибка billing для занятия %s — откат", lesson_id)
+            await self._lesson_repo.delete(lesson_id)
+            raise
+
         return lesson
 
     async def delete(self, lesson_id: str) -> bool:

@@ -12,7 +12,7 @@ def _row_to_payment(row: dict) -> StudentPeriodPayment:
         student_name=str(row["student_name"]),
         period_month=str(row["period_month"]),
         total_amount=int(row.get("total_amount") or 0),
-        status=PaymentStatus(str(row.get("status", "pending"))),
+        status=PaymentStatus(str(row.get("status") or "pending")),
         paid_at=str(row["paid_at"]) if row.get("paid_at") else None,
         confirmed_by_tg_id=int(row["confirmed_by_tg_id"]) if row.get("confirmed_by_tg_id") else None,
         comment=str(row["comment"]) if row.get("comment") else None,

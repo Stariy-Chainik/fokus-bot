@@ -25,6 +25,7 @@ class Teacher:
 class Student:
     student_id: str
     name: str
+    partner_id: Optional[str] = None
 
 
 @dataclass

@@ -15,6 +15,8 @@ import time
 from typing import Any
 
 import gspread
+import requests.exceptions
+from urllib3.exceptions import ProtocolError
 
 from .sheets_client import SheetsClient
 
@@ -23,12 +25,17 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL: float = 30.0      # секунды кеширования чтений
 _RETRY_ATTEMPTS: int = 3
 _RETRY_STATUSES: frozenset[int] = frozenset({429, 500, 503})
+_RETRY_NETWORK_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    ProtocolError,
+)
 
 
 def _with_retry(func, *args, **kwargs):
     """
     Синхронный retry для gspread-вызовов внутри потока.
-    При 429/503 делает экспоненциальный backoff: 5с → 10с → 20с.
+    При 429/503 и сетевых разрывах делает экспоненциальный backoff: 5с → 10с → 20с.
     """
     for attempt in range(_RETRY_ATTEMPTS):
         try:
@@ -40,6 +47,16 @@ def _with_retry(func, *args, **kwargs):
                 logger.warning(
                     "Sheets API error %s, retry %d/%d in %ds",
                     status, attempt + 1, _RETRY_ATTEMPTS, wait,
+                )
+                time.sleep(wait)
+            else:
+                raise
+        except _RETRY_NETWORK_ERRORS as exc:
+            if attempt < _RETRY_ATTEMPTS - 1:
+                wait = 5 * (2 ** attempt)
+                logger.warning(
+                    "Network error, retry %d/%d in %ds: %s",
+                    attempt + 1, _RETRY_ATTEMPTS, wait, exc,
                 )
                 time.sleep(wait)
             else:

@@ -25,6 +25,8 @@ def kb_teachers_menu() -> InlineKeyboardMarkup:
 def kb_students_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Список учеников", callback_data="students:list")],
+        [InlineKeyboardButton(text="💃 Все пары", callback_data="students:all_pairs")],
+        [InlineKeyboardButton(text="🎯 Все солисты", callback_data="students:all_soloists")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],
         [InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="students:delete")],
         [InlineKeyboardButton(text="🔗 Привязать ученика к педагогу", callback_data="students:link")],
@@ -54,10 +56,27 @@ def kb_student_paged(students: list, page: int, total: int, query: str = "") -> 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_student_card(student_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Назад к списку", callback_data="students:list")],
-    ])
+def kb_student_card(student_id: str, has_partner: bool) -> InlineKeyboardMarkup:
+    partner_label = "🔄 Изменить партнёра" if has_partner else "💃 Назначить партнёра"
+    rows = [
+        [InlineKeyboardButton(text=partner_label, callback_data=f"partner_assign:{student_id}")],
+    ]
+    if has_partner:
+        rows.append([InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"partner_clear:{student_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data="students:list")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_partner_candidates(candidates: list, student_id: str) -> InlineKeyboardMarkup:
+    """
+    candidates: list[tuple[Student, bool]] — ученик и флаг «у него уже есть партнёр».
+    """
+    buttons = []
+    for s, has_partner in candidates:
+        label = f"⚠️ {s.name}" if has_partner else s.name
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"partner_pick:{s.student_id}")])
+    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=f"student_card:{student_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def kb_salaries_menu() -> InlineKeyboardMarkup:
@@ -108,17 +127,6 @@ def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_stu
         [InlineKeyboardButton(text=f"Инд. ученику: {rate_student} руб.", callback_data=f"edit_rate:student:{teacher_id}")],
         [InlineKeyboardButton(text="« Отмена", callback_data="admin:teachers")],
     ])
-
-
-def kb_user_list(users: list, action_prefix: str) -> InlineKeyboardMarkup:
-    """Список незарегистрированных пользователей для привязки к педагогу."""
-    buttons = [
-        [InlineKeyboardButton(text=f"ID {u.tg_id}", callback_data=f"{action_prefix}:{u.tg_id}")]
-        for u in users
-    ]
-    buttons.append([InlineKeyboardButton(text="✏️ Ввести ID вручную", callback_data=f"{action_prefix}:manual")])
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data="admin:teachers")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def kb_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:

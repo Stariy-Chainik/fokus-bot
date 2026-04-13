@@ -3,14 +3,15 @@ import logging
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
 from bot.repositories import StudentRepository, TeacherRepository, TeacherStudentRepository
-from bot.states import AddStudentStates, LinkTeacherStudentStates, StudentListStates
+from bot.states import AddStudentStates, LinkTeacherStudentStates, StudentListStates, PartnerAssignStates
 from bot.keyboards.admin import (
     kb_students_menu, kb_teacher_list, kb_student_list,
-    kb_student_paged, kb_student_card, kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
+    kb_student_paged, kb_student_card, kb_partner_candidates,
+    kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,77 @@ async def cb_students_menu(callback: CallbackQuery, user: User | None) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.edit_text("Управление учениками:", reply_markup=kb_students_menu())
+    await callback.answer()
+
+
+# ─── Все пары и все солисты (школа целиком) ─────────────────────────────────
+
+@router.callback_query(F.data == "students:all_pairs")
+async def cb_all_pairs(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    all_students = await student_repo.get_all()
+    by_id = {s.student_id: s for s in all_students}
+    seen: set[tuple[str, str]] = set()
+    pairs = []
+    for s in all_students:
+        if not s.partner_id:
+            continue
+        partner = by_id.get(s.partner_id)
+        if not partner:
+            continue
+        key = tuple(sorted([s.student_id, partner.student_id]))
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append((s, partner))
+
+    if not pairs:
+        await callback.message.edit_text("Пар пока нет.", reply_markup=kb_back("admin:students"))
+        await callback.answer()
+        return
+
+    pairs.sort(key=lambda p: p[0].name)
+    buttons = []
+    for a, b in pairs:
+        buttons.append([InlineKeyboardButton(
+            text=f"{a.name} ↔ {b.name}",
+            callback_data=f"student_card:{a.student_id}",
+        )])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
+    await callback.message.edit_text(
+        f"Все пары ({len(pairs)}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "students:all_soloists")
+async def cb_all_soloists(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    soloists = [s for s in all_students if not s.partner_id]
+    if not soloists:
+        await callback.message.edit_text("Солистов нет.", reply_markup=kb_back("admin:students"))
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(text=s.name, callback_data=f"student_card:{s.student_id}")]
+        for s in soloists
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
+    await callback.message.edit_text(
+        f"Все солисты ({len(soloists)}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
     await callback.answer()
 
 
@@ -114,12 +186,22 @@ async def cb_student_card(
         teachers_text = "\n".join(f"  • {teachers_map.get(tid, tid)}" for tid in teacher_ids)
     else:
         teachers_text = "  не привязан"
+
+    if student.partner_id:
+        partner = await student_repo.get_by_id(student.partner_id)
+        partner_text = partner.name if partner else f"(удалён: {student.partner_id})"
+    else:
+        partner_text = "— (солист)"
+
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
         f"ID: {student.student_id}\n\n"
-        f"Педагоги:\n{teachers_text}"
+        f"Педагоги:\n{teachers_text}\n\n"
+        f"Партнёр: {partner_text}"
     )
-    await callback.message.edit_text(text, reply_markup=kb_student_card(student_id))
+    await callback.message.edit_text(
+        text, reply_markup=kb_student_card(student_id, has_partner=bool(student.partner_id))
+    )
     await callback.answer()
 
 
@@ -131,7 +213,7 @@ async def cb_add_student_start(callback: CallbackQuery, user: User | None, state
         await callback.answer("Нет доступа", show_alert=True)
         return
     await state.set_state(AddStudentStates.entering_name)
-    await callback.message.edit_text("Введите имя ученика:")
+    await callback.message.edit_text("Введите Фамилию Имя ученика:")
     await callback.answer()
 
 
@@ -139,7 +221,12 @@ async def cb_add_student_start(callback: CallbackQuery, user: User | None, state
 async def add_student_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
     if not name:
-        await message.answer("Имя не может быть пустым:")
+        await message.answer("Фамилия Имя не может быть пустым. Введите ещё раз:")
+        return
+    if len(name.split()) < 2:
+        await message.answer(
+            "Нужно указать и фамилию, и имя (например: <b>Иванова Мария</b>). Введите ещё раз:"
+        )
         return
     await state.update_data(name=name)
     await state.set_state(AddStudentStates.confirming)
@@ -158,7 +245,7 @@ async def cb_confirm_add_student(
     try:
         student = await student_repo.add(data["name"])
         await callback.message.edit_text(
-            f"Ученик добавлен!\nID: {student.student_id}\nИмя: {student.name}",
+            f"Ученик добавлен!\nID: {student.student_id}\nФамилия Имя: {student.name}",
             reply_markup=kb_back("admin:students"),
         )
     except Exception as exc:
@@ -354,15 +441,213 @@ async def cb_unlink_teacher_chosen(
 
 @router.callback_query(F.data.startswith("unlink_student:"))
 async def cb_unlink_student_do(
-    callback: CallbackQuery, user: User | None, state: FSMContext, ts_repo: TeacherStudentRepository,
+    callback: CallbackQuery,
+    user: User | None,
+    state: FSMContext,
+    ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     student_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
+    teacher_id = data.get("teacher_id", "")
     await state.clear()
-    ok = await ts_repo.remove(data.get("teacher_id", ""), student_id)
-    text = f"Связь удалена." if ok else "Связь не найдена."
+    ok = await ts_repo.remove(teacher_id, student_id)
+
+    warning = ""
+    # Предупреждение, если у ученика остаётся партнёр, а общих педагогов больше нет.
+    if ok:
+        student = await student_repo.get_by_id(student_id)
+        if student and student.partner_id:
+            s_teachers = set(await ts_repo.get_teachers_for_student(student_id))
+            p_teachers = set(await ts_repo.get_teachers_for_student(student.partner_id))
+            if not (s_teachers & p_teachers):
+                partner = await student_repo.get_by_id(student.partner_id)
+                partner_name = partner.name if partner else student.partner_id
+                warning = (
+                    f"\n\n⚠️ У «{student.name}» остался партнёр «{partner_name}», "
+                    f"но у них больше нет общего педагога."
+                )
+
+    text = ("Связь удалена." if ok else "Связь не найдена.") + warning
     await callback.message.edit_text(text, reply_markup=kb_back("admin:students"))
+    await callback.answer()
+
+
+# ─── Управление партнёром ученика ────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("partner_assign:"))
+async def cb_partner_assign_start(
+    callback: CallbackQuery,
+    user: User | None,
+    state: FSMContext,
+    student_repo: StudentRepository,
+    ts_repo: TeacherStudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+
+    # Кандидаты — те, у кого есть хотя бы один общий педагог с текущим учеником.
+    s_teachers = set(await ts_repo.get_teachers_for_student(student_id))
+    if not s_teachers:
+        await callback.message.edit_text(
+            "У ученика нет привязанных педагогов — сначала привяжите хотя бы одного.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+
+    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    candidates: list = []
+    for other in all_students:
+        if other.student_id == student_id:
+            continue
+        other_teachers = set(await ts_repo.get_teachers_for_student(other.student_id))
+        if not (s_teachers & other_teachers):
+            continue
+        # Уже текущий партнёр того же ученика — пропускаем (назначать не на что).
+        if other.student_id == student.partner_id:
+            continue
+        has_partner = bool(other.partner_id)
+        candidates.append((other, has_partner))
+
+    if not candidates:
+        await callback.message.edit_text(
+            "Нет подходящих кандидатов (нужен общий педагог).",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+
+    await state.set_state(PartnerAssignStates.choosing_partner)
+    await state.update_data(student_id=student_id)
+    await callback.message.edit_text(
+        f"Выберите партнёра для «{student.name}».\n"
+        f"⚠️ — у ученика уже есть партнёр, старая связь будет разорвана.",
+        reply_markup=kb_partner_candidates(candidates, student_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("partner_pick:"), PartnerAssignStates.choosing_partner)
+async def cb_partner_pick(
+    callback: CallbackQuery,
+    state: FSMContext,
+    student_repo: StudentRepository,
+) -> None:
+    partner_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    student_id = data.get("student_id", "")
+    a = await student_repo.get_by_id(student_id)
+    b = await student_repo.get_by_id(partner_id)
+    if not a or not b:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+
+    lines = [f"Назначить партнёрами:", f"• {a.name}", f"• {b.name}"]
+    # Предупреждения о разрыве старых связей.
+    old_links = []
+    if a.partner_id and a.partner_id != partner_id:
+        prev = await student_repo.get_by_id(a.partner_id)
+        old_links.append(prev.name if prev else a.partner_id)
+    if b.partner_id and b.partner_id != student_id:
+        prev = await student_repo.get_by_id(b.partner_id)
+        old_links.append(prev.name if prev else b.partner_id)
+    if old_links:
+        lines.append("")
+        lines.append("⚠️ Старые связи будут разорваны: " + ", ".join(old_links))
+    lines.append("")
+    lines.append("Продолжить?")
+
+    await state.update_data(partner_id=partner_id)
+    await state.set_state(PartnerAssignStates.confirming)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=kb_confirm("confirm_partner", f"student_card:{student_id}"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "confirm_partner", PartnerAssignStates.confirming)
+async def cb_partner_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    user: User | None,
+    student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    await state.clear()
+    student_id = data.get("student_id", "")
+    partner_id = data.get("partner_id", "")
+    try:
+        await student_repo.set_partner(student_id, partner_id)
+        await callback.message.edit_text(
+            "Партнёры назначены.", reply_markup=kb_back(f"student_card:{student_id}")
+        )
+    except ValueError as exc:
+        await callback.message.edit_text(
+            f"Ошибка: {exc}", reply_markup=kb_back(f"student_card:{student_id}")
+        )
+    except Exception as exc:
+        logger.error("Ошибка назначения партнёра: %s", exc)
+        await callback.message.edit_text(
+            "Не удалось назначить партнёра. Попробуйте позже.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("partner_clear:"))
+async def cb_partner_clear_confirm(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student or not student.partner_id:
+        await callback.answer("У ученика нет партнёра", show_alert=True)
+        return
+    partner = await student_repo.get_by_id(student.partner_id)
+    partner_name = partner.name if partner else student.partner_id
+    await callback.message.edit_text(
+        f"Убрать пару: «{student.name}» ↔ «{partner_name}»?",
+        reply_markup=kb_confirm(
+            f"confirm_partner_clear:{student_id}", f"student_card:{student_id}"
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_partner_clear:"))
+async def cb_partner_clear_do(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    try:
+        await student_repo.clear_partner(student_id)
+        await callback.message.edit_text(
+            "Партнёр снят.", reply_markup=kb_back(f"student_card:{student_id}")
+        )
+    except Exception as exc:
+        logger.error("Ошибка снятия партнёра: %s", exc)
+        await callback.message.edit_text(
+            "Не удалось снять партнёра.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
     await callback.answer()

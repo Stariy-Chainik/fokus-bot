@@ -2,8 +2,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class AddTeacherStates(StatesGroup):
-    choosing_user = State()   # выбор из зарегистрированных пользователей
-    entering_tg_id = State()  # ручной ввод, если нужного нет в списке
+    entering_tg_id = State()
     entering_name = State()
     entering_rate_group = State()
     entering_rate_for_teacher = State()
@@ -37,3 +36,8 @@ class ConfirmPaymentStates(StatesGroup):
 
 class StudentListStates(StatesGroup):
     searching = State()
+
+
+class PartnerAssignStates(StatesGroup):
+    choosing_partner = State()
+    confirming = State()

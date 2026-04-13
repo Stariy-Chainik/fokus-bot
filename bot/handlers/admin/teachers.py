@@ -6,9 +6,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.models import User
-from bot.repositories import TeacherRepository, UserRepository
+from bot.repositories import TeacherRepository, TeacherStudentRepository, UserRepository
 from bot.states import AddTeacherStates, EditTeacherRatesStates
-from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_teacher_card, kb_user_list, kb_rate_select, kb_confirm, kb_back
+from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_teacher_card, kb_rate_select, kb_confirm, kb_back
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_teachers")
@@ -105,30 +105,15 @@ async def cb_card_edit_rates(
 # ─── Добавление педагога ──────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "teachers:add")
-async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state: FSMContext, user_repo: UserRepository) -> None:
+async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    all_users = await user_repo.get_all()
-    unlinked = [u for u in all_users if not u.teacher_id and not u.is_admin]
-    await state.set_state(AddTeacherStates.choosing_user)
+    await state.set_state(AddTeacherStates.entering_tg_id)
     await callback.message.edit_text(
-        "Выберите пользователя из тех, кто уже написал /start боту, или введите ID вручную:",
-        reply_markup=kb_user_list(unlinked, "pick_user"),
+        "Введите Telegram ID педагога (число).\n"
+        "Узнать ID можно через @userinfobot — педагог отправляет ему /start."
     )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("pick_user:"), AddTeacherStates.choosing_user)
-async def cb_pick_user(callback: CallbackQuery, state: FSMContext) -> None:
-    value = callback.data.split(":", 1)[1]
-    if value == "manual":
-        await state.set_state(AddTeacherStates.entering_tg_id)
-        await callback.message.edit_text("Введите Telegram ID педагога (число) или 0 если неизвестен:")
-    else:
-        await state.update_data(tg_id=int(value))
-        await state.set_state(AddTeacherStates.entering_name)
-        await callback.message.edit_text("Введите имя педагога:")
     await callback.answer()
 
 
@@ -137,18 +122,26 @@ async def add_teacher_tg_id(message: Message, state: FSMContext) -> None:
     try:
         tg_id = int((message.text or "").strip())
     except ValueError:
-        await message.answer("Введите число или 0:")
+        await message.answer("Введите корректный Telegram ID (число):")
         return
-    await state.update_data(tg_id=tg_id if tg_id != 0 else None)
+    if tg_id <= 0:
+        await message.answer("Telegram ID должен быть положительным числом. Попробуйте ещё раз:")
+        return
+    await state.update_data(tg_id=tg_id)
     await state.set_state(AddTeacherStates.entering_name)
-    await message.answer("Введите имя педагога:")
+    await message.answer("Введите Фамилию Имя педагога:")
 
 
 @router.message(AddTeacherStates.entering_name)
 async def add_teacher_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
     if not name:
-        await message.answer("Имя не может быть пустым:")
+        await message.answer("Фамилия Имя не может быть пустым. Введите ещё раз:")
+        return
+    if len(name.split()) < 2:
+        await message.answer(
+            "Нужно указать и фамилию, и имя (например: <b>Петрова Екатерина</b>). Введите ещё раз:"
+        )
         return
     await state.update_data(name=name)
     await state.set_state(AddTeacherStates.entering_rate_group)
@@ -194,8 +187,8 @@ async def add_teacher_rate_student(message: Message, state: FSMContext) -> None:
     await state.set_state(AddTeacherStates.confirming)
     await message.answer(
         f"Проверьте данные:\n\n"
-        f"Имя: {data['name']}\n"
-        f"Telegram ID: {data.get('tg_id') or 'не указан'}\n"
+        f"Фамилия Имя: {data['name']}\n"
+        f"Telegram ID: {data['tg_id']}\n"
         f"Ставка групп: {data['rate_group']} руб.\n"
         f"Ставка педагогу (инд.): {data['rate_for_teacher']} руб.\n"
         f"Ставка ученику (инд.): {rate} руб.",
@@ -221,16 +214,18 @@ async def cb_confirm_add_teacher(
             rate_for_teacher=data["rate_for_teacher"],
             rate_for_student=data["rate_for_student"],
         )
-        # Автоматически привязываем teacher_id к пользователю в таблице users
-        linked = False
+        # Если у педагога есть tg_id — создаём/обновляем запись в users с привязанным teacher_id
+        note = ""
         if teacher.tg_id:
-            linked = await user_repo.update_teacher_id(teacher.tg_id, teacher.teacher_id)
-
-        note = "\n✅ Аккаунт педагога привязан." if linked else (
-            "\n⚠️ Telegram ID не найден в таблице users — привяжите teacher_id вручную." if teacher.tg_id else ""
-        )
+            existing = await user_repo.get_by_tg_id(teacher.tg_id)
+            if existing is None:
+                await user_repo.add(tg_id=teacher.tg_id, teacher_id=teacher.teacher_id)
+                note = "\n✅ Аккаунт педагога создан и привязан."
+            else:
+                await user_repo.update_teacher_id(teacher.tg_id, teacher.teacher_id)
+                note = "\n✅ Аккаунт педагога привязан."
         await callback.message.edit_text(
-            f"Педагог добавлен!\nID: {teacher.teacher_id}\nИмя: {teacher.name}{note}",
+            f"Педагог добавлен!\nID: {teacher.teacher_id}\nФамилия Имя: {teacher.name}{note}",
             reply_markup=kb_back("admin:teachers"),
         )
     except Exception as exc:
@@ -280,12 +275,18 @@ async def cb_delete_teacher_confirm(
 
 @router.callback_query(F.data.startswith("confirm_del_teacher:"))
 async def cb_delete_teacher_do(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository, user_repo,
+    callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository, user_repo,
+    ts_repo: TeacherStudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
+    # Удаляем связи teacher_students (аналогично удалению ученика)
+    for ts in await ts_repo.get_all():
+        if ts.teacher_id == teacher_id:
+            await ts_repo.remove(teacher_id, ts.student_id)
     ok = await teacher_repo.delete(teacher_id)
     if ok:
         await user_repo.delete_by_teacher_id(teacher_id)
@@ -367,13 +368,11 @@ async def edit_rate_value(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     rate_type = data["rate_type"]
-    # Обновляем только нужную ставку, остальные оставляем
     updated = {
         "rate_group": data["rate_group"],
         "rate_for_teacher": data["rate_for_teacher"],
         "rate_for_student": data["rate_for_student"],
     }
-    updated[f"rate_{rate_type}" if rate_type != "teacher" else "rate_for_teacher"] = rate
     if rate_type == "group":
         updated["rate_group"] = rate
     elif rate_type == "teacher":
