@@ -29,7 +29,7 @@ async def cb_diagnostics_menu(callback: CallbackQuery, user: User | None) -> Non
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Диагностика:", reply_markup=_diag_menu())
+    await callback.message.edit_text("<b>Диагностика:</b>", reply_markup=_diag_menu())
     await callback.answer()
 
 
@@ -44,7 +44,7 @@ async def cb_check(
     try:
         report = await diagnostics_service.run_consistency_check()
         lines = [
-            "Результат проверки:",
+            "<b>Результат проверки:</b>",
             "",
             f"Individual занятий без billing: {len(report.individual_without_billing)}",
         ]
@@ -67,6 +67,7 @@ async def cb_rebuild_confirm(callback: CallbackQuery, user: User | None) -> None
         await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.edit_text(
+        "<b>Пересборка billing</b>\n"
         "Пересборка удалит все billing и создаст заново из lessons.\n"
         "payment_id в billing будет потерян!\n\nВы уверены?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -87,7 +88,7 @@ async def cb_rebuild_do(
     await callback.answer("Пересобираю billing...")
     try:
         report = await diagnostics_service.rebuild_billing()
-        lines = ["Пересборка завершена.", "", f"Создано строк: {report.rebuilt_billing_count}"]
+        lines = ["<b>Пересборка завершена.</b>", "", f"Создано строк: {report.rebuilt_billing_count}"]
         if report.errors:
             lines.append(f"\nОшибки ({len(report.errors)}):")
             lines.extend(f"  {e}" for e in report.errors[:5])

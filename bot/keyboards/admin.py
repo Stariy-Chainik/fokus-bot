@@ -24,7 +24,7 @@ def kb_teachers_menu() -> InlineKeyboardMarkup:
 
 def kb_students_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Список учеников", callback_data="students:list")],
+        [InlineKeyboardButton(text="🔍 Поиск ученика", callback_data="students:list")],
         [InlineKeyboardButton(text="💃 Все пары", callback_data="students:all_pairs")],
         [InlineKeyboardButton(text="🎯 Все солисты", callback_data="students:all_soloists")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],

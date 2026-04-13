@@ -23,7 +23,7 @@ async def cb_teachers_menu(callback: CallbackQuery, user: User | None) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Управление педагогами:", reply_markup=kb_teachers_menu())
+    await callback.message.edit_text("<b>Управление педагогами:</b>", reply_markup=kb_teachers_menu())
     await callback.answer()
 
 
@@ -42,7 +42,7 @@ async def cb_teachers_list(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите педагога:",
+        "<b>Выберите педагога:</b>",
         reply_markup=kb_teacher_list(teachers, "teacher_card", back_cb="admin:teachers"),
     )
     await callback.answer()
@@ -111,6 +111,7 @@ async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state
         return
     await state.set_state(AddTeacherStates.entering_tg_id)
     await callback.message.edit_text(
+        "<b>Добавление педагога</b>\n"
         "Введите Telegram ID педагога (число).\n"
         "Узнать ID можно через @userinfobot — педагог отправляет ему /start."
     )
@@ -210,7 +211,7 @@ async def add_teacher_rate_student(
                 await user_repo.update_teacher_id(teacher.tg_id, teacher.teacher_id)
                 note = "\n✅ Аккаунт педагога привязан."
         await message.answer(
-            f"Педагог добавлен!\nID: {teacher.teacher_id}\nФамилия Имя: {teacher.name}{note}",
+            f"<b>Педагог добавлен!</b>\nID: {teacher.teacher_id}\nФамилия Имя: {teacher.name}{note}",
             reply_markup=kb_back("admin:teachers"),
         )
     except Exception as exc:
@@ -233,7 +234,7 @@ async def cb_delete_teacher_start(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите педагога для удаления:", reply_markup=kb_teacher_list(teachers, "del_teacher")
+        "<b>Выберите педагога для удаления:</b>", reply_markup=kb_teacher_list(teachers, "del_teacher")
     )
     await callback.answer()
 
@@ -251,7 +252,7 @@ async def cb_delete_teacher_confirm(
         await callback.answer("Педагог не найден", show_alert=True)
         return
     await callback.message.edit_text(
-        f"Удалить педагога «{teacher.name}» ({teacher_id})?\nЗанятия останутся.",
+        f"<b>Удалить педагога «{teacher.name}» ({teacher_id})?</b>\nЗанятия останутся.",
         reply_markup=kb_confirm(f"confirm_del_teacher:{teacher_id}", "admin:teachers"),
     )
     await callback.answer()
@@ -302,7 +303,7 @@ async def cb_edit_rates_start(
         return
     await state.set_state(EditTeacherRatesStates.choosing_teacher)
     await callback.message.edit_text(
-        "Выберите педагога:", reply_markup=kb_teacher_list(teachers, "edit_rates_teacher")
+        "<b>Выберите педагога:</b>", reply_markup=kb_teacher_list(teachers, "edit_rates_teacher")
     )
     await callback.answer()
 
@@ -338,7 +339,7 @@ async def cb_edit_rate_pick(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(rate_type=rate_type)
     label = _RATE_LABELS.get(rate_type, rate_type)
     await state.set_state(EditTeacherRatesStates.entering_rate)
-    await callback.message.edit_text(f"Новая ставка «{label}» (руб. за 45 мин):")
+    await callback.message.edit_text(f"<b>Новая ставка «{label}» (руб. за 45 мин):</b>")
     await callback.answer()
 
 
@@ -367,7 +368,7 @@ async def edit_rate_value(message: Message, state: FSMContext) -> None:
     await state.set_state(EditTeacherRatesStates.confirming)
     label = _RATE_LABELS.get(rate_type, rate_type)
     await message.answer(
-        f"Изменить ставку «{label}» → <b>{rate} руб.</b>?",
+        f"<b>Изменить ставку «{label}» → {rate} руб.?</b>",
         reply_markup=kb_confirm("confirm_edit_rates", f"edit_rates_teacher:{data['teacher_id']}"),
     )
 

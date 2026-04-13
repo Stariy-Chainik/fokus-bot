@@ -40,7 +40,7 @@ async def cb_bills_menu(callback: CallbackQuery, user: User | None) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Счета учеников:", reply_markup=kb_bills_menu())
+    await callback.message.edit_text("<b>Счета учеников:</b>", reply_markup=kb_bills_menu())
     await callback.answer()
 
 
@@ -59,7 +59,7 @@ async def cb_bills_choose_student(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите ученика:", reply_markup=kb_student_list(students, "bill_student", back_cb="admin:bills")
+        "<b>Выберите ученика:</b>", reply_markup=kb_student_list(students, "bill_student", back_cb="admin:bills")
     )
     await callback.answer()
 
@@ -70,7 +70,7 @@ async def cb_bills_choose_period(callback: CallbackQuery, user: User | None) -> 
         await callback.answer("Нет доступа", show_alert=True)
         return
     student_id = callback.data.split(":", 1)[1]
-    await callback.message.edit_text("Выберите период:", reply_markup=_period_buttons(student_id, "bill_period"))
+    await callback.message.edit_text("<b>Выберите период:</b>", reply_markup=_period_buttons(student_id, "bill_period"))
     await callback.answer()
 
 
@@ -112,7 +112,7 @@ async def cb_bills_show(
     else:
         status_text = "⏳ Не оплачен"
 
-    lines = [f"Счёт: {student.name}", f"Период: {display_period(period_month)}", f"Статус: {status_text}", ""]
+    lines = [f"<b>Счёт: {student.name}</b>", f"Период: {display_period(period_month)}", f"Статус: {status_text}", ""]
     total = 0
     for teacher_name, rows in by_teacher.items():
         lines.append(f"👨‍🏫 {teacher_name}:")
@@ -141,7 +141,7 @@ async def cb_confirm_payment_start(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите ученика:", reply_markup=kb_student_list(students, "pay_student", back_cb="admin:bills")
+        "<b>Выберите ученика:</b>", reply_markup=kb_student_list(students, "pay_student", back_cb="admin:bills")
     )
     await callback.answer()
 
@@ -152,7 +152,7 @@ async def cb_pay_choose_period(callback: CallbackQuery, user: User | None) -> No
         await callback.answer("Нет доступа", show_alert=True)
         return
     student_id = callback.data.split(":", 1)[1]
-    await callback.message.edit_text("Выберите период:", reply_markup=_period_buttons(student_id, "pay_period"))
+    await callback.message.edit_text("<b>Выберите период:</b>", reply_markup=_period_buttons(student_id, "pay_period"))
     await callback.answer()
 
 
@@ -182,7 +182,7 @@ async def cb_pay_confirm(
         return
 
     await callback.message.edit_text(
-        f"Подтвердить оплату счёта {payment.payment_id}?\n"
+        f"<b>Подтвердить оплату счёта {payment.payment_id}?</b>\n"
         f"Ученик: {student.name}\n"
         f"Период: {display_period(period_month)}\n"
         f"Сумма: {payment.total_amount} руб.",

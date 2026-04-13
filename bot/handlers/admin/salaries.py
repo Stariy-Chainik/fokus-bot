@@ -35,7 +35,7 @@ async def cb_salaries_menu(callback: CallbackQuery, user: User | None) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Зарплаты педагогов:", reply_markup=kb_salaries_menu())
+    await callback.message.edit_text("<b>Зарплаты педагогов:</b>", reply_markup=kb_salaries_menu())
     await callback.answer()
 
 
@@ -52,7 +52,7 @@ async def cb_salaries_choose_teacher(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите педагога:", reply_markup=kb_teacher_list(teachers, "salary_teacher")
+        "<b>Выберите педагога:</b>", reply_markup=kb_teacher_list(teachers, "salary_teacher")
     )
     await callback.answer()
 
@@ -64,7 +64,7 @@ async def cb_salary_choose_period(callback: CallbackQuery, user: User | None) ->
         return
     teacher_id = callback.data.split(":", 1)[1]
     await callback.message.edit_text(
-        f"Выберите период для педагога {teacher_id}:",
+        f"<b>Выберите период для педагога {teacher_id}:</b>",
         reply_markup=_period_buttons(teacher_id),
     )
     await callback.answer()
@@ -96,7 +96,7 @@ async def cb_salary_show(
     period_closed = total_billing > 0 and paid_billing == total_billing
 
     lines = [
-        f"Педагог: {teacher.name}",
+        f"<b>Педагог: {teacher.name}</b>",
         f"Период: {display_period(period_month)}",
         "",
         f"Занятий: {len(lessons)}",

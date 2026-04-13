@@ -1,14 +1,13 @@
 from __future__ import annotations
 import logging
-from collections import defaultdict
 from datetime import date
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import LessonRepository, BillingRepository, PaymentRepository
-from bot.keyboards.teacher import kb_teacher_menu
+from bot.models.enums import LessonType
+from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.utils.dates import display_period
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,9 @@ async def cb_my_stats(callback: CallbackQuery, user: User | None) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Выберите период:", reply_markup=_period_buttons())
+    await callback.message.edit_text(
+        "<b>Моя статистика</b>\nВыберите период:", reply_markup=_period_buttons(),
+    )
     await callback.answer()
 
 
@@ -45,8 +46,7 @@ async def cb_stats_period(
     callback: CallbackQuery,
     user: User | None,
     lesson_repo: LessonRepository,
-    billing_repo: BillingRepository,
-    payment_repo: PaymentRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -56,37 +56,20 @@ async def cb_stats_period(
     teacher_id = user.teacher_id
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total_earned = sum(ls.earned for ls in lessons)
-    group_count = sum(1 for ls in lessons if ls.type.value == "group")
-    ind_count = len(lessons) - group_count
+    total = len(lessons)
+    group_count = sum(1 for ls in lessons if ls.type == LessonType.GROUP)
+    ind_count = total - group_count
 
-    billing_rows = await billing_repo.get_by_teacher_and_period(teacher_id, period_month)
-
-    # Статус оплаты по каждому ученику (не повторяя)
-    students_amount: dict[str, int] = defaultdict(int)
-    students_paid: dict[str, bool] = {}
-    for b in billing_rows:
-        students_amount[b.student_id] += b.amount
-        if b.student_id not in students_paid:
-            payment = await payment_repo.get_by_student_and_period(b.student_id, period_month)
-            students_paid[b.student_id] = payment is not None and payment.status.value == "paid"
+    submission = await submission_repo.get_by_teacher_and_period(teacher_id, period_month)
+    status_line = "🔒 Период сдан на оплату" if submission else "✏️ Период открыт (можно править)"
 
     lines = [
-        f"Статистика за {display_period(period_month)}:",
+        f"<b>Статистика за {display_period(period_month)}</b>",
         "",
-        f"Занятий: {len(lessons)} (груп.: {group_count}, инд.: {ind_count})",
-        f"Начислено: {total_earned} руб.",
+        f"Занятий: {total} (груп.: {group_count}, инд.: {ind_count})",
+        "",
+        status_line,
     ]
-    if students_amount:
-        lines.append("")
-        lines.append("Статусы оплат:")
-        seen_names: dict[str, str] = {}
-        for b in billing_rows:
-            if b.student_id not in seen_names:
-                seen_names[b.student_id] = b.student_name
-        for sid, name in seen_names.items():
-            icon = "✅" if students_paid.get(sid) else "⏳"
-            lines.append(f"  {icon} {name}: {students_amount[sid]} руб.")
 
     await callback.message.edit_text(
         "\n".join(lines),

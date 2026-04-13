@@ -70,7 +70,8 @@ def _header(data: dict) -> str:
         parts.append(f"Тип: {_KIND_LABEL.get(data['kind'], data['kind'])}")
     if data.get("duration_min"):
         parts.append(f"{data['duration_min']} мин")
-    return " | ".join(parts) + ("\n\n" if parts else "")
+    header = " | ".join(parts)
+    return (f"<b>{header}</b>\n\n" if parts else "")
 
 
 @router.callback_query(F.data == "teacher:record_lesson")
@@ -80,7 +81,9 @@ async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, sta
         return
     await state.clear()
     await state.set_state(RecordLessonStates.choosing_date)
-    await callback.message.edit_text("Выберите дату занятия:", reply_markup=_date_picker_kb())
+    await callback.message.edit_text(
+        "<b>Отметить занятие</b>\nВыберите дату:", reply_markup=_date_picker_kb(),
+    )
     await callback.answer()
 
 
@@ -106,7 +109,9 @@ async def cb_lesson_back(
 
     if target == "date":
         await state.set_state(RecordLessonStates.choosing_date)
-        await callback.message.edit_text("Выберите дату занятия:", reply_markup=_date_picker_kb())
+        await callback.message.edit_text(
+            "<b>Отметить занятие</b>\nВыберите дату:", reply_markup=_date_picker_kb(),
+        )
 
     elif target == "kind":
         # очистим данные ниже по воронке
@@ -468,9 +473,8 @@ async def _finalize(
             await state.set_data({"lesson_date": lesson_date})
             await state.set_state(RecordLessonStates.choosing_kind)
             await callback.message.edit_text(
-                f"✅ Групповое занятие записано!\nID: {lesson.lesson_id}\n"
-                f"Дата: {format_date_display(lesson.date)}\n"
-                f"Начислено: {lesson.earned} руб.{extra}\n\n"
+                f"<b>✅ Групповое занятие записано</b>\nID: {lesson.lesson_id}\n"
+                f"Дата: {format_date_display(lesson.date)}{extra}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
                 reply_markup=kb_lesson_type(),
             )
@@ -494,14 +498,12 @@ async def _finalize(
                 duration_min=duration,
                 pairs=pairs_data,
             )
-            total_earned = sum(ls.earned for ls in lessons)
             await state.set_data({"lesson_date": lesson_date})
             await state.set_state(RecordLessonStates.choosing_kind)
             await callback.message.edit_text(
-                f"✅ Создано парных занятий: {len(lessons)}\n"
+                f"<b>✅ Создано парных занятий: {len(lessons)}</b>\n"
                 f"Дата: {format_date_display(lesson_date)}\n"
-                f"Пары: {'; '.join(pair_labels)}\n"
-                f"Итого начислено: {total_earned} руб.\n\n"
+                f"Пары: {'; '.join(pair_labels)}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
                 reply_markup=kb_lesson_type(),
             )
@@ -519,15 +521,13 @@ async def _finalize(
                 duration_min=duration,
                 students=students,
             )
-            total_earned = sum(ls.earned for ls in lessons)
             names = ", ".join(n for _, n in students)
             await state.set_data({"lesson_date": lesson_date})
             await state.set_state(RecordLessonStates.choosing_kind)
             await callback.message.edit_text(
-                f"✅ Создано соло-занятий: {len(lessons)}\n"
+                f"<b>✅ Создано соло-занятий: {len(lessons)}</b>\n"
                 f"Дата: {format_date_display(lesson_date)}\n"
-                f"Ученики: {names}\n"
-                f"Итого начислено: {total_earned} руб.\n\n"
+                f"Ученики: {names}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
                 reply_markup=kb_lesson_type(),
             )

@@ -15,15 +15,6 @@ class MyLessonsStates(StatesGroup):
     entering_custom_date = State()
 
 
-class EditLessonStates(StatesGroup):
-    choosing_field = State()
-    editing_duration = State()
-    editing_date = State()
-    editing_attendees = State()          # group
-    editing_student_soloist = State()    # individual, 1 ученик
-    editing_pair = State()               # individual, 2 ученика
-
-
 class SubmitPeriodStates(StatesGroup):
     choosing_month = State()
     confirming = State()

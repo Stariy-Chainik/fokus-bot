@@ -1,4 +1,4 @@
-from .lesson_states import RecordLessonStates, MyLessonsStates, EditLessonStates, SubmitPeriodStates
+from .lesson_states import RecordLessonStates, MyLessonsStates, SubmitPeriodStates
 from .admin_states import (
     AddTeacherStates,
     EditTeacherRatesStates,
@@ -13,7 +13,6 @@ from .teacher_states import TeacherAddStudentStates
 __all__ = [
     "RecordLessonStates",
     "MyLessonsStates",
-    "EditLessonStates",
     "SubmitPeriodStates",
     "AddTeacherStates",
     "EditTeacherRatesStates",

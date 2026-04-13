@@ -1,3 +1,4 @@
+from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 PAGE_SIZE = 8  # кол-во учеников на странице при листании
@@ -9,7 +10,7 @@ def kb_teacher_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💃 Мои пары", callback_data="teacher:my_pairs")],
         [InlineKeyboardButton(text="👩‍🎓 Мои ученики (соло)", callback_data="teacher:my_students")],
         [InlineKeyboardButton(text="➕ Добавить в мой список", callback_data="teacher:add_student")],
-        [InlineKeyboardButton(text="📋 Мои занятия", callback_data="teacher:my_lessons")],
+        [InlineKeyboardButton(text="📋 Мои занятия / править", callback_data="teacher:my_lessons")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
     ])
@@ -18,17 +19,14 @@ def kb_teacher_menu() -> InlineKeyboardMarkup:
 def kb_my_student_card(student_id: str, has_partner: bool, can_manage: bool) -> InlineKeyboardMarkup:
     """
     Карточка ученика в интерфейсе педагога.
-    can_manage=True — педагог может управлять партнёрством (партнёр тоже его ученик
-    либо ученик солист). Иначе кнопок партнёрства нет.
+    Создание/изменение/снятие пары — через экран «Мои пары».
+    can_manage оставлен для совместимости сигнатуры.
     """
-    rows = []
-    if can_manage:
-        label = "🔄 Изменить партнёра" if has_partner else "💃 Назначить партнёра"
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"t_partner_assign:{student_id}")])
-        if has_partner:
-            rows.append([InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"t_partner_clear:{student_id}")])
-    rows.append([InlineKeyboardButton(text="🚪 Убрать из моего списка", callback_data=f"t_unlink_self:{student_id}")])
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_students")])
+    _ = has_partner, can_manage
+    rows = [
+        [InlineKeyboardButton(text="🚪 Убрать из моего списка", callback_data=f"t_unlink_self:{student_id}")],
+        [InlineKeyboardButton(text="« Назад", callback_data="teacher:my_students")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -174,27 +172,41 @@ def kb_student_search_results(
 
 
 def kb_lesson_list(
-    lessons: list, page: int = 0, page_size: int = 5,
+    lessons: list, page: int = 0, page_size: int = 10,
     locked_ids: set | None = None,
+    filter_date: str | None = None,
 ) -> InlineKeyboardMarkup:
-    """Список занятий педагога с пагинацией. locked_ids — занятия из сданного периода."""
+    """Список занятий педагога с пагинацией. locked_ids — занятия из сданного периода.
+    filter_date сохраняется в callback пагинации, чтобы не терять фильтр при листании."""
     from bot.utils.dates import format_date_display
     locked_ids = locked_ids or set()
     start = page * page_size
     page_lessons = lessons[start: start + page_size]
+    filter_tag = filter_date or "all"
 
+    from bot.models.enums import LessonType
     buttons = []
     for ls in page_lessons:
         date_display = format_date_display(ls.date)
         lock_icon = "🔒 " if ls.lesson_id in locked_ids else ""
-        label = f"{lock_icon}{date_display} | {ls.type.value} | {ls.duration_min} мин"
+        if ls.type == LessonType.GROUP:
+            who = "группа"
+        elif ls.student_2_name:
+            who = f"{ls.student_1_name} ↔ {ls.student_2_name}"
+        else:
+            who = ls.student_1_name or "—"
+        label = f"{lock_icon}{date_display} | {ls.duration_min}м | {who}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"lesson_detail:{ls.lesson_id}")])
 
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton(text="← Пред.", callback_data=f"lessons_page:{page - 1}"))
+        nav_row.append(InlineKeyboardButton(
+            text="← Пред.", callback_data=f"lessons_page:{page - 1}:{filter_tag}",
+        ))
     if start + page_size < len(lessons):
-        nav_row.append(InlineKeyboardButton(text="След. →", callback_data=f"lessons_page:{page + 1}"))
+        nav_row.append(InlineKeyboardButton(
+            text="След. →", callback_data=f"lessons_page:{page + 1}:{filter_tag}",
+        ))
     if nav_row:
         buttons.append(nav_row)
 
@@ -203,33 +215,19 @@ def kb_lesson_list(
 
 
 def kb_lesson_detail(lesson, locked: bool = False) -> InlineKeyboardMarkup:
-    """Карточка занятия. Если locked — период сдан, кнопок редактирования нет."""
-    from bot.models.enums import LessonType
+    """Карточка занятия. Правка полей не поддерживается — если педагог ошибся,
+    он удаляет занятие и создаёт заново через «Отметить занятие».
+    Если locked — период сдан, кнопки удаления нет.
+    """
     lesson_id = lesson.lesson_id
     rows: list[list[InlineKeyboardButton]] = []
 
     if locked:
         rows.append([InlineKeyboardButton(text="🔒 Период сдан", callback_data="noop")])
     else:
-        rows.append([
-            InlineKeyboardButton(text="✏️ Дата", callback_data=f"edit_lesson:date:{lesson_id}"),
-            InlineKeyboardButton(text="✏️ Длительность", callback_data=f"edit_lesson:duration:{lesson_id}"),
-        ])
-        if lesson.type == LessonType.GROUP:
-            rows.append([InlineKeyboardButton(
-                text="✏️ Присутствующие", callback_data=f"edit_lesson:attendees:{lesson_id}",
-            )])
-        else:
-            # INDIVIDUAL
-            if lesson.student_2_id:
-                rows.append([InlineKeyboardButton(
-                    text="✏️ Пара", callback_data=f"edit_lesson:pair:{lesson_id}",
-                )])
-            else:
-                rows.append([InlineKeyboardButton(
-                    text="✏️ Ученик", callback_data=f"edit_lesson:soloist:{lesson_id}",
-                )])
-        rows.append([InlineKeyboardButton(text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}")])
+        rows.append([InlineKeyboardButton(
+            text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}",
+        )])
 
     rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data="teacher:my_lessons")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

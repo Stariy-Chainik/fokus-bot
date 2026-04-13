@@ -96,7 +96,10 @@ async def cb_my_pairs(
     if not pairs:
         await callback.message.edit_text(
             "У вас пока нет пар среди учеников.",
-            reply_markup=kb_teacher_menu(),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Создать пару", callback_data="teacher:create_pair")],
+                [InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")],
+            ]),
         )
         await callback.answer()
         return
@@ -107,9 +110,53 @@ async def cb_my_pairs(
             text=f"{a.name} ↔ {b.name}",
             callback_data=f"t_pair_card:{a.student_id}",
         )])
+    buttons.append([InlineKeyboardButton(text="➕ Создать пару", callback_data="teacher:create_pair")])
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")])
     await callback.message.edit_text(
-        f"Ваши пары ({len(pairs)}):",
+        f"<b>Ваши пары</b> ({len(pairs)}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "teacher:create_pair")
+async def cb_create_pair_start(
+    callback: CallbackQuery,
+    user: User | None,
+    ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
+) -> None:
+    """Шаг 1 «Создать пару»: выбор первого ученика из своего списка.
+    Вторым шагом переиспользуется существующий t_partner_assign:<id>.
+    """
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    mine = await _linked_students_of(user.teacher_id, ts_repo, student_repo)
+    mine_ids = {s.student_id for s in mine}
+    # Кандидаты-лидеры: солисты и те, у кого партнёр тоже в списке педагога
+    # (иначе управление — у другого педагога/админа).
+    leaders = [s for s in mine if not s.partner_id or s.partner_id in mine_ids]
+    if not leaders:
+        await callback.message.edit_text(
+            "Нет доступных учеников для создания пары.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="teacher:my_pairs")],
+            ]),
+        )
+        await callback.answer()
+        return
+
+    buttons = []
+    for s in leaders:
+        mark = " 💃" if s.partner_id else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{s.name}{mark}", callback_data=f"t_partner_assign:{s.student_id}",
+        )])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_pairs")])
+    await callback.message.edit_text(
+        "<b>Создать пару</b>\nВыберите первого ученика:\n"
+        "💃 — у ученика уже есть партнёр, старая связь будет разорвана.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()

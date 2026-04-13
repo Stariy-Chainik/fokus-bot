@@ -22,7 +22,7 @@ from .sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL: float = 30.0      # секунды кеширования чтений
+_CACHE_TTL: float = 300.0     # секунды кеширования чтений (инвалидируется при любой записи)
 _RETRY_ATTEMPTS: int = 3
 _RETRY_STATUSES: frozenset[int] = frozenset({429, 500, 503})
 _RETRY_NETWORK_ERRORS = (

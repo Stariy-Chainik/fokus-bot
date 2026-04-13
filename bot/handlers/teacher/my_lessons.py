@@ -16,7 +16,7 @@ from bot.utils.dates import format_date_display
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
-PAGE_SIZE = 5
+PAGE_SIZE = 20
 
 
 def _is_teacher(user: User | None) -> bool:
@@ -71,12 +71,15 @@ async def _show_lessons(
     periods = await _submitted_periods(user.teacher_id, submission_repo)
     locked = _locked_ids(lessons, periods)
     header = (
-        f"Занятия за {format_date_display(filter_date)} ({len(lessons)}):"
-        if filter_date else f"Все занятия ({len(lessons)}):"
+        f"<b>Занятия за {format_date_display(filter_date)}</b> ({len(lessons)}):"
+        if filter_date else f"<b>Все занятия</b> ({len(lessons)}):"
     )
     await callback.message.edit_text(
         header,
-        reply_markup=kb_lesson_list(lessons, page=0, page_size=PAGE_SIZE, locked_ids=locked),
+        reply_markup=kb_lesson_list(
+            lessons, page=0, page_size=PAGE_SIZE,
+            locked_ids=locked, filter_date=filter_date,
+        ),
     )
 
 
@@ -87,7 +90,10 @@ async def cb_my_lessons(callback: CallbackQuery, user: User | None, state: FSMCo
         return
     await state.clear()
     await callback.message.edit_text(
-        "За какую дату показать занятия?", reply_markup=_date_filter_kb(),
+        "<b>Мои занятия</b>\n"
+        "За какую дату показать?\n"
+        "(нажмите на занятие в списке, чтобы удалить)",
+        reply_markup=_date_filter_kb(),
     )
     await callback.answer()
 
@@ -149,8 +155,11 @@ async def msg_custom_date(
     periods = await _submitted_periods(user.teacher_id, submission_repo)
     locked = _locked_ids(lessons, periods)
     await message.answer(
-        f"Занятия за {format_date_display(filter_date)} ({len(lessons)}):",
-        reply_markup=kb_lesson_list(lessons, page=0, page_size=PAGE_SIZE, locked_ids=locked),
+        f"<b>Занятия за {format_date_display(filter_date)}</b> ({len(lessons)}):",
+        reply_markup=kb_lesson_list(
+            lessons, page=0, page_size=PAGE_SIZE,
+            locked_ids=locked, filter_date=filter_date,
+        ),
     )
 
 
@@ -162,13 +171,22 @@ async def cb_lessons_page(
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    page = int(callback.data.split(":", 1)[1])
+    parts = callback.data.split(":")
+    page = int(parts[1])
+    filter_tag = parts[2] if len(parts) > 2 else "all"
+    filter_date = None if filter_tag == "all" else filter_tag
+
     lessons = await lesson_repo.get_by_teacher(user.teacher_id)
+    if filter_date:
+        lessons = [ls for ls in lessons if ls.date == filter_date]
     lessons.sort(key=lambda ls: ls.date, reverse=True)
     periods = await _submitted_periods(user.teacher_id, submission_repo)
     locked = _locked_ids(lessons, periods)
     await callback.message.edit_reply_markup(
-        reply_markup=kb_lesson_list(lessons, page=page, page_size=PAGE_SIZE, locked_ids=locked),
+        reply_markup=kb_lesson_list(
+            lessons, page=page, page_size=PAGE_SIZE,
+            locked_ids=locked, filter_date=filter_date,
+        ),
     )
     await callback.answer()
 
@@ -191,11 +209,10 @@ async def cb_lesson_detail(
     locked = lesson.date[:7] in periods
 
     lines = [
-        f"Занятие {lesson.lesson_id}",
+        f"<b>Занятие {lesson.lesson_id}</b>",
         f"Дата: {format_date_display(lesson.date)}",
         f"Тип: {'Групповое' if lesson.type == LessonType.GROUP else 'Индивидуальное'}",
         f"Длительность: {lesson.duration_min} мин",
-        f"Начислено: {lesson.earned} руб.",
     ]
     if lesson.student_1_name:
         lines.append(f"Ученик 1: {lesson.student_1_name}")

@@ -68,7 +68,9 @@ def _build_dispatcher(storage) -> Dispatcher:
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     billing_service = BillingService(billing_repo)
-    lesson_service = LessonService(lesson_repo, billing_service, submission_repo, teacher_repo)
+    lesson_service = LessonService(
+        lesson_repo, billing_service, submission_repo, teacher_repo, billing_repo,
+    )
     payment_service = PaymentService(billing_repo, payment_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, billing_repo, teacher_repo)
 

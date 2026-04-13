@@ -27,7 +27,7 @@ async def cb_students_menu(callback: CallbackQuery, user: User | None) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Управление учениками:", reply_markup=kb_students_menu())
+    await callback.message.edit_text("<b>Управление учениками:</b>", reply_markup=kb_students_menu())
     await callback.answer()
 
 
@@ -54,7 +54,8 @@ async def cb_all_pairs(
         if key in seen:
             continue
         seen.add(key)
-        pairs.append((s, partner))
+        a, b = (s, partner) if s.name <= partner.name else (partner, s)
+        pairs.append((a, b))
 
     if not pairs:
         await callback.message.edit_text("Пар пока нет.", reply_markup=kb_back("admin:students"))
@@ -70,7 +71,7 @@ async def cb_all_pairs(
         )])
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
     await callback.message.edit_text(
-        f"Все пары ({len(pairs)}):",
+        f"<b>Все пары ({len(pairs)}):</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
@@ -96,7 +97,7 @@ async def cb_all_soloists(
     ]
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
     await callback.message.edit_text(
-        f"Все солисты ({len(soloists)}):",
+        f"<b>Все солисты ({len(soloists)}):</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
@@ -121,6 +122,7 @@ async def cb_students_list(callback: CallbackQuery, user: User | None, state: FS
     await state.set_state(StudentListStates.searching)
     await state.update_data(student_query="")
     await callback.message.edit_text(
+        "<b>Поиск ученика</b>\n"
         "Введите имя или часть имени ученика для поиска.\n"
         "Чтобы показать всех — отправьте <b>*</b>"
     )
@@ -142,7 +144,7 @@ async def handle_student_search(
         return
     label = f"Найдено: {total}" if query else f"Всего учеников: {total}"
     await message.answer(
-        f"{label}. Страница 1:",
+        f"<b>{label}. Страница 1:</b>",
         reply_markup=kb_student_paged(page_students, 0, total, query),
     )
 
@@ -160,7 +162,7 @@ async def cb_student_page(
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     page_students, total = _filter_and_page(all_students, query, page)
     await callback.message.edit_text(
-        f"Страница {page + 1}:",
+        f"<b>Страница {page + 1}:</b>",
         reply_markup=kb_student_paged(page_students, page, total, query),
     )
     await callback.answer()
@@ -213,7 +215,7 @@ async def cb_add_student_start(callback: CallbackQuery, user: User | None, state
         await callback.answer("Нет доступа", show_alert=True)
         return
     await state.set_state(AddStudentStates.entering_name)
-    await callback.message.edit_text("Введите Фамилию Имя ученика:")
+    await callback.message.edit_text("<b>Добавление ученика</b>\nВведите Фамилию Имя ученика:")
     await callback.answer()
 
 
@@ -230,7 +232,7 @@ async def add_student_name(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(name=name)
     await state.set_state(AddStudentStates.confirming)
-    await message.answer(f"Добавить ученика «{name}»?", reply_markup=kb_confirm("confirm_add_student", "admin:students"))
+    await message.answer(f"<b>Добавить ученика «{name}»?</b>", reply_markup=kb_confirm("confirm_add_student", "admin:students"))
 
 
 @router.callback_query(F.data == "confirm_add_student")
@@ -245,7 +247,7 @@ async def cb_confirm_add_student(
     try:
         student = await student_repo.add(data["name"])
         await callback.message.edit_text(
-            f"Ученик добавлен!\nID: {student.student_id}\nФамилия Имя: {student.name}",
+            f"<b>Ученик добавлен!</b>\nID: {student.student_id}\nФамилия Имя: {student.name}",
             reply_markup=kb_back("admin:students"),
         )
     except Exception as exc:
@@ -269,7 +271,7 @@ async def cb_delete_student_start(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите ученика для удаления:", reply_markup=kb_student_list(students, "del_student")
+        "<b>Выберите ученика для удаления:</b>", reply_markup=kb_student_list(students, "del_student")
     )
     await callback.answer()
 
@@ -287,7 +289,7 @@ async def cb_delete_student_confirm(
         await callback.answer("Ученик не найден", show_alert=True)
         return
     await callback.message.edit_text(
-        f"Удалить ученика «{student.name}» ({student_id})?",
+        f"<b>Удалить ученика «{student.name}» ({student_id})?</b>",
         reply_markup=kb_confirm(f"confirm_del_student:{student_id}", "admin:students"),
     )
     await callback.answer()
@@ -329,7 +331,7 @@ async def cb_link_start(
         return
     await state.set_state(LinkTeacherStudentStates.choosing_teacher)
     await callback.message.edit_text(
-        "Выберите педагога:", reply_markup=kb_teacher_list(teachers, "link_teacher")
+        "<b>Выберите педагога:</b>", reply_markup=kb_teacher_list(teachers, "link_teacher")
     )
     await callback.answer()
 
@@ -346,7 +348,7 @@ async def cb_link_teacher_chosen(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "Выберите ученика для привязки:", reply_markup=kb_student_list(students, "link_student")
+        "<b>Выберите ученика для привязки:</b>", reply_markup=kb_student_list(students, "link_student")
     )
     await callback.answer()
 
@@ -365,8 +367,8 @@ async def cb_link_student_chosen(
     await state.update_data(student_id=student_id)
     await state.set_state(LinkTeacherStudentStates.confirming)
     await callback.message.edit_text(
-        f"Привязать «{student.name if student else student_id}» "
-        f"к педагогу «{teacher.name if teacher else data['teacher_id']}»?",
+        f"<b>Привязать «{student.name if student else student_id}» "
+        f"к педагогу «{teacher.name if teacher else data['teacher_id']}»?</b>",
         reply_markup=kb_confirm("confirm_link_ts", "admin:students"),
     )
     await callback.answer()
@@ -409,7 +411,7 @@ async def cb_unlink_start(
     await state.set_state(LinkTeacherStudentStates.choosing_teacher)
     await state.update_data(action="unlink")
     await callback.message.edit_text(
-        "Выберите педагога для удаления связи:", reply_markup=kb_teacher_list(teachers, "unlink_teacher")
+        "<b>Выберите педагога для удаления связи:</b>", reply_markup=kb_teacher_list(teachers, "unlink_teacher")
     )
     await callback.answer()
 
@@ -434,7 +436,7 @@ async def cb_unlink_teacher_chosen(
     students = [s for s in all_students if s.student_id in student_ids]
     await state.set_state(LinkTeacherStudentStates.choosing_student)
     await callback.message.edit_text(
-        "Выберите ученика для удаления связи:", reply_markup=kb_student_list(students, "unlink_student")
+        "<b>Выберите ученика для удаления связи:</b>", reply_markup=kb_student_list(students, "unlink_student")
     )
     await callback.answer()
 
@@ -530,7 +532,7 @@ async def cb_partner_assign_start(
     await state.set_state(PartnerAssignStates.choosing_partner)
     await state.update_data(student_id=student_id)
     await callback.message.edit_text(
-        f"Выберите партнёра для «{student.name}».\n"
+        f"<b>Выберите партнёра для «{student.name}».</b>\n"
         f"⚠️ — у ученика уже есть партнёр, старая связь будет разорвана.",
         reply_markup=kb_partner_candidates(candidates, student_id),
     )
@@ -552,7 +554,7 @@ async def cb_partner_pick(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    lines = [f"Назначить партнёрами:", f"• {a.name}", f"• {b.name}"]
+    lines = [f"<b>Назначить партнёрами:</b>", f"• {a.name}", f"• {b.name}"]
     # Предупреждения о разрыве старых связей.
     old_links = []
     if a.partner_id and a.partner_id != partner_id:
@@ -623,7 +625,7 @@ async def cb_partner_clear_confirm(
     partner = await student_repo.get_by_id(student.partner_id)
     partner_name = partner.name if partner else student.partner_id
     await callback.message.edit_text(
-        f"Убрать пару: «{student.name}» ↔ «{partner_name}»?",
+        f"<b>Убрать пару: «{student.name}» ↔ «{partner_name}»?</b>",
         reply_markup=kb_confirm(
             f"confirm_partner_clear:{student_id}", f"student_card:{student_id}"
         ),
