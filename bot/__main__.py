@@ -21,6 +21,7 @@ from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
     TeacherStudentRepository, LessonRepository, BillingRepository, PaymentRepository,
+    TeacherPeriodSubmissionRepository,
 )
 from bot.services import LessonService, BillingService, PaymentService, DiagnosticsService
 from bot.middlewares import AuthMiddleware
@@ -61,10 +62,13 @@ def _build_dispatcher(storage) -> Dispatcher:
     lesson_repo = LessonRepository(sheets_client, settings.sheet_lessons)
     billing_repo = BillingRepository(sheets_client, settings.sheet_billing)
     payment_repo = PaymentRepository(sheets_client, settings.sheet_payments)
+    submission_repo = TeacherPeriodSubmissionRepository(
+        sheets_client, settings.sheet_teacher_period_submissions,
+    )
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     billing_service = BillingService(billing_repo)
-    lesson_service = LessonService(lesson_repo, billing_service)
+    lesson_service = LessonService(lesson_repo, billing_service, submission_repo, teacher_repo)
     payment_service = PaymentService(billing_repo, payment_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, billing_repo, teacher_repo)
 
@@ -76,6 +80,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["lesson_repo"] = lesson_repo
     dp["billing_repo"] = billing_repo
     dp["payment_repo"] = payment_repo
+    dp["submission_repo"] = submission_repo
     dp["lesson_service"] = lesson_service
     dp["billing_service"] = billing_service
     dp["payment_service"] = payment_service

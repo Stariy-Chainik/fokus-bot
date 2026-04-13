@@ -1,6 +1,9 @@
 from __future__ import annotations
 """
 Педагог: FSM «Отметить занятие».
+Порядок: Дата → Тип (группа/пара/соло) → Длительность → ветка → создание.
+Группа: опциональная отметка присутствующих. Пара: выбор одной пары.
+Соло: мульти-выбор учеников (включая тех, кто в паре — если пришли одни).
 Защита от двойного нажатия — set _confirming_lesson_ids по tg_id.
 """
 import logging
@@ -15,7 +18,10 @@ from bot.models.enums import LessonType
 from bot.repositories import TeacherRepository, StudentRepository, TeacherStudentRepository
 from bot.services import LessonService
 from bot.states import RecordLessonStates
-from bot.keyboards.teacher import kb_lesson_type, kb_duration, kb_yes_no, kb_student_search_results, PAGE_SIZE, kb_teacher_menu
+from bot.keyboards.teacher import (
+    kb_lesson_type, kb_duration, kb_teacher_menu,
+    kb_attendance_yes_no, kb_pair_multi_select, kb_multi_select,
+)
 from bot.utils.dates import format_date_display
 
 logger = logging.getLogger(__name__)
@@ -23,9 +29,18 @@ router = Router(name="teacher_record_lesson")
 
 _confirming_lesson_ids: set[str] = set()
 
+_KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло"}
+
 
 def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
+
+
+async def _linked_students(teacher_id: str, ts_repo, student_repo):
+    student_ids = await ts_repo.get_students_for_teacher(teacher_id)
+    all_students = await student_repo.get_all()
+    linked = [s for s in all_students if s.student_id in student_ids]
+    return sorted(linked, key=lambda s: s.name)
 
 
 def _date_picker_kb() -> InlineKeyboardMarkup:
@@ -47,6 +62,17 @@ def _date_picker_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def _header(data: dict) -> str:
+    parts = []
+    if data.get("lesson_date"):
+        parts.append(f"Дата: {format_date_display(data['lesson_date'])}")
+    if data.get("kind"):
+        parts.append(f"Тип: {_KIND_LABEL.get(data['kind'], data['kind'])}")
+    if data.get("duration_min"):
+        parts.append(f"{data['duration_min']} мин")
+    return " | ".join(parts) + ("\n\n" if parts else "")
+
+
 @router.callback_query(F.data == "teacher:record_lesson")
 async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
     if not _is_teacher(user):
@@ -65,7 +91,93 @@ async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-# ─── Дата ─────────────────────────────────────────────────────────────────────
+# ─── Назад на шаг ────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("lesson_back:"))
+async def cb_lesson_back(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    target = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+
+    if target == "date":
+        await state.set_state(RecordLessonStates.choosing_date)
+        await callback.message.edit_text("Выберите дату занятия:", reply_markup=_date_picker_kb())
+
+    elif target == "kind":
+        # очистим данные ниже по воронке
+        await state.update_data(kind=None, duration_min=None, selected_ids=[])
+        await state.set_state(RecordLessonStates.choosing_kind)
+        data = await state.get_data()
+        await callback.message.edit_text(
+            f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
+        )
+
+    elif target == "duration":
+        await state.update_data(selected_ids=[])
+        await state.set_state(RecordLessonStates.choosing_duration)
+        data = await state.get_data()
+        await callback.message.edit_text(
+            f"{_header(data)}Выберите длительность:",
+            reply_markup=kb_duration(back_cb="lesson_back:kind"),
+        )
+
+    elif target == "attendance":
+        await state.set_state(RecordLessonStates.asking_attendance)
+        await callback.message.edit_text(
+            f"{_header(data)}Групповое занятие.\nОтметить присутствующих?",
+            reply_markup=kb_attendance_yes_no(),
+        )
+
+    elif target == "pair":
+        await _show_pair_list(callback, state, user, ts_repo, student_repo)
+
+    await callback.answer()
+
+
+async def _collect_pairs(teacher_id: str, ts_repo, student_repo):
+    mine = await _linked_students(teacher_id, ts_repo, student_repo)
+    mine_ids = {s.student_id for s in mine}
+    by_id = {s.student_id: s for s in mine}
+    seen: set[tuple[str, str]] = set()
+    pairs = []
+    for s in mine:
+        if not s.partner_id or s.partner_id not in mine_ids:
+            continue
+        partner = by_id[s.partner_id]
+        key = tuple(sorted([s.student_id, partner.student_id]))
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append((s, partner))
+    return pairs
+
+
+async def _show_pair_list(
+    callback: CallbackQuery, state: FSMContext, user: User,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    data = await state.get_data()
+    pairs = await _collect_pairs(user.teacher_id, ts_repo, student_repo)
+    if not pairs:
+        await callback.message.edit_text(
+            "У вас нет пар среди ваших учеников.", reply_markup=kb_teacher_menu(),
+        )
+        await state.clear()
+        return
+    await state.update_data(selected_ids=[])
+    await state.set_state(RecordLessonStates.choosing_pair)
+    await callback.message.edit_text(
+        f"{_header(data)}Отметьте пары ({len(pairs)} доступно), затем Подтвердить:",
+        reply_markup=kb_pair_multi_select(pairs, set(), back_cb="lesson_back:duration"),
+    )
+
+
+# ─── Дата → тип ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("lesson_date:"), RecordLessonStates.choosing_date)
 async def cb_lesson_date(callback: CallbackQuery, state: FSMContext) -> None:
@@ -80,9 +192,10 @@ async def cb_lesson_date(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.update_data(lesson_date=value)
-    await state.set_state(RecordLessonStates.choosing_type)
+    await state.set_state(RecordLessonStates.choosing_kind)
+    data = await state.get_data()
     await callback.message.edit_text(
-        f"Дата: {format_date_display(value)}\n\nТип занятия:", reply_markup=kb_lesson_type()
+        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
     )
     await callback.answer()
 
@@ -105,261 +218,218 @@ async def msg_lesson_date_manual(message: Message, state: FSMContext) -> None:
         await message.answer("Неверный формат. Введите дату в формате ДД.ММ.ГГГГ:")
         return
     await state.update_data(lesson_date=lesson_date)
-    await state.set_state(RecordLessonStates.choosing_type)
+    await state.set_state(RecordLessonStates.choosing_kind)
+    data = await state.get_data()
     await message.answer(
-        f"Дата: {format_date_display(lesson_date)}\n\nТип занятия:", reply_markup=kb_lesson_type()
+        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
     )
 
 
-# ─── Тип занятия ──────────────────────────────────────────────────────────────
+# ─── Тип → длительность ──────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("lesson_type:"), RecordLessonStates.choosing_type)
-async def cb_lesson_type_chosen(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    lesson_type = callback.data.split(":", 1)[1]
-    await state.update_data(lesson_type=lesson_type)
-    if lesson_type == "group":
-        await state.set_state(RecordLessonStates.choosing_duration)
-        await callback.message.edit_text("Групповое занятие.\n\nВыберите длительность:", reply_markup=kb_duration())
-    else:
-        students = await _linked_students(user.teacher_id, ts_repo, student_repo)
-        if not students:
-            await callback.message.edit_text(
-                "Нет привязанных учеников. Обратитесь к администратору.",
-                reply_markup=kb_teacher_menu(),
-            )
-            await callback.answer()
-            return
-        await state.set_state(RecordLessonStates.searching_student_1)
-        await state.update_data(student_query="")
-        await callback.message.edit_text(
-            "Введите фамилию или первые буквы ученика.\n"
-            "Чтобы показать всех — отправьте <b>*</b>"
-        )
+@router.callback_query(F.data.startswith("lesson_kind:"), RecordLessonStates.choosing_kind)
+async def cb_kind_any(callback: CallbackQuery, state: FSMContext) -> None:
+    kind = callback.data.split(":", 1)[1]
+    if kind not in ("group", "pair", "soloist"):
+        await callback.answer("Неизвестный тип", show_alert=True)
+        return
+    await state.update_data(kind=kind)
+    await state.set_state(RecordLessonStates.choosing_duration)
+    data = await state.get_data()
+    await callback.message.edit_text(
+        f"{_header(data)}Выберите длительность:",
+        reply_markup=kb_duration(back_cb="lesson_back:kind"),
+    )
     await callback.answer()
 
 
-# ─── Поиск ученика 1 по подстроке ─────────────────────────────────────────────
+# ─── Длительность → ветка ────────────────────────────────────────────────────
 
-def _filter_students(students: list, query: str) -> list:
-    if not query:
-        return students
-    q = query.lower()
-    return [s for s in students if q in s.name.lower()]
-
-
-@router.message(RecordLessonStates.searching_student_1)
-async def msg_student_1_search(
-    message: Message, state: FSMContext, user: User | None,
+@router.callback_query(F.data.startswith("duration:"), RecordLessonStates.choosing_duration)
+async def cb_duration(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
     ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
 ) -> None:
     if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
         return
-    query = (message.text or "").strip()
-    if query == "*":
-        query = ""
-    students = await _linked_students(user.teacher_id, ts_repo, student_repo)
-    filtered = _filter_students(students, query)
-    if not filtered:
-        await message.answer("Никого не найдено. Введите другой запрос или <b>*</b> для показа всех.")
-        return
-    await state.update_data(student_query=query)
-    await state.set_state(RecordLessonStates.choosing_student_1)
-    label = f"Найдено: {len(filtered)}" if query else f"Ваши ученики: {len(filtered)}"
-    await message.answer(
-        f"{label}. Выберите ученика:",
-        reply_markup=kb_student_search_results(
-            filtered[:PAGE_SIZE], "pick_student_1", page=0, total=len(filtered),
-        ),
-    )
-
-
-# ─── Поиск ученика 1 ──────────────────────────────────────────────────────────
-
-async def _linked_students(teacher_id: str, ts_repo, student_repo, exclude_id: str | None = None):
-    student_ids = await ts_repo.get_students_for_teacher(teacher_id)
-    all_students = await student_repo.get_all()
-    linked = [s for s in all_students if s.student_id in student_ids]
-    if exclude_id:
-        linked = [s for s in linked if s.student_id != exclude_id]
-    return sorted(linked, key=lambda s: s.name)
-
-
-@router.callback_query(F.data.startswith("page:pick_student_1:"))
-async def cb_page_student_1(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    page = int(callback.data.split(":")[-1])
-    data = await state.get_data()
-    query = data.get("student_query", "") or ""
-    students = _filter_students(
-        await _linked_students(user.teacher_id, ts_repo, student_repo), query,
-    )
-    start = page * PAGE_SIZE
-    await callback.message.edit_reply_markup(
-        reply_markup=kb_student_search_results(students[start:start + PAGE_SIZE], "pick_student_1", page=page, total=len(students))
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("pick_student_1:"), RecordLessonStates.choosing_student_1)
-async def cb_pick_student_1(
-    callback: CallbackQuery,
-    state: FSMContext,
-    user: User | None,
-    student_repo: StudentRepository,
-    ts_repo: TeacherStudentRepository,
-) -> None:
-    student_id = callback.data.split(":", 1)[1]
-    student = await student_repo.get_by_id(student_id)
-    if not student:
-        await callback.answer("Ученик не найден", show_alert=True)
-        return
-    await state.update_data(student_1_id=student_id, student_1_name=student.name)
-
-    # Автоподстановка партнёра, если он привязан к этому же педагогу.
-    if student.partner_id and user and user.teacher_id:
-        partner = await student_repo.get_by_id(student.partner_id)
-        if partner:
-            teacher_students = await ts_repo.get_students_for_teacher(user.teacher_id)
-            if partner.student_id in teacher_students:
-                await state.update_data(student_2_id=partner.student_id, student_2_name=partner.name)
-                await state.set_state(RecordLessonStates.choosing_duration)
-                await callback.message.edit_text(
-                    f"Ученик 1: {student.name}\n"
-                    f"Ученик 2: {partner.name} (партнёр)\n\n"
-                    f"Выберите длительность:",
-                    reply_markup=_kb_duration_with_remove_partner(),
-                )
-                await callback.answer()
-                return
-            else:
-                logger.warning(
-                    "Партнёр %s ученика %s не привязан к педагогу %s — fallback",
-                    partner.student_id, student_id, user.teacher_id,
-                )
-
-    await state.set_state(RecordLessonStates.asking_second_student)
-    await callback.message.edit_text(
-        f"Ученик 1: {student.name}\n\nДобавить второго ученика?",
-        reply_markup=kb_yes_no("second_student:yes", "second_student:no"),
-    )
-    await callback.answer()
-
-
-def _kb_duration_with_remove_partner() -> InlineKeyboardMarkup:
-    base = kb_duration().inline_keyboard
-    extra = [[InlineKeyboardButton(text="❌ Убрать партнёра", callback_data="remove_partner")]]
-    return InlineKeyboardMarkup(inline_keyboard=list(base) + extra)
-
-
-@router.callback_query(F.data == "remove_partner", RecordLessonStates.choosing_duration)
-async def cb_remove_partner(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    await state.update_data(student_2_id=None, student_2_name=None)
-    await callback.message.edit_text(
-        f"Ученик 1: {data.get('student_1_name')}\n\nВыберите длительность:",
-        reply_markup=kb_duration(),
-    )
-    await callback.answer("Партнёр убран")
-
-
-# ─── Второй ученик ────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "second_student:no", RecordLessonStates.asking_second_student)
-async def cb_no_second_student(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(student_2_id=None, student_2_name=None)
-    await state.set_state(RecordLessonStates.choosing_duration)
-    await callback.message.edit_text("Выберите длительность:", reply_markup=kb_duration())
-    await callback.answer()
-
-
-@router.callback_query(F.data == "second_student:yes", RecordLessonStates.asking_second_student)
-async def cb_yes_second_student(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    data = await state.get_data()
-    students = await _linked_students(user.teacher_id, ts_repo, student_repo, exclude_id=data.get("student_1_id"))
-    await state.set_state(RecordLessonStates.choosing_student_2)
-    await callback.message.edit_text(
-        f"Ученик 1: {data.get('student_1_name')}\n\nВыберите второго ученика:",
-        reply_markup=kb_student_search_results(students[:PAGE_SIZE], "pick_student_2", page=0, total=len(students)),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("page:pick_student_2:"))
-async def cb_page_student_2(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    page = int(callback.data.split(":")[-1])
-    data = await state.get_data()
-    students = await _linked_students(user.teacher_id, ts_repo, student_repo, exclude_id=data.get("student_1_id"))
-    start = page * PAGE_SIZE
-    await callback.message.edit_reply_markup(
-        reply_markup=kb_student_search_results(students[start:start + PAGE_SIZE], "pick_student_2", page=page, total=len(students))
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("pick_student_2:"), RecordLessonStates.choosing_student_2)
-async def cb_pick_student_2(callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository) -> None:
-    student_id = callback.data.split(":", 1)[1]
-    student = await student_repo.get_by_id(student_id)
-    if not student:
-        await callback.answer("Ученик не найден", show_alert=True)
-        return
-    await state.update_data(student_2_id=student_id, student_2_name=student.name)
-    await state.set_state(RecordLessonStates.choosing_duration)
-    data = await state.get_data()
-    await callback.message.edit_text(
-        f"Ученик 1: {data.get('student_1_name')}\nУченик 2: {student.name}\n\nВыберите длительность:",
-        reply_markup=kb_duration(),
-    )
-    await callback.answer()
-
-
-# ─── Длительность + подтверждение ────────────────────────────────────────────
-
-@router.callback_query(F.data.startswith("duration:"), RecordLessonStates.choosing_duration)
-async def cb_duration(callback: CallbackQuery, state: FSMContext) -> None:
     duration = int(callback.data.split(":", 1)[1])
     await state.update_data(duration_min=duration)
     data = await state.get_data()
+    kind = data.get("kind")
 
-    lesson_type = data.get("lesson_type", "")
-    lesson_date = data.get("lesson_date", "")
-    lines = [
-        "Подтвердите занятие:", "",
-        f"Дата: {format_date_display(lesson_date)}",
-        f"Тип: {'Групповое' if lesson_type == 'group' else 'Индивидуальное'}",
-    ]
-    if data.get("student_1_name"):
-        lines.append(f"Ученик 1: {data['student_1_name']}")
-    if data.get("student_2_name"):
-        lines.append(f"Ученик 2: {data['student_2_name']}")
-    lines.append(f"Длительность: {duration} мин")
+    if kind == "group":
+        await state.set_state(RecordLessonStates.asking_attendance)
+        await callback.message.edit_text(
+            f"{_header(data)}Групповое занятие.\nОтметить присутствующих?",
+            reply_markup=kb_attendance_yes_no(),
+        )
 
-    await state.set_state(RecordLessonStates.confirming)
+    elif kind == "pair":
+        await _show_pair_list(callback, state, user, ts_repo, student_repo)
+
+    elif kind == "soloist":
+        mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+        if not mine:
+            await callback.message.edit_text(
+                "У вас нет учеников.", reply_markup=kb_teacher_menu(),
+            )
+            await state.clear()
+            await callback.answer()
+            return
+        await state.update_data(selected_ids=[])
+        await state.set_state(RecordLessonStates.selecting_soloists)
+        await callback.message.edit_text(
+            f"{_header(data)}Отметьте учеников для соло ({len(mine)} в списке), затем Подтвердить.\n"
+            f"💡 Можно отметить и ученика из пары — если он пришёл один.",
+            reply_markup=kb_multi_select(mine, set(), back_cb="lesson_back:duration"),
+        )
+
+    await callback.answer()
+
+
+# ─── Group: отметить присутствующих? ─────────────────────────────────────────
+
+@router.callback_query(F.data == "attendance:no", RecordLessonStates.asking_attendance)
+async def cb_attendance_no(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, lesson_service: LessonService,
+) -> None:
+    await state.update_data(selected_ids=[])
+    await _finalize(callback, state, user, teacher_repo, None, lesson_service)
+
+
+@router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance)
+async def cb_attendance_yes(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+    if not mine:
+        await callback.message.edit_text(
+            "У вас нет учеников.", reply_markup=kb_teacher_menu(),
+        )
+        await state.clear()
+        await callback.answer()
+        return
+    await state.update_data(selected_ids=[])
+    await state.set_state(RecordLessonStates.selecting_attendees)
+    data = await state.get_data()
     await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_lesson")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson")],
-        ]),
+        f"{_header(data)}Отметьте присутствующих ({len(mine)} в списке):",
+        reply_markup=kb_multi_select(mine, set(), back_cb="lesson_back:attendance"),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "confirm_lesson", RecordLessonStates.confirming)
-async def cb_confirm_lesson(
+# ─── Мульти-выбор: переключение и подтверждение ─────────────────────────────
+
+async def _refresh_multi_select(
+    callback: CallbackQuery, state: FSMContext, user: User,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    data = await state.get_data()
+    selected = set(data.get("selected_ids", []))
+    cur_state = await state.get_state()
+    mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+    if cur_state == RecordLessonStates.selecting_soloists.state:
+        back_cb = "lesson_back:duration"
+    else:
+        back_cb = "lesson_back:attendance"
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_multi_select(mine, selected, back_cb=back_cb),
+    )
+
+
+@router.callback_query(F.data.startswith("ms_toggle:"))
+async def cb_ms_toggle(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    teacher_repo: TeacherRepository, lesson_service: LessonService,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    cur = await state.get_state()
+    if cur not in (RecordLessonStates.selecting_attendees.state, RecordLessonStates.selecting_soloists.state):
+        await callback.answer()
+        return
+
+    student_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = list(data.get("selected_ids", []))
+    if student_id in selected:
+        selected.remove(student_id)
+    else:
+        selected.append(student_id)
+    await state.update_data(selected_ids=selected)
+    await _refresh_multi_select(callback, state, user, ts_repo, student_repo)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "ms_confirm")
+async def cb_ms_confirm(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, student_repo: StudentRepository,
+    lesson_service: LessonService,
+) -> None:
+    cur = await state.get_state()
+    if cur not in (RecordLessonStates.selecting_attendees.state, RecordLessonStates.selecting_soloists.state):
+        await callback.answer()
+        return
+    data = await state.get_data()
+    selected = list(data.get("selected_ids", []))
+    if not selected:
+        await callback.answer("Никто не отмечен", show_alert=True)
+        return
+    await _finalize(callback, state, user, teacher_repo, student_repo, lesson_service)
+
+
+# ─── Pair: мульти-выбор пар ──────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("pair_toggle:"), RecordLessonStates.choosing_pair)
+async def cb_pair_toggle(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    key = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = list(data.get("selected_ids", []))
+    if key in selected:
+        selected.remove(key)
+    else:
+        selected.append(key)
+    await state.update_data(selected_ids=selected)
+
+    pairs = await _collect_pairs(user.teacher_id, ts_repo, student_repo)
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_pair_multi_select(pairs, set(selected), back_cb="lesson_back:duration"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "pair_confirm", RecordLessonStates.choosing_pair)
+async def cb_pair_confirm(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, student_repo: StudentRepository,
+    lesson_service: LessonService,
+) -> None:
+    data = await state.get_data()
+    selected = list(data.get("selected_ids", []))
+    if not selected:
+        await callback.answer("Ни одна пара не отмечена", show_alert=True)
+        return
+    await _finalize(callback, state, user, teacher_repo, student_repo, lesson_service)
+
+
+# ─── Создание занятий ────────────────────────────────────────────────────────
+
+async def _finalize(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, student_repo: StudentRepository | None,
+    lesson_service: LessonService,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -374,33 +444,110 @@ async def cb_confirm_lesson(
 
     try:
         data = await state.get_data()
-        await state.clear()
         teacher = await teacher_repo.get_by_id(user.teacher_id)
         if not teacher:
+            await state.clear()
             await callback.message.edit_text("Педагог не найден. Обратитесь к администратору.")
             return
 
-        lesson = await lesson_service.create(
-            teacher=teacher,
-            lesson_type=LessonType(data["lesson_type"]),
-            lesson_date=data["lesson_date"],
-            duration_min=data["duration_min"],
-            student_1_id=data.get("student_1_id"),
-            student_1_name=data.get("student_1_name"),
-            student_2_id=data.get("student_2_id"),
-            student_2_name=data.get("student_2_name"),
-        )
+        kind = data.get("kind")
+        lesson_date = data["lesson_date"]
+        duration = int(data["duration_min"])
+
+        if kind == "group":
+            attendee_ids = list(data.get("selected_ids", []))
+            attendees_csv = ",".join(attendee_ids) if attendee_ids else None
+            lesson = await lesson_service.create(
+                teacher=teacher,
+                lesson_type=LessonType.GROUP,
+                lesson_date=lesson_date,
+                duration_min=duration,
+                attendees=attendees_csv,
+            )
+            extra = f"\nОтмечено: {len(attendee_ids)}" if attendee_ids else ""
+            await state.set_data({"lesson_date": lesson_date})
+            await state.set_state(RecordLessonStates.choosing_kind)
+            await callback.message.edit_text(
+                f"✅ Групповое занятие записано!\nID: {lesson.lesson_id}\n"
+                f"Дата: {format_date_display(lesson.date)}\n"
+                f"Начислено: {lesson.earned} руб.{extra}\n\n"
+                f"Продолжим? Выберите тип следующего занятия:",
+                reply_markup=kb_lesson_type(),
+            )
+
+        elif kind == "pair":
+            keys = list(data.get("selected_ids", []))
+            pairs_data: list[tuple[str, str, str, str]] = []
+            pair_labels: list[str] = []
+            for a_id in keys:
+                a = await student_repo.get_by_id(a_id)
+                if not a or not a.partner_id:
+                    continue
+                b = await student_repo.get_by_id(a.partner_id)
+                if not b:
+                    continue
+                pairs_data.append((a.student_id, a.name, b.student_id, b.name))
+                pair_labels.append(f"{a.name} ↔ {b.name}")
+            lessons = await lesson_service.create_pair_batch(
+                teacher=teacher,
+                lesson_date=lesson_date,
+                duration_min=duration,
+                pairs=pairs_data,
+            )
+            total_earned = sum(ls.earned for ls in lessons)
+            await state.set_data({"lesson_date": lesson_date})
+            await state.set_state(RecordLessonStates.choosing_kind)
+            await callback.message.edit_text(
+                f"✅ Создано парных занятий: {len(lessons)}\n"
+                f"Дата: {format_date_display(lesson_date)}\n"
+                f"Пары: {'; '.join(pair_labels)}\n"
+                f"Итого начислено: {total_earned} руб.\n\n"
+                f"Продолжим? Выберите тип следующего занятия:",
+                reply_markup=kb_lesson_type(),
+            )
+
+        elif kind == "soloist":
+            ids = list(data.get("selected_ids", []))
+            students = []
+            for sid in ids:
+                s = await student_repo.get_by_id(sid)
+                if s:
+                    students.append((s.student_id, s.name))
+            lessons = await lesson_service.create_soloist_batch(
+                teacher=teacher,
+                lesson_date=lesson_date,
+                duration_min=duration,
+                students=students,
+            )
+            total_earned = sum(ls.earned for ls in lessons)
+            names = ", ".join(n for _, n in students)
+            await state.set_data({"lesson_date": lesson_date})
+            await state.set_state(RecordLessonStates.choosing_kind)
+            await callback.message.edit_text(
+                f"✅ Создано соло-занятий: {len(lessons)}\n"
+                f"Дата: {format_date_display(lesson_date)}\n"
+                f"Ученики: {names}\n"
+                f"Итого начислено: {total_earned} руб.\n\n"
+                f"Продолжим? Выберите тип следующего занятия:",
+                reply_markup=kb_lesson_type(),
+            )
+        else:
+            await state.clear()
+            await callback.message.edit_text(
+                "Неизвестный тип занятия.", reply_markup=kb_teacher_menu(),
+            )
+    except PermissionError as exc:
+        await state.clear()
         await callback.message.edit_text(
-            f"Занятие записано!\nID: {lesson.lesson_id}\n"
-            f"Дата: {format_date_display(lesson.date)}\n"
-            f"Начислено: {lesson.earned} руб.",
-            reply_markup=kb_teacher_menu(),
+            f"🔒 {exc}\nОбратитесь к администратору.", reply_markup=kb_teacher_menu(),
         )
     except ValueError as exc:
-        await callback.message.edit_text(f"Ошибка: {exc}")
+        await callback.message.edit_text(f"Ошибка: {exc}", reply_markup=kb_teacher_menu())
     except Exception as exc:
         logger.error("Ошибка записи занятия: %s", exc)
-        await callback.message.edit_text("Ошибка при сохранении занятия. Попробуйте позже.")
+        await callback.message.edit_text(
+            "Ошибка при сохранении занятия. Попробуйте позже.", reply_markup=kb_teacher_menu(),
+        )
     finally:
         _confirming_lesson_ids.discard(lock_key)
 

@@ -11,6 +11,7 @@ def kb_teacher_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Добавить в мой список", callback_data="teacher:add_student")],
         [InlineKeyboardButton(text="📋 Мои занятия", callback_data="teacher:my_lessons")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
+        [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
     ])
 
 
@@ -61,20 +62,78 @@ def kb_t_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
 
 def kb_lesson_type() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_type:group")],
-        [InlineKeyboardButton(text="👤 Индивидуальное", callback_data="lesson_type:individual")],
-        [InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson")],
+        [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_kind:group")],
+        [InlineKeyboardButton(text="💃 Парное", callback_data="lesson_kind:pair")],
+        [InlineKeyboardButton(text="👤 Индивидуальное (соло)", callback_data="lesson_kind:soloist")],
+        [
+            InlineKeyboardButton(text="« Назад", callback_data="lesson_back:date"),
+            InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
+        ],
     ])
 
 
-def kb_duration() -> InlineKeyboardMarkup:
+def kb_attendance_yes_no() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Отметить", callback_data="attendance:yes"),
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="attendance:no"),
+        ],
+        [
+            InlineKeyboardButton(text="« Назад", callback_data="lesson_back:kind"),
+            InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
+        ],
+    ])
+
+
+def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson_back:duration") -> InlineKeyboardMarkup:
+    """pairs: list[tuple[Student a, Student b]]. Чекбоксы для мульти-выбора пар.
+    Ключ — a.student_id (партнёр определяется по partner_id)."""
+    rows = []
+    for a, b in pairs:
+        mark = "✅" if a.student_id in selected_keys else "⬜"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {a.name} ↔ {b.name}",
+            callback_data=f"pair_toggle:{a.student_id}",
+        )])
+    rows.append([
+        InlineKeyboardButton(text=f"✅ Подтвердить ({len(selected_keys)})", callback_data="pair_confirm"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_multi_select(students: list, selected_ids: set, back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
+    """Чекбоксы со списком учеников. selected_ids — set[str] выбранных."""
+    rows = []
+    for s in students:
+        mark = "✅" if s.student_id in selected_ids else "⬜"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {s.name}", callback_data=f"ms_toggle:{s.student_id}"
+        )])
+    rows.append([
+        InlineKeyboardButton(text=f"✅ Подтвердить ({len(selected_ids)})", callback_data="ms_confirm"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_duration(back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="45 мин", callback_data="duration:45"),
             InlineKeyboardButton(text="60 мин", callback_data="duration:60"),
             InlineKeyboardButton(text="90 мин", callback_data="duration:90"),
         ],
-        [InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson")],
+        [
+            InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+            InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
+        ],
     ])
 
 
@@ -114,16 +173,21 @@ def kb_student_search_results(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_lesson_list(lessons: list, page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
-    """Список занятий педагога с пагинацией."""
+def kb_lesson_list(
+    lessons: list, page: int = 0, page_size: int = 5,
+    locked_ids: set | None = None,
+) -> InlineKeyboardMarkup:
+    """Список занятий педагога с пагинацией. locked_ids — занятия из сданного периода."""
     from bot.utils.dates import format_date_display
+    locked_ids = locked_ids or set()
     start = page * page_size
     page_lessons = lessons[start: start + page_size]
 
     buttons = []
     for ls in page_lessons:
         date_display = format_date_display(ls.date)
-        label = f"{date_display} | {ls.type.value} | {ls.duration_min} мин"
+        lock_icon = "🔒 " if ls.lesson_id in locked_ids else ""
+        label = f"{lock_icon}{date_display} | {ls.type.value} | {ls.duration_min} мин"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"lesson_detail:{ls.lesson_id}")])
 
     nav_row = []
@@ -138,8 +202,34 @@ def kb_lesson_list(lessons: list, page: int = 0, page_size: int = 5) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_lesson_detail(lesson_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}")],
-        [InlineKeyboardButton(text="« Назад к списку", callback_data="teacher:my_lessons")],
-    ])
+def kb_lesson_detail(lesson, locked: bool = False) -> InlineKeyboardMarkup:
+    """Карточка занятия. Если locked — период сдан, кнопок редактирования нет."""
+    from bot.models.enums import LessonType
+    lesson_id = lesson.lesson_id
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if locked:
+        rows.append([InlineKeyboardButton(text="🔒 Период сдан", callback_data="noop")])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="✏️ Дата", callback_data=f"edit_lesson:date:{lesson_id}"),
+            InlineKeyboardButton(text="✏️ Длительность", callback_data=f"edit_lesson:duration:{lesson_id}"),
+        ])
+        if lesson.type == LessonType.GROUP:
+            rows.append([InlineKeyboardButton(
+                text="✏️ Присутствующие", callback_data=f"edit_lesson:attendees:{lesson_id}",
+            )])
+        else:
+            # INDIVIDUAL
+            if lesson.student_2_id:
+                rows.append([InlineKeyboardButton(
+                    text="✏️ Пара", callback_data=f"edit_lesson:pair:{lesson_id}",
+                )])
+            else:
+                rows.append([InlineKeyboardButton(
+                    text="✏️ Ученик", callback_data=f"edit_lesson:soloist:{lesson_id}",
+                )])
+        rows.append([InlineKeyboardButton(text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}")])
+
+    rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data="teacher:my_lessons")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

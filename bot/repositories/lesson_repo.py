@@ -20,6 +20,7 @@ def _row_to_lesson(row: dict) -> Lesson:
         earned=int(row.get("earned") or 0),
         recorded_at=str(row["recorded_at"]),
         updated_at=str(row["updated_at"]),
+        attendees=str(row["attendees"]) if row.get("attendees") else None,
     )
 
 
@@ -60,6 +61,7 @@ class LessonRepository(BaseRepository):
             lesson.earned,
             lesson.recorded_at,
             lesson.updated_at,
+            lesson.attendees or "",
         ])
         return lesson
 
@@ -68,4 +70,26 @@ class LessonRepository(BaseRepository):
         if row_idx is None:
             return False
         await self._delete_row(row_idx)
+        return True
+
+    async def update(self, lesson: Lesson) -> bool:
+        row_idx = await self._find_row_index("lesson_id", lesson.lesson_id)
+        if row_idx is None:
+            return False
+        await self._update_row(row_idx, [
+            lesson.lesson_id,
+            lesson.teacher_id,
+            lesson.teacher_name,
+            lesson.type.value,
+            lesson.student_1_id or "",
+            lesson.student_1_name or "",
+            lesson.student_2_id or "",
+            lesson.student_2_name or "",
+            lesson.date,
+            lesson.duration_min,
+            lesson.earned,
+            lesson.recorded_at,
+            lesson.updated_at,
+            lesson.attendees or "",
+        ])
         return True

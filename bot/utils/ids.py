@@ -41,3 +41,7 @@ def generate_payment_id(existing: list[str]) -> str:
 
 def generate_user_id(existing: list[str]) -> str:
     return _next_id("USR", 4, existing)
+
+
+def generate_submission_id(existing: list[str]) -> str:
+    return _next_id("SUB", 6, existing)

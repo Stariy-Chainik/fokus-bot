@@ -49,6 +49,9 @@ class Lesson:
     earned: int                # рублей, целое
     recorded_at: str           # YYYY-MM-DD HH:MM:SS
     updated_at: str            # YYYY-MM-DD HH:MM:SS
+    # CSV student_id присутствовавших — используется только для group-занятий;
+    # для individual всегда пусто (учеников видно по student_1/2_id).
+    attendees: Optional[str] = None
 
 
 @dataclass
@@ -66,6 +69,16 @@ class Billing:
     payment_id: Optional[str]  # проставляется после оплаты
     created_at: str
     updated_at: str
+
+
+@dataclass
+class TeacherPeriodSubmission:
+    submission_id: str
+    teacher_id: str
+    period_month: str          # YYYY-MM
+    submitted_at: str
+    lessons_count: int
+    total_earned: int
 
 
 @dataclass
