@@ -24,7 +24,7 @@ from bot.repositories import (
     TeacherPeriodSubmissionRepository,
 )
 from bot.services import LessonService, BillingService, PaymentService, DiagnosticsService
-from bot.middlewares import AuthMiddleware
+from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router
 
 logging.basicConfig(
@@ -89,6 +89,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["diagnostics_service"] = diagnostics_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
+    dp.update.outer_middleware(DedupUpdateMiddleware())
     dp.update.middleware(AuthMiddleware(user_repo))
 
     # ── Роутеры ──────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ def kb_students_menu() -> InlineKeyboardMarkup:
     ])
 
 
-_STUDENT_PAGE_SIZE = 8
+_STUDENT_PAGE_SIZE = 20
 
 
 def kb_student_paged(students: list, page: int, total: int, query: str = "") -> InlineKeyboardMarkup:
