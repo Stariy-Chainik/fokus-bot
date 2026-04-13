@@ -445,6 +445,18 @@ async def msg_add_student_search(
         q = query.lower()
         available = [s for s in available if q in s.name.lower()]
     if not available:
+        if query:
+            mine_ids = set(await ts_repo.get_students_for_teacher(user.teacher_id))
+            already_mine = [
+                s for s in await student_repo.get_all()
+                if s.student_id in mine_ids and query.lower() in s.name.lower()
+            ]
+            if already_mine:
+                names = ", ".join(s.name for s in already_mine)
+                await message.answer(
+                    f"Уже в вашем списке: {names}. Введите другой запрос или <b>*</b> для всех доступных."
+                )
+                return
         await message.answer(
             "Никого не найдено. Если ученика нет в школе — обратитесь к администратору."
         )

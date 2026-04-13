@@ -175,35 +175,21 @@ async def add_teacher_rate_teacher(message: Message, state: FSMContext) -> None:
 
 
 @router.message(AddTeacherStates.entering_rate_for_student)
-async def add_teacher_rate_student(message: Message, state: FSMContext) -> None:
+async def add_teacher_rate_student(
+    message: Message, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, user_repo,
+) -> None:
     try:
         rate = int((message.text or "").strip())
         assert rate >= 0
     except (ValueError, AssertionError):
         await message.answer("Введите положительное целое число:")
         return
-    await state.update_data(rate_for_student=rate)
-    data = await state.get_data()
-    await state.set_state(AddTeacherStates.confirming)
-    await message.answer(
-        f"Проверьте данные:\n\n"
-        f"Фамилия Имя: {data['name']}\n"
-        f"Telegram ID: {data['tg_id']}\n"
-        f"Ставка групп: {data['rate_group']} руб.\n"
-        f"Ставка педагогу (инд.): {data['rate_for_teacher']} руб.\n"
-        f"Ставка ученику (инд.): {rate} руб.",
-        reply_markup=kb_confirm("confirm_add_teacher", "admin:teachers"),
-    )
-
-
-@router.callback_query(F.data == "confirm_add_teacher")
-async def cb_confirm_add_teacher(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
-    teacher_repo: TeacherRepository, user_repo,
-) -> None:
     if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
+        await message.answer("Нет доступа.")
+        await state.clear()
         return
+    await state.update_data(rate_for_student=rate)
     data = await state.get_data()
     await state.clear()
     try:
@@ -214,7 +200,6 @@ async def cb_confirm_add_teacher(
             rate_for_teacher=data["rate_for_teacher"],
             rate_for_student=data["rate_for_student"],
         )
-        # Если у педагога есть tg_id — создаём/обновляем запись в users с привязанным teacher_id
         note = ""
         if teacher.tg_id:
             existing = await user_repo.get_by_tg_id(teacher.tg_id)
@@ -224,14 +209,13 @@ async def cb_confirm_add_teacher(
             else:
                 await user_repo.update_teacher_id(teacher.tg_id, teacher.teacher_id)
                 note = "\n✅ Аккаунт педагога привязан."
-        await callback.message.edit_text(
+        await message.answer(
             f"Педагог добавлен!\nID: {teacher.teacher_id}\nФамилия Имя: {teacher.name}{note}",
             reply_markup=kb_back("admin:teachers"),
         )
     except Exception as exc:
         logger.error("Ошибка добавления педагога: %s", exc)
-        await callback.message.edit_text("Ошибка при добавлении педагога.", reply_markup=kb_back("admin:teachers"))
-    await callback.answer()
+        await message.answer("Ошибка при добавлении педагога.", reply_markup=kb_back("admin:teachers"))
 
 
 # ─── Удаление педагога ────────────────────────────────────────────────────────
