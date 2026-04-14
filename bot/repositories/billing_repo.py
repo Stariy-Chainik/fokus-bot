@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional
 from bot.models import Billing
 from bot.utils import generate_billing_id, now_str
@@ -75,15 +76,20 @@ class BillingRepository(BaseRepository):
                 deleted += 1
         return deleted
 
-    async def set_payment_id_for_period(self, student_id: str, period_month: str, payment_id: str) -> int:
-        """Проставляет payment_id всем billing-строкам ученика за период."""
+    async def set_payment_id_for_period(
+        self, student_id: str, period_month: str, payment_id: str,
+        teacher_id: str | None = None,
+    ) -> int:
+        """Проставляет payment_id billing-строкам ученика за период.
+        Если teacher_id задан — только строкам этого педагога."""
         records = await self._all_records()
         ts_now = now_str()
         updated = 0
         for i, row in enumerate(records):
             if (str(row.get("student_id")) == student_id
                     and str(row.get("period_month")) == period_month
-                    and not row.get("payment_id")):
+                    and not row.get("payment_id")
+                    and (teacher_id is None or str(row.get("teacher_id")) == teacher_id)):
                 row_idx = i + 2
                 await self._update_cell(row_idx, 11, payment_id)   # col 11 = payment_id
                 await self._update_cell(row_idx, 13, ts_now)        # col 13 = updated_at

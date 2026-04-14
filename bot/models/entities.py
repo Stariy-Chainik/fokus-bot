@@ -94,3 +94,5 @@ class StudentPeriodPayment:
     comment: Optional[str]
     created_at: str
     updated_at: str
+    teacher_id: str = ""
+    teacher_name: str = ""

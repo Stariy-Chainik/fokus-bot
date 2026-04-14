@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository
@@ -35,10 +35,16 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
             f"Telegram ID: <code>{tg_user.id}</code>\n\n"
             f"Добавьте его как педагога через меню Администратора → Педагоги → Добавить"
         )
+        notify_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="➕ Добавить как педагога",
+                callback_data=f"add_teacher_prefill:{tg_user.id}",
+            )
+        ]])
         admins = [u for u in await user_repo.get_all() if u.is_admin]
         for admin in admins:
             try:
-                await message.bot.send_message(admin.tg_id, notify_text)
+                await message.bot.send_message(admin.tg_id, notify_text, reply_markup=notify_kb)
             except Exception:
                 pass  # Если администратор недоступен — не прерываем
 

@@ -127,12 +127,13 @@ class LessonService:
 
     # ─── Удаление ──────────────────────────────────────────────────────────
 
-    async def delete(self, lesson_id: str) -> bool:
+    async def delete(self, lesson_id: str, bypass_period_lock: bool = False) -> bool:
         lesson = await self._lesson_repo.get_by_id(lesson_id)
         if lesson is None:
             logger.warning("Занятие %s не найдено при удалении", lesson_id)
             return False
-        await self._ensure_not_submitted(lesson.teacher_id, period_month_from_date(lesson.date))
+        if not bypass_period_lock:
+            await self._ensure_not_submitted(lesson.teacher_id, period_month_from_date(lesson.date))
 
         # Историческая подстраховка: если у занятия были billing-строки (до рефакторинга)
         # — тоже чистим, чтобы не осталось сирот.

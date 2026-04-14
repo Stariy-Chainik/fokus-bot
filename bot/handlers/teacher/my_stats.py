@@ -9,6 +9,7 @@ from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.utils.dates import display_period
+from bot.utils.lesson_stats import format_lesson_breakdown
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_stats")
@@ -56,9 +57,8 @@ async def cb_stats_period(
     teacher_id = user.teacher_id
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total = len(lessons)
-    group_count = sum(1 for ls in lessons if ls.type == LessonType.GROUP)
-    ind_count = total - group_count
+    group_count, ind_count, group_line, ind_line = format_lesson_breakdown(lessons)
+    total = group_count + ind_count
 
     submission = await submission_repo.get_by_teacher_and_period(teacher_id, period_month)
     status_line = "🔒 Период сдан на оплату" if submission else "✏️ Период открыт (можно править)"
@@ -66,7 +66,9 @@ async def cb_stats_period(
     lines = [
         f"<b>Статистика за {display_period(period_month)}</b>",
         "",
-        f"Занятий: {total} (груп.: {group_count}, инд.: {ind_count})",
+        f"Всего занятий: {total}",
+        f"👥 Групповые ({group_count}): {group_line}",
+        f"👤 Индивидуальные ({ind_count}): {ind_line}",
         "",
         status_line,
     ]

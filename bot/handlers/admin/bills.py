@@ -101,26 +101,31 @@ async def cb_bills_show(
         return
 
     by_teacher: dict[str, list] = defaultdict(list)
+    teacher_names: dict[str, str] = {}
     for b in billing_rows:
-        by_teacher[b.teacher_name].append(b)
+        by_teacher[b.teacher_id].append(b)
+        teacher_names[b.teacher_id] = b.teacher_name
 
-    payment = await payment_repo.get_by_student_and_period(student_id, period_month)
-    if payment and payment.status.value == "paid":
-        status_text = f"✅ Оплачен ({payment.paid_at or ''})"
-    elif payment:
-        status_text = "📋 Счёт создан, ожидает оплаты"
-    else:
-        status_text = "⏳ Не оплачен"
+    payments = await payment_repo.get_by_student_and_period(student_id, period_month)
+    pay_by_teacher = {p.teacher_id: p for p in payments}
 
-    lines = [f"<b>Счёт: {student.name}</b>", f"Период: {display_period(period_month)}", f"Статус: {status_text}", ""]
-    total = 0
-    for teacher_name, rows in by_teacher.items():
-        lines.append(f"👨‍🏫 {teacher_name}:")
+    lines = [f"<b>Счёт: {student.name}</b>", f"Период: {display_period(period_month)}", ""]
+    grand_total = 0
+    for teacher_id, rows in by_teacher.items():
+        subtotal = sum(b.amount for b in rows)
+        grand_total += subtotal
+        p = pay_by_teacher.get(teacher_id)
+        if p and p.status.value == "paid":
+            status = f"✅ Оплачен ({p.paid_at or ''})"
+        elif p:
+            status = "📋 Ожидает оплаты"
+        else:
+            status = "⏳ Счёт не создан"
+        lines.append(f"👨‍🏫 <b>{teacher_names[teacher_id]}</b> — {subtotal} руб. — {status}")
         for b in rows:
             lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
-            total += b.amount
         lines.append("")
-    lines.append(f"Итого: {total} руб.")
+    lines.append(f"Итого: {grand_total} руб.")
 
     await callback.message.edit_text("\n".join(lines), reply_markup=kb_back("admin:bills"))
     await callback.answer()
@@ -157,7 +162,7 @@ async def cb_pay_choose_period(callback: CallbackQuery, user: User | None) -> No
 
 
 @router.callback_query(F.data.startswith("pay_period:"))
-async def cb_pay_confirm(
+async def cb_pay_pick_invoice(
     callback: CallbackQuery,
     user: User | None,
     student_repo: StudentRepository,
@@ -172,19 +177,62 @@ async def cb_pay_confirm(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    payment = await payment_service.get_or_create_invoice(student, period_month)
-
-    if payment.status.value == "paid":
+    invoices = await payment_service.get_or_create_invoices_for_student_period(
+        student, period_month,
+    )
+    if not invoices:
         await callback.message.edit_text(
-            f"Счёт {payment.payment_id} уже оплачен.", reply_markup=kb_back("admin:bills")
+            f"У {student.name} за {display_period(period_month)} нет занятий.",
+            reply_markup=kb_back("admin:bills"),
         )
         await callback.answer()
         return
 
+    rows: list[list[InlineKeyboardButton]] = []
+    for p in invoices:
+        paid = p.status.value == "paid"
+        icon = "✅" if paid else "⏳"
+        label = f"{icon} {p.teacher_name or '—'} — {p.total_amount} руб."
+        if paid:
+            rows.append([InlineKeyboardButton(text=label, callback_data="noop")])
+        else:
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"pay_invoice:{p.payment_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:bills")])
+
+    await callback.message.edit_text(
+        f"<b>{student.name}</b> — {display_period(period_month)}\n"
+        "Выберите счёт для подтверждения:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pay_invoice:"))
+async def cb_pay_confirm(
+    callback: CallbackQuery, user: User | None,
+    payment_repo: PaymentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    payment_id = callback.data.split(":", 1)[1]
+    payment = next(
+        (p for p in await payment_repo.get_all() if p.payment_id == payment_id), None,
+    )
+    if not payment:
+        await callback.answer("Счёт не найден", show_alert=True)
+        return
+    if payment.status.value == "paid":
+        await callback.message.edit_text(
+            f"Счёт {payment.payment_id} уже оплачен.", reply_markup=kb_back("admin:bills"),
+        )
+        await callback.answer()
+        return
     await callback.message.edit_text(
         f"<b>Подтвердить оплату счёта {payment.payment_id}?</b>\n"
-        f"Ученик: {student.name}\n"
-        f"Период: {display_period(period_month)}\n"
+        f"Ученик: {payment.student_name}\n"
+        f"Педагог: {payment.teacher_name or '—'}\n"
+        f"Период: {display_period(payment.period_month)}\n"
         f"Сумма: {payment.total_amount} руб.",
         reply_markup=kb_confirm(f"do_confirm_payment:{payment.payment_id}", "admin:bills"),
     )

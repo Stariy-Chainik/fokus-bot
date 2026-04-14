@@ -87,6 +87,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["billing_service"] = billing_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
+    dp["student_requests"] = {}   # req_id -> {teacher_id, teacher_tg_id, teacher_name, student_name, admin_msgs}
 
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())

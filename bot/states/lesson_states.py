@@ -11,10 +11,6 @@ class RecordLessonStates(StatesGroup):
     choosing_duration = State()
 
 
-class MyLessonsStates(StatesGroup):
-    entering_custom_date = State()
-
-
 class SubmitPeriodStates(StatesGroup):
     choosing_month = State()
     confirming = State()

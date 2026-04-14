@@ -7,11 +7,11 @@ from __future__ import annotations
 Защита от двойного нажатия — set _confirming_lesson_ids по tg_id.
 """
 import logging
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
 from bot.models.enums import LessonType
@@ -22,6 +22,7 @@ from bot.keyboards.teacher import (
     kb_lesson_type, kb_duration, kb_teacher_menu,
     kb_attendance_yes_no, kb_pair_multi_select, kb_multi_select,
 )
+from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
 
 logger = logging.getLogger(__name__)
@@ -184,11 +185,27 @@ async def _show_pair_list(
 
 # ─── Дата → тип ──────────────────────────────────────────────────────────────
 
+async def _proceed_to_kind(callback: CallbackQuery, state: FSMContext, lesson_date: str) -> None:
+    await state.update_data(lesson_date=lesson_date)
+    await state.set_state(RecordLessonStates.choosing_kind)
+    data = await state.get_data()
+    await callback.message.edit_text(
+        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
+    )
+
+
 @router.callback_query(F.data.startswith("lesson_date:"), RecordLessonStates.choosing_date)
 async def cb_lesson_date(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":", 1)[1]
     if value == "manual":
-        await callback.message.edit_text("Введите дату в формате ДД.ММ.ГГГГ:")
+        today = date.today()
+        await callback.message.edit_text(
+            "Выберите дату:",
+            reply_markup=kb_calendar(
+                today.year, today.month, prefix="rl",
+                max_date=today, cancel_cb="teacher:cancel_lesson",
+            ),
+        )
         await callback.answer()
         return
 
@@ -196,38 +213,31 @@ async def cb_lesson_date(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Дата в будущем запрещена!", show_alert=True)
         return
 
-    await state.update_data(lesson_date=value)
-    await state.set_state(RecordLessonStates.choosing_kind)
-    data = await state.get_data()
-    await callback.message.edit_text(
-        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
+    await _proceed_to_kind(callback, state, value)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("rl_nav:"), RecordLessonStates.choosing_date)
+async def cb_rl_nav(callback: CallbackQuery) -> None:
+    ym = callback.data.split(":", 1)[1]
+    year, month = (int(x) for x in ym.split("-"))
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_calendar(
+            year, month, prefix="rl",
+            max_date=date.today(), cancel_cb="teacher:cancel_lesson",
+        ),
     )
     await callback.answer()
 
 
-@router.message(RecordLessonStates.choosing_date)
-async def msg_lesson_date_manual(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-    lesson_date = None
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
-        try:
-            d = datetime.strptime(text, fmt).date()
-            if d > date.today():
-                await message.answer("Дата в будущем запрещена. Введите другую дату:")
-                return
-            lesson_date = d.isoformat()
-            break
-        except ValueError:
-            pass
-    if lesson_date is None:
-        await message.answer("Неверный формат. Введите дату в формате ДД.ММ.ГГГГ:")
+@router.callback_query(F.data.startswith("rl_pick:"), RecordLessonStates.choosing_date)
+async def cb_rl_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":", 1)[1]
+    if date.fromisoformat(value) > date.today():
+        await callback.answer("Дата в будущем запрещена!", show_alert=True)
         return
-    await state.update_data(lesson_date=lesson_date)
-    await state.set_state(RecordLessonStates.choosing_kind)
-    data = await state.get_data()
-    await message.answer(
-        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
-    )
+    await _proceed_to_kind(callback, state, value)
+    await callback.answer()
 
 
 # ─── Тип → длительность ──────────────────────────────────────────────────────

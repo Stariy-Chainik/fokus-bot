@@ -18,6 +18,8 @@ def _row_to_payment(row: dict) -> StudentPeriodPayment:
         comment=str(row["comment"]) if row.get("comment") else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        teacher_id=str(row.get("teacher_id") or ""),
+        teacher_name=str(row.get("teacher_name") or ""),
     )
 
 
@@ -27,9 +29,19 @@ class PaymentRepository(BaseRepository):
 
     async def get_by_student_and_period(
         self, student_id: str, period_month: str
+    ) -> list[StudentPeriodPayment]:
+        """Все счета ученика за период (по одному на педагога)."""
+        return [
+            p for p in await self.get_all()
+            if p.student_id == student_id and p.period_month == period_month
+        ]
+
+    async def get_by_student_period_teacher(
+        self, student_id: str, period_month: str, teacher_id: str,
     ) -> Optional[StudentPeriodPayment]:
         for p in await self.get_all():
-            if p.student_id == student_id and p.period_month == period_month:
+            if (p.student_id == student_id and p.period_month == period_month
+                    and p.teacher_id == teacher_id):
                 return p
         return None
 
@@ -52,6 +64,8 @@ class PaymentRepository(BaseRepository):
             payment.comment or "",
             payment.created_at,
             payment.updated_at,
+            payment.teacher_id,
+            payment.teacher_name,
         ])
         return payment
 

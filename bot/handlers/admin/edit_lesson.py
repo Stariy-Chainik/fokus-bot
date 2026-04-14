@@ -31,7 +31,8 @@ async def cb_edit_lesson_choose_teacher(
         await callback.answer()
         return
     await callback.message.edit_text(
-        "<b>Выберите педагога:</b>", reply_markup=kb_teacher_list(teachers, "admin_lessons_teacher")
+        "<b>Выберите педагога:</b>",
+        reply_markup=kb_teacher_list(teachers, "admin_lessons_teacher", back_cb="admin:menu"),
     )
     await callback.answer()
 
@@ -52,7 +53,7 @@ async def cb_admin_lessons_list(
         return
     await callback.message.edit_text(
         f"<b>Занятия педагога {teacher_id} ({len(lessons)}):</b>",
-        reply_markup=kb_lesson_list(lessons, page=0, page_size=5),
+        reply_markup=kb_lesson_list(lessons, page=0, page_size=5, back_cb="admin:edit_lesson"),
     )
     await callback.answer()
 

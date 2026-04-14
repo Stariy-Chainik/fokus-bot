@@ -118,6 +118,24 @@ async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("add_teacher_prefill:"))
+async def cb_add_teacher_prefill(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    try:
+        tg_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("Некорректный ID", show_alert=True)
+        return
+    await state.update_data(tg_id=tg_id)
+    await state.set_state(AddTeacherStates.entering_name)
+    await callback.message.answer(
+        f"<b>Добавление педагога</b>\nTelegram ID: <code>{tg_id}</code>\n\nВведите Фамилию Имя педагога:"
+    )
+    await callback.answer()
+
+
 @router.message(AddTeacherStates.entering_tg_id)
 async def add_teacher_tg_id(message: Message, state: FSMContext) -> None:
     try:
@@ -135,7 +153,7 @@ async def add_teacher_tg_id(message: Message, state: FSMContext) -> None:
 
 @router.message(AddTeacherStates.entering_name)
 async def add_teacher_name(message: Message, state: FSMContext) -> None:
-    name = message.text.strip() if message.text else ""
+    name = " ".join((message.text or "").split())
     if not name:
         await message.answer("Фамилия Имя не может быть пустым. Введите ещё раз:")
         return

@@ -15,6 +15,7 @@ from bot.states import SubmitPeriodStates
 from bot.keyboards.teacher import kb_teacher_menu
 from bot.utils import generate_submission_id, now_str
 from bot.utils.dates import display_period
+from bot.utils.lesson_stats import format_lesson_breakdown
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_submit_period")
@@ -26,15 +27,13 @@ def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
 
 
-async def _period_counts(
+async def _period_breakdown(
     teacher_id: str, period_month: str, lesson_repo: LessonRepository,
-) -> tuple[int, int, int]:
-    """→ (total, group_count, ind_count). Денежные суммы педагогу не показываем."""
+) -> tuple[int, int, int, str, str]:
+    """→ (total, group_count, ind_count, group_line, ind_line)."""
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total = len(lessons)
-    group = sum(1 for ls in lessons if ls.type == LessonType.GROUP)
-    ind = total - group
-    return total, group, ind
+    group, ind, gline, iline = format_lesson_breakdown(lessons)
+    return group + ind, group, ind, gline, iline
 
 
 async def _open_periods(
@@ -56,7 +55,7 @@ async def _show_confirm(
     period_month: str, lesson_repo: LessonRepository,
     open_periods: list[str],
 ) -> None:
-    total, group, ind = await _period_counts(user.teacher_id, period_month, lesson_repo)
+    total, group, ind, gline, iline = await _period_breakdown(user.teacher_id, period_month, lesson_repo)
     if total == 0:
         # Текущий месяц пустой — предложим выбрать другой, если есть.
         rows: list[list[InlineKeyboardButton]] = []
@@ -86,7 +85,9 @@ async def _show_confirm(
 
     await callback.message.edit_text(
         f"<b>Сдать период {display_period(period_month)}?</b>\n\n"
-        f"Занятий: {total} (груп.: {group}, инд.: {ind})\n\n"
+        f"Всего занятий: {total}\n"
+        f"👥 Групповые ({group}): {gline}\n"
+        f"👤 Индивидуальные ({ind}): {iline}\n\n"
         "После сдачи редактирование занятий этого месяца станет недоступно.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
@@ -186,6 +187,7 @@ async def cb_submit_pick(
 @router.callback_query(F.data == "submit_confirm", SubmitPeriodStates.confirming)
 async def cb_submit_confirm(
     callback: CallbackQuery, user: User | None, state: FSMContext,
+    lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     lesson_service: LessonService,
 ) -> None:
@@ -233,10 +235,15 @@ async def cb_submit_confirm(
         logger.info("Сдан период %s teacher=%s lessons=%d earned=%d",
                     period_month, user.teacher_id, lessons_count, total_earned)
 
+        total, group, ind, gline, iline = await _period_breakdown(
+            user.teacher_id, period_month, lesson_repo,
+        )
         await state.clear()
         await callback.message.edit_text(
-            f"<b>✅ Период {display_period(period_month)} сдан</b>\n"
-            f"Занятий: {lessons_count}.\n"
+            f"<b>✅ Период {display_period(period_month)} сдан</b>\n\n"
+            f"Всего занятий: {total}\n"
+            f"👥 Групповые ({group}): {gline}\n"
+            f"👤 Индивидуальные ({ind}): {iline}\n\n"
             f"Занятия этого месяца больше редактировать нельзя.",
             reply_markup=kb_teacher_menu(),
         )

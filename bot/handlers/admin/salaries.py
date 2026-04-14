@@ -9,6 +9,7 @@ from bot.models import User
 from bot.repositories import TeacherRepository, LessonRepository, BillingRepository
 from bot.keyboards.admin import kb_salaries_menu, kb_teacher_list, kb_back
 from bot.utils.dates import display_period
+from bot.utils.lesson_stats import format_lesson_breakdown
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_salaries")
@@ -89,6 +90,8 @@ async def cb_salary_show(
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
     total_earned = sum(ls.earned for ls in lessons)
+    group, ind, gline, iline = format_lesson_breakdown(lessons)
+    total = group + ind
 
     billing_rows = await billing_repo.get_by_teacher_and_period(teacher_id, period_month)
     total_billing = len(billing_rows)
@@ -99,7 +102,9 @@ async def cb_salary_show(
         f"<b>Педагог: {teacher.name}</b>",
         f"Период: {display_period(period_month)}",
         "",
-        f"Занятий: {len(lessons)}",
+        f"Всего занятий: {total}",
+        f"👥 Групповые ({group}): {gline}",
+        f"👤 Индивидуальные ({ind}): {iline}",
         f"Начислено: {total_earned} руб.",
         "",
         f"Billing: {paid_billing}/{total_billing} оплачено",

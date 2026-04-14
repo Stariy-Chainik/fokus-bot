@@ -29,8 +29,6 @@ def kb_students_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎯 Все солисты", callback_data="students:all_soloists")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],
         [InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="students:delete")],
-        [InlineKeyboardButton(text="🔗 Привязать ученика к педагогу", callback_data="students:link")],
-        [InlineKeyboardButton(text="✂️ Убрать связь педагог-ученик", callback_data="students:unlink")],
         [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
     ])
 
@@ -100,7 +98,7 @@ def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:te
         [InlineKeyboardButton(text=t.name, callback_data=f"{action_prefix}:{t.teacher_id}")]
         for t in teachers
     ]
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=back_cb)])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

@@ -21,12 +21,6 @@ class AddStudentStates(StatesGroup):
     confirming = State()
 
 
-class LinkTeacherStudentStates(StatesGroup):
-    choosing_teacher = State()
-    choosing_student = State()
-    confirming = State()
-
-
 class ConfirmPaymentStates(StatesGroup):
     choosing_student = State()
     choosing_period = State()
