@@ -8,6 +8,7 @@ def kb_teacher_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💃 Мои пары", callback_data="teacher:my_pairs")],
         [InlineKeyboardButton(text="👩‍🎓 Мои ученики (соло)", callback_data="teacher:my_students")],
+        [InlineKeyboardButton(text="🏢 Мои группы", callback_data="teacher:my_groups")],
         [InlineKeyboardButton(text="📋 Мои занятия", callback_data="teacher:my_lessons")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
@@ -50,7 +51,7 @@ def kb_t_partner_candidates(candidates: list, student_id: str) -> InlineKeyboard
 def kb_t_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Подтвердить", callback_data=confirm_cb),
+            InlineKeyboardButton(text="💾 Подтвердить", callback_data=confirm_cb),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
         ]
     ])
@@ -75,7 +76,7 @@ def kb_attendance_yes_no() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⏭ Пропустить", callback_data="attendance:no"),
         ],
         [
-            InlineKeyboardButton(text="« Назад", callback_data="lesson_back:kind"),
+            InlineKeyboardButton(text="« Назад", callback_data="lesson_back:group"),
             InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
         ],
     ])
@@ -92,7 +93,7 @@ def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson
             callback_data=f"pair_toggle:{a.student_id}",
         )])
     rows.append([
-        InlineKeyboardButton(text=f"✅ Подтвердить ({len(selected_keys)})", callback_data="pair_confirm"),
+        InlineKeyboardButton(text=f"💾 Подтвердить ({len(selected_keys)})", callback_data="pair_confirm"),
     ])
     rows.append([
         InlineKeyboardButton(text="« Назад", callback_data=back_cb),
@@ -101,7 +102,10 @@ def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_multi_select(students: list, selected_ids: set, back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
+def kb_multi_select(
+    students: list, selected_ids: set, back_cb: str = "lesson_back:kind",
+    show_toggle_all: bool = False,
+) -> InlineKeyboardMarkup:
     """Чекбоксы со списком учеников. selected_ids — set[str] выбранных."""
     rows = []
     for s in students:
@@ -109,6 +113,10 @@ def kb_multi_select(students: list, selected_ids: set, back_cb: str = "lesson_ba
         rows.append([InlineKeyboardButton(
             text=f"{mark} {s.name}", callback_data=f"ms_toggle:{s.student_id}"
         )])
+    if show_toggle_all:
+        all_selected = students and len(selected_ids) == len(students)
+        toggle_all_text = "◻️ Снять всех" if all_selected else "☑️ Отметить всех"
+        rows.append([InlineKeyboardButton(text=toggle_all_text, callback_data="ms_all")])
     rows.append([
         InlineKeyboardButton(text=f"💾 Подтвердить ({len(selected_ids)})", callback_data="ms_confirm"),
     ])
@@ -119,9 +127,34 @@ def kb_multi_select(students: list, selected_ids: set, back_cb: str = "lesson_ba
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def kb_group_branch_picker(branches: list, back_cb: str = "lesson_back:duration") -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"group_branch:{b.branch_id}")]
+        for b in branches
+    ]
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_group_picker(groups: list, back_cb: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"💃 {g.name}", callback_data=f"group_pick:{g.group_id}")]
+        for g in groups
+    ]
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def kb_duration(back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="35 мин", callback_data="duration:35"),
             InlineKeyboardButton(text="45 мин", callback_data="duration:45"),
             InlineKeyboardButton(text="60 мин", callback_data="duration:60"),
             InlineKeyboardButton(text="90 мин", callback_data="duration:90"),

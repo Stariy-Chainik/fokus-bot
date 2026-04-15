@@ -74,7 +74,7 @@ async def _show_confirm(
     await state.update_data(period_month=period_month, total=total)
     await state.set_state(SubmitPeriodStates.confirming)
 
-    rows = [[InlineKeyboardButton(text="✅ Подтвердить сдачу", callback_data="submit_confirm")]]
+    rows = [[InlineKeyboardButton(text="💾 Подтвердить сдачу", callback_data="submit_confirm")]]
     # Если есть другие открытые периоды кроме текущего — дать возможность выбрать.
     others = [p for p in open_periods if p != period_month]
     if others:

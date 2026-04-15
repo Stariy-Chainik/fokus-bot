@@ -18,6 +18,8 @@ class EditTeacherRatesStates(StatesGroup):
 
 class AddStudentStates(StatesGroup):
     entering_name = State()
+    choosing_branch = State()
+    choosing_group = State()
     confirming = State()
 
 
@@ -34,3 +36,19 @@ class StudentListStates(StatesGroup):
 class PartnerAssignStates(StatesGroup):
     choosing_partner = State()
     confirming = State()
+
+
+class AddBranchStates(StatesGroup):
+    entering_name = State()
+
+
+class EditBranchNameStates(StatesGroup):
+    entering_name = State()
+
+
+class AddGroupStates(StatesGroup):
+    entering_name = State()
+
+
+class EditGroupNameStates(StatesGroup):
+    entering_name = State()

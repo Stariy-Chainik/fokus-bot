@@ -51,6 +51,7 @@ class LessonService:
         student_2_id: str | None = None,
         student_2_name: str | None = None,
         attendees: str | None = None,
+        group_id: str = "",
     ) -> Lesson:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
@@ -76,6 +77,7 @@ class LessonService:
             recorded_at=now,
             updated_at=now,
             attendees=attendees,
+            group_id=group_id,
         )
 
         await self._lesson_repo.add(lesson)

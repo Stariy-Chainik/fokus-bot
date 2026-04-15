@@ -22,6 +22,7 @@ from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
     TeacherStudentRepository, LessonRepository, BillingRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
+    BranchRepository, GroupRepository, TeacherGroupRepository,
 )
 from bot.services import LessonService, BillingService, PaymentService, DiagnosticsService
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
@@ -65,6 +66,9 @@ def _build_dispatcher(storage) -> Dispatcher:
     submission_repo = TeacherPeriodSubmissionRepository(
         sheets_client, settings.sheet_teacher_period_submissions,
     )
+    branch_repo = BranchRepository(sheets_client, settings.sheet_branches)
+    group_repo = GroupRepository(sheets_client, settings.sheet_groups)
+    teacher_group_repo = TeacherGroupRepository(sheets_client, settings.sheet_teacher_groups)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     billing_service = BillingService(billing_repo)
@@ -83,6 +87,9 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["billing_repo"] = billing_repo
     dp["payment_repo"] = payment_repo
     dp["submission_repo"] = submission_repo
+    dp["branch_repo"] = branch_repo
+    dp["group_repo"] = group_repo
+    dp["teacher_group_repo"] = teacher_group_repo
     dp["lesson_service"] = lesson_service
     dp["billing_service"] = billing_service
     dp["payment_service"] = payment_service

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )
+    sheet_branches: str = Field(default="branches", alias="SHEET_BRANCHES")
+    sheet_groups: str = Field(default="groups", alias="SHEET_GROUPS")
+    sheet_teacher_groups: str = Field(default="teacher_groups", alias="SHEET_TEACHER_GROUPS")
 
     # Server / Railway
     # Если задан — бот запускается в webhook-режиме (рекомендуется для продакшена).

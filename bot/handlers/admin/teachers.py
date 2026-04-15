@@ -3,10 +3,13 @@ import logging
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import TeacherRepository, TeacherStudentRepository, UserRepository
+from bot.repositories import (
+    TeacherRepository, TeacherStudentRepository, UserRepository,
+    GroupRepository, BranchRepository, TeacherGroupRepository,
+)
 from bot.states import AddTeacherStates, EditTeacherRatesStates
 from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_teacher_card, kb_rate_select, kb_confirm, kb_back
 
@@ -51,6 +54,8 @@ async def cb_teachers_list(
 @router.callback_query(F.data.startswith("teacher_card:"))
 async def cb_teacher_card(
     callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -61,6 +66,18 @@ async def cb_teacher_card(
         await callback.answer("Педагог не найден", show_alert=True)
         return
     tg_info = f"@tg_id: {teacher.tg_id}" if teacher.tg_id else "Telegram не привязан"
+
+    gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    groups = [g for g in await group_repo.get_all() if g.group_id in gids]
+    branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
+    groups.sort(key=lambda g: (branches.get(g.branch_id, ""), g.name))
+    if groups:
+        groups_block = "\n".join(
+            f"  • {branches.get(g.branch_id, '—')} / {g.name}" for g in groups
+        )
+    else:
+        groups_block = "  —"
+
     text = (
         f"👨‍🏫 <b>{teacher.name}</b>\n"
         f"ID: {teacher.teacher_id}\n"
@@ -68,9 +85,79 @@ async def cb_teacher_card(
         f"📊 Ставки (руб. за 45 мин):\n"
         f"  Групповое: <b>{teacher.rate_group}</b>\n"
         f"  Инд. педагогу: <b>{teacher.rate_for_teacher}</b>\n"
-        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>"
+        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n\n"
+        f"🏢 Группы:\n{groups_block}"
     )
     await callback.message.edit_text(text, reply_markup=kb_teacher_card(teacher_id))
+    await callback.answer()
+
+
+def _kb_teacher_groups_edit(teacher_id: str, groups: list, branches: dict, assigned: set[str]) -> InlineKeyboardMarkup:
+    rows = []
+    for g in groups:
+        mark = "✅ " if g.group_id in assigned else "☐ "
+        bname = branches.get(g.branch_id, "—")
+        rows.append([InlineKeyboardButton(
+            text=f"{mark}{bname} / {g.name}",
+            callback_data=f"teg_toggle:{teacher_id}:{g.group_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="💾 Готово", callback_data=f"teacher_card:{teacher_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("t_edit_groups:"))
+async def cb_t_edit_groups(
+    callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    if not teacher:
+        await callback.answer("Педагог не найден", show_alert=True)
+        return
+    branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
+    groups = sorted(
+        await group_repo.get_all(),
+        key=lambda g: (branches.get(g.branch_id, ""), g.name),
+    )
+    assigned = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    await callback.message.edit_text(
+        f"<b>Группы педагога «{teacher.name}»</b>\n"
+        "✅ — назначен(а). Тап переключает.",
+        reply_markup=_kb_teacher_groups_edit(teacher_id, groups, branches, assigned),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("teg_toggle:"))
+async def cb_teg_toggle(
+    callback: CallbackQuery, user: User | None,
+    teacher_group_repo: TeacherGroupRepository,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, teacher_id, group_id = callback.data.split(":", 2)
+    assigned = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    if group_id in assigned:
+        await teacher_group_repo.remove(teacher_id, group_id)
+    else:
+        await teacher_group_repo.add(teacher_id, group_id)
+    branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
+    groups = sorted(
+        await group_repo.get_all(),
+        key=lambda g: (branches.get(g.branch_id, ""), g.name),
+    )
+    assigned = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    await callback.message.edit_reply_markup(
+        reply_markup=_kb_teacher_groups_edit(teacher_id, groups, branches, assigned),
+    )
     await callback.answer()
 
 

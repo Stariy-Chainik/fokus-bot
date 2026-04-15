@@ -8,6 +8,7 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💰 Зарплаты", callback_data="admin:salaries")],
         [InlineKeyboardButton(text="🧾 Счета учеников", callback_data="admin:bills")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
+        [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
     ])
 
@@ -87,7 +88,7 @@ def kb_salaries_menu() -> InlineKeyboardMarkup:
 def kb_bills_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Счёт ученика за период", callback_data="bills:view")],
-        [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data="bills:confirm_payment")],
+        [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
     ])
 
@@ -105,6 +106,7 @@ def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:te
 def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
+        [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
     ])
 
@@ -130,7 +132,7 @@ def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_stu
 def kb_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Подтвердить", callback_data=confirm_cb),
+            InlineKeyboardButton(text="💾 Подтвердить", callback_data=confirm_cb),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
         ]
     ])

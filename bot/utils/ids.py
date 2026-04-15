@@ -45,3 +45,11 @@ def generate_user_id(existing: list[str]) -> str:
 
 def generate_submission_id(existing: list[str]) -> str:
     return _next_id("SUB", 6, existing)
+
+
+def generate_branch_id(existing: list[str]) -> str:
+    return _next_id("BRN", 4, existing)
+
+
+def generate_group_id(existing: list[str]) -> str:
+    return _next_id("GRP", 4, existing)

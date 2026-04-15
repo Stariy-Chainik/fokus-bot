@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.models.enums import LessonType
-from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
+from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, GroupRepository
 from bot.services import LessonService
 from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu
 from bot.keyboards.admin import kb_back
@@ -307,6 +307,8 @@ async def cb_lessons_page(
 async def cb_lesson_detail(
     callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    group_repo: GroupRepository,
+    state: FSMContext,
 ) -> None:
     if not _is_teacher_or_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -326,6 +328,10 @@ async def cb_lesson_detail(
         f"Тип: {'Групповое' if lesson.type == LessonType.GROUP else 'Индивидуальное'}",
         f"Длительность: {lesson.duration_min} мин",
     ]
+    if lesson.group_id:
+        group = await group_repo.get_by_id(lesson.group_id)
+        if group:
+            lines.append(f"Группа: {group.name}")
     if lesson.student_1_name:
         lines.append(f"Ученик 1: {lesson.student_1_name}")
     if lesson.student_2_name:
@@ -334,7 +340,12 @@ async def cb_lesson_detail(
         lines.append("")
         lines.append("🔒 Период сдан — редактирование недоступно.")
 
-    back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
+    data = await state.get_data()
+    from_teacher_flow = bool(data.get("lm_mode"))
+    if from_teacher_flow:
+        back_cb = "teacher:lesson_view" if data.get("lm_mode") == "view" else "teacher:lesson_delete"
+    else:
+        back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
     await callback.message.edit_text("\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))
     await callback.answer()
 

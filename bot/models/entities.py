@@ -26,12 +26,36 @@ class Student:
     student_id: str
     name: str
     partner_id: Optional[str] = None
+    group_id: str = ""
 
 
 @dataclass
 class TeacherStudent:
     teacher_id: str
     student_id: str
+
+
+@dataclass
+class Branch:
+    branch_id: str
+    name: str
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class Group:
+    group_id: str
+    branch_id: str
+    name: str
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class TeacherGroup:
+    teacher_id: str
+    group_id: str
 
 
 @dataclass
@@ -52,6 +76,7 @@ class Lesson:
     # CSV student_id присутствовавших — используется только для group-занятий;
     # для individual всегда пусто (учеников видно по student_1/2_id).
     attendees: Optional[str] = None
+    group_id: str = ""  # заполнено только для групповых занятий, если педагог выбрал тренировочную группу
 
 
 @dataclass

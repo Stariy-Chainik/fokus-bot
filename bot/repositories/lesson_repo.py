@@ -21,6 +21,7 @@ def _row_to_lesson(row: dict) -> Lesson:
         recorded_at=str(row["recorded_at"]),
         updated_at=str(row["updated_at"]),
         attendees=str(row["attendees"]) if row.get("attendees") else None,
+        group_id=str(row.get("group_id") or ""),
     )
 
 
@@ -62,6 +63,7 @@ class LessonRepository(BaseRepository):
             lesson.recorded_at,
             lesson.updated_at,
             lesson.attendees or "",
+            lesson.group_id or "",
         ])
         return lesson
 
@@ -91,5 +93,6 @@ class LessonRepository(BaseRepository):
             lesson.recorded_at,
             lesson.updated_at,
             lesson.attendees or "",
+            lesson.group_id or "",
         ])
         return True

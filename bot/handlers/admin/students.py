@@ -6,7 +6,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import StudentRepository, TeacherRepository, TeacherStudentRepository, UserRepository
+from bot.repositories import (
+    StudentRepository, TeacherRepository, TeacherStudentRepository, UserRepository,
+    GroupRepository, BranchRepository,
+)
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates
 from bot.keyboards.admin import (
     kb_students_menu, kb_teacher_list, kb_student_list,
@@ -172,6 +175,7 @@ async def cb_student_page(
 async def cb_student_card(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, teacher_repo: TeacherRepository, ts_repo: TeacherStudentRepository,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -195,9 +199,21 @@ async def cb_student_card(
     else:
         partner_text = "— (солист)"
 
+    if student.group_id:
+        group = await group_repo.get_by_id(student.group_id)
+        if group:
+            branch = await branch_repo.get_by_id(group.branch_id)
+            branch_name = branch.name if branch else group.branch_id
+            group_text = f"<b>{group.name}</b> ({branch_name})"
+        else:
+            group_text = f"(не найдена: {student.group_id})"
+    else:
+        group_text = "<i>не задана</i>"
+
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
-        f"ID: {student.student_id}\n\n"
+        f"ID: {student.student_id}\n"
+        f"🏢 Группа: {group_text}\n\n"
         f"Педагоги:\n{teachers_text}\n\n"
         f"Партнёр: {partner_text}"
     )
@@ -220,7 +236,9 @@ async def cb_add_student_start(callback: CallbackQuery, user: User | None, state
 
 
 @router.message(AddStudentStates.entering_name)
-async def add_student_name(message: Message, state: FSMContext) -> None:
+async def add_student_name(
+    message: Message, state: FSMContext, branch_repo: BranchRepository,
+) -> None:
     name = " ".join((message.text or "").split())
     if not name:
         await message.answer("Фамилия Имя не может быть пустым. Введите ещё раз:")
@@ -231,21 +249,98 @@ async def add_student_name(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(name=name)
+    branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
+    if not branches:
+        await state.clear()
+        await message.answer(
+            "Нет ни одного филиала. Создайте филиал и группу в «🏢 Филиалы и группы».",
+            reply_markup=kb_back("admin:students"),
+        )
+        return
+    rows = [
+        [InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"add_st_branch:{b.branch_id}")]
+        for b in branches
+    ]
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="admin:students")])
+    await state.set_state(AddStudentStates.choosing_branch)
+    await message.answer(
+        f"<b>Новый ученик: {name}</b>\nВыберите филиал:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith("add_st_branch:"), AddStudentStates.choosing_branch)
+async def cb_add_student_branch(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    branch_id = callback.data.split(":", 1)[1]
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    if not groups:
+        await callback.answer(
+            "В этом филиале нет групп. Создайте группу в «🏢 Филиалы и группы».",
+            show_alert=True,
+        )
+        return
+    await state.update_data(branch_id=branch_id)
+    await state.set_state(AddStudentStates.choosing_group)
+    rows = [
+        [InlineKeyboardButton(text=f"💃 {g.name}", callback_data=f"add_st_group:{g.group_id}")]
+        for g in groups
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
+    await callback.message.edit_text(
+        "<b>Выберите группу:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("add_st_group:"), AddStudentStates.choosing_group)
+async def cb_add_student_group(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    await state.update_data(group_id=group_id)
+    data = await state.get_data()
     await state.set_state(AddStudentStates.confirming)
-    await message.answer(f"<b>Добавить ученика «{name}»?</b>", reply_markup=kb_confirm("confirm_add_student", "admin:students"))
+    await callback.message.edit_text(
+        f"<b>Добавить ученика «{data['name']}»?</b>\n(группа будет назначена)",
+        reply_markup=kb_confirm("confirm_add_student", "admin:students"),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "confirm_add_student")
 async def cb_confirm_add_student(
-    callback: CallbackQuery, state: FSMContext, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    student_repo: StudentRepository,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     data = await state.get_data()
     await state.clear()
+    toast = ""
     try:
         student = await student_repo.add(data["name"])
+        group_id = data.get("group_id") or ""
+        if group_id:
+            await student_repo.update_group(student.student_id, group_id)
+            group = await group_repo.get_by_id(group_id)
+            if group:
+                branch = await branch_repo.get_by_id(group.branch_id)
+                bname = branch.name if branch else "—"
+                toast = f"Ученик «{student.name}» добавлен в группу «{group.name}» (филиал «{bname}»)"
+        if not toast:
+            toast = f"Ученик «{student.name}» добавлен"
         await callback.message.edit_text(
             f"<b>Ученик добавлен!</b>\nID: {student.student_id}\nФамилия Имя: {student.name}",
             reply_markup=kb_back("admin:students"),
@@ -253,7 +348,9 @@ async def cb_confirm_add_student(
     except Exception as exc:
         logger.error("Ошибка добавления ученика: %s", exc)
         await callback.message.edit_text("Ошибка при добавлении ученика.", reply_markup=kb_back("admin:students"))
-    await callback.answer()
+        await callback.answer()
+        return
+    await callback.answer(toast, show_alert=True)
 
 
 # ─── Удаление ученика ─────────────────────────────────────────────────────────
@@ -542,11 +639,26 @@ async def _finalize_link(
     return link_note
 
 
+async def _group_toast(
+    student_name: str, group_id: str,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> str:
+    if not group_id:
+        return f"Ученик «{student_name}» создан"
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        return f"Ученик «{student_name}» создан"
+    branch = await branch_repo.get_by_id(group.branch_id)
+    bname = branch.name if branch else "—"
+    return f"Ученик «{student_name}» добавлен в группу «{group.name}» (филиал «{bname}»)"
+
+
 @router.callback_query(F.data.startswith("req_approve:"))
 async def cb_approve_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
     student_requests: dict,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -581,6 +693,8 @@ async def cb_approve_student_request(
         return
     # Дублей нет — создаём сразу
     student = await student_repo.add(name=name)
+    if req.get("group_id"):
+        await student_repo.update_group(student.student_id, req["group_id"])
     link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
     student_requests.pop(req_id, None)
     await callback.message.edit_text(
@@ -590,7 +704,8 @@ async def cb_approve_student_request(
         callback.bot, req, callback.message.chat.id,
         f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
     )
-    await callback.answer()
+    toast = await _group_toast(student.name, req.get("group_id") or "", group_repo, branch_repo)
+    await callback.answer(toast, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("req_create_new:"))
@@ -598,6 +713,7 @@ async def cb_create_new_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
     student_requests: dict,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -608,6 +724,8 @@ async def cb_create_new_student_request(
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
     student = await student_repo.add(name=req["student_name"])
+    if req.get("group_id"):
+        await student_repo.update_group(student.student_id, req["group_id"])
     link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
     student_requests.pop(req_id, None)
     await callback.message.edit_text(
@@ -617,7 +735,8 @@ async def cb_create_new_student_request(
         callback.bot, req, callback.message.chat.id,
         f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
     )
-    await callback.answer()
+    toast = await _group_toast(student.name, req.get("group_id") or "", group_repo, branch_repo)
+    await callback.answer(toast, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("req_link_existing:"))

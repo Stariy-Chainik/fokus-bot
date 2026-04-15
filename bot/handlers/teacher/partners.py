@@ -11,7 +11,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import StudentRepository, TeacherStudentRepository, TeacherRepository, UserRepository
+from bot.repositories import (
+    StudentRepository, TeacherStudentRepository, TeacherRepository, UserRepository,
+    GroupRepository, BranchRepository, TeacherGroupRepository,
+)
 from bot.states import PartnerAssignStates, TeacherAddStudentStates
 from bot.keyboards.teacher import (
     kb_teacher_menu, kb_my_student_card, kb_my_pair_card,
@@ -623,7 +626,7 @@ async def msg_add_student_search(
     teacher = await teacher_repo.get_by_id(user.teacher_id)
     teacher_name = teacher.name if teacher else user.teacher_id
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Создать и привязать", callback_data="t_req_send")],
+        [InlineKeyboardButton(text="💾 Создать и привязать", callback_data="t_req_send")],
         [InlineKeyboardButton(text="❌ Отменить", callback_data="teacher:menu")],
     ])
     reply = await message.answer(
@@ -691,12 +694,12 @@ async def cb_add_student_pick(
 # ─── Заявка админу на создание нового ученика ────────────────────────────────
 
 @router.callback_query(F.data == "t_req_send", TeacherAddStudentStates.searching)
-async def cb_request_new_student(
+async def cb_request_new_student_pick_group(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    teacher_repo: TeacherRepository, user_repo: UserRepository,
-    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
-    student_requests: dict,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    branch_repo: BranchRepository,
 ) -> None:
+    """Перед отправкой заявки — педагог выбирает группу для нового ученика."""
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
@@ -710,10 +713,71 @@ async def cb_request_new_student(
         )
         return
 
+    my_group_ids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    all_groups = await group_repo.get_all()
+    my_groups = sorted(
+        [g for g in all_groups if g.group_id in my_group_ids], key=lambda g: g.name,
+    )
+
+    if not my_groups:
+        await callback.answer(
+            "Нельзя создать ученика: у вас нет тренировочных групп. Обратитесь к администратору.",
+            show_alert=True,
+        )
+        return
+
+    # Сохраним имя — понадобится после выбора группы
+    await state.update_data(t_new_student_name=student_name)
+    await state.set_state(TeacherAddStudentStates.choosing_group)
+
+    # Группируем по филиалу для удобства (по тексту)
+    branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
+    by_branch: dict[str, list] = {}
+    for g in my_groups:
+        by_branch.setdefault(g.branch_id, []).append(g)
+
+    rows = []
+    for bid, groups in by_branch.items():
+        bname = branches.get(bid, bid)
+        for g in groups:
+            rows.append([InlineKeyboardButton(
+                text=f"🏢 {bname} — {g.name}",
+                callback_data=f"t_new_pick_group:{g.group_id}",
+            )])
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="teacher:menu")])
+
+    await callback.message.edit_text(
+        f"<b>Новый ученик: {student_name}</b>\n\nВыберите тренировочную группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("t_new_pick_group:"), TeacherAddStudentStates.choosing_group)
+async def cb_request_new_student_with_group(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_repo: TeacherRepository, user_repo: UserRepository,
+    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+    student_requests: dict,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    student_name = " ".join((data.get("t_new_student_name") or "").split())
+    parts = student_name.split()
+    if len(parts) != 2:
+        await callback.answer("Имя ученика потерялось. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
     # Shortcut: педагог-админ создаёт ученика сам, без заявки
     if user.is_admin:
         try:
             student = await student_repo.add(name=student_name)
+            await student_repo.update_group(student.student_id, group_id)
             await ts_repo.add(user.teacher_id, student.student_id)
         except Exception as exc:
             logger.error("Ошибка self-service создания ученика педагогом-админом: %s", exc)
@@ -727,7 +791,16 @@ async def cb_request_new_student(
                 [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
             ]),
         )
-        await callback.answer()
+        group = await group_repo.get_by_id(group_id)
+        bname = "—"
+        if group:
+            branch = await branch_repo.get_by_id(group.branch_id)
+            bname = branch.name if branch else "—"
+        gname = group.name if group else group_id
+        await callback.answer(
+            f"Ученик «{student.name}» добавлен в группу «{gname}» (филиал «{bname}»)",
+            show_alert=True,
+        )
         return
 
     teacher = await teacher_repo.get_by_id(user.teacher_id)
@@ -740,13 +813,14 @@ async def cb_request_new_student(
 
     req_id = uuid.uuid4().hex[:8]
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Создать и привязать", callback_data=f"req_approve:{req_id}")],
+        [InlineKeyboardButton(text="💾 Создать и привязать", callback_data=f"req_approve:{req_id}")],
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"req_reject:{req_id}")],
     ])
     notify_text = (
         f"📝 <b>Заявка на создание ученика</b>\n\n"
         f"Педагог: <b>{teacher_name}</b>\n"
-        f"Фамилия Имя: <b>{student_name}</b>"
+        f"Фамилия Имя: <b>{student_name}</b>\n"
+        f"Группа: <code>{group_id}</code>"
     )
     admin_msgs: list[tuple[int, int]] = []
     for admin in admins:
@@ -761,6 +835,7 @@ async def cb_request_new_student(
         "teacher_tg_id": callback.from_user.id,
         "teacher_name": teacher_name,
         "student_name": student_name,
+        "group_id": group_id,
         "admin_msgs": admin_msgs,
     }
 
@@ -772,7 +847,16 @@ async def cb_request_new_student(
             [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
         ]),
     )
-    await callback.answer()
+    group = await group_repo.get_by_id(group_id)
+    bname = "—"
+    if group:
+        branch = await branch_repo.get_by_id(group.branch_id)
+        bname = branch.name if branch else "—"
+    gname = group.name if group else group_id
+    await callback.answer(
+        f"Заявка: «{student_name}» → группа «{gname}» (филиал «{bname}»)",
+        show_alert=True,
+    )
 
 
 # ─── Убрать ученика из своего списка ─────────────────────────────────────────
