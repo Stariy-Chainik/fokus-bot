@@ -118,6 +118,14 @@ async def _show_lessons(
     lessons.sort(key=lambda ls: ls.date, reverse=True)
 
     if filter_date:
+        filter_tag = filter_date
+    elif filter_month:
+        filter_tag = f"m-{filter_month}"
+    else:
+        filter_tag = "all"
+    await state.update_data(lm_filter_tag=filter_tag)
+
+    if filter_date:
         title_frag = f"за {format_date_display(filter_date)}"
     elif filter_month:
         title_frag = f"за {_month_label(filter_month)}"
@@ -343,7 +351,11 @@ async def cb_lesson_detail(
     data = await state.get_data()
     from_teacher_flow = bool(data.get("lm_mode"))
     if from_teacher_flow:
-        back_cb = "teacher:lesson_view" if data.get("lm_mode") == "view" else "teacher:lesson_delete"
+        tag = data.get("lm_filter_tag")
+        if tag:
+            back_cb = f"lessons_page:0:{tag}"
+        else:
+            back_cb = "teacher:lesson_view" if data.get("lm_mode") == "view" else "teacher:lesson_delete"
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
     await callback.message.edit_text("\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))
@@ -376,8 +388,7 @@ async def cb_delete_lesson_confirm(
             )
             return
     await callback.message.edit_text(
-        f"Удалить занятие {lesson_id} от {format_date_display(lesson.date)}?\n"
-        "Связанные billing-записи тоже будут удалены.",
+        f"Удалить занятие {lesson_id} от {format_date_display(lesson.date)}?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"confirm_delete_lesson:{lesson_id}")],
             [InlineKeyboardButton(text="« Назад", callback_data=f"lesson_detail:{lesson_id}")],

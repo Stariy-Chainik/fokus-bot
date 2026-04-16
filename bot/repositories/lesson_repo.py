@@ -44,6 +44,13 @@ class LessonRepository(BaseRepository):
             if ls.teacher_id == teacher_id and ls.date.startswith(period_month)
         ]
 
+    async def get_by_student_and_period(self, student_id: str, period_month: str) -> list[Lesson]:
+        return [
+            ls for ls in await self.get_all()
+            if ls.date.startswith(period_month)
+            and (ls.student_1_id == student_id or ls.student_2_id == student_id)
+        ]
+
     async def get_existing_ids(self) -> list[str]:
         return [ls.lesson_id for ls in await self.get_all()]
 

@@ -6,7 +6,10 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import TeacherRepository, LessonRepository, BillingRepository
+from bot.repositories import (
+    TeacherRepository, LessonRepository, TeacherPeriodSubmissionRepository,
+)
+from bot.services import calc_earned
 from bot.keyboards.admin import kb_salaries_menu, kb_teacher_list, kb_back
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown
@@ -77,7 +80,7 @@ async def cb_salary_show(
     user: User | None,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
-    billing_repo: BillingRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -89,14 +92,12 @@ async def cb_salary_show(
         return
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total_earned = sum(ls.earned for ls in lessons)
+    total_earned = sum(calc_earned(ls.type, ls.duration_min, teacher) for ls in lessons)
     group, ind, gline, iline = format_lesson_breakdown(lessons)
     total = group + ind
 
-    billing_rows = await billing_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total_billing = len(billing_rows)
-    paid_billing = sum(1 for b in billing_rows if b.payment_id)
-    period_closed = total_billing > 0 and paid_billing == total_billing
+    submission = await submission_repo.get_by_teacher_and_period(teacher_id, period_month)
+    period_status = "✅ Сдан педагогом" if submission else "⏳ Открыт"
 
     lines = [
         f"<b>Педагог: {teacher.name}</b>",
@@ -107,8 +108,7 @@ async def cb_salary_show(
         f"👤 Индивидуальные ({ind}): {iline}",
         f"Начислено: {total_earned} руб.",
         "",
-        f"Billing: {paid_billing}/{total_billing} оплачено",
-        f"Период: {'✅ Закрыт' if period_closed else '⏳ Открыт'}",
+        f"Период: {period_status}",
     ]
     await callback.message.edit_text("\n".join(lines), reply_markup=kb_back("admin:salaries"))
     await callback.answer()

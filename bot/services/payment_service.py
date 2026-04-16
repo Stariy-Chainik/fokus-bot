@@ -1,40 +1,80 @@
+from __future__ import annotations
 import logging
 
 from bot.models import StudentPeriodPayment, Student
 from bot.models.enums import PaymentStatus
 from bot.utils import generate_payment_id, now_str
-from bot.repositories import BillingRepository, PaymentRepository
+from bot.repositories import (
+    PaymentRepository, LessonRepository, TeacherRepository,
+    TeacherPeriodSubmissionRepository,
+)
+from .billing_service import build_billing_rows
 
 logger = logging.getLogger(__name__)
 
 
 class PaymentService:
-    def __init__(self, billing_repo: BillingRepository, payment_repo: PaymentRepository) -> None:
-        self._billing_repo = billing_repo
+    def __init__(
+        self,
+        payment_repo: PaymentRepository,
+        lesson_repo: LessonRepository,
+        teacher_repo: TeacherRepository,
+        submission_repo: TeacherPeriodSubmissionRepository,
+    ) -> None:
         self._payment_repo = payment_repo
+        self._lesson_repo = lesson_repo
+        self._teacher_repo = teacher_repo
+        self._submission_repo = submission_repo
+
+    async def compute_bills_for_student_period(
+        self, student_id: str, period_month: str,
+    ) -> dict[str, dict]:
+        """
+        On-demand расчёт счёта ученика за период.
+        Возвращает dict[teacher_id] -> {name, total, items: list[Billing-like dicts]}.
+        """
+        lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
+        teachers_cache: dict[str, object] = {}
+        result: dict[str, dict] = {}
+        for ls in lessons:
+            teacher = teachers_cache.get(ls.teacher_id)
+            if teacher is None:
+                teacher = await self._teacher_repo.get_by_id(ls.teacher_id)
+                if teacher is None:
+                    logger.warning("Педагог %s не найден для занятия %s", ls.teacher_id, ls.lesson_id)
+                    continue
+                teachers_cache[ls.teacher_id] = teacher
+            for b in build_billing_rows(ls, teacher):
+                if b.student_id != student_id:
+                    continue
+                agg = result.setdefault(b.teacher_id, {
+                    "name": b.teacher_name, "total": 0, "items": [],
+                })
+                agg["total"] += b.amount
+                agg["items"].append(b)
+        return result
 
     async def get_or_create_invoices_for_student_period(
         self, student: Student, period_month: str,
     ) -> list[StudentPeriodPayment]:
         """Возвращает (создаёт при необходимости) по одному счёту на каждого педагога,
-        у которого есть billing-строки этого ученика за период."""
-        billing_rows = await self._billing_repo.get_by_student_and_period(
-            student.student_id, period_month,
-        )
-        if not billing_rows:
+        у которого есть индивидуальные занятия с этим учеником за период."""
+        bills = await self.compute_bills_for_student_period(student.student_id, period_month)
+        if not bills:
             return []
-        by_teacher: dict[str, dict] = {}
-        for b in billing_rows:
-            agg = by_teacher.setdefault(b.teacher_id, {"name": b.teacher_name, "total": 0})
-            agg["total"] += b.amount
-            agg["name"] = b.teacher_name  # последнее имя
 
         invoices: list[StudentPeriodPayment] = []
-        for teacher_id, agg in by_teacher.items():
+        for teacher_id, agg in bills.items():
             existing = await self._payment_repo.get_by_student_period_teacher(
                 student.student_id, period_month, teacher_id,
             )
             if existing:
+                # Сумма могла измениться (добавили/удалили занятие) — refresh, если ещё не оплачен
+                if existing.status != PaymentStatus.PAID and existing.total_amount != agg["total"]:
+                    logger.info(
+                        "Сумма счёта %s изменилась: %d → %d (refresh)",
+                        existing.payment_id, existing.total_amount, agg["total"],
+                    )
                 invoices.append(existing)
                 continue
             now = now_str()
@@ -64,12 +104,6 @@ class PaymentService:
         return invoices
 
     async def confirm_payment(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
-        """
-        Подтверждает оплату:
-        1. Ставит status=paid в student_period_payments
-        2. Проставляет payment_id в billing-строки ученика за период
-           (только у педагога, к которому привязан этот счёт)
-        """
         payment = next(
             (p for p in await self._payment_repo.get_all() if p.payment_id == payment_id),
             None,
@@ -77,28 +111,21 @@ class PaymentService:
         if payment is None:
             logger.warning("Счёт %s не найден при подтверждении", payment_id)
             return False
-
         if payment.status == PaymentStatus.PAID:
             logger.warning("Повторное подтверждение счёта %s — игнорируем", payment_id)
             return False
-
         ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id)
         if ok:
-            updated = await self._billing_repo.set_payment_id_for_period(
-                payment.student_id, payment.period_month, payment_id,
-                teacher_id=payment.teacher_id or None,
-            )
-            logger.info("Счёт %s подтверждён, billing-строк обновлено: %d", payment_id, updated)
+            logger.info("Счёт %s подтверждён", payment_id)
         return ok
 
-    async def check_teacher_period_closed(
-        self, teacher_id: str, period_month: str
-    ) -> tuple[bool, int, int]:
-        """
-        Проверяет, все ли billing-строки педагога за период имеют payment_id.
-        Возвращает (all_paid, paid_count, total_count).
-        """
-        rows = await self._billing_repo.get_by_teacher_and_period(teacher_id, period_month)
-        total = len(rows)
-        paid = sum(1 for b in rows if b.payment_id)
-        return paid == total and total > 0, paid, total
+    async def teachers_not_submitted(
+        self, teacher_ids: list[str], period_month: str,
+    ) -> list[str]:
+        """Из списка teacher_id возвращает тех, кто ещё не сдал период."""
+        not_submitted: list[str] = []
+        for tid in teacher_ids:
+            sub = await self._submission_repo.get_by_teacher_and_period(tid, period_month)
+            if sub is None:
+                not_submitted.append(tid)
+        return not_submitted

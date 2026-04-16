@@ -6,15 +6,19 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from datetime import date
+
 from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
     TeacherRepository, StudentRepository,
 )
+from bot.services import PaymentService
 from bot.states import (
     AddBranchStates, EditBranchNameStates,
     AddGroupStates, EditGroupNameStates,
 )
 from bot.keyboards.admin import kb_back, kb_confirm
+from bot.utils.dates import display_period
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_branches")
@@ -53,6 +57,7 @@ def _kb_group_card(group_id: str, branch_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики группы", callback_data=f"group_students:{group_id}")],
+        [InlineKeyboardButton(text="📤 Разослать счета группе", callback_data=f"group_send_bills:{group_id}")],
         [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"group:edit_name:{group_id}")],
         [InlineKeyboardButton(text="🗑 Удалить группу", callback_data=f"group:del:{group_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
@@ -465,6 +470,86 @@ async def cb_group_students(
         reply_markup=_kb_group_students(group_id, candidates, assigned),
     )
     await callback.answer()
+
+
+_group_send_in_progress: set[str] = set()
+
+
+@router.callback_query(F.data.startswith("group_send_bills:"))
+async def cb_group_send_bills(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository, student_repo: StudentRepository,
+    teacher_repo: TeacherRepository, payment_service: PaymentService,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+
+    period_month = date.today().strftime("%Y-%m")
+    lock_key = f"{group_id}:{period_month}"
+    if lock_key in _group_send_in_progress:
+        await callback.answer("Рассылка уже выполняется", show_alert=True)
+        return
+    _group_send_in_progress.add(lock_key)
+
+    try:
+        students = [s for s in await student_repo.get_all() if s.group_id == group_id]
+        if not students:
+            await callback.answer("В группе нет учеников", show_alert=True)
+            return
+
+        # Собираем педагогов из всех счетов учеников группы
+        all_teacher_ids: set[str] = set()
+        per_student_bills: dict[str, dict] = {}
+        for s in students:
+            bills = await payment_service.compute_bills_for_student_period(
+                s.student_id, period_month,
+            )
+            per_student_bills[s.student_id] = bills
+            all_teacher_ids.update(bills.keys())
+
+        if not all_teacher_ids:
+            await callback.answer(
+                f"За {display_period(period_month)} нет индивидуальных занятий учеников группы.",
+                show_alert=True,
+            )
+            return
+
+        not_submitted = await payment_service.teachers_not_submitted(
+            list(all_teacher_ids), period_month,
+        )
+        if not_submitted:
+            names = []
+            for tid in not_submitted:
+                t = await teacher_repo.get_by_id(tid)
+                names.append(t.name if t else tid)
+            await callback.answer(
+                "Период не сдан педагогами:\n" + "\n".join(names),
+                show_alert=True,
+            )
+            return
+
+        # Все сдали — создаём счета и отправляем (заглушка)
+        total_invoices = 0
+        for s in students:
+            if not per_student_bills[s.student_id]:
+                continue
+            invoices = await payment_service.get_or_create_invoices_for_student_period(
+                s, period_month,
+            )
+            total_invoices += len(invoices)
+        await callback.answer(
+            f"Счёта группы «{group.name}» за {display_period(period_month)} разосланы родителям (заглушка). "
+            f"Учеников: {len(students)}, счетов: {total_invoices}.",
+            show_alert=True,
+        )
+    finally:
+        _group_send_in_progress.discard(lock_key)
 
 
 @router.callback_query(F.data.startswith("gs_toggle:"))

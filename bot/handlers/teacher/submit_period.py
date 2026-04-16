@@ -10,7 +10,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User, TeacherPeriodSubmission
 from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
-from bot.services import LessonService
+from bot.services import LessonService, calc_earned
+from bot.repositories import TeacherRepository  # noqa: F401  (DI hint)
 from bot.states import SubmitPeriodStates
 from bot.keyboards.teacher import kb_teacher_menu
 from bot.utils import generate_submission_id, now_str
@@ -217,10 +218,11 @@ async def cb_submit_confirm(
             await callback.answer()
             return
 
-        # Расчёт: проставляем earned в lessons и создаём billing.
-        lessons_count, total_earned = await lesson_service.finalize_period(
+        # Считаем сводку в момент сдачи; ничего не пишем в billing.
+        lessons, teacher, total_earned = await lesson_service.preview_period(
             user.teacher_id, period_month,
         )
+        lessons_count = len(lessons)
 
         existing_ids = await submission_repo.get_existing_ids()
         sub = TeacherPeriodSubmission(

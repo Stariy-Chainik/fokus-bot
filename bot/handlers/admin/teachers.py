@@ -6,9 +6,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from datetime import date
+
 from bot.repositories import (
     TeacherRepository, TeacherStudentRepository, UserRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
+    TeacherPeriodSubmissionRepository,
 )
 from bot.states import AddTeacherStates, EditTeacherRatesStates
 from bot.keyboards.admin import kb_teachers_menu, kb_teacher_list, kb_teacher_card, kb_rate_select, kb_confirm, kb_back
@@ -32,9 +35,24 @@ async def cb_teachers_menu(callback: CallbackQuery, user: User | None) -> None:
 
 # ─── Список педагогов ────────────────────────────────────────────────────────
 
+def _kb_teachers_list_with_status(
+    teachers: list, submitted_ids: set[str], period_label: str,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for t in teachers:
+        mark = "🟢" if t.teacher_id in submitted_ids else "🔴"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {t.name}", callback_data=f"teacher_card:{t.teacher_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:teachers")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.callback_query(F.data == "teachers:list")
 async def cb_teachers_list(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -44,9 +62,16 @@ async def cb_teachers_list(
         await callback.message.edit_text("Педагогов нет.", reply_markup=kb_back("admin:teachers"))
         await callback.answer()
         return
+    current = date.today().strftime("%Y-%m")
+    submitted_ids = {
+        s.teacher_id for s in await submission_repo.get_all()
+        if s.period_month == current
+    }
+    from bot.utils.dates import display_period
     await callback.message.edit_text(
-        "<b>Выберите педагога:</b>",
-        reply_markup=kb_teacher_list(teachers, "teacher_card", back_cb="admin:teachers"),
+        f"<b>Педагоги</b>\nСтатус сдачи периода: {display_period(current)}\n"
+        "🟢 — сдан, 🔴 — открыт",
+        reply_markup=_kb_teachers_list_with_status(teachers, submitted_ids, current),
     )
     await callback.answer()
 

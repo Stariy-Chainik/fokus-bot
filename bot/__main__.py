@@ -20,11 +20,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
-    TeacherStudentRepository, LessonRepository, BillingRepository, PaymentRepository,
+    TeacherStudentRepository, LessonRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
     BranchRepository, GroupRepository, TeacherGroupRepository,
 )
-from bot.services import LessonService, BillingService, PaymentService, DiagnosticsService
+from bot.services import LessonService, PaymentService, DiagnosticsService
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router
 
@@ -61,7 +61,6 @@ def _build_dispatcher(storage) -> Dispatcher:
     student_repo = StudentRepository(sheets_client, settings.sheet_students)
     ts_repo = TeacherStudentRepository(sheets_client, settings.sheet_teacher_students)
     lesson_repo = LessonRepository(sheets_client, settings.sheet_lessons)
-    billing_repo = BillingRepository(sheets_client, settings.sheet_billing)
     payment_repo = PaymentRepository(sheets_client, settings.sheet_payments)
     submission_repo = TeacherPeriodSubmissionRepository(
         sheets_client, settings.sheet_teacher_period_submissions,
@@ -71,12 +70,9 @@ def _build_dispatcher(storage) -> Dispatcher:
     teacher_group_repo = TeacherGroupRepository(sheets_client, settings.sheet_teacher_groups)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
-    billing_service = BillingService(billing_repo)
-    lesson_service = LessonService(
-        lesson_repo, billing_service, submission_repo, teacher_repo, billing_repo,
-    )
-    payment_service = PaymentService(billing_repo, payment_repo)
-    diagnostics_service = DiagnosticsService(lesson_repo, billing_repo, teacher_repo)
+    lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
+    payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, submission_repo)
+    diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
 
     # ── DI: зависимости во все хендлеры через workflow_data ──────────────────
     dp["user_repo"] = user_repo
@@ -84,14 +80,12 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["student_repo"] = student_repo
     dp["ts_repo"] = ts_repo
     dp["lesson_repo"] = lesson_repo
-    dp["billing_repo"] = billing_repo
     dp["payment_repo"] = payment_repo
     dp["submission_repo"] = submission_repo
     dp["branch_repo"] = branch_repo
     dp["group_repo"] = group_repo
     dp["teacher_group_repo"] = teacher_group_repo
     dp["lesson_service"] = lesson_service
-    dp["billing_service"] = billing_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
     dp["student_requests"] = {}   # req_id -> {teacher_id, teacher_tg_id, teacher_name, student_name, admin_msgs}
