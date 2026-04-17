@@ -11,16 +11,6 @@ def now_str() -> str:
     return datetime.now().strftime(DATETIME_FMT)
 
 
-def today_str() -> str:
-    """Сегодняшняя дата для хранения в таблице: YYYY-MM-DD"""
-    return date.today().strftime(DATE_FMT)
-
-
-def parse_date(value: str) -> date:
-    """Парсит строку YYYY-MM-DD в объект date."""
-    return datetime.strptime(value, DATE_FMT).date()
-
-
 def format_date_display(value: str) -> str:
     """Переводит YYYY-MM-DD → ДД.ММ.ГГГГ для отображения в боте."""
     return datetime.strptime(value, DATE_FMT).strftime(DISPLAY_FMT)

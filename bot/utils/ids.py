@@ -31,10 +31,6 @@ def generate_lesson_id(existing: list[str]) -> str:
     return _next_id("LES", 6, existing)
 
 
-def generate_billing_id(existing: list[str]) -> str:
-    return _next_id("BIL", 6, existing)
-
-
 def generate_payment_id(existing: list[str]) -> str:
     return _next_id("PAY", 6, existing)
 
