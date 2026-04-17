@@ -50,6 +50,7 @@ class Group:
     name: str
     created_at: str = ""
     updated_at: str = ""
+    sort_order: int = 0
 
 
 @dataclass

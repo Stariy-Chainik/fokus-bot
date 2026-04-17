@@ -34,34 +34,71 @@ async def _linked_students_of(teacher_id: str, ts_repo, student_repo):
     return sorted([s for s in await student_repo.get_all() if s.student_id in ids], key=lambda s: s.name)
 
 
-# ─── Мои ученики (соло) ──────────────────────────────────────────────────────
+# ─── Мои солисты: выбор группы → список ──────────────────────────────────────
 
-@router.callback_query(F.data == "teacher:my_students")
-async def cb_my_students(
+@router.callback_query(F.data == "teacher:my_soloists")
+async def cb_my_soloists_groups(
     callback: CallbackQuery,
     user: User | None,
-    ts_repo: TeacherStudentRepository,
-    student_repo: StudentRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    group_repo: GroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    groups = sorted(
+        [g for g in await group_repo.get_all() if g.group_id in gids],
+        key=lambda g: (g.sort_order, g.name),
+    )
+    if not groups:
+        await callback.message.edit_text(
+            "У вас нет групп.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")],
+            ]),
+        )
+        await callback.answer()
+        return
+    buttons = [
+        [InlineKeyboardButton(text=g.name, callback_data=f"t_solo_grp:{g.group_id}")]
+        for g in groups
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")])
+    await callback.message.edit_text(
+        "<b>Мои солисты — выберите группу:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("t_solo_grp:"))
+async def cb_my_soloists_list(
+    callback: CallbackQuery,
+    user: User | None,
+    ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    group_name = group.name if group else group_id
     mine = await _linked_students_of(user.teacher_id, ts_repo, student_repo)
-    soloists = [s for s in mine if not s.partner_id]
+    soloists = [s for s in mine if not s.partner_id and s.group_id == group_id]
 
     buttons = [
         [InlineKeyboardButton(text=s.name, callback_data=f"t_student_card:{s.student_id}")]
         for s in soloists
     ]
     buttons.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data="teacher:add_student")])
-    if mine:
-        buttons.append([InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="teacher:unlink_pick")])
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_soloists")])
 
     header = (
-        f"Ваши ученики-солисты ({len(soloists)}):"
+        f"<b>Солисты — {group_name}</b> ({len(soloists)}):"
         if soloists
-        else "У вас нет учеников-солистов (все в парах или пусто)."
+        else f"В группе «{group_name}» солистов нет."
     )
     await callback.message.edit_text(
         header,
@@ -86,7 +123,7 @@ async def cb_unlink_pick(
         [InlineKeyboardButton(text=s.name, callback_data=f"t_unlink_self:{s.student_id}")]
         for s in mine
     ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_students")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_soloists")])
     await callback.message.edit_text(
         "Выберите ученика для удаления из вашего списка:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
@@ -94,29 +131,70 @@ async def cb_unlink_pick(
     await callback.answer()
 
 
-# ─── Мои пары ────────────────────────────────────────────────────────────────
+# ─── Мои пары: выбор группы → список ─────────────────────────────────────────
 
 @router.callback_query(F.data == "teacher:my_pairs")
-async def cb_my_pairs(
+async def cb_my_pairs_groups(
     callback: CallbackQuery,
     user: User | None,
-    ts_repo: TeacherStudentRepository,
-    student_repo: StudentRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    group_repo: GroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    groups = sorted(
+        [g for g in await group_repo.get_all() if g.group_id in gids],
+        key=lambda g: (g.sort_order, g.name),
+    )
+    if not groups:
+        await callback.message.edit_text(
+            "У вас нет групп.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")],
+            ]),
+        )
+        await callback.answer()
+        return
+    buttons = [
+        [InlineKeyboardButton(text=g.name, callback_data=f"t_pairs_grp:{g.group_id}")]
+        for g in groups
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")])
+    await callback.message.edit_text(
+        "<b>Мои пары — выберите группу:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("t_pairs_grp:"))
+async def cb_my_pairs_list(
+    callback: CallbackQuery,
+    user: User | None,
+    ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    group_name = group.name if group else group_id
     mine = await _linked_students_of(user.teacher_id, ts_repo, student_repo)
     mine_ids = {s.student_id for s in mine}
 
-    # Пары, где ОБА партнёра привязаны к этому педагогу.
+    grp_students = [s for s in mine if s.group_id == group_id]
+    by_id = {s.student_id: s for s in mine}
     seen: set[tuple[str, str]] = set()
     pairs = []
-    by_id = {s.student_id: s for s in mine}
-    for s in mine:
+    for s in grp_students:
         if not s.partner_id or s.partner_id not in mine_ids:
             continue
-        partner = by_id[s.partner_id]
+        partner = by_id.get(s.partner_id)
+        if not partner:
+            continue
         key = tuple(sorted([s.student_id, partner.student_id]))
         if key in seen:
             continue
@@ -125,10 +203,10 @@ async def cb_my_pairs(
 
     if not pairs:
         await callback.message.edit_text(
-            "У вас пока нет пар среди учеников.",
+            f"В группе «{group_name}» пар нет.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Создать пару", callback_data="teacher:create_pair")],
-                [InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")],
+                [InlineKeyboardButton(text="« Назад", callback_data="teacher:my_pairs")],
             ]),
         )
         await callback.answer()
@@ -142,9 +220,9 @@ async def cb_my_pairs(
         )])
     buttons.append([InlineKeyboardButton(text="➕ Создать пару", callback_data="teacher:create_pair")])
     buttons.append([InlineKeyboardButton(text="❌ Удалить пару", callback_data="teacher:pair_clear_pick")])
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_pairs")])
     await callback.message.edit_text(
-        f"<b>Ваши пары</b> ({len(pairs)}):",
+        f"<b>Пары — {group_name}</b> ({len(pairs)}):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()

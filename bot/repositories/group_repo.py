@@ -6,12 +6,18 @@ from .base import BaseRepository
 
 
 def _row_to_group(row: dict) -> Group:
+    raw_sort = row.get("sort_order")
+    try:
+        sort_order = int(raw_sort) if raw_sort else 0
+    except (ValueError, TypeError):
+        sort_order = 0
     return Group(
         group_id=str(row["group_id"]),
         branch_id=str(row["branch_id"]),
         name=str(row["name"]),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
+        sort_order=sort_order,
     )
 
 

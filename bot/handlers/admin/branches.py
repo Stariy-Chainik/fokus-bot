@@ -36,6 +36,8 @@ def _kb_branches_list(branches: list) -> InlineKeyboardMarkup:
         for b in branches
     ]
     rows.append([InlineKeyboardButton(text="➕ Создать филиал", callback_data="branch:add")])
+    if branches:
+        rows.append([InlineKeyboardButton(text="✏️ Переименовать филиал", callback_data="branch:rename_pick")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -46,7 +48,9 @@ def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKey
         for g in groups
     ]
     rows.append([InlineKeyboardButton(text="➕ Создать группу", callback_data=f"group:add:{branch_id}")])
-    rows.append([InlineKeyboardButton(text="✏️ Переименовать филиал", callback_data=f"branch:edit_name:{branch_id}")])
+    if has_groups:
+        rows.append([InlineKeyboardButton(text="🗑 Удалить группу", callback_data=f"group:del_pick:{branch_id}")])
+        rows.append([InlineKeyboardButton(text="✏️ Переименовать группу", callback_data=f"group:rename_pick:{branch_id}")])
     if not has_groups:
         rows.append([InlineKeyboardButton(text="🗑 Удалить филиал", callback_data=f"branch:del:{branch_id}")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:branches")])
@@ -58,8 +62,6 @@ def _kb_group_card(group_id: str, branch_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики группы", callback_data=f"group_students:{group_id}")],
         [InlineKeyboardButton(text="📤 Разослать счета группе", callback_data=f"group_send_bills:{group_id}")],
-        [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"group:edit_name:{group_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить группу", callback_data=f"group:del:{group_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
     ])
 
@@ -149,7 +151,7 @@ async def cb_branch_card(
     if not branch:
         await callback.answer("Филиал не найден", show_alert=True)
         return
-    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     text = (
         f"🏢 <b>{branch.name}</b>\n"
         f"ID: {branch.branch_id}\n\n"
@@ -162,6 +164,26 @@ async def cb_branch_card(
 
 
 # ─── Переименование филиала ──────────────────────────────────────────────────
+
+@router.callback_query(F.data == "branch:rename_pick")
+async def cb_branch_rename_pick(
+    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
+    buttons = [
+        [InlineKeyboardButton(text=b.name, callback_data=f"branch:edit_name:{b.branch_id}")]
+        for b in branches
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="admin:branches")])
+    await callback.message.edit_text(
+        "<b>Выберите филиал для переименования:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
 
 @router.callback_query(F.data.startswith("branch:edit_name:"))
 async def cb_branch_edit_name_start(
@@ -314,6 +336,27 @@ async def cb_group_card(
 
 # ─── Переименование группы ───────────────────────────────────────────────────
 
+@router.callback_query(F.data.startswith("group:rename_pick:"))
+async def cb_group_rename_pick(
+    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    branch_id = callback.data.split(":", 2)[2]
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
+    buttons = [
+        [InlineKeyboardButton(text=g.name, callback_data=f"group:edit_name:{g.group_id}")]
+        for g in groups
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")])
+    await callback.message.edit_text(
+        "<b>Выберите группу для переименования:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("group:edit_name:"))
 async def cb_group_edit_name_start(
     callback: CallbackQuery, user: User | None, state: FSMContext,
@@ -349,6 +392,27 @@ async def group_edit_name_save(
 
 # ─── Удаление группы ─────────────────────────────────────────────────────────
 
+@router.callback_query(F.data.startswith("group:del_pick:"))
+async def cb_group_del_pick(
+    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    branch_id = callback.data.split(":", 2)[2]
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
+    buttons = [
+        [InlineKeyboardButton(text=f"🗑 {g.name}", callback_data=f"group:del:{g.group_id}")]
+        for g in groups
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")])
+    await callback.message.edit_text(
+        "<b>Выберите группу для удаления:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("group:del:"))
 async def cb_group_del_confirm(
     callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
@@ -364,7 +428,7 @@ async def cb_group_del_confirm(
     await callback.message.edit_text(
         f"<b>Удалить группу «{group.name}»?</b>\n"
         "Связи педагогов с группой будут удалены, у учеников обнулится group_id.",
-        reply_markup=kb_confirm(f"confirm_del_group:{group_id}", f"group_card:{group_id}"),
+        reply_markup=kb_confirm(f"confirm_del_group:{group_id}", f"branch_card:{group.branch_id}"),
     )
     await callback.answer()
 

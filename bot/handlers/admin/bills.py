@@ -131,7 +131,7 @@ async def cb_bills_choose_group(
         await callback.answer()
         return
 
-    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     if not groups:
         await callback.message.edit_text(
             "В филиале нет групп.", reply_markup=kb_back(f"bvp:{period}"),
@@ -393,7 +393,7 @@ async def cb_confirm_payment_choose_group(
         await callback.answer()
         return
 
-    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     if not groups:
         await callback.message.edit_text(
             "В филиале нет групп.", reply_markup=kb_back(f"pcp:{period}"),

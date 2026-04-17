@@ -5,11 +5,11 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨‍🏫 Педагоги", callback_data="admin:teachers")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],
+        [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
         [InlineKeyboardButton(text="💰 Зарплаты", callback_data="admin:salaries")],
         [InlineKeyboardButton(text="🧾 Счёт ученика за период", callback_data="bills:view")],
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
-        [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
     ])
 
@@ -27,8 +27,8 @@ def kb_teachers_menu() -> InlineKeyboardMarkup:
 def kb_students_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Поиск ученика", callback_data="students:list")],
-        [InlineKeyboardButton(text="💃 Все пары", callback_data="students:all_pairs")],
-        [InlineKeyboardButton(text="🎯 Все солисты", callback_data="students:all_soloists")],
+        [InlineKeyboardButton(text="💃 Пары", callback_data="students:pairs")],
+        [InlineKeyboardButton(text="🎯 Солисты", callback_data="students:soloists")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],
         [InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="students:delete")],
         [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
