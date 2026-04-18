@@ -44,6 +44,13 @@ class StudentRepository(BaseRepository):
         await self._append_row([student_id, name, "", ""])
         return Student(student_id=student_id, name=name, partner_id=None, group_id="")
 
+    async def update_name(self, student_id: str, name: str) -> bool:
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, 2, name)
+        return True
+
     async def update_group(self, student_id: str, group_id: str) -> bool:
         row_idx = await self._find_row_index("student_id", student_id)
         if row_idx is None:

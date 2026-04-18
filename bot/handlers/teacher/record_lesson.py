@@ -48,6 +48,17 @@ async def _linked_students(teacher_id: str, ts_repo, student_repo):
     return sorted(linked, key=lambda s: s.name)
 
 
+async def _my_students_in_group(teacher_id: str, group_id: str, ts_repo, student_repo):
+    """Ученики педагога, состоящие в указанной группе (строгое пересечение)."""
+    mine_ids = set(await ts_repo.get_students_for_teacher(teacher_id))
+    members = [
+        s for s in await student_repo.get_all()
+        if s.group_id == group_id and s.student_id in mine_ids
+    ]
+    members.sort(key=lambda s: s.name)
+    return members
+
+
 def _date_picker_kb() -> InlineKeyboardMarkup:
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -267,20 +278,19 @@ async def _ask_group_attendance(
 
 async def _show_group_roster(
     callback: CallbackQuery, state: FSMContext, group_id: str,
+    user: User, ts_repo: TeacherStudentRepository,
     student_repo: StudentRepository, group_repo: GroupRepository,
 ) -> None:
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    members = sorted(
-        [s for s in await student_repo.get_all() if s.group_id == group_id],
-        key=lambda s: s.name,
-    )
+    members = await _my_students_in_group(user.teacher_id, group_id, ts_repo, student_repo)
     if not members:
         await state.clear()
         await callback.message.edit_text(
-            f"В группе «{group.name}» нет учеников. Обратитесь к администратору.",
+            f"В группе «{group.name}» нет ваших учеников.\n"
+            f"Добавьте их через «Мои ученики».",
             reply_markup=kb_teacher_menu(),
         )
         return
@@ -488,14 +498,18 @@ async def cb_attendance_no(
 @router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance)
 async def cb_attendance_yes(
     callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository,
     student_repo: StudentRepository, group_repo: GroupRepository,
 ) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
     data = await state.get_data()
     gid = data.get("selected_group_id")
     if not gid:
         await callback.answer("Группа не выбрана", show_alert=True)
         return
-    await _show_group_roster(callback, state, gid, student_repo, group_repo)
+    await _show_group_roster(callback, state, gid, user, ts_repo, student_repo, group_repo)
     await callback.answer()
 
 
@@ -513,10 +527,7 @@ async def _refresh_multi_select(
         back_cb = "lesson_back:duration"
     elif cur_state == RecordLessonStates.selecting_attendees.state and data.get("selected_group_id"):
         gid = data["selected_group_id"]
-        mine = sorted(
-            [s for s in await student_repo.get_all() if s.group_id == gid],
-            key=lambda s: s.name,
-        )
+        mine = await _my_students_in_group(user.teacher_id, gid, ts_repo, student_repo)
         back_cb = "lesson_back:attendance"
     else:
         mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
@@ -571,10 +582,7 @@ async def cb_ms_all(
         mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
     elif data.get("selected_group_id"):
         gid = data["selected_group_id"]
-        mine = sorted(
-            [s for s in await student_repo.get_all() if s.group_id == gid],
-            key=lambda s: s.name,
-        )
+        mine = await _my_students_in_group(user.teacher_id, gid, ts_repo, student_repo)
     else:
         mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
     all_ids = [s.student_id for s in mine]

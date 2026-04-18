@@ -11,7 +11,7 @@ from .admin_states import (
     AddGroupStates,
     EditGroupNameStates,
 )
-from .teacher_states import TeacherAddStudentStates
+from .teacher_states import TeacherAddStudentStates, TeacherRenameStudentStates
 
 __all__ = [
     "RecordLessonStates",
@@ -23,6 +23,7 @@ __all__ = [
     "StudentListStates",
     "PartnerAssignStates",
     "TeacherAddStudentStates",
+    "TeacherRenameStudentStates",
     "AddBranchStates",
     "EditBranchNameStates",
     "AddGroupStates",

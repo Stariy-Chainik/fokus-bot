@@ -15,7 +15,7 @@ from bot.repositories import (
     StudentRepository, TeacherStudentRepository, TeacherRepository, UserRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
 )
-from bot.states import PartnerAssignStates, TeacherAddStudentStates
+from bot.states import PartnerAssignStates, TeacherAddStudentStates, TeacherRenameStudentStates
 from bot.keyboards.teacher import (
     kb_teacher_menu, kb_my_student_card, kb_my_pair_card,
     kb_t_partner_candidates, kb_t_confirm,
@@ -102,30 +102,6 @@ async def cb_my_soloists_list(
     )
     await callback.message.edit_text(
         header,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "teacher:unlink_pick")
-async def cb_unlink_pick(
-    callback: CallbackQuery, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
-) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    mine = await _linked_students_of(user.teacher_id, ts_repo, student_repo)
-    if not mine:
-        await callback.answer("В вашем списке нет учеников.", show_alert=True)
-        return
-    buttons = [
-        [InlineKeyboardButton(text=s.name, callback_data=f"t_unlink_self:{s.student_id}")]
-        for s in mine
-    ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_soloists")])
-    await callback.message.edit_text(
-        "Выберите ученика для удаления из вашего списка:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     await callback.answer()
@@ -576,6 +552,58 @@ async def cb_partner_clear_do(
             ]),
         )
     await callback.answer()
+
+
+# ─── Переименование ученика (педагог) ─────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("t_rename_student:"))
+async def cb_rename_student_start(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    mine_ids = set(await ts_repo.get_students_for_teacher(user.teacher_id))
+    if student_id not in mine_ids:
+        await callback.answer("Ученик не привязан к вам", show_alert=True)
+        return
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    await state.set_state(TeacherRenameStudentStates.entering_name)
+    await state.update_data(t_rename_student_id=student_id)
+    await callback.message.edit_text(
+        f"Текущее имя: <b>{student.name}</b>\n\nВведите новое имя (Фамилия Имя):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« Отмена", callback_data=f"t_student_card:{student_id}")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.message(TeacherRenameStudentStates.entering_name)
+async def rename_student_save(
+    message: Message, state: FSMContext,
+    student_repo: StudentRepository,
+) -> None:
+    name = " ".join((message.text or "").split())
+    if not name:
+        await message.answer("Имя не может быть пустым. Введите ещё раз:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    student_id = data["t_rename_student_id"]
+    ok = await student_repo.update_name(student_id, name)
+    text = f"✅ Имя обновлено: <b>{name}</b>" if ok else "Ученик не найден."
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« Назад", callback_data=f"t_student_card:{student_id}")],
+        ]),
+    )
 
 
 # ─── Добавить ученика в свой список (привязка педагог↔ученик) ────────────────
