@@ -142,7 +142,7 @@ async def cb_pairs_soloists_list(
         for a, b in pairs:
             buttons.append([InlineKeyboardButton(
                 text=f"{a.name} ↔ {b.name}",
-                callback_data=f"student_card:{a.student_id}",
+                callback_data=f"student_card_sp:{mode}:{group_id}:{a.student_id}",
             )])
         buttons.append([InlineKeyboardButton(text="➕ Создать пару", callback_data=f"admin_create_pair:{group_id}")])
         buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
@@ -161,7 +161,10 @@ async def cb_pairs_soloists_list(
             return
 
         buttons = [
-            [InlineKeyboardButton(text=s.name, callback_data=f"student_card:{s.student_id}")]
+            [InlineKeyboardButton(
+                text=s.name,
+                callback_data=f"student_card_sp:{mode}:{group_id}:{s.student_id}",
+            )]
             for s in soloists
         ]
         back_cb = f"sp_brn:{mode}:{group.branch_id}" if group else "admin:students"
@@ -326,17 +329,12 @@ async def cb_student_page(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("student_card:"))
-async def cb_student_card(
-    callback: CallbackQuery, user: User | None,
+async def _render_student_card(
+    callback: CallbackQuery, student_id: str, back_cb: str,
     student_repo: StudentRepository, teacher_repo: TeacherRepository,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
@@ -374,9 +372,47 @@ async def cb_student_card(
         f"Партнёр: {partner_text}"
     )
     await callback.message.edit_text(
-        text, reply_markup=kb_student_card(student_id, has_partner=bool(student.partner_id))
+        text,
+        reply_markup=kb_student_card(
+            student_id, has_partner=bool(student.partner_id), back_cb=back_cb,
+        ),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("student_card:"))
+async def cb_student_card(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    await _render_student_card(
+        callback, student_id, "students:list",
+        student_repo, teacher_repo, visibility, group_repo, branch_repo,
+    )
+
+
+@router.callback_query(F.data.startswith("student_card_sp:"))
+async def cb_student_card_from_sp(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, mode, group_id, student_id = callback.data.split(":", 3)
+    back_cb = f"sp_grp:{mode}:{group_id}"
+    await _render_student_card(
+        callback, student_id, back_cb,
+        student_repo, teacher_repo, visibility, group_repo, branch_repo,
+    )
 
 
 # ─── Добавление ученика ───────────────────────────────────────────────────────

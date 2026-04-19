@@ -321,8 +321,14 @@ async def _render_student_card(
         f"{note}"
     )
     if back_to_pairs and student.partner_id:
-        kb = kb_my_pair_card(student.student_id) if can_manage else InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="« Назад к парам", callback_data="teacher:my_pairs")]]
+        pairs_back_cb = (
+            f"t_pairs_grp:{student.group_id}" if student.group_id
+            else "teacher:my_pairs"
+        )
+        kb = kb_my_pair_card(
+            student.student_id, back_cb=pairs_back_cb,
+        ) if can_manage else InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="« Назад", callback_data=pairs_back_cb)]]
         )
     else:
         back_cb = (

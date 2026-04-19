@@ -53,14 +53,16 @@ def kb_student_paged(students: list, page: int, total: int) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_student_card(student_id: str, has_partner: bool) -> InlineKeyboardMarkup:
+def kb_student_card(
+    student_id: str, has_partner: bool, back_cb: str = "students:list",
+) -> InlineKeyboardMarkup:
     partner_label = "🔄 Изменить партнёра" if has_partner else "💃 Назначить партнёра"
     rows = [
         [InlineKeyboardButton(text=partner_label, callback_data=f"partner_assign:{student_id}")],
     ]
     if has_partner:
         rows.append([InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"partner_clear:{student_id}")])
-    rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data="students:list")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

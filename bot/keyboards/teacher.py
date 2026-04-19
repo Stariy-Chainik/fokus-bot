@@ -36,12 +36,14 @@ def kb_my_student_card(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_my_pair_card(student_id: str) -> InlineKeyboardMarkup:
+def kb_my_pair_card(
+    student_id: str, back_cb: str = "teacher:my_pairs",
+) -> InlineKeyboardMarkup:
     """Карточка пары (открыта из списка «Мои пары»)."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Изменить партнёра", callback_data=f"t_partner_assign:{student_id}")],
         [InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"t_partner_clear:{student_id}")],
-        [InlineKeyboardButton(text="« Назад к парам", callback_data="teacher:my_pairs")],
+        [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
     ])
 
 
