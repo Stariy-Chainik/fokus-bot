@@ -6,6 +6,13 @@ from .admin import (
     kb_salaries_menu,
 )
 from .teacher import kb_teacher_menu
+from .client import (
+    kb_client_menu,
+    kb_client_periods,
+    kb_client_schedule_back,
+    kb_client_invoices,
+    kb_client_invoice_view,
+)
 from .calendar import kb_calendar
 
 __all__ = [
@@ -13,5 +20,7 @@ __all__ = [
     "kb_admin_menu", "kb_teachers_menu", "kb_students_menu",
     "kb_salaries_menu",
     "kb_teacher_menu",
+    "kb_client_menu", "kb_client_periods", "kb_client_schedule_back",
+    "kb_client_invoices", "kb_client_invoice_view",
     "kb_calendar",
 ]

@@ -6,9 +6,19 @@ from .base import BaseRepository
 
 logger = logging.getLogger(__name__)
 
-# Колонки листа `students` (1-based): student_id | name | partner_id | group_id
+# Колонки листа `students` (1-based):
+# student_id | name | partner_id | group_id | tg_id
 _PARTNER_COL = 3
 _GROUP_COL = 4
+_TG_COL = 5
+
+
+def _parse_tg_id(value) -> Optional[int]:
+    """Парсит tg_id — Google Sheets может вернуть float."""
+    try:
+        return int(float(str(value).strip()))
+    except (ValueError, TypeError):
+        return None
 
 
 def _row_to_student(row: dict) -> Student:
@@ -16,11 +26,13 @@ def _row_to_student(row: dict) -> Student:
     partner_id = str(partner_raw).strip() if partner_raw else ""
     group_raw = row.get("group_id")
     group_id = str(group_raw).strip() if group_raw else ""
+    tg_id = _parse_tg_id(row.get("tg_id")) if row.get("tg_id") else None
     return Student(
         student_id=str(row["student_id"]),
         name=str(row["name"]),
         partner_id=partner_id or None,
         group_id=group_id,
+        tg_id=tg_id,
     )
 
 
@@ -34,6 +46,12 @@ class StudentRepository(BaseRepository):
                 return s
         return None
 
+    async def get_by_tg_id(self, tg_id: int) -> Optional[Student]:
+        for s in await self.get_all():
+            if s.tg_id == tg_id:
+                return s
+        return None
+
     async def search_by_name(self, prefix: str) -> list[Student]:
         prefix_lower = prefix.lower()
         return [s for s in await self.get_all() if s.name.lower().startswith(prefix_lower)]
@@ -41,8 +59,16 @@ class StudentRepository(BaseRepository):
     async def add(self, name: str) -> Student:
         existing_ids = [s.student_id for s in await self.get_all()]
         student_id = generate_student_id(existing_ids)
-        await self._append_row([student_id, name, "", ""])
+        await self._append_row([student_id, name, "", "", ""])
         return Student(student_id=student_id, name=name, partner_id=None, group_id="")
+
+    async def update_tg_id(self, student_id: str, tg_id: Optional[int]) -> bool:
+        """Привязывает/отвязывает Telegram-аккаунт к ученику."""
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _TG_COL, tg_id if tg_id is not None else "")
+        return True
 
     async def update_name(self, student_id: str, name: str) -> bool:
         row_idx = await self._find_row_index("student_id", student_id)

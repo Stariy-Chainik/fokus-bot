@@ -8,10 +8,40 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository
-from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
+from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu, kb_client_menu
 
 logger = logging.getLogger(__name__)
 router = Router(name="common")
+
+
+def _role_count(user: User) -> int:
+    return int(bool(user.is_admin)) + int(bool(user.teacher_id)) + int(bool(user.student_id))
+
+
+async def _open_default_menu(
+    message: Message, user: User,
+) -> None:
+    """Отправляет пользователю меню по его роли(ям)."""
+    roles = _role_count(user)
+    if roles >= 2:
+        await message.answer(
+            "Выберите режим работы:",
+            reply_markup=kb_mode_select(
+                is_admin=bool(user.is_admin),
+                is_teacher=bool(user.teacher_id),
+                is_client=bool(user.student_id),
+            ),
+        )
+        return
+    if user.is_admin:
+        await message.answer("Меню администратора:", reply_markup=kb_admin_menu())
+        return
+    if user.teacher_id:
+        await message.answer("Меню педагога:", reply_markup=kb_teacher_menu())
+        return
+    if user.student_id:
+        await message.answer("Меню ученика:", reply_markup=kb_client_menu())
+        return
 
 
 @router.message(CommandStart())
@@ -50,12 +80,23 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
                 pass  # Если администратор недоступен — не прерываем
 
         await message.answer(
-            "Добро пожаловать!\n\nВы зарегистрированы. Ожидайте, пока администратор назначит вам роль."
+            "Добро пожаловать!\n\n"
+            "Вы зарегистрированы. Если у вас есть <b>6-значный код привязки</b> "
+            "от администратора — отправьте его сообщением, и вы получите доступ "
+            "как ученик.\n\n"
+            "Если кода нет — ожидайте, пока администратор назначит вам роль."
         )
         return
 
-    if user.is_admin and user.teacher_id:
-        await message.answer("Выберите режим работы:", reply_markup=kb_mode_select())
+    if _role_count(user) >= 2:
+        await message.answer(
+            "Выберите режим работы:",
+            reply_markup=kb_mode_select(
+                is_admin=bool(user.is_admin),
+                is_teacher=bool(user.teacher_id),
+                is_client=bool(user.student_id),
+            ),
+        )
         return
 
     if user.is_admin:
@@ -66,7 +107,11 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
         await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
         return
 
-    # Пользователь зарегистрирован, но teacher_id не привязан.
+    if user.student_id:
+        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_client_menu())
+        return
+
+    # Пользователь зарегистрирован, но без ролей.
     # Проверяем — может педагог уже добавлен в таблицу teachers по tg_id.
     teacher = await teacher_repo.get_by_tg_id(message.from_user.id)
     if teacher:
@@ -80,7 +125,10 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
         return
 
     logger.warning("Пользователь tg_id=%s без роли", message.from_user.id if message.from_user else "?")
-    await message.answer("Ожидайте, пока администратор назначит вам роль.")
+    await message.answer(
+        "Если у вас есть <b>6-значный код привязки</b> от администратора — "
+        "отправьте его сообщением. Иначе ожидайте, пока администратор назначит вам роль."
+    )
 
 
 @router.message(Command("menu"))
@@ -90,10 +138,17 @@ async def cmd_menu(message: Message, user: User | None, state: FSMContext) -> No
     if user is None:
         await message.answer("Сначала отправьте /start для регистрации.")
         return
-    if user.is_admin and user.teacher_id:
-        await message.answer("Выберите режим работы:", reply_markup=kb_mode_select())
+    if _role_count(user) >= 2:
+        await message.answer(
+            "Выберите режим работы:",
+            reply_markup=kb_mode_select(
+                is_admin=bool(user.is_admin),
+                is_teacher=bool(user.teacher_id),
+                is_client=bool(user.student_id),
+            ),
+        )
         return
-    can_switch = bool(user.is_admin and user.teacher_id)
+    can_switch = _role_count(user) >= 2
     if user.is_admin:
         await message.answer(
             "Меню администратора:",
@@ -106,7 +161,17 @@ async def cmd_menu(message: Message, user: User | None, state: FSMContext) -> No
             reply_markup=kb_teacher_menu(can_switch_role=can_switch),
         )
         return
-    await message.answer("Ожидайте, пока администратор назначит вам роль.")
+    if user.student_id:
+        await message.answer(
+            "Меню ученика:",
+            reply_markup=kb_client_menu(
+                is_admin=bool(user.is_admin), is_teacher=bool(user.teacher_id),
+            ),
+        )
+        return
+    await message.answer(
+        "Если у вас есть 6-значный код привязки — отправьте его сообщением."
+    )
 
 
 @router.callback_query(F.data == "mode:admin")
@@ -114,7 +179,7 @@ async def cb_mode_admin(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    can_switch = bool(user.is_admin and user.teacher_id)
+    can_switch = _role_count(user) >= 2
     await callback.message.edit_text(
         "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
     )
@@ -126,7 +191,7 @@ async def cb_mode_teacher(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    can_switch = bool(user.is_admin and user.teacher_id)
+    can_switch = _role_count(user) >= 2
     await callback.message.edit_text(
         "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
     )
@@ -138,7 +203,7 @@ async def cb_admin_menu(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    can_switch = bool(user.is_admin and user.teacher_id)
+    can_switch = _role_count(user) >= 2
     await callback.message.edit_text(
         "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
     )
@@ -150,7 +215,7 @@ async def cb_teacher_menu(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    can_switch = bool(user.is_admin and user.teacher_id)
+    can_switch = _role_count(user) >= 2
     await callback.message.edit_text(
         "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
     )

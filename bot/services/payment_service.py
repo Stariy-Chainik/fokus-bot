@@ -103,7 +103,9 @@ class PaymentService:
             invoices.append(payment)
         return invoices
 
-    async def confirm_payment(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
+    async def confirm_payment(
+        self, payment_id: str, confirmed_by_tg_id: int, comment: str | None = None,
+    ) -> bool:
         payment = next(
             (p for p in await self._payment_repo.get_all() if p.payment_id == payment_id),
             None,
@@ -114,7 +116,7 @@ class PaymentService:
         if payment.status == PaymentStatus.PAID:
             logger.warning("Повторное подтверждение счёта %s — игнорируем", payment_id)
             return False
-        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id)
+        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id, comment=comment)
         if ok:
             logger.info("Счёт %s подтверждён", payment_id)
         return ok

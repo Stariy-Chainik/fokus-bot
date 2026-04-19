@@ -304,23 +304,45 @@ async def cb_bill_send(
             )
             return
 
-        # Все сдали — создаём счета и шлём (заглушка).
+        # Все сдали — создаём счета и шлём уведомление ученику.
         invoices = await payment_service.get_or_create_invoices_for_student_period(
             student, period_month,
         )
         logger.info(
-            "Заглушка отправки счетов родителю student=%s period=%s invoices=%d",
-            student_id, period_month, len(invoices),
+            "Отправка счетов ученику student=%s period=%s invoices=%d tg=%s",
+            student_id, period_month, len(invoices), student.tg_id,
         )
+        notified = False
+        if student.tg_id and invoices:
+            total = sum(p.total_amount for p in invoices)
+            notify_text = (
+                f"💸 <b>Вам выставлен счёт</b>\n\n"
+                f"Период: {display_period(period_month)}\n"
+                f"Сумма: {total} ₽\n\n"
+                "Откройте «Мои счета» в меню ученика, чтобы оплатить."
+            )
+            try:
+                await callback.bot.send_message(student.tg_id, notify_text)
+                notified = True
+            except Exception as exc:
+                logger.warning(
+                    "Не удалось уведомить ученика tg=%s о счёте: %s",
+                    student.tg_id, exc,
+                )
         back_cb = (
             f"bvb:{period_month}:none" if group_id == "none"
             else f"bvg:{period_month}:{group_id}"
         )
+        if student.tg_id:
+            status_line = "✅ Уведомление отправлено ученику." if notified else "⚠️ Ученик не получил уведомление (заблокировал бота?)."
+        else:
+            status_line = "⚠️ Ученик не привязан к Telegram — уведомления нет."
         await callback.message.edit_text(
-            f"📤 <b>Счёт отправлен родителю</b> (заглушка)\n\n"
+            f"📤 <b>Счёт выставлен</b>\n\n"
             f"Ученик: <b>{student.name}</b>\n"
             f"Период: {display_period(period_month)}\n"
-            f"Счетов: {len(invoices)}",
+            f"Счетов: {len(invoices)}\n\n"
+            f"{status_line}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
                 [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
@@ -561,7 +583,7 @@ async def cb_pay_confirm(
 @router.callback_query(F.data.startswith("do_confirm_payment:"))
 async def cb_do_confirm_payment(
     callback: CallbackQuery, user: User | None, payment_service: PaymentService,
-    payment_repo: PaymentRepository,
+    payment_repo: PaymentRepository, student_repo: StudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -588,6 +610,19 @@ async def cb_do_confirm_payment(
         ok = await payment_service.confirm_payment(payment_id, callback.from_user.id)
         if ok:
             await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back(back_cb))
+            # Уведомляем ученика, если он привязан.
+            if payment:
+                try:
+                    student = await student_repo.get_by_id(payment.student_id)
+                    if student and student.tg_id:
+                        await callback.bot.send_message(
+                            student.tg_id,
+                            f"✅ Оплата за {display_period(payment.period_month)} подтверждена.\n"
+                            f"Педагог: {payment.teacher_name or '—'}\n"
+                            f"Сумма: {payment.total_amount} ₽",
+                        )
+                except Exception as exc:
+                    logger.warning("Не удалось уведомить ученика об оплате: %s", exc)
         else:
             await callback.message.edit_text("Счёт уже оплачен или не найден.", reply_markup=kb_back(back_cb))
     except Exception as exc:

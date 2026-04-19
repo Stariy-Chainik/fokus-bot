@@ -10,6 +10,7 @@ from .branch_repo import BranchRepository
 from .group_repo import GroupRepository
 from .teacher_group_repo import TeacherGroupRepository
 from .student_request_repo import StudentRequestRepository
+from .student_invite_repo import StudentInviteRepository
 
 __all__ = [
     "SheetsClient",
@@ -24,4 +25,5 @@ __all__ = [
     "GroupRepository",
     "TeacherGroupRepository",
     "StudentRequestRepository",
+    "StudentInviteRepository",
 ]

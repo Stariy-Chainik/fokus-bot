@@ -63,13 +63,34 @@ def kb_student_paged(students: list, page: int, total: int) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_student_card(student_id: str, has_partner: bool) -> InlineKeyboardMarkup:
+def kb_student_card(
+    student_id: str, has_partner: bool,
+    is_linked: bool = False, has_active_invite: bool = False,
+) -> InlineKeyboardMarkup:
     partner_label = "🔄 Изменить партнёра" if has_partner else "💃 Назначить партнёра"
     rows = [
         [InlineKeyboardButton(text=partner_label, callback_data=f"partner_assign:{student_id}")],
     ]
     if has_partner:
         rows.append([InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"partner_clear:{student_id}")])
+
+    # Управление Telegram-привязкой клиента.
+    if is_linked:
+        rows.append([InlineKeyboardButton(
+            text="❌ Отвязать от Telegram", callback_data=f"student_unlink:{student_id}",
+        )])
+    elif has_active_invite:
+        rows.append([InlineKeyboardButton(
+            text="🔑 Показать код привязки", callback_data=f"student_invite_show:{student_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="🔁 Выпустить новый код", callback_data=f"student_invite:{student_id}",
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
+            text="🔑 Выдать код привязки", callback_data=f"student_invite:{student_id}",
+        )])
+
     rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data="students:list")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

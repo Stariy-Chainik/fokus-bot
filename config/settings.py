@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     sheet_groups: str = Field(default="groups", alias="SHEET_GROUPS")
     sheet_teacher_groups: str = Field(default="teacher_groups", alias="SHEET_TEACHER_GROUPS")
     sheet_student_requests: str = Field(default="student_requests", alias="SHEET_STUDENT_REQUESTS")
+    sheet_student_invites: str = Field(default="student_invite_codes", alias="SHEET_STUDENT_INVITES")
+
+    # Оплата (Telegram Payments + ЮKassa)
+    # Токен провайдера выдаётся @BotFather при подключении ЮKassa к боту.
+    # Без него клиентские хендлеры оплаты показывают «оплата временно недоступна».
+    yookassa_provider_token: Optional[str] = Field(default=None, alias="YOOKASSA_PROVIDER_TOKEN")
+
+    # TTL кода привязки ученика. 0 = без ограничения.
+    invite_code_ttl_hours: int = Field(default=24, alias="INVITE_CODE_TTL_HOURS")
 
     # Server / Railway
     # Если задан — бот запускается в webhook-режиме (рекомендуется для продакшена).

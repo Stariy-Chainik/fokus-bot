@@ -27,6 +27,7 @@ def _row_to_user(row: dict) -> User:
         tg_id=_parse_tg_id(row["tg_id"]),
         is_admin=_to_bool(row.get("is_admin", False)),
         teacher_id=str(row["teacher_id"]) if row.get("teacher_id") else None,
+        student_id=str(row["student_id"]) if row.get("student_id") else None,
     )
 
 
@@ -41,12 +42,24 @@ class UserRepository(BaseRepository):
     async def get_all(self) -> list[User]:
         return [_row_to_user(r) for r in await self._all_records()]
 
-    async def add(self, tg_id: int, teacher_id: Optional[str] = None, is_admin: bool = False) -> User:
-        """Создаёт нового пользователя. При добавлении педагога сразу привязываем teacher_id."""
+    async def get_by_student_id(self, student_id: str) -> Optional[User]:
+        for u in await self.get_all():
+            if u.student_id == student_id:
+                return u
+        return None
+
+    async def add(
+        self, tg_id: int, teacher_id: Optional[str] = None, is_admin: bool = False,
+        student_id: Optional[str] = None,
+    ) -> User:
+        """Создаёт нового пользователя. Все роли опциональны — заполняется то, что передали."""
         existing_ids = [u.user_id for u in await self.get_all()]
         user_id = generate_user_id(existing_ids)
-        await self._append_row([user_id, tg_id, is_admin, teacher_id or ""])
-        return User(user_id=user_id, tg_id=tg_id, is_admin=is_admin, teacher_id=teacher_id)
+        await self._append_row([user_id, tg_id, is_admin, teacher_id or "", student_id or ""])
+        return User(
+            user_id=user_id, tg_id=tg_id, is_admin=is_admin,
+            teacher_id=teacher_id, student_id=student_id,
+        )
 
     async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:
         """Привязывает teacher_id к пользователю по его tg_id."""
@@ -54,21 +67,56 @@ class UserRepository(BaseRepository):
         for i, row in enumerate(records):
             if _parse_tg_id(row.get("tg_id")) == tg_id:
                 row_idx = i + 2
-                # колонка teacher_id — 4-я (user_id, tg_id, is_admin, teacher_id)
+                # колонка teacher_id — 4-я (user_id, tg_id, is_admin, teacher_id, student_id)
                 await self._update_cell(row_idx, 4, teacher_id)
                 return True
         return False
 
+    async def update_student_id(self, tg_id: int, student_id: str) -> bool:
+        """Привязывает student_id к пользователю по его tg_id."""
+        records = await self._all_records()
+        for i, row in enumerate(records):
+            if _parse_tg_id(row.get("tg_id")) == tg_id:
+                row_idx = i + 2
+                await self._update_cell(row_idx, 5, student_id)  # колонка 5 = student_id
+                return True
+        return False
+
     async def delete_by_teacher_id(self, teacher_id: str) -> bool:
-        """Удаляет пользователя из таблицы при удалении педагога."""
+        """Снимает роль педагога: если у пользователя нет других ролей (админ/ученик) —
+        удаляет строку. Иначе просто очищает колонку teacher_id."""
         records = await self._all_records()
         logger.info("delete_by_teacher_id: ищем teacher_id=%r в %d строках", teacher_id, len(records))
         for i, row in enumerate(records):
             val = row.get("teacher_id")
-            logger.info("  строка %d: teacher_id=%r", i + 2, val)
-            if str(val or "").strip() == teacher_id:
-                await self._delete_row(i + 2)
-                logger.info("  → удалена строка %d", i + 2)
-                return True
+            if str(val or "").strip() != teacher_id:
+                continue
+            row_idx = i + 2
+            is_admin = _to_bool(row.get("is_admin", False))
+            student_id = str(row.get("student_id") or "").strip()
+            if is_admin or student_id:
+                # Сохраняем строку — остаются другие роли.
+                await self._update_cell(row_idx, 4, "")
+                logger.info("  → teacher_id очищен в строке %d (сохранены другие роли)", row_idx)
+            else:
+                await self._delete_row(row_idx)
+                logger.info("  → удалена строка %d", row_idx)
+            return True
         logger.warning("delete_by_teacher_id: строка с teacher_id=%r не найдена", teacher_id)
+        return False
+
+    async def clear_student_id(self, tg_id: int) -> bool:
+        """Отвязывает ученическую роль. Если нет других ролей — удаляет строку пользователя."""
+        records = await self._all_records()
+        for i, row in enumerate(records):
+            if _parse_tg_id(row.get("tg_id")) != tg_id:
+                continue
+            row_idx = i + 2
+            is_admin = _to_bool(row.get("is_admin", False))
+            teacher_id = str(row.get("teacher_id") or "").strip()
+            if is_admin or teacher_id:
+                await self._update_cell(row_idx, 5, "")
+            else:
+                await self._delete_row(row_idx)
+            return True
         return False

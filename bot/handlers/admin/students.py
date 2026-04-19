@@ -9,6 +9,7 @@ from bot.models import User, StudentRequest
 from bot.repositories import (
     StudentRepository, TeacherRepository, TeacherStudentRepository, UserRepository,
     GroupRepository, BranchRepository, StudentRequestRepository,
+    StudentInviteRepository,
 )
 from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates
@@ -341,6 +342,7 @@ async def cb_student_card(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, teacher_repo: TeacherRepository, ts_repo: TeacherStudentRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    invite_repo: StudentInviteRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -375,15 +377,181 @@ async def cb_student_card(
     else:
         group_text = "<i>не задана</i>"
 
+    # Статус Telegram-привязки.
+    is_linked = bool(student.tg_id)
+    active_invites = await invite_repo.list_active_for_student(student_id)
+    has_active_invite = bool(active_invites)
+    if is_linked:
+        tg_line = f"📱 Telegram: <code>{student.tg_id}</code>"
+    elif has_active_invite:
+        tg_line = f"📱 Telegram: не привязан · активный код: <b>{active_invites[0].code}</b>"
+    else:
+        tg_line = "📱 Telegram: не привязан"
+
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
         f"ID: {student.student_id}\n"
-        f"🏢 Группа: {group_text}\n\n"
+        f"🏢 Группа: {group_text}\n"
+        f"{tg_line}\n\n"
         f"Педагоги:\n{teachers_text}\n\n"
         f"Партнёр: {partner_text}"
     )
     await callback.message.edit_text(
-        text, reply_markup=kb_student_card(student_id, has_partner=bool(student.partner_id))
+        text,
+        reply_markup=kb_student_card(
+            student_id,
+            has_partner=bool(student.partner_id),
+            is_linked=is_linked,
+            has_active_invite=has_active_invite,
+        ),
+    )
+    await callback.answer()
+
+
+# ─── Telegram-привязка клиента: код, показ, отвязка ──────────────────────────
+
+def _format_invite_message(code: str, student_name: str, ttl_hours: int) -> str:
+    ttl_line = (
+        f"Срок действия: {ttl_hours} ч." if ttl_hours and ttl_hours > 0
+        else "Срок действия: не ограничен."
+    )
+    return (
+        f"🔑 <b>Код привязки для {student_name}</b>\n\n"
+        f"<code>{code}</code>\n\n"
+        f"{ttl_line}\n"
+        f"Передайте код ученику или родителю. Клиент отправляет 6 цифр боту "
+        f"и получает доступ к расписанию и счетам."
+    )
+
+
+@router.callback_query(F.data.startswith("student_invite:"))
+async def cb_student_invite_generate(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, invite_repo: StudentInviteRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    from config.settings import settings as _settings  # локальный импорт, чтобы не нагружать модуль
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    if student.tg_id:
+        await callback.answer(
+            "Ученик уже привязан. Сначала отвяжите текущий аккаунт.",
+            show_alert=True,
+        )
+        return
+    try:
+        invite = await invite_repo.generate_code(
+            student_id=student_id,
+            created_by_tg_id=callback.from_user.id,
+            ttl_hours=_settings.invite_code_ttl_hours,
+        )
+    except Exception as exc:
+        logger.error("Ошибка генерации кода для %s: %s", student_id, exc)
+        await callback.message.edit_text(
+            "Не удалось сгенерировать код.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        _format_invite_message(invite.code, student.name, _settings.invite_code_ttl_hours),
+        reply_markup=kb_back(f"student_card:{student_id}"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("student_invite_show:"))
+async def cb_student_invite_show(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, invite_repo: StudentInviteRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    from config.settings import settings as _settings
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    active = await invite_repo.list_active_for_student(student_id)
+    if not active:
+        await callback.message.edit_text(
+            "Активных кодов нет. Сгенерируйте новый.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+    invite = active[0]
+    await callback.message.edit_text(
+        _format_invite_message(invite.code, student.name, _settings.invite_code_ttl_hours),
+        reply_markup=kb_back(f"student_card:{student_id}"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("student_unlink:"))
+async def cb_student_unlink_confirm(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student or not student.tg_id:
+        await callback.answer("Ученик не привязан", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"<b>Отвязать ученика «{student.name}» от Telegram?</b>\n\n"
+        f"Текущий tg_id: <code>{student.tg_id}</code>\n"
+        "После этого клиент потеряет доступ к расписанию и счетам.",
+        reply_markup=kb_confirm(
+            f"confirm_student_unlink:{student_id}",
+            f"student_card:{student_id}",
+            confirm_text="❌ Отвязать",
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_student_unlink:"))
+async def cb_student_unlink_do(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, user_repo: UserRepository,
+    invite_repo: StudentInviteRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    tg_id = student.tg_id
+    try:
+        await student_repo.update_tg_id(student_id, None)
+        if tg_id:
+            await user_repo.clear_student_id(tg_id)
+        for inv in await invite_repo.list_active_for_student(student_id):
+            await invite_repo.revoke(inv.invite_id)
+    except Exception as exc:
+        logger.error("Ошибка отвязки ученика %s: %s", student_id, exc)
+        await callback.message.edit_text(
+            "Не удалось отвязать. Попробуйте позже.",
+            reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        f"✅ Ученик «{student.name}» отвязан от Telegram.",
+        reply_markup=kb_back(f"student_card:{student_id}"),
     )
     await callback.answer()
 

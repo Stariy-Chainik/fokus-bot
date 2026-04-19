@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .enums import LessonType, PaymentStatus, RequestStatus
+from .enums import LessonType, PaymentStatus, RequestStatus, InviteStatus
 
 
 @dataclass
@@ -9,6 +9,7 @@ class User:
     tg_id: int
     is_admin: bool
     teacher_id: Optional[str]  # None если просто администратор
+    student_id: Optional[str] = None  # None если пользователь не привязан как ученик
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Student:
     name: str
     partner_id: Optional[str] = None
     group_id: str = ""
+    tg_id: Optional[int] = None  # Telegram ID привязанного клиента (или None)
 
 
 @dataclass
@@ -120,6 +122,19 @@ class StudentRequest:
     resolved_at: Optional[str] = None
     resolved_by_tg_id: Optional[int] = None
     admin_msgs_json: str = ""      # JSON: [[chat_id, message_id], ...]
+
+
+@dataclass
+class StudentInviteCode:
+    invite_id: str
+    code: str                              # 6 цифр
+    student_id: str
+    created_at: str
+    created_by_tg_id: int
+    expires_at: Optional[str] = None       # YYYY-MM-DD HH:MM:SS или None
+    used_at: Optional[str] = None
+    used_by_tg_id: Optional[int] = None
+    status: InviteStatus = InviteStatus.ACTIVE
 
 
 @dataclass

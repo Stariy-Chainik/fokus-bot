@@ -15,3 +15,10 @@ class RequestStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class InviteStatus(str, Enum):
+    ACTIVE = "active"
+    USED = "used"
+    EXPIRED = "expired"
+    REVOKED = "revoked"

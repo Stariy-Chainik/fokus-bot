@@ -51,6 +51,27 @@ class LessonRepository(BaseRepository):
             and (ls.student_1_id == student_id or ls.student_2_id == student_id)
         ]
 
+    async def get_by_student_and_period_all(
+        self, student_id: str, period_month: str,
+    ) -> list[Lesson]:
+        """Все уроки ученика за период, включая групповые (по CSV attendees).
+
+        Используется для клиентского расписания — ученик должен видеть все занятия,
+        на которых присутствовал. Биллинг по-прежнему идёт через get_by_student_and_period,
+        т.к. групповые не тарифицируются на ученика."""
+        result: list[Lesson] = []
+        for ls in await self.get_all():
+            if not ls.date.startswith(period_month):
+                continue
+            if ls.student_1_id == student_id or ls.student_2_id == student_id:
+                result.append(ls)
+                continue
+            if ls.attendees:
+                ids = [x.strip() for x in ls.attendees.split(",") if x.strip()]
+                if student_id in ids:
+                    result.append(ls)
+        return result
+
     async def get_existing_ids(self) -> list[str]:
         return [ls.lesson_id for ls in await self.get_all()]
 

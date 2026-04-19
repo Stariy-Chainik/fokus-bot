@@ -69,8 +69,14 @@ class PaymentRepository(BaseRepository):
         ])
         return payment
 
-    async def confirm(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
-        """Подтверждает оплату: status=paid, paid_at=now, confirmed_by_tg_id."""
+    async def confirm(
+        self, payment_id: str, confirmed_by_tg_id: int, comment: Optional[str] = None,
+    ) -> bool:
+        """Подтверждает оплату: status=paid, paid_at=now, confirmed_by_tg_id.
+
+        Если передан comment — записывает в колонку 9 (например, `YK:{charge_id}`
+        для оплат через ЮKassa, чтобы можно было свериться с провайдером).
+        """
         records = await self._all_records()
         ts_now = now_str()
         for i, row in enumerate(records):
@@ -79,6 +85,8 @@ class PaymentRepository(BaseRepository):
                 await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)  # status
                 await self._update_cell(row_idx, 7, ts_now)                     # paid_at
                 await self._update_cell(row_idx, 8, confirmed_by_tg_id)         # confirmed_by_tg_id
+                if comment is not None:
+                    await self._update_cell(row_idx, 9, comment)                # comment
                 await self._update_cell(row_idx, 11, ts_now)                    # updated_at
                 return True
         return False

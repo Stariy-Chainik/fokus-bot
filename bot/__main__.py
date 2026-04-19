@@ -24,11 +24,11 @@ from bot.repositories import (
     TeacherStudentRepository, LessonRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
     BranchRepository, GroupRepository, TeacherGroupRepository,
-    StudentRequestRepository,
+    StudentRequestRepository, StudentInviteRepository,
 )
 from bot.services import LessonService, PaymentService, DiagnosticsService
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
-from bot.handlers import common_router, admin_router, teacher_router
+from bot.handlers import common_router, admin_router, teacher_router, client_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +71,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     group_repo = GroupRepository(sheets_client, settings.sheet_groups)
     teacher_group_repo = TeacherGroupRepository(sheets_client, settings.sheet_teacher_groups)
     student_request_repo = StudentRequestRepository(sheets_client, settings.sheet_student_requests)
+    invite_repo = StudentInviteRepository(sheets_client, settings.sheet_student_invites)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
@@ -89,6 +90,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["group_repo"] = group_repo
     dp["teacher_group_repo"] = teacher_group_repo
     dp["student_request_repo"] = student_request_repo
+    dp["invite_repo"] = invite_repo
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
@@ -98,7 +100,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp.update.middleware(AuthMiddleware(user_repo))
 
     # ── Роутеры ──────────────────────────────────────────────────────────────
-    dp.include_routers(common_router, admin_router, teacher_router)
+    dp.include_routers(common_router, admin_router, teacher_router, client_router)
 
     return dp
 
