@@ -60,7 +60,6 @@ def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKey
 def _kb_group_card(group_id: str, branch_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
-        [InlineKeyboardButton(text="👩‍🎓 Ученики группы", callback_data=f"group_students:{group_id}")],
         [InlineKeyboardButton(text="📤 Разослать счета группе", callback_data=f"group_send_bills:{group_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
     ])
@@ -72,17 +71,6 @@ def _kb_group_teachers(group_id: str, teachers: list, assigned: set[str]) -> Inl
         mark = "✅ " if t.teacher_id in assigned else "☐ "
         rows.append([InlineKeyboardButton(
             text=f"{mark}{t.name}", callback_data=f"gt_toggle:{group_id}:{t.teacher_id}",
-        )])
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _kb_group_students(group_id: str, students: list, assigned: set[str]) -> InlineKeyboardMarkup:
-    rows = []
-    for s in students:
-        mark = "✅ " if s.student_id in assigned else "☐ "
-        rows.append([InlineKeyboardButton(
-            text=f"{mark}{s.name}", callback_data=f"gs_toggle:{group_id}:{s.student_id}",
         )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -514,34 +502,6 @@ async def cb_gt_toggle(
     await callback.answer()
 
 
-# ─── Ученики группы (чекбоксы) ───────────────────────────────────────────────
-
-@router.callback_query(F.data.startswith("group_students:"))
-async def cb_group_students(
-    callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, group_repo: GroupRepository,
-) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    group_id = callback.data.split(":", 1)[1]
-    group = await group_repo.get_by_id(group_id)
-    if not group:
-        await callback.answer("Группа не найдена", show_alert=True)
-        return
-    # Показываем: учеников этой группы + учеников без группы (которых можно добавить).
-    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    assigned = {s.student_id for s in all_students if s.group_id == group_id}
-    candidates = [s for s in all_students if s.group_id == group_id or not s.group_id]
-    await callback.message.edit_text(
-        f"<b>Ученики группы «{group.name}»</b>\n"
-        "✅ — в группе. Доступны также ученики без группы.\n"
-        "Ученики из других групп здесь не видны (смена группы — вручную в Google Sheets).",
-        reply_markup=_kb_group_students(group_id, candidates, assigned),
-    )
-    await callback.answer()
-
-
 _group_send_in_progress: set[str] = set()
 
 
@@ -620,36 +580,3 @@ async def cb_group_send_bills(
         )
     finally:
         _group_send_in_progress.discard(lock_key)
-
-
-@router.callback_query(F.data.startswith("gs_toggle:"))
-async def cb_gs_toggle(
-    callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, group_repo: GroupRepository,
-) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    _, group_id, student_id = callback.data.split(":", 2)
-    student = await student_repo.get_by_id(student_id)
-    if not student:
-        await callback.answer("Ученик не найден", show_alert=True)
-        return
-    if student.group_id == group_id:
-        # Снятие: обнуляем group_id
-        await student_repo.update_group(student_id, "")
-    elif not student.group_id:
-        # Добавление в группу
-        await student_repo.update_group(student_id, group_id)
-    else:
-        # У ученика другая группа — не трогаем через UI
-        await callback.answer("Ученик уже в другой группе — меняйте вручную в Sheets.", show_alert=True)
-        return
-    group = await group_repo.get_by_id(group_id)
-    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    assigned = {s.student_id for s in all_students if s.group_id == group_id}
-    candidates = [s for s in all_students if s.group_id == group_id or not s.group_id]
-    await callback.message.edit_reply_markup(
-        reply_markup=_kb_group_students(group_id, candidates, assigned),
-    )
-    await callback.answer()
