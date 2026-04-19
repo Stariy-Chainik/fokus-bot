@@ -10,7 +10,7 @@ from bot.repositories import (
     TeacherRepository, LessonRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.services import calc_earned
-from bot.keyboards.admin import kb_salaries_menu, kb_teacher_list, kb_back
+from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown
 
@@ -34,15 +34,6 @@ def _period_buttons(teacher_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-@router.callback_query(F.data == "admin:salaries")
-async def cb_salaries_menu(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    await callback.message.edit_text("<b>Зарплаты педагогов:</b>", reply_markup=kb_salaries_menu())
-    await callback.answer()
-
-
 @router.callback_query(F.data == "salaries:view")
 async def cb_salaries_choose_teacher(
     callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
@@ -52,11 +43,12 @@ async def cb_salaries_choose_teacher(
         return
     teachers = await teacher_repo.get_all()
     if not teachers:
-        await callback.message.edit_text("Педагогов нет.", reply_markup=kb_back("admin:salaries"))
+        await callback.message.edit_text("Педагогов нет.", reply_markup=kb_back("admin:menu"))
         await callback.answer()
         return
     await callback.message.edit_text(
-        "<b>Выберите педагога:</b>", reply_markup=kb_teacher_list(teachers, "salary_teacher")
+        "<b>Выберите педагога:</b>",
+        reply_markup=kb_teacher_list(teachers, "salary_teacher", back_cb="admin:menu"),
     )
     await callback.answer()
 

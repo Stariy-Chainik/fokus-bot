@@ -7,7 +7,7 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],
         [InlineKeyboardButton(text="📝 Заявки", callback_data="admin:requests")],
         [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
-        [InlineKeyboardButton(text="💰 Зарплаты", callback_data="admin:salaries")],
+        [InlineKeyboardButton(text="💰 Зарплата педагога за период", callback_data="salaries:view")],
         [InlineKeyboardButton(text="🧾 Счёт ученика за период", callback_data="bills:view")],
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
@@ -89,13 +89,6 @@ def kb_partner_candidates(
         text="« Отмена", callback_data=cancel_cb or f"student_card:{student_id}",
     )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def kb_salaries_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Зарплата педагога за период", callback_data="salaries:view")],
-        [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
-    ])
 
 
 def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:teachers") -> InlineKeyboardMarkup:
