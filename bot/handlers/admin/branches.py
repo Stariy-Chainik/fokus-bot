@@ -185,7 +185,7 @@ async def cb_branch_edit_name_start(
     await state.update_data(branch_id=branch_id)
     await callback.message.edit_text(
         "<b>Новое название филиала:</b>",
-        reply_markup=kb_back(f"branch_card:{branch_id}"),
+        reply_markup=kb_back("branch:rename_pick"),
     )
     await callback.answer()
 
@@ -337,7 +337,7 @@ async def cb_group_rename_pick(
     branch_id = callback.data.split(":", 2)[2]
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     buttons = [
-        [InlineKeyboardButton(text=g.name, callback_data=f"group:edit_name:{g.group_id}")]
+        [InlineKeyboardButton(text=g.name, callback_data=f"group:edit_name:{branch_id}:{g.group_id}")]
         for g in groups
     ]
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")])
@@ -355,12 +355,13 @@ async def cb_group_edit_name_start(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    group_id = callback.data.split(":", 2)[2]
+    parts = callback.data.split(":", 3)
+    branch_id, group_id = parts[2], parts[3]
     await state.set_state(EditGroupNameStates.entering_name)
-    await state.update_data(group_id=group_id)
+    await state.update_data(group_id=group_id, branch_id=branch_id)
     await callback.message.edit_text(
         "<b>Новое название группы:</b>",
-        reply_markup=kb_back(f"group_card:{group_id}"),
+        reply_markup=kb_back(f"group:rename_pick:{branch_id}"),
     )
     await callback.answer()
 

@@ -464,6 +464,30 @@ async def add_student_name(
     )
 
 
+@router.callback_query(F.data == "add_st_pick_branch")
+async def cb_add_student_pick_branch(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    name = data.get("name") or ""
+    branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
+    rows = [
+        [InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"add_st_branch:{b.branch_id}")]
+        for b in branches
+    ]
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="admin:students")])
+    await state.set_state(AddStudentStates.choosing_branch)
+    await callback.message.edit_text(
+        f"<b>Новый ученик: {name}</b>\nВыберите филиал:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("add_st_branch:"), AddStudentStates.choosing_branch)
 async def cb_add_student_branch(
     callback: CallbackQuery, state: FSMContext, user: User | None,
@@ -486,7 +510,7 @@ async def cb_add_student_branch(
         [InlineKeyboardButton(text=f"💃 {g.name}", callback_data=f"add_st_group:{g.group_id}")]
         for g in groups
     ]
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:students")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="add_st_pick_branch")])
     await callback.message.edit_text(
         "<b>Выберите группу:</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
