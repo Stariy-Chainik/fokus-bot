@@ -1,17 +1,21 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-def kb_admin_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги", callback_data="admin:teachers")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],
+        [InlineKeyboardButton(text="📝 Заявки", callback_data="admin:requests")],
         [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
         [InlineKeyboardButton(text="💰 Зарплаты", callback_data="admin:salaries")],
         [InlineKeyboardButton(text="🧾 Счёт ученика за период", callback_data="bills:view")],
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
-    ])
+    ]
+    if can_switch_role:
+        rows.append([InlineKeyboardButton(text="🔄 Режим педагога", callback_data="mode:teacher")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_teachers_menu() -> InlineKeyboardMarkup:
@@ -38,17 +42,20 @@ def kb_students_menu() -> InlineKeyboardMarkup:
 _STUDENT_PAGE_SIZE = 20
 
 
-def kb_student_paged(students: list, page: int, total: int, query: str = "") -> InlineKeyboardMarkup:
+def kb_student_paged(students: list, page: int, total: int) -> InlineKeyboardMarkup:
+    """Пагинация поискового списка учеников.
+    Сам запрос хранится в FSM-state, а не в callback_data — иначе символы
+    вроде ':' / '_' ломают декодирование.
+    """
     buttons = [
         [InlineKeyboardButton(text=s.name, callback_data=f"student_card:{s.student_id}")]
         for s in students
     ]
     nav = []
-    q = query.replace(":", "_")
     if page > 0:
-        nav.append(InlineKeyboardButton(text="← Пред.", callback_data=f"spage:{q}:{page - 1}"))
+        nav.append(InlineKeyboardButton(text="← Пред.", callback_data=f"spage:{page - 1}"))
     if (page + 1) * _STUDENT_PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton(text="След. →", callback_data=f"spage:{q}:{page + 1}"))
+        nav.append(InlineKeyboardButton(text="След. →", callback_data=f"spage:{page + 1}"))
     if nav:
         buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="students:list")])
@@ -67,15 +74,20 @@ def kb_student_card(student_id: str, has_partner: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_partner_candidates(candidates: list, student_id: str) -> InlineKeyboardMarkup:
+def kb_partner_candidates(
+    candidates: list, student_id: str, cancel_cb: str | None = None,
+) -> InlineKeyboardMarkup:
     """
     candidates: list[tuple[Student, bool]] — ученик и флаг «у него уже есть партнёр».
+    cancel_cb — куда ведёт «Отмена» (по умолчанию — карточка ученика).
     """
     buttons = []
     for s, has_partner in candidates:
         label = f"⚠️ {s.name}" if has_partner else s.name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"partner_pick:{s.student_id}")])
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=f"student_card:{student_id}")])
+    buttons.append([InlineKeyboardButton(
+        text="« Отмена", callback_data=cancel_cb or f"student_card:{student_id}",
+    )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -104,11 +116,30 @@ def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     ])
 
 
-def kb_student_list(students: list, action_prefix: str, back_cb: str = "admin:students") -> InlineKeyboardMarkup:
+def kb_student_list(
+    students: list, action_prefix: str, back_cb: str = "admin:students",
+    page: int = 0, total: int | None = None,
+) -> InlineKeyboardMarkup:
+    """Список учеников с пагинацией.
+    students — уже срезанный по странице список; total — общий размер выборки.
+    """
+    if total is None:
+        total = len(students)
     buttons = [
         [InlineKeyboardButton(text=s.name, callback_data=f"{action_prefix}:{s.student_id}")]
         for s in students
     ]
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            text="← Пред.", callback_data=f"slist_page:{action_prefix}:{page - 1}",
+        ))
+    if (page + 1) * _STUDENT_PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton(
+            text="След. →", callback_data=f"slist_page:{action_prefix}:{page + 1}",
+        ))
+    if nav:
+        buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -122,10 +153,12 @@ def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_stu
     ])
 
 
-def kb_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
+def kb_confirm(
+    confirm_cb: str, cancel_cb: str, confirm_text: str = "✅ Подтвердить",
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💾 Подтвердить", callback_data=confirm_cb),
+            InlineKeyboardButton(text=confirm_text, callback_data=confirm_cb),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
         ]
     ])

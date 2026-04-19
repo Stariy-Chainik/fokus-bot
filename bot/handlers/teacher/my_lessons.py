@@ -362,10 +362,6 @@ async def cb_lesson_detail(
     await callback.answer()
 
 
-@router.callback_query(F.data == "noop")
-async def cb_noop(callback: CallbackQuery) -> None:
-    await callback.answer()
-
 
 @router.callback_query(F.data.startswith("delete_lesson:"))
 async def cb_delete_lesson_confirm(

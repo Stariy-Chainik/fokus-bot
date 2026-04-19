@@ -4,7 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 class RecordLessonStates(StatesGroup):
     choosing_date = State()
     choosing_kind = State()              # group / pair / soloist
-    asking_attendance = State()          # group: отметить присутствующих? (legacy, теперь не используется)
+    asking_attendance = State()          # group: отметить присутствующих?
     choosing_group_branch = State()      # group: выбор филиала (если у педагога группы в разных)
     choosing_group = State()             # group: выбор тренировочной группы
     selecting_attendees = State()        # group: чекбоксы присутствующих в выбранной группе

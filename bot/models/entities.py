@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .enums import LessonType, PaymentStatus
+from .enums import LessonType, PaymentStatus, RequestStatus
 
 
 @dataclass
@@ -105,6 +105,21 @@ class TeacherPeriodSubmission:
     submitted_at: str
     lessons_count: int
     total_earned: int
+
+
+@dataclass
+class StudentRequest:
+    request_id: str
+    teacher_id: str
+    teacher_tg_id: int
+    teacher_name: str
+    student_name: str
+    group_id: str
+    status: RequestStatus
+    created_at: str                # YYYY-MM-DD HH:MM:SS
+    resolved_at: Optional[str] = None
+    resolved_by_tg_id: Optional[int] = None
+    admin_msgs_json: str = ""      # JSON: [[chat_id, message_id], ...]
 
 
 @dataclass

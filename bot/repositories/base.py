@@ -78,36 +78,52 @@ class BaseRepository:
     # ── Синхронные хелперы (выполняются внутри потока) ────────────────────────
 
     def _sync_all_records(self) -> list[dict[str, Any]]:
+        t0 = time.monotonic()
         try:
-            return _with_retry(self._ws.get_all_records, default_blank=None)
+            result = _with_retry(self._ws.get_all_records, default_blank=None)
+            logger.info("SHEETS read %s: %d rows in %.0f ms",
+                        self._sheet_name, len(result), (time.monotonic() - t0) * 1000)
+            return result
         except Exception as exc:
             logger.error("Ошибка чтения листа %s: %s", self._sheet_name, exc)
             raise
 
     def _sync_append_row(self, values: list[Any]) -> None:
+        t0 = time.monotonic()
         try:
             _with_retry(self._ws.append_row, values, value_input_option="USER_ENTERED")
+            logger.info("SHEETS append %s in %.0f ms",
+                        self._sheet_name, (time.monotonic() - t0) * 1000)
         except Exception as exc:
             logger.error("Ошибка записи в лист %s: %s", self._sheet_name, exc)
             raise
 
     def _sync_update_row(self, row_index: int, values: list[Any]) -> None:
+        t0 = time.monotonic()
         try:
             _with_retry(self._ws.update, f"A{row_index}", [values])
+            logger.info("SHEETS update_row %s row=%d in %.0f ms",
+                        self._sheet_name, row_index, (time.monotonic() - t0) * 1000)
         except Exception as exc:
             logger.error("Ошибка обновления строки %d в листе %s: %s", row_index, self._sheet_name, exc)
             raise
 
     def _sync_delete_row(self, row_index: int) -> None:
+        t0 = time.monotonic()
         try:
             _with_retry(self._ws.delete_rows, row_index)
+            logger.info("SHEETS delete_row %s row=%d in %.0f ms",
+                        self._sheet_name, row_index, (time.monotonic() - t0) * 1000)
         except Exception as exc:
             logger.error("Ошибка удаления строки %d в листе %s: %s", row_index, self._sheet_name, exc)
             raise
 
     def _sync_update_cell(self, row_index: int, col: int, value: Any) -> None:
+        t0 = time.monotonic()
         try:
             _with_retry(self._ws.update_cell, row_index, col, value)
+            logger.info("SHEETS update_cell %s (%d,%d) in %.0f ms",
+                        self._sheet_name, row_index, col, (time.monotonic() - t0) * 1000)
         except Exception as exc:
             logger.error(
                 "Ошибка обновления ячейки (%d,%d) в листе %s: %s",

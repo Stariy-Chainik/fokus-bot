@@ -114,7 +114,7 @@ def _kb_tg_students(group_id: str, students: list, assigned: set[str]) -> Inline
         rows.append([InlineKeyboardButton(
             text=f"{mark}{s.name}", callback_data=f"tgs_toggle:{group_id}:{s.student_id}",
         )])
-    rows.append([InlineKeyboardButton(text="💾 Готово", callback_data=f"t_group_card:{group_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"t_group_card:{group_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

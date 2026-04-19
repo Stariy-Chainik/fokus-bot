@@ -2,7 +2,8 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
@@ -71,10 +72,40 @@ async def cmd_start(message: Message, user: User | None, user_repo: UserReposito
     if teacher:
         await user_repo.update_teacher_id(message.from_user.id, teacher.teacher_id)
         logger.info("Авто-привязка teacher_id=%s для tg_id=%s", teacher.teacher_id, message.from_user.id)
-        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
+        can_switch = bool(user.is_admin)
+        await message.answer(
+            "Добро пожаловать!\n\nВыберите действие:",
+            reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+        )
         return
 
     logger.warning("Пользователь tg_id=%s без роли", message.from_user.id if message.from_user else "?")
+    await message.answer("Ожидайте, пока администратор назначит вам роль.")
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, user: User | None, state: FSMContext) -> None:
+    """Быстрый возврат в главное меню из любой точки (включая FSM)."""
+    await state.clear()
+    if user is None:
+        await message.answer("Сначала отправьте /start для регистрации.")
+        return
+    if user.is_admin and user.teacher_id:
+        await message.answer("Выберите режим работы:", reply_markup=kb_mode_select())
+        return
+    can_switch = bool(user.is_admin and user.teacher_id)
+    if user.is_admin:
+        await message.answer(
+            "Меню администратора:",
+            reply_markup=kb_admin_menu(can_switch_role=can_switch),
+        )
+        return
+    if user.teacher_id:
+        await message.answer(
+            "Меню педагога:",
+            reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+        )
+        return
     await message.answer("Ожидайте, пока администратор назначит вам роль.")
 
 
@@ -83,7 +114,10 @@ async def cb_mode_admin(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Меню администратора:", reply_markup=kb_admin_menu())
+    can_switch = bool(user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
+    )
     await callback.answer()
 
 
@@ -92,7 +126,10 @@ async def cb_mode_teacher(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Меню педагога:", reply_markup=kb_teacher_menu())
+    can_switch = bool(user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+    )
     await callback.answer()
 
 
@@ -101,7 +138,10 @@ async def cb_admin_menu(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Меню администратора:", reply_markup=kb_admin_menu())
+    can_switch = bool(user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
+    )
     await callback.answer()
 
 
@@ -110,5 +150,14 @@ async def cb_teacher_menu(callback: CallbackQuery, user: User | None) -> None:
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text("Меню педагога:", reply_markup=kb_teacher_menu())
+    can_switch = bool(user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery) -> None:
+    """Подавляет «часики» на некликабельных кнопках (заголовки календаря и т.п.)."""
     await callback.answer()

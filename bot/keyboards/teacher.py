@@ -4,18 +4,25 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 PAGE_SIZE = 8  # кол-во учеников на странице при листании
 
 
-def kb_teacher_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def kb_teacher_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="✏️ Отметить занятие", callback_data="teacher:record_lesson")],
         [InlineKeyboardButton(text="💃 Мои пары", callback_data="teacher:my_pairs")],
         [InlineKeyboardButton(text="🎯 Мои солисты", callback_data="teacher:my_soloists")],
         [InlineKeyboardButton(text="🏢 Мои группы", callback_data="teacher:my_groups")],
         [InlineKeyboardButton(text="📋 Мои занятия", callback_data="teacher:my_lessons")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
-    ])
+    ]
+    if can_switch_role:
+        rows.append([InlineKeyboardButton(text="🔄 Режим администратора", callback_data="mode:admin")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_my_student_card(student_id: str, has_partner: bool, can_manage: bool) -> InlineKeyboardMarkup:
+def kb_my_student_card(
+    student_id: str, has_partner: bool, can_manage: bool,
+    back_cb: str = "teacher:my_soloists",
+) -> InlineKeyboardMarkup:
     """
     Карточка ученика в интерфейсе педагога.
     Создание/изменение/снятие пары — через экран «Мои пары».
@@ -25,7 +32,7 @@ def kb_my_student_card(student_id: str, has_partner: bool, can_manage: bool) -> 
     rows = [
         [InlineKeyboardButton(text="✏️ Изменить имя", callback_data=f"t_rename_student:{student_id}")],
         [InlineKeyboardButton(text="🚪 Убрать из моего списка", callback_data=f"t_unlink_self:{student_id}")],
-        [InlineKeyboardButton(text="« Назад", callback_data="teacher:my_soloists")],
+        [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -40,20 +47,27 @@ def kb_my_pair_card(student_id: str) -> InlineKeyboardMarkup:
     ])
 
 
-def kb_t_partner_candidates(candidates: list, student_id: str) -> InlineKeyboardMarkup:
-    """candidates: list[tuple[Student, bool has_partner]]"""
+def kb_t_partner_candidates(
+    candidates: list, student_id: str, cancel_cb: str | None = None,
+) -> InlineKeyboardMarkup:
+    """candidates: list[tuple[Student, bool has_partner]].
+    cancel_cb — куда ведёт «Отмена» (по умолчанию — карточка ученика)."""
     buttons = []
     for s, has_partner in candidates:
         label = f"⚠️ {s.name}" if has_partner else s.name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"t_partner_pick:{s.student_id}")])
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=f"t_student_card:{student_id}")])
+    buttons.append([InlineKeyboardButton(
+        text="« Отмена", callback_data=cancel_cb or f"t_student_card:{student_id}",
+    )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_t_confirm(confirm_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
+def kb_t_confirm(
+    confirm_cb: str, cancel_cb: str, confirm_text: str = "✅ Подтвердить",
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💾 Подтвердить", callback_data=confirm_cb),
+            InlineKeyboardButton(text=confirm_text, callback_data=confirm_cb),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
         ]
     ])
@@ -68,6 +82,16 @@ def kb_lesson_type() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="« Назад", callback_data="lesson_back:date"),
             InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
         ],
+    ])
+
+
+def kb_lesson_type_after_save() -> InlineKeyboardMarkup:
+    """После успешного сохранения: продолжить с тем же днём или выйти в меню."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_kind:group")],
+        [InlineKeyboardButton(text="💃 Парное", callback_data="lesson_kind:pair")],
+        [InlineKeyboardButton(text="👤 Индивидуальное (соло)", callback_data="lesson_kind:soloist")],
+        [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
     ])
 
 

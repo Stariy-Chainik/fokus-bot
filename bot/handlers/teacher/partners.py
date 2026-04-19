@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from bot.models import User
 from bot.repositories import (
     StudentRepository, TeacherStudentRepository, TeacherRepository, UserRepository,
-    GroupRepository, BranchRepository, TeacherGroupRepository,
+    GroupRepository, BranchRepository, TeacherGroupRepository, StudentRequestRepository,
 )
 from bot.states import PartnerAssignStates, TeacherAddStudentStates, TeacherRenameStudentStates
 from bot.keyboards.teacher import (
@@ -92,7 +92,7 @@ async def cb_my_soloists_list(
         [InlineKeyboardButton(text=s.name, callback_data=f"t_student_card:{s.student_id}")]
         for s in soloists
     ]
-    buttons.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data="teacher:add_student")])
+    buttons.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"t_add_from_grp:{group_id}")])
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_soloists")])
 
     header = (
@@ -276,7 +276,7 @@ async def cb_create_pair_start(
     for s in leaders:
         mark = " 💃" if s.partner_id else ""
         buttons.append([InlineKeyboardButton(
-            text=f"{s.name}{mark}", callback_data=f"t_partner_assign:{s.student_id}",
+            text=f"{s.name}{mark}", callback_data=f"t_cp_lead:{s.student_id}",
         )])
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_pairs")])
     await callback.message.edit_text(
@@ -326,7 +326,16 @@ async def _render_student_card(
             inline_keyboard=[[InlineKeyboardButton(text="« Назад к парам", callback_data="teacher:my_pairs")]]
         )
     else:
-        kb = kb_my_student_card(student.student_id, has_partner=bool(student.partner_id), can_manage=can_manage)
+        back_cb = (
+            f"t_solo_grp:{student.group_id}" if student.group_id
+            else "teacher:my_soloists"
+        )
+        kb = kb_my_student_card(
+            student.student_id,
+            has_partner=bool(student.partner_id),
+            can_manage=can_manage,
+            back_cb=back_cb,
+        )
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
@@ -357,7 +366,7 @@ async def cb_pair_card(
 
 # ─── Назначение партнёра (педагог) ───────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_partner_assign:"))
+@router.callback_query(F.data.startswith("t_partner_assign:") | F.data.startswith("t_cp_lead:"))
 async def cb_partner_assign_start(
     callback: CallbackQuery,
     user: User | None,
@@ -368,7 +377,9 @@ async def cb_partner_assign_start(
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    from_create_pair = callback.data.startswith("t_cp_lead:")
     student_id = callback.data.split(":", 1)[1]
+    cancel_cb = "teacher:my_pairs" if from_create_pair else f"t_student_card:{student_id}"
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
@@ -402,18 +413,18 @@ async def cb_partner_assign_start(
         await callback.message.edit_text(
             "Нет подходящих кандидатов среди ваших учеников.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="« Назад", callback_data=f"t_student_card:{student_id}")],
+                [InlineKeyboardButton(text="« Назад", callback_data=cancel_cb)],
             ]),
         )
         await callback.answer()
         return
 
     await state.set_state(PartnerAssignStates.choosing_partner)
-    await state.update_data(t_student_id=student_id)
+    await state.update_data(t_student_id=student_id, t_from_create_pair=from_create_pair)
     await callback.message.edit_text(
         f"Выберите партнёра для «{student.name}».\n"
         f"⚠️ — у ученика уже есть партнёр (из ваших), старая связь будет разорвана.",
-        reply_markup=kb_t_partner_candidates(candidates, student_id),
+        reply_markup=kb_t_partner_candidates(candidates, student_id, cancel_cb=cancel_cb),
     )
     await callback.answer()
 
@@ -445,11 +456,14 @@ async def cb_partner_pick(
     lines.append("")
     lines.append("Продолжить?")
 
+    cancel_cb = (
+        "teacher:my_pairs" if data.get("t_from_create_pair") else f"t_student_card:{student_id}"
+    )
     await state.update_data(t_partner_id=partner_id)
     await state.set_state(PartnerAssignStates.confirming)
     await callback.message.edit_text(
         "\n".join(lines),
-        reply_markup=kb_t_confirm("t_confirm_partner", f"t_student_card:{student_id}"),
+        reply_markup=kb_t_confirm("t_confirm_partner", cancel_cb),
     )
     await callback.answer()
 
@@ -521,7 +535,8 @@ async def cb_partner_clear_confirm(
     await callback.message.edit_text(
         f"Убрать пару: «{student.name}» ↔ «{partner_name}»?",
         reply_markup=kb_t_confirm(
-            f"t_confirm_partner_clear:{student_id}", f"t_student_card:{student_id}"
+            f"t_confirm_partner_clear:{student_id}", f"t_student_card:{student_id}",
+            confirm_text="❌ Убрать",
         ),
     )
     await callback.answer()
@@ -611,20 +626,190 @@ async def rename_student_save(
 PAGE_SIZE = 10
 
 
-@router.callback_query(F.data == "teacher:add_student")
-async def cb_add_student_start(
+async def _candidates_for_add(
+    teacher_id: str, group_id: str,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+):
+    mine_ids = set(await ts_repo.get_students_for_teacher(teacher_id))
+    return sorted(
+        [
+            s for s in await student_repo.get_all()
+            if s.group_id == group_id and s.student_id not in mine_ids
+        ],
+        key=lambda s: s.name,
+    )
+
+
+def _kb_add_multi_select(students, selected_ids: set, group_id: str) -> InlineKeyboardMarkup:
+    rows = []
+    for s in students:
+        mark = "✅" if s.student_id in selected_ids else "⬜"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {s.name}", callback_data=f"t_add_tg:{s.student_id}",
+        )])
+    if students:
+        all_sel = len(selected_ids) == len(students)
+        toggle_all = "◻️ Снять всех" if all_sel else "☑️ Отметить всех"
+        rows.append([InlineKeyboardButton(text=toggle_all, callback_data="t_add_all_tg")])
+    rows.append([InlineKeyboardButton(
+        text=f"💾 Добавить ({len(selected_ids)})", callback_data="t_add_confirm",
+    )])
+    rows.append([InlineKeyboardButton(
+        text="📝 Новый (запрос админу)", callback_data=f"t_add_new:{group_id}",
+    )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"t_solo_grp:{group_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("t_add_from_grp:"))
+async def cb_add_student_from_group(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    group_name = group.name if group else group_id
+    candidates = await _candidates_for_add(user.teacher_id, group_id, ts_repo, student_repo)
+
+    if not candidates:
+        await state.clear()
+        await callback.message.edit_text(
+            f"В группе «{group_name}» нет учеников, которых можно добавить.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Новый (запрос админу)", callback_data=f"t_add_new:{group_id}")],
+                [InlineKeyboardButton(text="« Назад", callback_data=f"t_solo_grp:{group_id}")],
+            ]),
+        )
+        await callback.answer()
+        return
+
+    await state.set_state(TeacherAddStudentStates.multi_selecting)
+    await state.update_data(t_add_group_id=group_id, t_add_selected=[])
+    await callback.message.edit_text(
+        f"<b>Добавить в группу «{group_name}»</b>\n"
+        f"Отметьте учеников (доступно: {len(candidates)}), затем «Добавить»:",
+        reply_markup=_kb_add_multi_select(candidates, set(), group_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("t_add_tg:"), TeacherAddStudentStates.multi_selecting)
+async def cb_add_toggle(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer()
+        return
+    student_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    group_id = data.get("t_add_group_id")
+    if not group_id:
+        await callback.answer("Сессия истекла, начните заново", show_alert=True)
+        return
+    selected = set(data.get("t_add_selected") or [])
+    selected.symmetric_difference_update({student_id})
+    await state.update_data(t_add_selected=list(selected))
+    candidates = await _candidates_for_add(user.teacher_id, group_id, ts_repo, student_repo)
+    await callback.message.edit_reply_markup(
+        reply_markup=_kb_add_multi_select(candidates, selected, group_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "t_add_all_tg", TeacherAddStudentStates.multi_selecting)
+async def cb_add_toggle_all(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer()
+        return
+    data = await state.get_data()
+    group_id = data.get("t_add_group_id")
+    if not group_id:
+        await callback.answer("Сессия истекла, начните заново", show_alert=True)
+        return
+    candidates = await _candidates_for_add(user.teacher_id, group_id, ts_repo, student_repo)
+    selected = set(data.get("t_add_selected") or [])
+    all_ids = {s.student_id for s in candidates}
+    new_selected = set() if selected == all_ids else all_ids
+    await state.update_data(t_add_selected=list(new_selected))
+    await callback.message.edit_reply_markup(
+        reply_markup=_kb_add_multi_select(candidates, new_selected, group_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "t_add_confirm", TeacherAddStudentStates.multi_selecting)
+async def cb_add_confirm(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    group_id = data.get("t_add_group_id")
+    selected = list(dict.fromkeys(data.get("t_add_selected") or []))
+    if not group_id:
+        await callback.answer("Сессия истекла", show_alert=True)
+        return
+    if not selected:
+        await callback.answer("Никого не выбрали", show_alert=True)
+        return
+    added, skipped, failed = 0, 0, 0
+    for sid in selected:
+        try:
+            if await ts_repo.exists(user.teacher_id, sid):
+                skipped += 1
+            else:
+                await ts_repo.add(user.teacher_id, sid)
+                added += 1
+        except Exception as exc:
+            logger.error("Ошибка привязки ученика %s к педагогу: %s", sid, exc)
+            failed += 1
+    await state.clear()
+    group = await group_repo.get_by_id(group_id)
+    group_name = group.name if group else group_id
+    parts = [f"✅ Добавлено: <b>{added}</b>"]
+    if skipped:
+        parts.append(f"уже было: {skipped}")
+    if failed:
+        parts.append(f"ошибок: {failed}")
+    await callback.message.edit_text(
+        f"Группа «{group_name}»\n" + ", ".join(parts),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить ещё", callback_data=f"t_add_from_grp:{group_id}")],
+            [InlineKeyboardButton(text="« К солистам", callback_data=f"t_solo_grp:{group_id}")],
+            [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("t_add_new:"))
+async def cb_add_new_student_start(
     callback: CallbackQuery, user: User | None, state: FSMContext,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    group_id = callback.data.split(":", 1)[1]
     await state.set_state(TeacherAddStudentStates.searching)
-    await state.update_data(t_add_query="")
+    await state.update_data(t_add_query="", t_add_from_group=group_id)
     await callback.message.edit_text(
-        "<b>Добавление ученика</b>\n\n"
-        "Введите <b>Фамилию и Имя через пробел</b> (ровно два слова, без отчества) "
-        "— бот проверит, есть ли такой ученик в школе.\n\n"
-        "Или отправьте <b>*</b>, чтобы вручную просмотреть всех учеников школы."
+        "<b>Новый ученик</b>\n\n"
+        "Введите <b>Фамилию и Имя через пробел</b> (ровно два слова, без отчества). "
+        "Если такого ученика нет в школе — будет создана заявка администратору.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« Отмена", callback_data=f"t_add_from_grp:{group_id}")],
+        ]),
     )
     await callback.answer()
 
@@ -764,7 +949,7 @@ async def cb_add_student_page(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_add_pick:"), TeacherAddStudentStates.searching)
+@router.callback_query(F.data.startswith("t_add_pick:"))
 async def cb_add_student_pick(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
@@ -777,6 +962,9 @@ async def cb_add_student_pick(
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    # Возврат — в ту группу, откуда пришёл педагог (если известна); иначе по group_id ученика.
+    data = await state.get_data()
+    from_group_id = data.get("t_add_from_group") or student.group_id
     await state.clear()
     try:
         if await ts_repo.exists(user.teacher_id, student_id):
@@ -787,10 +975,13 @@ async def cb_add_student_pick(
     except Exception as exc:
         logger.error("Ошибка привязки ученика к педагогу (self-service): %s", exc)
         text = "Не удалось добавить ученика. Попробуйте позже."
+    add_more_cb = (
+        f"t_add_from_grp:{from_group_id}" if from_group_id else "teacher:my_soloists"
+    )
     await callback.message.edit_text(
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить ещё", callback_data="teacher:add_student")],
+            [InlineKeyboardButton(text="➕ Добавить ещё", callback_data=add_more_cb)],
             [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
         ]),
     )
@@ -864,7 +1055,7 @@ async def cb_request_new_student_with_group(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     teacher_repo: TeacherRepository, user_repo: UserRepository,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
-    student_requests: dict,
+    student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_teacher(user):
@@ -893,7 +1084,7 @@ async def cb_request_new_student_with_group(
         await callback.message.edit_text(
             f"✅ Ученик <b>{student.name}</b> создан и добавлен в ваш список.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="➕ Добавить ещё", callback_data="teacher:add_student")],
+                [InlineKeyboardButton(text="➕ Добавить ещё", callback_data=f"t_add_from_grp:{group_id}")],
                 [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
             ]),
         )
@@ -936,14 +1127,22 @@ async def cb_request_new_student_with_group(
         except Exception:
             pass
 
-    student_requests[req_id] = {
-        "teacher_id": user.teacher_id,
-        "teacher_tg_id": callback.from_user.id,
-        "teacher_name": teacher_name,
-        "student_name": student_name,
-        "group_id": group_id,
-        "admin_msgs": admin_msgs,
-    }
+    try:
+        await student_request_repo.add(
+            request_id=req_id,
+            teacher_id=user.teacher_id,
+            teacher_tg_id=callback.from_user.id,
+            teacher_name=teacher_name,
+            student_name=student_name,
+            group_id=group_id,
+            admin_msgs=admin_msgs,
+        )
+    except Exception as exc:
+        logger.error("Не удалось сохранить заявку в Sheets: %s", exc)
+        await callback.answer(
+            "Не удалось сохранить заявку. Попробуйте позже.", show_alert=True,
+        )
+        return
 
     await state.clear()
     await callback.message.edit_text(
@@ -1003,7 +1202,8 @@ async def cb_unlink_self_confirm(
     await callback.message.edit_text(
         f"Убрать «{student.name}» из вашего списка учеников?{warning}",
         reply_markup=kb_t_confirm(
-            f"t_confirm_unlink_self:{student_id}", f"t_student_card:{student_id}"
+            f"t_confirm_unlink_self:{student_id}", f"t_student_card:{student_id}",
+            confirm_text="🚪 Убрать",
         ),
     )
     await callback.answer()

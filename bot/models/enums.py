@@ -9,3 +9,9 @@ class LessonType(str, Enum):
 class PaymentStatus(str, Enum):
     PENDING = "pending"
     PAID = "paid"
+
+
+class RequestStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"

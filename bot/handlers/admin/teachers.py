@@ -25,10 +25,11 @@ def _is_admin(user: User | None) -> bool:
 
 
 @router.callback_query(F.data == "admin:teachers")
-async def cb_teachers_menu(callback: CallbackQuery, user: User | None) -> None:
+async def cb_teachers_menu(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await state.clear()
     await callback.message.edit_text("<b>Управление педагогами:</b>", reply_markup=kb_teachers_menu())
     await callback.answer()
 
@@ -126,7 +127,7 @@ def _kb_teacher_groups_edit(teacher_id: str, groups: list, branches: dict, assig
             text=f"{mark}{bname} / {g.name}",
             callback_data=f"teg_toggle:{teacher_id}:{g.group_id}",
         )])
-    rows.append([InlineKeyboardButton(text="💾 Готово", callback_data=f"teacher_card:{teacher_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"teacher_card:{teacher_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -225,7 +226,8 @@ async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state
     await callback.message.edit_text(
         "<b>Добавление педагога</b>\n"
         "Введите Telegram ID педагога (число).\n"
-        "Узнать ID можно через @userinfobot — педагог отправляет ему /start."
+        "Узнать ID можно через @userinfobot — педагог отправляет ему /start.",
+        reply_markup=kb_back("admin:teachers"),
     )
     await callback.answer()
 
@@ -383,7 +385,10 @@ async def cb_delete_teacher_confirm(
         return
     await callback.message.edit_text(
         f"<b>Удалить педагога «{teacher.name}» ({teacher_id})?</b>\nЗанятия останутся.",
-        reply_markup=kb_confirm(f"confirm_del_teacher:{teacher_id}", "admin:teachers"),
+        reply_markup=kb_confirm(
+            f"confirm_del_teacher:{teacher_id}", "admin:teachers",
+            confirm_text="🗑 Удалить",
+        ),
     )
     await callback.answer()
 
@@ -469,7 +474,10 @@ async def cb_edit_rate_pick(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(rate_type=rate_type)
     label = _RATE_LABELS.get(rate_type, rate_type)
     await state.set_state(EditTeacherRatesStates.entering_rate)
-    await callback.message.edit_text(f"<b>Новая ставка «{label}» (руб. за 45 мин):</b>")
+    await callback.message.edit_text(
+        f"<b>Новая ставка «{label}» (руб. за 45 мин):</b>",
+        reply_markup=kb_back("teachers:edit_rates"),
+    )
     await callback.answer()
 
 

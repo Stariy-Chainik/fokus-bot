@@ -9,6 +9,7 @@ from .teacher_period_submission_repo import TeacherPeriodSubmissionRepository
 from .branch_repo import BranchRepository
 from .group_repo import GroupRepository
 from .teacher_group_repo import TeacherGroupRepository
+from .student_request_repo import StudentRequestRepository
 
 __all__ = [
     "SheetsClient",
@@ -22,4 +23,5 @@ __all__ = [
     "BranchRepository",
     "GroupRepository",
     "TeacherGroupRepository",
+    "StudentRequestRepository",
 ]

@@ -120,7 +120,7 @@ async def cb_bills_choose_group(
             await callback.answer()
             return
         rows = [
-            [InlineKeyboardButton(text=s.name, callback_data=f"bvs:{period}:{s.student_id}")]
+            [InlineKeyboardButton(text=s.name, callback_data=f"bvs:{period}:none:{s.student_id}")]
             for s in students
         ]
         rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"bvp:{period}")])
@@ -175,7 +175,7 @@ async def cb_bills_choose_student(
         await callback.answer()
         return
     rows = [
-        [InlineKeyboardButton(text=s.name, callback_data=f"bvs:{period}:{s.student_id}")]
+        [InlineKeyboardButton(text=s.name, callback_data=f"bvs:{period}:{group_id}:{s.student_id}")]
         for s in students
     ]
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"bvb:{period}:{group.branch_id}")])
@@ -193,11 +193,16 @@ async def cb_bills_show(
     student_repo: StudentRepository,
     payment_repo: PaymentRepository,
     payment_service: PaymentService,
+    group_repo: GroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, period_month, student_id = callback.data.split(":", 2)
+    _, period_month, group_id, student_id = callback.data.split(":", 3)
+    back_cb = (
+        f"bvb:{period_month}:none" if group_id == "none"
+        else f"bvg:{period_month}:{group_id}"
+    )
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
@@ -207,7 +212,7 @@ async def cb_bills_show(
     if not bills:
         await callback.message.edit_text(
             f"У {student.name} за {display_period(period_month)} нет индивидуальных занятий.",
-            reply_markup=kb_back("admin:menu"),
+            reply_markup=kb_back(back_cb),
         )
         await callback.answer()
         return
@@ -240,9 +245,10 @@ async def cb_bills_show(
     lines.append(f"Итого: {grand_total} руб.")
 
     rows = [[InlineKeyboardButton(
-        text="📤 Отправить родителю", callback_data=f"bill_send:{student_id}:{period_month}",
+        text="📤 Отправить родителю",
+        callback_data=f"bill_send:{student_id}:{period_month}:{group_id}",
     )]]
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
 
     await callback.message.edit_text(
         "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -262,7 +268,11 @@ async def cb_bill_send(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, period_month = callback.data.split(":", 2)
+    parts = callback.data.split(":")
+    # bill_send:{student_id}:{period_month}[:{group_id}] — group_id опционален для обратной совместимости
+    student_id = parts[1]
+    period_month = parts[2]
+    group_id = parts[3] if len(parts) > 3 else "none"
 
     lock_key = f"{student_id}:{period_month}"
     if lock_key in _sending_in_progress:
@@ -302,11 +312,21 @@ async def cb_bill_send(
             "Заглушка отправки счетов родителю student=%s period=%s invoices=%d",
             student_id, period_month, len(invoices),
         )
-        await callback.answer(
-            f"Счёт {student.name} за {display_period(period_month)} отправлен родителю (заглушка). "
-            f"Счетов: {len(invoices)}.",
-            show_alert=True,
+        back_cb = (
+            f"bvb:{period_month}:none" if group_id == "none"
+            else f"bvg:{period_month}:{group_id}"
         )
+        await callback.message.edit_text(
+            f"📤 <b>Счёт отправлен родителю</b> (заглушка)\n\n"
+            f"Ученик: <b>{student.name}</b>\n"
+            f"Период: {display_period(period_month)}\n"
+            f"Счетов: {len(invoices)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
+                [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
+            ]),
+        )
+        await callback.answer()
     finally:
         _sending_in_progress.discard(lock_key)
 
@@ -382,7 +402,7 @@ async def cb_confirm_payment_choose_group(
             await callback.answer()
             return
         rows = [
-            [InlineKeyboardButton(text=s.name, callback_data=f"pcps:{period}:{s.student_id}")]
+            [InlineKeyboardButton(text=s.name, callback_data=f"pcps:{period}:none:{s.student_id}")]
             for s in students
         ]
         rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"pcp:{period}")])
@@ -437,7 +457,7 @@ async def cb_confirm_payment_choose_student(
         await callback.answer()
         return
     rows = [
-        [InlineKeyboardButton(text=s.name, callback_data=f"pcps:{period}:{s.student_id}")]
+        [InlineKeyboardButton(text=s.name, callback_data=f"pcps:{period}:{group_id}:{s.student_id}")]
         for s in students
     ]
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"pcpb:{period}:{group.branch_id}")])
@@ -458,7 +478,11 @@ async def cb_pay_pick_invoice(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, period_month, student_id = callback.data.split(":", 2)
+    _, period_month, group_id, student_id = callback.data.split(":", 3)
+    back_cb = (
+        f"pcpb:{period_month}:none" if group_id == "none"
+        else f"pcpg:{period_month}:{group_id}"
+    )
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
@@ -470,7 +494,7 @@ async def cb_pay_pick_invoice(
     if not invoices:
         await callback.message.edit_text(
             f"У {student.name} за {display_period(period_month)} нет занятий.",
-            reply_markup=kb_back("admin:menu"),
+            reply_markup=kb_back(back_cb),
         )
         await callback.answer()
         return
@@ -483,8 +507,10 @@ async def cb_pay_pick_invoice(
         if paid:
             rows.append([InlineKeyboardButton(text=label, callback_data="noop")])
         else:
-            rows.append([InlineKeyboardButton(text=label, callback_data=f"pay_invoice:{p.payment_id}")])
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
+            rows.append([InlineKeyboardButton(
+                text=label, callback_data=f"pay_invoice:{p.payment_id}:{group_id}",
+            )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
 
     await callback.message.edit_text(
         f"<b>{student.name}</b> — {display_period(period_month)}\n"
@@ -502,16 +528,20 @@ async def cb_pay_confirm(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    payment_id = callback.data.split(":", 1)[1]
+    parts = callback.data.split(":")
+    # pay_invoice:{payment_id}[:{group_id}]
+    payment_id = parts[1]
+    group_id = parts[2] if len(parts) > 2 else "none"
     payment = next(
         (p for p in await payment_repo.get_all() if p.payment_id == payment_id), None,
     )
     if not payment:
         await callback.answer("Счёт не найден", show_alert=True)
         return
+    pick_cb = f"pcps:{payment.period_month}:{group_id}:{payment.student_id}"
     if payment.status.value == "paid":
         await callback.message.edit_text(
-            f"Счёт {payment.payment_id} уже оплачен.", reply_markup=kb_back("admin:menu"),
+            f"Счёт {payment.payment_id} уже оплачен.", reply_markup=kb_back(pick_cb),
         )
         await callback.answer()
         return
@@ -521,7 +551,9 @@ async def cb_pay_confirm(
         f"Педагог: {payment.teacher_name or '—'}\n"
         f"Период: {display_period(payment.period_month)}\n"
         f"Сумма: {payment.total_amount} руб.",
-        reply_markup=kb_confirm(f"do_confirm_payment:{payment.payment_id}", "admin:menu"),
+        reply_markup=kb_confirm(
+            f"do_confirm_payment:{payment.payment_id}:{group_id}", pick_cb,
+        ),
     )
     await callback.answer()
 
@@ -529,12 +561,22 @@ async def cb_pay_confirm(
 @router.callback_query(F.data.startswith("do_confirm_payment:"))
 async def cb_do_confirm_payment(
     callback: CallbackQuery, user: User | None, payment_service: PaymentService,
+    payment_repo: PaymentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    payment_id = callback.data.split(":", 1)[1]
+    parts = callback.data.split(":")
+    payment_id = parts[1]
+    group_id = parts[2] if len(parts) > 2 else "none"
+    payment = next(
+        (p for p in await payment_repo.get_all() if p.payment_id == payment_id), None,
+    )
+    back_cb = (
+        f"pcps:{payment.period_month}:{group_id}:{payment.student_id}"
+        if payment else "admin:menu"
+    )
 
     if payment_id in _confirming_in_progress:
         logger.warning("Двойное подтверждение payment_id=%s tg_id=%s", payment_id, callback.from_user.id)
@@ -545,12 +587,12 @@ async def cb_do_confirm_payment(
     try:
         ok = await payment_service.confirm_payment(payment_id, callback.from_user.id)
         if ok:
-            await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back("admin:menu"))
+            await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back(back_cb))
         else:
-            await callback.message.edit_text("Счёт уже оплачен или не найден.", reply_markup=kb_back("admin:menu"))
+            await callback.message.edit_text("Счёт уже оплачен или не найден.", reply_markup=kb_back(back_cb))
     except Exception as exc:
         logger.error("Ошибка подтверждения оплаты %s: %s", payment_id, exc)
-        await callback.message.edit_text("Ошибка при подтверждении оплаты.", reply_markup=kb_back("admin:menu"))
+        await callback.message.edit_text("Ошибка при подтверждении оплаты.", reply_markup=kb_back(back_cb))
     finally:
         _confirming_in_progress.discard(payment_id)
 

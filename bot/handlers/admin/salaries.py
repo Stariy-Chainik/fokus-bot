@@ -87,6 +87,7 @@ async def cb_salary_show(
         return
     _, teacher_id, period_month = callback.data.split(":", 2)
     teacher = await teacher_repo.get_by_id(teacher_id)
+    back_cb = f"salary_teacher:{teacher_id}"
     if not teacher:
         await callback.answer("Педагог не найден", show_alert=True)
         return
@@ -110,5 +111,5 @@ async def cb_salary_show(
         "",
         f"Период: {period_status}",
     ]
-    await callback.message.edit_text("\n".join(lines), reply_markup=kb_back("admin:salaries"))
+    await callback.message.edit_text("\n".join(lines), reply_markup=kb_back(back_cb))
     await callback.answer()

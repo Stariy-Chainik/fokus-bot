@@ -16,6 +16,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from config.settings import settings
 from bot.repositories import (
@@ -23,6 +24,7 @@ from bot.repositories import (
     TeacherStudentRepository, LessonRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
     BranchRepository, GroupRepository, TeacherGroupRepository,
+    StudentRequestRepository,
 )
 from bot.services import LessonService, PaymentService, DiagnosticsService
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
@@ -68,6 +70,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     branch_repo = BranchRepository(sheets_client, settings.sheet_branches)
     group_repo = GroupRepository(sheets_client, settings.sheet_groups)
     teacher_group_repo = TeacherGroupRepository(sheets_client, settings.sheet_teacher_groups)
+    student_request_repo = StudentRequestRepository(sheets_client, settings.sheet_student_requests)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
@@ -85,10 +88,10 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["branch_repo"] = branch_repo
     dp["group_repo"] = group_repo
     dp["teacher_group_repo"] = teacher_group_repo
+    dp["student_request_repo"] = student_request_repo
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
-    dp["student_requests"] = {}   # req_id -> {teacher_id, teacher_tg_id, teacher_name, student_name, admin_msgs}
 
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())
@@ -152,6 +155,11 @@ async def main() -> None:
     )
     storage = _build_storage()
     dp = _build_dispatcher(storage)
+
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Запуск / главное меню"),
+        BotCommand(command="menu", description="Главное меню"),
+    ])
 
     if settings.webhook_url:
         await _run_webhook(bot, dp)

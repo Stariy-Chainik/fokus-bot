@@ -5,11 +5,12 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
+from bot.models import User, StudentRequest
 from bot.repositories import (
     StudentRepository, TeacherRepository, TeacherStudentRepository, UserRepository,
-    GroupRepository, BranchRepository,
+    GroupRepository, BranchRepository, StudentRequestRepository,
 )
+from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates
 from bot.keyboards.admin import (
     kb_students_menu, kb_teacher_list, kb_student_list,
@@ -26,10 +27,11 @@ def _is_admin(user: User | None) -> bool:
 
 
 @router.callback_query(F.data == "admin:students")
-async def cb_students_menu(callback: CallbackQuery, user: User | None) -> None:
+async def cb_students_menu(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await state.clear()
     await callback.message.edit_text("<b>Управление учениками:</b>", reply_markup=kb_students_menu())
     await callback.answer()
 
@@ -122,10 +124,14 @@ async def cb_pairs_soloists_list(
             a, b = (s, partner) if s.name <= partner.name else (partner, s)
             pairs.append((a, b))
 
+        back_cb = f"sp_brn:{mode}:{group.branch_id}" if group else "admin:students"
         if not pairs:
             await callback.message.edit_text(
                 f"В группе «{group_name}» пар нет.",
-                reply_markup=kb_back(f"sp_brn:{mode}:{group.branch_id}" if group else "admin:students"),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="➕ Создать пару", callback_data=f"admin_create_pair:{group_id}")],
+                    [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
+                ]),
             )
             await callback.answer()
             return
@@ -137,7 +143,7 @@ async def cb_pairs_soloists_list(
                 text=f"{a.name} ↔ {b.name}",
                 callback_data=f"student_card:{a.student_id}",
             )])
-        back_cb = f"sp_brn:{mode}:{group.branch_id}" if group else "admin:students"
+        buttons.append([InlineKeyboardButton(text="➕ Создать пару", callback_data=f"admin_create_pair:{group_id}")])
         buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
         await callback.message.edit_text(
             f"<b>Пары — {group_name} ({len(pairs)}):</b>",
@@ -166,6 +172,99 @@ async def cb_pairs_soloists_list(
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("admin_create_pair:"))
+async def cb_admin_create_pair(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, group_repo: GroupRepository,
+) -> None:
+    """Админ: выбор первого ученика для новой пары (из солистов группы).
+    Дальше — стандартный поток partner_assign:<id>."""
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    group_name = group.name if group else group_id
+    back_cb = f"sp_brn:pairs:{group.branch_id}" if group else "admin:students"
+
+    soloists = sorted(
+        [s for s in await student_repo.get_all()
+         if s.group_id == group_id and not s.partner_id],
+        key=lambda s: s.name,
+    )
+    if not soloists:
+        await callback.message.edit_text(
+            f"В группе «{group_name}» нет солистов, из которых можно собрать пару.",
+            reply_markup=kb_back(back_cb),
+        )
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(text=s.name, callback_data=f"admin_pair_lead:{group_id}:{s.student_id}")]
+        for s in soloists
+    ]
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"sp_grp:pairs:{group_id}")])
+    await callback.message.edit_text(
+        f"<b>Создать пару — {group_name}</b>\nВыберите первого ученика:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_pair_lead:"))
+async def cb_admin_pair_lead(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+) -> None:
+    """Админ: выбор лидера через «Создать пару» — как partner_assign, но помнит группу."""
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, group_id, student_id = callback.data.split(":")
+    back_cb = f"sp_grp:pairs:{group_id}"
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    s_teachers = set(await ts_repo.get_teachers_for_student(student_id))
+    if not s_teachers:
+        await callback.message.edit_text(
+            "У ученика нет привязанных педагогов — сначала привяжите хотя бы одного.",
+            reply_markup=kb_back(back_cb),
+        )
+        await callback.answer()
+        return
+    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    candidates: list = []
+    for other in all_students:
+        if other.student_id == student_id:
+            continue
+        if other.group_id != group_id:
+            continue
+        other_teachers = set(await ts_repo.get_teachers_for_student(other.student_id))
+        if not (s_teachers & other_teachers):
+            continue
+        if other.student_id == student.partner_id:
+            continue
+        candidates.append((other, bool(other.partner_id)))
+    if not candidates:
+        await callback.message.edit_text(
+            "Нет подходящих кандидатов в этой группе (нужен общий педагог).",
+            reply_markup=kb_back(back_cb),
+        )
+        await callback.answer()
+        return
+    await state.set_state(PartnerAssignStates.choosing_partner)
+    await state.update_data(student_id=student_id, admin_pair_group_id=group_id)
+    await callback.message.edit_text(
+        f"<b>Выберите партнёра для «{student.name}».</b>\n"
+        f"⚠️ — у ученика уже есть партнёр, старая связь будет разорвана.",
+        reply_markup=kb_partner_candidates(candidates, student_id, cancel_cb=back_cb),
+    )
+    await callback.answer()
+
+
 # ─── Список учеников с поиском ───────────────────────────────────────────────
 
 def _filter_and_page(students: list, query: str, page: int):
@@ -187,7 +286,8 @@ async def cb_students_list(callback: CallbackQuery, user: User | None, state: FS
     await callback.message.edit_text(
         "<b>Поиск ученика</b>\n"
         "Введите имя или часть имени ученика для поиска.\n"
-        "Чтобы показать всех — отправьте <b>*</b>"
+        "Чтобы показать всех — отправьте <b>*</b>",
+        reply_markup=kb_back("admin:students"),
     )
     await callback.answer()
 
@@ -208,25 +308,30 @@ async def handle_student_search(
     label = f"Найдено: {total}" if query else f"Всего учеников: {total}"
     await message.answer(
         f"<b>{label}. Страница 1:</b>",
-        reply_markup=kb_student_paged(page_students, 0, total, query),
+        reply_markup=kb_student_paged(page_students, 0, total),
     )
 
 
 @router.callback_query(F.data.startswith("spage:"))
 async def cb_student_page(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    student_repo: StudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    parts = callback.data.split(":")
-    query = parts[1].replace("_", ":") if parts[1] != "" else ""
-    page = int(parts[2])
+    try:
+        page = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer()
+        return
+    data = await state.get_data()
+    query = data.get("student_query", "")
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     page_students, total = _filter_and_page(all_students, query, page)
     await callback.message.edit_text(
         f"<b>Страница {page + 1}:</b>",
-        reply_markup=kb_student_paged(page_students, page, total, query),
+        reply_markup=kb_student_paged(page_students, page, total),
     )
     await callback.answer()
 
@@ -291,7 +396,10 @@ async def cb_add_student_start(callback: CallbackQuery, user: User | None, state
         await callback.answer("Нет доступа", show_alert=True)
         return
     await state.set_state(AddStudentStates.entering_name)
-    await callback.message.edit_text("<b>Добавление ученика</b>\nВведите Фамилию Имя ученика:")
+    await callback.message.edit_text(
+        "<b>Добавление ученика</b>\nВведите Фамилию Имя ученика:",
+        reply_markup=kb_back("admin:students"),
+    )
     await callback.answer()
 
 
@@ -388,21 +496,22 @@ async def cb_confirm_add_student(
         return
     data = await state.get_data()
     await state.clear()
-    toast = ""
     try:
         student = await student_repo.add(data["name"])
         group_id = data.get("group_id") or ""
+        group_info = ""
         if group_id:
             await student_repo.update_group(student.student_id, group_id)
             group = await group_repo.get_by_id(group_id)
             if group:
                 branch = await branch_repo.get_by_id(group.branch_id)
                 bname = branch.name if branch else "—"
-                toast = f"Ученик «{student.name}» добавлен в группу «{group.name}» (филиал «{bname}»)"
-        if not toast:
-            toast = f"Ученик «{student.name}» добавлен"
+                group_info = f"\nГруппа: <b>{group.name}</b> (филиал «{bname}»)"
         await callback.message.edit_text(
-            f"<b>Ученик добавлен!</b>\nID: {student.student_id}\nФамилия Имя: {student.name}",
+            f"<b>✅ Ученик добавлен</b>\n\n"
+            f"Имя: <b>{student.name}</b>\n"
+            f"ID: <code>{student.student_id}</code>"
+            f"{group_info}",
             reply_markup=kb_back("admin:students"),
         )
     except Exception as exc:
@@ -410,7 +519,7 @@ async def cb_confirm_add_student(
         await callback.message.edit_text("Ошибка при добавлении ученика.", reply_markup=kb_back("admin:students"))
         await callback.answer()
         return
-    await callback.answer(toast, show_alert=True)
+    await callback.answer()
 
 
 # ─── Удаление ученика ─────────────────────────────────────────────────────────
@@ -422,13 +531,39 @@ async def cb_delete_student_start(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    students = await student_repo.get_all()
+    students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     if not students:
         await callback.message.edit_text("Учеников нет.", reply_markup=kb_back("admin:students"))
         await callback.answer()
         return
+    total = len(students)
+    page_slice = students[:_STUDENT_PAGE_SIZE]
     await callback.message.edit_text(
-        "<b>Выберите ученика для удаления:</b>", reply_markup=kb_student_list(students, "del_student")
+        "<b>Выберите ученика для удаления:</b>",
+        reply_markup=kb_student_list(page_slice, "del_student", page=0, total=total),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("slist_page:"))
+async def cb_student_list_page(
+    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, action_prefix, page_raw = callback.data.split(":", 2)
+    try:
+        page = int(page_raw)
+    except ValueError:
+        await callback.answer()
+        return
+    students = sorted(await student_repo.get_all(), key=lambda s: s.name)
+    total = len(students)
+    start = page * _STUDENT_PAGE_SIZE
+    page_slice = students[start:start + _STUDENT_PAGE_SIZE]
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_student_list(page_slice, action_prefix, page=page, total=total),
     )
     await callback.answer()
 
@@ -447,7 +582,10 @@ async def cb_delete_student_confirm(
         return
     await callback.message.edit_text(
         f"<b>Удалить ученика «{student.name}» ({student_id})?</b>",
-        reply_markup=kb_confirm(f"confirm_del_student:{student_id}", "admin:students"),
+        reply_markup=kb_confirm(
+            f"confirm_del_student:{student_id}", "admin:students",
+            confirm_text="🗑 Удалить",
+        ),
     )
     await callback.answer()
 
@@ -564,11 +702,16 @@ async def cb_partner_pick(
     lines.append("")
     lines.append("Продолжить?")
 
+    admin_pair_group_id = data.get("admin_pair_group_id")
+    cancel_cb = (
+        f"sp_grp:pairs:{admin_pair_group_id}"
+        if admin_pair_group_id else f"student_card:{student_id}"
+    )
     await state.update_data(partner_id=partner_id)
     await state.set_state(PartnerAssignStates.confirming)
     await callback.message.edit_text(
         "\n".join(lines),
-        reply_markup=kb_confirm("confirm_partner", f"student_card:{student_id}"),
+        reply_markup=kb_confirm("confirm_partner", cancel_cb),
     )
     await callback.answer()
 
@@ -587,20 +730,25 @@ async def cb_partner_confirm(
     await state.clear()
     student_id = data.get("student_id", "")
     partner_id = data.get("partner_id", "")
+    admin_pair_group_id = data.get("admin_pair_group_id")
+    back_cb = (
+        f"sp_grp:pairs:{admin_pair_group_id}"
+        if admin_pair_group_id else f"student_card:{student_id}"
+    )
     try:
         await student_repo.set_partner(student_id, partner_id)
         await callback.message.edit_text(
-            "Партнёры назначены.", reply_markup=kb_back(f"student_card:{student_id}")
+            "Партнёры назначены.", reply_markup=kb_back(back_cb),
         )
     except ValueError as exc:
         await callback.message.edit_text(
-            f"Ошибка: {exc}", reply_markup=kb_back(f"student_card:{student_id}")
+            f"Ошибка: {exc}", reply_markup=kb_back(back_cb),
         )
     except Exception as exc:
         logger.error("Ошибка назначения партнёра: %s", exc)
         await callback.message.edit_text(
             "Не удалось назначить партнёра. Попробуйте позже.",
-            reply_markup=kb_back(f"student_card:{student_id}"),
+            reply_markup=kb_back(back_cb),
         )
     await callback.answer()
 
@@ -622,7 +770,8 @@ async def cb_partner_clear_confirm(
     await callback.message.edit_text(
         f"<b>Убрать пару: «{student.name}» ↔ «{partner_name}»?</b>",
         reply_markup=kb_confirm(
-            f"confirm_partner_clear:{student_id}", f"student_card:{student_id}"
+            f"confirm_partner_clear:{student_id}", f"student_card:{student_id}",
+            confirm_text="❌ Убрать",
         ),
     )
     await callback.answer()
@@ -665,9 +814,11 @@ def _find_similar_students(all_students: list, name: str) -> list:
     return similar[:10]
 
 
-async def _notify_other_admins(bot, req: dict, except_chat_id: int, resolution_text: str) -> None:
+async def _notify_other_admins(
+    bot, req: StudentRequest, except_chat_id: int, resolution_text: str,
+) -> None:
     """Редактирует сообщения у остальных админов, показывая что заявка уже обработана."""
-    for chat_id, message_id in req.get("admin_msgs", []):
+    for chat_id, message_id in StudentRequestRepository.parse_admin_msgs(req):
         if chat_id == except_chat_id:
             continue
         try:
@@ -679,11 +830,11 @@ async def _notify_other_admins(bot, req: dict, except_chat_id: int, resolution_t
 
 
 async def _finalize_link(
-    bot, req: dict, student_id: str, student_name: str,
+    bot, req: StudentRequest, student_id: str, student_name: str,
     ts_repo: TeacherStudentRepository,
 ) -> str:
     """Создаёт связь педагог↔ученик, уведомляет педагога. Возвращает текст для админа."""
-    teacher_id = req["teacher_id"]
+    teacher_id = req.teacher_id
     if await ts_repo.exists(teacher_id, student_id):
         link_note = "Связь уже существовала."
     else:
@@ -691,7 +842,7 @@ async def _finalize_link(
         link_note = "Ученик привязан к педагогу."
     try:
         await bot.send_message(
-            req["teacher_tg_id"],
+            req.teacher_tg_id,
             f"✅ Ученик <b>{student_name}</b> добавлен в ваш список.",
         )
     except Exception as exc:
@@ -717,18 +868,18 @@ async def _group_toast(
 async def cb_approve_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
-    student_requests: dict,
+    student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     req_id = callback.data.split(":", 1)[1]
-    req = student_requests.get(req_id)
-    if not req:
+    req = await student_request_repo.get_by_id(req_id)
+    if not req or req.status != RequestStatus.PENDING:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    name = req["student_name"]
+    name = req.student_name
     all_students = await student_repo.get_all()
     similar = _find_similar_students(all_students, name)
     if similar:
@@ -745,18 +896,22 @@ async def cb_approve_student_request(
             text="❌ Отменить", callback_data=f"req_reject:{req_id}",
         )])
         await callback.message.edit_text(
-            f"📝 Заявка от <b>{req['teacher_name']}</b> на ученика <b>{name}</b>.\n\n"
+            f"📝 Заявка от <b>{req.teacher_name}</b> на ученика <b>{name}</b>.\n\n"
             f"⚠️ Найдены похожие ученики в базе:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
         await callback.answer()
         return
-    # Дублей нет — создаём сразу
+    # Дублей нет — атомарно помечаем как APPROVED, затем создаём
+    if not await student_request_repo.mark_resolved(
+        req_id, RequestStatus.APPROVED, callback.from_user.id,
+    ):
+        await callback.answer("Заявка уже обработана.", show_alert=True)
+        return
     student = await student_repo.add(name=name)
-    if req.get("group_id"):
-        await student_repo.update_group(student.student_id, req["group_id"])
+    if req.group_id:
+        await student_repo.update_group(student.student_id, req.group_id)
     link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
-    student_requests.pop(req_id, None)
     await callback.message.edit_text(
         f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).\n{link_note}",
     )
@@ -764,7 +919,7 @@ async def cb_approve_student_request(
         callback.bot, req, callback.message.chat.id,
         f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
     )
-    toast = await _group_toast(student.name, req.get("group_id") or "", group_repo, branch_repo)
+    toast = await _group_toast(student.name, req.group_id or "", group_repo, branch_repo)
     await callback.answer(toast, show_alert=True)
 
 
@@ -772,22 +927,26 @@ async def cb_approve_student_request(
 async def cb_create_new_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
-    student_requests: dict,
+    student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     req_id = callback.data.split(":", 1)[1]
-    req = student_requests.get(req_id)
-    if not req:
+    req = await student_request_repo.get_by_id(req_id)
+    if not req or req.status != RequestStatus.PENDING:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    student = await student_repo.add(name=req["student_name"])
-    if req.get("group_id"):
-        await student_repo.update_group(student.student_id, req["group_id"])
+    if not await student_request_repo.mark_resolved(
+        req_id, RequestStatus.APPROVED, callback.from_user.id,
+    ):
+        await callback.answer("Заявка уже обработана.", show_alert=True)
+        return
+    student = await student_repo.add(name=req.student_name)
+    if req.group_id:
+        await student_repo.update_group(student.student_id, req.group_id)
     link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
-    student_requests.pop(req_id, None)
     await callback.message.edit_text(
         f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).\n{link_note}",
     )
@@ -795,7 +954,7 @@ async def cb_create_new_student_request(
         callback.bot, req, callback.message.chat.id,
         f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
     )
-    toast = await _group_toast(student.name, req.get("group_id") or "", group_repo, branch_repo)
+    toast = await _group_toast(student.name, req.group_id or "", group_repo, branch_repo)
     await callback.answer(toast, show_alert=True)
 
 
@@ -803,22 +962,26 @@ async def cb_create_new_student_request(
 async def cb_link_existing_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
-    student_requests: dict,
+    student_request_repo: StudentRequestRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, req_id, student_id = callback.data.split(":", 2)
-    req = student_requests.get(req_id)
-    if not req:
+    req = await student_request_repo.get_by_id(req_id)
+    if not req or req.status != RequestStatus.PENDING:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден.", show_alert=True)
         return
+    if not await student_request_repo.mark_resolved(
+        req_id, RequestStatus.APPROVED, callback.from_user.id,
+    ):
+        await callback.answer("Заявка уже обработана.", show_alert=True)
+        return
     link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
-    student_requests.pop(req_id, None)
     await callback.message.edit_text(
         f"🔗 Ученик <b>{student.name}</b> (ID: {student.student_id}) привязан к педагогу.\n{link_note}",
     )
@@ -831,29 +994,67 @@ async def cb_link_existing_student_request(
 
 @router.callback_query(F.data.startswith("req_reject:"))
 async def cb_reject_student_request(
-    callback: CallbackQuery, user: User | None, student_requests: dict,
+    callback: CallbackQuery, user: User | None,
+    student_request_repo: StudentRequestRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     req_id = callback.data.split(":", 1)[1]
-    req = student_requests.pop(req_id, None)
-    if not req:
+    req = await student_request_repo.get_by_id(req_id)
+    if not req or req.status != RequestStatus.PENDING:
+        await callback.answer("Заявка уже обработана.", show_alert=True)
+        return
+    if not await student_request_repo.mark_resolved(
+        req_id, RequestStatus.REJECTED, callback.from_user.id,
+    ):
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
     try:
         await callback.bot.send_message(
-            req["teacher_tg_id"],
-            f"❌ Заявка на создание ученика <b>{req['student_name']}</b> отклонена.\n"
+            req.teacher_tg_id,
+            f"❌ Заявка на создание ученика <b>{req.student_name}</b> отклонена.\n"
             "Свяжитесь с администратором лично.",
         )
     except Exception as exc:
         logger.error("Не удалось уведомить педагога об отклонении заявки: %s", exc)
     await callback.message.edit_text(
-        f"❌ Заявка от <b>{req['teacher_name']}</b> на <b>{req['student_name']}</b> отклонена.",
+        f"❌ Заявка от <b>{req.teacher_name}</b> на <b>{req.student_name}</b> отклонена.",
     )
     await _notify_other_admins(
         callback.bot, req, callback.message.chat.id,
         f"❌ Заявка отклонена админом @{callback.from_user.username or callback.from_user.id}",
+    )
+    await callback.answer()
+
+
+# ─── Список ожидающих заявок ─────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:requests")
+async def cb_requests_list(
+    callback: CallbackQuery, user: User | None,
+    student_request_repo: StudentRequestRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    pending = await student_request_repo.get_pending()
+    if not pending:
+        await callback.message.edit_text(
+            "Ожидающих заявок нет.", reply_markup=kb_back("admin:menu"),
+        )
+        await callback.answer()
+        return
+    rows = []
+    for r in sorted(pending, key=lambda x: x.created_at):
+        rows.append([InlineKeyboardButton(
+            text=f"📝 {r.teacher_name} → {r.student_name}",
+            callback_data=f"req_approve:{r.request_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
+    await callback.message.edit_text(
+        f"<b>Ожидающие заявки ({len(pending)}):</b>\n"
+        "Нажмите на заявку чтобы обработать.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()

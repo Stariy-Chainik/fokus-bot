@@ -73,7 +73,7 @@ def _kb_group_teachers(group_id: str, teachers: list, assigned: set[str]) -> Inl
         rows.append([InlineKeyboardButton(
             text=f"{mark}{t.name}", callback_data=f"gt_toggle:{group_id}:{t.teacher_id}",
         )])
-    rows.append([InlineKeyboardButton(text="💾 Готово", callback_data=f"group_card:{group_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -84,7 +84,7 @@ def _kb_group_students(group_id: str, students: list, assigned: set[str]) -> Inl
         rows.append([InlineKeyboardButton(
             text=f"{mark}{s.name}", callback_data=f"gs_toggle:{group_id}:{s.student_id}",
         )])
-    rows.append([InlineKeyboardButton(text="💾 Готово", callback_data=f"group_card:{group_id}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -239,7 +239,10 @@ async def cb_branch_del_confirm(
         return
     await callback.message.edit_text(
         f"<b>Удалить филиал «{branch.name}»?</b>",
-        reply_markup=kb_confirm(f"confirm_del_branch:{branch_id}", f"branch_card:{branch_id}"),
+        reply_markup=kb_confirm(
+            f"confirm_del_branch:{branch_id}", f"branch_card:{branch_id}",
+            confirm_text="🗑 Удалить",
+        ),
     )
     await callback.answer()
 
@@ -428,7 +431,10 @@ async def cb_group_del_confirm(
     await callback.message.edit_text(
         f"<b>Удалить группу «{group.name}»?</b>\n"
         "Связи педагогов с группой будут удалены, у учеников обнулится group_id.",
-        reply_markup=kb_confirm(f"confirm_del_group:{group_id}", f"branch_card:{group.branch_id}"),
+        reply_markup=kb_confirm(
+            f"confirm_del_group:{group_id}", f"branch_card:{group.branch_id}",
+            confirm_text="🗑 Удалить",
+        ),
     )
     await callback.answer()
 
