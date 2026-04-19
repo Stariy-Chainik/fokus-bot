@@ -49,7 +49,9 @@ def main() -> None:
     for r in tg_rows:
         teacher_groups[str(r["teacher_id"])].add(str(r["group_id"]))
 
-    ts_rows = sh.worksheet(settings.sheet_teacher_students).get_all_records()
+    # Лист teacher_students удалён из settings в коммите 7492a6a; имя захардкожено,
+    # чтобы скрипт оставался запускаемым как исторический референс.
+    ts_rows = sh.worksheet("teacher_students").get_all_records()
 
     total = len(ts_rows)
     ok = 0
