@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     sheet_users: str = Field(default="users", alias="SHEET_USERS")
     sheet_teachers: str = Field(default="teachers", alias="SHEET_TEACHERS")
     sheet_students: str = Field(default="students", alias="SHEET_STUDENTS")
-    sheet_teacher_students: str = Field(default="teacher_students", alias="SHEET_TEACHER_STUDENTS")
     sheet_lessons: str = Field(default="lessons", alias="SHEET_LESSONS")
     sheet_billing: str = Field(default="billing", alias="SHEET_BILLING")
     sheet_payments: str = Field(default="student_period_payments", alias="SHEET_PAYMENTS")

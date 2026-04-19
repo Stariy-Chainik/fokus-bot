@@ -83,7 +83,7 @@
 ---
 
 ## 🗄️ Данные (Google Sheets)
-`users`, `teachers`, `students`, `branches`, `groups`, `teacher_groups`, `teacher_students`, `lessons`, `payments`, `submitted_periods`, `student_requests`.
+`users`, `teachers`, `students`, `branches`, `groups`, `teacher_groups`, `lessons`, `payments`, `submitted_periods`, `student_requests`.
 
 Кэш: TTL 300с, инвалидация на каждую запись.
 

@@ -47,3 +47,12 @@ class TeacherGroupRepository(BaseRepository):
                 await self._delete_row(i + 2)
                 deleted += 1
         return deleted
+
+    async def remove_all_for_teacher(self, teacher_id: str) -> int:
+        records = await self._all_records()
+        deleted = 0
+        for i in range(len(records) - 1, -1, -1):
+            if str(records[i].get("teacher_id")) == teacher_id:
+                await self._delete_row(i + 2)
+                deleted += 1
+        return deleted

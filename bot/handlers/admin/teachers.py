@@ -9,7 +9,7 @@ from bot.models import User
 from datetime import date
 
 from bot.repositories import (
-    TeacherRepository, TeacherStudentRepository, UserRepository,
+    TeacherRepository, UserRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
     TeacherPeriodSubmissionRepository,
 )
@@ -397,16 +397,13 @@ async def cb_delete_teacher_confirm(
 async def cb_delete_teacher_do(
     callback: CallbackQuery, user: User | None,
     teacher_repo: TeacherRepository, user_repo,
-    ts_repo: TeacherStudentRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
-    # Удаляем связи teacher_students (аналогично удалению ученика)
-    for ts in await ts_repo.get_all():
-        if ts.teacher_id == teacher_id:
-            await ts_repo.remove(teacher_id, ts.student_id)
+    await teacher_group_repo.remove_all_for_teacher(teacher_id)
     ok = await teacher_repo.delete(teacher_id)
     if ok:
         await user_repo.delete_by_teacher_id(teacher_id)

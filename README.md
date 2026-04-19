@@ -45,7 +45,6 @@ python -m bot
 | `SHEET_USERS` | — | Имя листа users (по умолчанию: `users`) |
 | `SHEET_TEACHERS` | — | Имя листа teachers (по умолчанию: `teachers`) |
 | `SHEET_STUDENTS` | — | Имя листа students (по умолчанию: `students`) |
-| `SHEET_TEACHER_STUDENTS` | — | Имя листа teacher_students |
 | `SHEET_LESSONS` | — | Имя листа lessons |
 | `SHEET_BILLING` | — | Имя листа billing |
 | `SHEET_PAYMENTS` | — | Имя листа student_period_payments |
@@ -75,11 +74,6 @@ python -m bot
 | student_id | name |
 |---|---|
 | STU-0001 | Петров Иван |
-
-#### teacher_students
-| teacher_id | student_id |
-|---|---|
-| TCH-0001 | STU-0001 |
 
 #### lessons
 | lesson_id | teacher_id | teacher_name | type | student_1_id | student_1_name | student_2_id | student_2_name | date | duration_min | earned | recorded_at | updated_at |

@@ -7,9 +7,10 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User, StudentRequest
 from bot.repositories import (
-    StudentRepository, TeacherRepository, TeacherStudentRepository, UserRepository,
+    StudentRepository, TeacherRepository, UserRepository,
     GroupRepository, BranchRepository, StudentRequestRepository,
 )
+from bot.services import TeacherVisibilityService
 from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates
 from bot.keyboards.admin import (
@@ -215,7 +216,7 @@ async def cb_admin_create_pair(
 @router.callback_query(F.data.startswith("admin_pair_lead:"))
 async def cb_admin_pair_lead(
     callback: CallbackQuery, user: User | None, state: FSMContext,
-    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
 ) -> None:
     """Админ: выбор лидера через «Создать пару» — как partner_assign, но помнит группу."""
     if not _is_admin(user):
@@ -227,14 +228,6 @@ async def cb_admin_pair_lead(
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
-    s_teachers = set(await ts_repo.get_teachers_for_student(student_id))
-    if not s_teachers:
-        await callback.message.edit_text(
-            "У ученика нет привязанных педагогов — сначала привяжите хотя бы одного.",
-            reply_markup=kb_back(back_cb),
-        )
-        await callback.answer()
-        return
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     candidates: list = []
     for other in all_students:
@@ -242,15 +235,12 @@ async def cb_admin_pair_lead(
             continue
         if other.group_id != group_id:
             continue
-        other_teachers = set(await ts_repo.get_teachers_for_student(other.student_id))
-        if not (s_teachers & other_teachers):
-            continue
         if other.student_id == student.partner_id:
             continue
         candidates.append((other, bool(other.partner_id)))
     if not candidates:
         await callback.message.edit_text(
-            "Нет подходящих кандидатов в этой группе (нужен общий педагог).",
+            "В этой группе нет других учеников для пары.",
             reply_markup=kb_back(back_cb),
         )
         await callback.answer()
@@ -339,7 +329,8 @@ async def cb_student_page(
 @router.callback_query(F.data.startswith("student_card:"))
 async def cb_student_card(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, teacher_repo: TeacherRepository, ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
     if not _is_admin(user):
@@ -350,7 +341,7 @@ async def cb_student_card(
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
-    teacher_ids = await ts_repo.get_teachers_for_student(student_id)
+    teacher_ids = await visibility.teachers_for_student(student_id)
     if teacher_ids:
         all_teachers = await teacher_repo.get_all()
         teachers_map = {t.teacher_id: t.name for t in all_teachers}
@@ -595,17 +586,13 @@ async def cb_delete_student_do(
     callback: CallbackQuery,
     user: User | None,
     student_repo: StudentRepository,
-    ts_repo: TeacherStudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     student_id = callback.data.split(":", 1)[1]
-    for ts in await ts_repo.get_all():
-        if ts.student_id == student_id:
-            await ts_repo.remove(ts.teacher_id, student_id)
     ok = await student_repo.delete(student_id)
-    text = f"Ученик {student_id} удалён (и все его связи с педагогами)." if ok else "Ученик не найден."
+    text = f"Ученик {student_id} удалён." if ok else "Ученик не найден."
     await callback.message.edit_text(text, reply_markup=kb_back("admin:students"))
     await callback.answer()
 
@@ -619,7 +606,6 @@ async def cb_partner_assign_start(
     user: User | None,
     state: FSMContext,
     student_repo: StudentRepository,
-    ts_repo: TeacherStudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -630,33 +616,29 @@ async def cb_partner_assign_start(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    # Кандидаты — те, у кого есть хотя бы один общий педагог с текущим учеником.
-    s_teachers = set(await ts_repo.get_teachers_for_student(student_id))
-    if not s_teachers:
+    if not student.group_id:
         await callback.message.edit_text(
-            "У ученика нет привязанных педагогов — сначала привяжите хотя бы одного.",
+            "У ученика не задана группа — сначала назначьте группу.",
             reply_markup=kb_back(f"student_card:{student_id}"),
         )
         await callback.answer()
         return
 
+    # Кандидаты — ученики из той же группы.
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     candidates: list = []
     for other in all_students:
         if other.student_id == student_id:
             continue
-        other_teachers = set(await ts_repo.get_teachers_for_student(other.student_id))
-        if not (s_teachers & other_teachers):
+        if other.group_id != student.group_id:
             continue
-        # Уже текущий партнёр того же ученика — пропускаем (назначать не на что).
         if other.student_id == student.partner_id:
             continue
-        has_partner = bool(other.partner_id)
-        candidates.append((other, has_partner))
+        candidates.append((other, bool(other.partner_id)))
 
     if not candidates:
         await callback.message.edit_text(
-            "Нет подходящих кандидатов (нужен общий педагог).",
+            "В группе нет других учеников для пары.",
             reply_markup=kb_back(f"student_card:{student_id}"),
         )
         await callback.answer()
@@ -829,25 +811,15 @@ async def _notify_other_admins(
             pass
 
 
-async def _finalize_link(
-    bot, req: StudentRequest, student_id: str, student_name: str,
-    ts_repo: TeacherStudentRepository,
-) -> str:
-    """Создаёт связь педагог↔ученик, уведомляет педагога. Возвращает текст для админа."""
-    teacher_id = req.teacher_id
-    if await ts_repo.exists(teacher_id, student_id):
-        link_note = "Связь уже существовала."
-    else:
-        await ts_repo.add(teacher_id, student_id)
-        link_note = "Ученик привязан к педагогу."
+async def _notify_teacher_student_created(bot, req: StudentRequest, student_name: str) -> None:
     try:
         await bot.send_message(
             req.teacher_tg_id,
-            f"✅ Ученик <b>{student_name}</b> добавлен в ваш список.",
+            f"✅ Ученик <b>{student_name}</b> создан. "
+            f"Он появится в ваших списках после обновления кэша групп.",
         )
     except Exception as exc:
         logger.error("Не удалось уведомить педагога о создании ученика: %s", exc)
-    return link_note
 
 
 async def _group_toast(
@@ -867,7 +839,7 @@ async def _group_toast(
 @router.callback_query(F.data.startswith("req_approve:"))
 async def cb_approve_student_request(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
@@ -912,9 +884,9 @@ async def cb_approve_student_request(
     student = await student_repo.add(name=name)
     if req.group_id:
         await student_repo.update_group(student.student_id, req.group_id)
-    link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
+    await _notify_teacher_student_created(callback.bot, req, student.name)
     await callback.message.edit_text(
-        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).\n{link_note}",
+        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
     )
     await _notify_other_admins(
         callback.bot, req, callback.message.chat.id,
@@ -927,7 +899,7 @@ async def cb_approve_student_request(
 @router.callback_query(F.data.startswith("req_create_new:"))
 async def cb_create_new_student_request(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
@@ -947,9 +919,9 @@ async def cb_create_new_student_request(
     student = await student_repo.add(name=req.student_name)
     if req.group_id:
         await student_repo.update_group(student.student_id, req.group_id)
-    link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
+    await _notify_teacher_student_created(callback.bot, req, student.name)
     await callback.message.edit_text(
-        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).\n{link_note}",
+        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
     )
     await _notify_other_admins(
         callback.bot, req, callback.message.chat.id,
@@ -962,7 +934,7 @@ async def cb_create_new_student_request(
 @router.callback_query(F.data.startswith("req_link_existing:"))
 async def cb_link_existing_student_request(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, ts_repo: TeacherStudentRepository,
+    student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
 ) -> None:
     if not _is_admin(user):
@@ -982,9 +954,29 @@ async def cb_link_existing_student_request(
     ):
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    link_note = await _finalize_link(callback.bot, req, student.student_id, student.name, ts_repo)
+    group_match = bool(req.group_id) and student.group_id == req.group_id
+    try:
+        if group_match:
+            teacher_note = (
+                f"✅ Ученик <b>{student.name}</b> уже в вашей группе — пользуйтесь."
+            )
+        else:
+            teacher_note = (
+                f"ℹ️ По вашей заявке админ выбрал существующего ученика "
+                f"<b>{student.name}</b>. Он числится в другой группе, поэтому "
+                f"не появится в ваших списках автоматически — свяжитесь с админом."
+            )
+        await callback.bot.send_message(req.teacher_tg_id, teacher_note)
+    except Exception as exc:
+        logger.error("Не удалось уведомить педагога о привязке ученика: %s", exc)
+    admin_note = (
+        "Группа совпадает — ученик виден педагогу."
+        if group_match
+        else "⚠️ Группа ученика отличается от заявленной — педагог не увидит "
+             "его в своих списках. При необходимости переведите ученика в нужную группу."
+    )
     await callback.message.edit_text(
-        f"🔗 Ученик <b>{student.name}</b> (ID: {student.student_id}) привязан к педагогу.\n{link_note}",
+        f"🔗 Выбран ученик <b>{student.name}</b> (ID: {student.student_id}).\n{admin_note}",
     )
     await _notify_other_admins(
         callback.bot, req, callback.message.chat.id,

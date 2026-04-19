@@ -2,10 +2,9 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class TeacherAddStudentStates(StatesGroup):
-    """Педагог добавляет существующего ученика в свой список."""
+    """Педагог создаёт нового ученика через заявку админу."""
     searching = State()
-    choosing_group = State()        # при создании НОВОГО ученика: выбор тренировочной группы
-    multi_selecting = State()       # мульти-выбор из ростера группы
+    choosing_group = State()        # выбор тренировочной группы нового ученика
 
 
 class TeacherRenameStudentStates(StatesGroup):

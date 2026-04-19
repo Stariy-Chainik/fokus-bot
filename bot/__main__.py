@@ -21,12 +21,14 @@ from aiogram.types import BotCommand
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
-    TeacherStudentRepository, LessonRepository, PaymentRepository,
+    LessonRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
     BranchRepository, GroupRepository, TeacherGroupRepository,
     StudentRequestRepository,
 )
-from bot.services import LessonService, PaymentService, DiagnosticsService
+from bot.services import (
+    LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
+)
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router
 
@@ -61,7 +63,6 @@ def _build_dispatcher(storage) -> Dispatcher:
     user_repo = UserRepository(sheets_client, settings.sheet_users)
     teacher_repo = TeacherRepository(sheets_client, settings.sheet_teachers)
     student_repo = StudentRepository(sheets_client, settings.sheet_students)
-    ts_repo = TeacherStudentRepository(sheets_client, settings.sheet_teacher_students)
     lesson_repo = LessonRepository(sheets_client, settings.sheet_lessons)
     payment_repo = PaymentRepository(sheets_client, settings.sheet_payments)
     submission_repo = TeacherPeriodSubmissionRepository(
@@ -76,12 +77,12 @@ def _build_dispatcher(storage) -> Dispatcher:
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, submission_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
+    visibility = TeacherVisibilityService(student_repo, teacher_group_repo)
 
     # ── DI: зависимости во все хендлеры через workflow_data ──────────────────
     dp["user_repo"] = user_repo
     dp["teacher_repo"] = teacher_repo
     dp["student_repo"] = student_repo
-    dp["ts_repo"] = ts_repo
     dp["lesson_repo"] = lesson_repo
     dp["payment_repo"] = payment_repo
     dp["submission_repo"] = submission_repo
@@ -92,6 +93,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
+    dp["visibility"] = visibility
 
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())

@@ -16,10 +16,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import (
-    TeacherRepository, StudentRepository, TeacherStudentRepository,
+    TeacherRepository, StudentRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
 )
-from bot.services import LessonService
+from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
     kb_lesson_type, kb_lesson_type_after_save, kb_duration, kb_teacher_menu,
@@ -39,24 +39,6 @@ _KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло
 
 def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
-
-
-async def _linked_students(teacher_id: str, ts_repo, student_repo):
-    student_ids = await ts_repo.get_students_for_teacher(teacher_id)
-    all_students = await student_repo.get_all()
-    linked = [s for s in all_students if s.student_id in student_ids]
-    return sorted(linked, key=lambda s: s.name)
-
-
-async def _my_students_in_group(teacher_id: str, group_id: str, ts_repo, student_repo):
-    """Ученики педагога, состоящие в указанной группе (строгое пересечение)."""
-    mine_ids = set(await ts_repo.get_students_for_teacher(teacher_id))
-    members = [
-        s for s in await student_repo.get_all()
-        if s.group_id == group_id and s.student_id in mine_ids
-    ]
-    members.sort(key=lambda s: s.name)
-    return members
 
 
 async def _all_students_in_group(group_id: str, student_repo):
@@ -122,7 +104,7 @@ async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("lesson_back:"))
 async def cb_lesson_back(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository,
 ) -> None:
@@ -170,7 +152,7 @@ async def cb_lesson_back(
         )
 
     elif target == "pair":
-        await _show_pair_list(callback, state, user, ts_repo, student_repo)
+        await _show_pair_list(callback, state, user, visibility)
 
     elif target == "group":
         # Возврат к пикеру группы (или филиала) из attendance yes/no.
@@ -187,21 +169,21 @@ async def cb_lesson_back(
         else:
             await state.update_data(selected_group_id=None, selected_ids=[])
             await _start_group_flow(
-                callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, ts_repo,
+                callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, visibility,
             )
 
     elif target == "group_branch":
         # Возврат к выбору филиала из пикера группы.
         await state.update_data(selected_branch_id=None, selected_group_id=None)
         await _start_group_flow(
-            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, ts_repo,
+            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, visibility,
         )
 
     await callback.answer()
 
 
-async def _collect_pairs(teacher_id: str, ts_repo, student_repo):
-    mine = await _linked_students(teacher_id, ts_repo, student_repo)
+async def _collect_pairs(teacher_id: str, visibility: TeacherVisibilityService):
+    mine = await visibility.students_for_teacher(teacher_id)
     mine_ids = {s.student_id for s in mine}
     by_id = {s.student_id: s for s in mine}
     seen: set[tuple[str, str]] = set()
@@ -222,7 +204,7 @@ async def _start_group_flow(
     callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository, student_repo: StudentRepository,
-    ts_repo: TeacherStudentRepository,
+    visibility: TeacherVisibilityService,
 ) -> None:
     data = await state.get_data()
     group_ids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
@@ -241,7 +223,7 @@ async def _start_group_flow(
         # Единственная группа — авто-выбор, запоминаем флаг для корректного back.
         await state.update_data(group_auto=True)
         await _after_group_pick(
-            callback, state, my_groups[0].group_id, user, ts_repo, student_repo, group_repo,
+            callback, state, my_groups[0].group_id, user, visibility, student_repo, group_repo,
         )
         return
 
@@ -269,14 +251,14 @@ async def _start_group_flow(
 
 async def _after_group_pick(
     callback: CallbackQuery, state: FSMContext, group_id: str,
-    user: User, ts_repo: TeacherStudentRepository,
+    user: User, visibility: TeacherVisibilityService,
     student_repo: StudentRepository, group_repo: GroupRepository,
 ) -> None:
     """Ветвление после выбора группы: соло → ростер учеников, группа → attendance."""
     data = await state.get_data()
     if data.get("kind") == "soloist":
         await _show_soloist_in_group(
-            callback, state, group_id, user, ts_repo, student_repo, group_repo,
+            callback, state, group_id, user, visibility, group_repo,
         )
     else:
         await _ask_group_attendance(callback, state, group_id, group_repo)
@@ -303,20 +285,19 @@ async def _ask_group_attendance(
 
 async def _show_soloist_in_group(
     callback: CallbackQuery, state: FSMContext, group_id: str,
-    user: User, ts_repo: TeacherStudentRepository,
-    student_repo: StudentRepository, group_repo: GroupRepository,
+    user: User, visibility: TeacherVisibilityService,
+    group_repo: GroupRepository,
 ) -> None:
     """Для соло: мульти-выбор учеников педагога из выбранной группы."""
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    members = await _my_students_in_group(user.teacher_id, group_id, ts_repo, student_repo)
+    members = await visibility.students_in_group_for_teacher(user.teacher_id, group_id)
     if not members:
         await state.clear()
         await callback.message.edit_text(
-            f"В группе «{group.name}» нет ваших учеников.\n"
-            f"Добавьте их через «Мои ученики».",
+            f"В группе «{group.name}» нет учеников.",
             reply_markup=kb_teacher_menu(),
         )
         return
@@ -333,7 +314,7 @@ async def _show_soloist_in_group(
 
 async def _show_group_roster(
     callback: CallbackQuery, state: FSMContext, group_id: str,
-    user: User, ts_repo: TeacherStudentRepository,
+    user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
 ) -> None:
     group = await group_repo.get_by_id(group_id)
@@ -360,10 +341,10 @@ async def _show_group_roster(
 
 async def _show_pair_list(
     callback: CallbackQuery, state: FSMContext, user: User,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService,
 ) -> None:
     data = await state.get_data()
-    pairs = await _collect_pairs(user.teacher_id, ts_repo, student_repo)
+    pairs = await _collect_pairs(user.teacher_id, visibility)
     if not pairs:
         await callback.message.edit_text(
             "У вас нет пар среди ваших учеников.", reply_markup=kb_teacher_menu(),
@@ -458,7 +439,7 @@ async def cb_kind_any(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("duration:"), RecordLessonStates.choosing_duration)
 async def cb_duration(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository,
 ) -> None:
@@ -472,15 +453,15 @@ async def cb_duration(
 
     if kind == "group":
         await _start_group_flow(
-            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, ts_repo,
+            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, visibility,
         )
 
     elif kind == "pair":
-        await _show_pair_list(callback, state, user, ts_repo, student_repo)
+        await _show_pair_list(callback, state, user, visibility)
 
     elif kind == "soloist":
         await _start_group_flow(
-            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, ts_repo,
+            callback, state, user, teacher_group_repo, group_repo, branch_repo, student_repo, visibility,
         )
 
     await callback.answer()
@@ -516,14 +497,14 @@ async def cb_group_branch(
 @router.callback_query(F.data.startswith("group_pick:"), RecordLessonStates.choosing_group)
 async def cb_group_pick(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     group_id = callback.data.split(":", 1)[1]
-    await _after_group_pick(callback, state, group_id, user, ts_repo, student_repo, group_repo)
+    await _after_group_pick(callback, state, group_id, user, visibility, student_repo, group_repo)
     await callback.answer()
 
 
@@ -541,7 +522,6 @@ async def cb_attendance_no(
 @router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance)
 async def cb_attendance_yes(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository,
     student_repo: StudentRepository, group_repo: GroupRepository,
 ) -> None:
     if not _is_teacher(user):
@@ -552,7 +532,7 @@ async def cb_attendance_yes(
     if not gid:
         await callback.answer("Группа не выбрана", show_alert=True)
         return
-    await _show_group_roster(callback, state, gid, user, ts_repo, student_repo, group_repo)
+    await _show_group_roster(callback, state, gid, user, student_repo, group_repo)
     await callback.answer()
 
 
@@ -560,7 +540,7 @@ async def cb_attendance_yes(
 
 async def _refresh_multi_select(
     callback: CallbackQuery, state: FSMContext, user: User,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
 ) -> None:
     data = await state.get_data()
     selected = set(data.get("selected_ids", []))
@@ -568,16 +548,16 @@ async def _refresh_multi_select(
     gid = data.get("selected_group_id")
     if cur_state == RecordLessonStates.selecting_soloists.state:
         if gid:
-            mine = await _my_students_in_group(user.teacher_id, gid, ts_repo, student_repo)
+            mine = await visibility.students_in_group_for_teacher(user.teacher_id, gid)
             back_cb = "lesson_back:group"
         else:
-            mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+            mine = await visibility.students_for_teacher(user.teacher_id)
             back_cb = "lesson_back:duration"
     elif cur_state == RecordLessonStates.selecting_attendees.state and gid:
         mine = await _all_students_in_group(gid, student_repo)
         back_cb = "lesson_back:attendance"
     else:
-        mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+        mine = await visibility.students_for_teacher(user.teacher_id)
         back_cb = "lesson_back:attendance"
     show_toggle_all = bool(gid) and cur_state in (
         RecordLessonStates.selecting_attendees.state,
@@ -593,7 +573,7 @@ async def _refresh_multi_select(
 @router.callback_query(F.data.startswith("ms_toggle:"))
 async def cb_ms_toggle(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -611,14 +591,14 @@ async def cb_ms_toggle(
     else:
         selected.append(student_id)
     await state.update_data(selected_ids=selected)
-    await _refresh_multi_select(callback, state, user, ts_repo, student_repo)
+    await _refresh_multi_select(callback, state, user, visibility, student_repo)
     await callback.answer()
 
 
 @router.callback_query(F.data == "ms_all")
 async def cb_ms_all(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -632,14 +612,14 @@ async def cb_ms_all(
     if gid and cur == RecordLessonStates.selecting_attendees.state:
         mine = await _all_students_in_group(gid, student_repo)
     elif gid and cur == RecordLessonStates.selecting_soloists.state:
-        mine = await _my_students_in_group(user.teacher_id, gid, ts_repo, student_repo)
+        mine = await visibility.students_in_group_for_teacher(user.teacher_id, gid)
     else:
-        mine = await _linked_students(user.teacher_id, ts_repo, student_repo)
+        mine = await visibility.students_for_teacher(user.teacher_id)
     all_ids = [s.student_id for s in mine]
     selected = list(data.get("selected_ids", []))
     new_selected = [] if len(selected) == len(all_ids) else all_ids
     await state.update_data(selected_ids=new_selected)
-    await _refresh_multi_select(callback, state, user, ts_repo, student_repo)
+    await _refresh_multi_select(callback, state, user, visibility, student_repo)
     await callback.answer()
 
 
@@ -666,7 +646,7 @@ async def cb_ms_confirm(
 @router.callback_query(F.data.startswith("pair_toggle:"), RecordLessonStates.choosing_pair)
 async def cb_pair_toggle(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    ts_repo: TeacherStudentRepository, student_repo: StudentRepository,
+    visibility: TeacherVisibilityService,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -680,7 +660,7 @@ async def cb_pair_toggle(
         selected.append(key)
     await state.update_data(selected_ids=selected)
 
-    pairs = await _collect_pairs(user.teacher_id, ts_repo, student_repo)
+    pairs = await _collect_pairs(user.teacher_id, visibility)
     await callback.message.edit_reply_markup(
         reply_markup=kb_pair_multi_select(pairs, set(selected), back_cb="lesson_back:duration"),
     )

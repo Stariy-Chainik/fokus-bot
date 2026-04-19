@@ -56,7 +56,6 @@ bot/
     user_repo.py
     teacher_repo.py
     student_repo.py
-    teacher_student_repo.py    # many-to-many педагог<->ученик
     lesson_repo.py
     payment_repo.py
     teacher_period_submission_repo.py
@@ -68,6 +67,7 @@ bot/
     billing_service.py     # Чистые функции: calc_earned, build_billing_rows
     payment_service.py     # On-demand счета, подтверждение оплаты
     diagnostics_service.py # Проверка целостности ссылок
+    visibility.py          # Видимость педагог→ученик через группы
   states/
     admin_states.py        # FSM-состояния админских flow
     teacher_states.py      # FSM-состояния педагога
@@ -147,7 +147,7 @@ StudentPeriodPayment (student_period_payments)
 Branch 1───* Group
 Group  1───* Student (через student.group_id)
 Group  *───* Teacher (через teacher_groups)
-Teacher *───* Student (через teacher_students)
+Teacher *───* Student (деривативно: student.group_id ∈ teacher.groups)
 Student 1───1 Student (partner_id, двусторонний)
 Teacher 1───* Lesson
 Lesson  *───1 Student (student_1)
@@ -184,11 +184,13 @@ Handler (получает user, repos, services через DI)
 Все зависимости регистрируются в `__main__.py` через `dp[key] = value`:
 
 ```
-Repositories:  user_repo, teacher_repo, student_repo, ts_repo,
+Repositories:  user_repo, teacher_repo, student_repo,
                lesson_repo, payment_repo, submission_repo,
-               branch_repo, group_repo, teacher_group_repo
+               branch_repo, group_repo, teacher_group_repo,
+               student_request_repo
 
-Services:      lesson_service, payment_service, diagnostics_service
+Services:      lesson_service, payment_service, diagnostics_service,
+               visibility (TeacherVisibilityService)
 
 Other:         student_requests (in-memory dict)
 ```
@@ -506,7 +508,6 @@ amount = rate_for_student * duration_min / 45
 | users | user_id | Telegram-аккаунты, привязка admin/teacher |
 | teachers | teacher_id | Педагоги и ставки |
 | students | student_id | Ученики, group_id, partner_id |
-| teacher_students | teacher_id + student_id | Связь педагог-ученик |
 | lessons | lesson_id | Все записанные занятия |
 | billing | - | Не используется (legacy, on-demand) |
 | student_period_payments | payment_id | Счета учеников |

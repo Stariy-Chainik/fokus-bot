@@ -30,12 +30,6 @@ class Student:
 
 
 @dataclass
-class TeacherStudent:
-    teacher_id: str
-    student_id: str
-
-
-@dataclass
 class Branch:
     branch_id: str
     name: str
