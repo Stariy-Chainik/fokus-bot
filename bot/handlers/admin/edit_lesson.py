@@ -8,7 +8,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.repositories import LessonRepository, TeacherRepository
-from bot.services import LessonService
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.teacher import kb_lesson_list
 from bot.keyboards.calendar import kb_calendar
@@ -269,15 +268,3 @@ async def cb_admin_lessons_cal_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_delete_lesson:"))
-async def cb_admin_delete_lesson(
-    callback: CallbackQuery, user: User | None, lesson_service: LessonService,
-) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    lesson_id = callback.data.split(":", 1)[1]
-    ok = await lesson_service.delete(lesson_id)
-    text = f"Занятие {lesson_id} удалено." if ok else "Занятие не найдено."
-    await callback.message.edit_text(text, reply_markup=kb_back("admin:edit_lesson"))
-    await callback.answer()

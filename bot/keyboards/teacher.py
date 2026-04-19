@@ -1,8 +1,6 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-PAGE_SIZE = 8  # кол-во учеников на странице при листании
-
 
 def kb_teacher_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
     rows = [
@@ -199,33 +197,6 @@ def kb_yes_no(yes_cb: str, no_cb: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="❌ Нет", callback_data=no_cb),
         ]
     ])
-
-
-def kb_student_search_results(
-    students: list,
-    action_prefix: str,
-    page: int = 0,
-    total: int = 0,
-) -> InlineKeyboardMarkup:
-    """
-    Клавиатура результатов поиска/просмотра учеников.
-    Поддерживает пагинацию: page — текущая страница (0-based).
-    """
-    buttons = [
-        [InlineKeyboardButton(text=s.name, callback_data=f"{action_prefix}:{s.student_id}")]
-        for s in students
-    ]
-
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="← Пред.", callback_data=f"page:{action_prefix}:{page - 1}"))
-    if (page + 1) * PAGE_SIZE < total:
-        nav_row.append(InlineKeyboardButton(text="След. →", callback_data=f"page:{action_prefix}:{page + 1}"))
-    if nav_row:
-        buttons.append(nav_row)
-
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def kb_lesson_list(
