@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="👨‍🏫 Педагоги", callback_data="admin:teachers")],
+        [InlineKeyboardButton(text="👨‍🏫 Педагоги", callback_data="teachers:list")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],
         [InlineKeyboardButton(text="📝 Заявки", callback_data="admin:requests")],
         [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
@@ -16,16 +16,6 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
     if can_switch_role:
         rows.append([InlineKeyboardButton(text="🔄 Режим педагога", callback_data="mode:teacher")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def kb_teachers_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Список педагогов", callback_data="teachers:list")],
-        [InlineKeyboardButton(text="➕ Добавить педагога", callback_data="teachers:add")],
-        [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data="teachers:delete")],
-        [InlineKeyboardButton(text="📊 Изменить ставки", callback_data="teachers:edit_rates")],
-        [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
-    ])
 
 
 def kb_students_menu() -> InlineKeyboardMarkup:
@@ -91,7 +81,7 @@ def kb_partner_candidates(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:teachers") -> InlineKeyboardMarkup:
+def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:menu") -> InlineKeyboardMarkup:
     """Список педагогов для выбора. action_prefix например 'del_teacher' → callback_data='del_teacher:TCH-0001'"""
     buttons = [
         [InlineKeyboardButton(text=t.name, callback_data=f"{action_prefix}:{t.teacher_id}")]
@@ -105,6 +95,7 @@ def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
         [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data=f"del_teacher:{teacher_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
     ])
 
@@ -114,7 +105,7 @@ def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_stu
         [InlineKeyboardButton(text=f"Групповое: {rate_group} руб.", callback_data=f"edit_rate:group:{teacher_id}")],
         [InlineKeyboardButton(text=f"Инд. педагогу: {rate_teacher} руб.", callback_data=f"edit_rate:teacher:{teacher_id}")],
         [InlineKeyboardButton(text=f"Инд. ученику: {rate_student} руб.", callback_data=f"edit_rate:student:{teacher_id}")],
-        [InlineKeyboardButton(text="« Отмена", callback_data="admin:teachers")],
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"teacher_card:{teacher_id}")],
     ])
 
 

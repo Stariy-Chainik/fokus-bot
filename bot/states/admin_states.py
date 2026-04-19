@@ -10,7 +10,6 @@ class AddTeacherStates(StatesGroup):
 
 
 class EditTeacherRatesStates(StatesGroup):
-    choosing_teacher = State()
     choosing_rate = State()
     entering_rate = State()
     confirming = State()
