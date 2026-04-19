@@ -11,7 +11,7 @@ from bot.repositories import (
     BranchRepository, GroupRepository,
 )
 from bot.services import PaymentService
-from bot.keyboards.admin import kb_student_list, kb_back, kb_confirm
+from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period, format_date_display
 
 logger = logging.getLogger(__name__)

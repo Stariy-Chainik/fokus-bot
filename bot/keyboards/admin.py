@@ -116,34 +116,6 @@ def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     ])
 
 
-def kb_student_list(
-    students: list, action_prefix: str, back_cb: str = "admin:students",
-    page: int = 0, total: int | None = None,
-) -> InlineKeyboardMarkup:
-    """Список учеников с пагинацией.
-    students — уже срезанный по странице список; total — общий размер выборки.
-    """
-    if total is None:
-        total = len(students)
-    buttons = [
-        [InlineKeyboardButton(text=s.name, callback_data=f"{action_prefix}:{s.student_id}")]
-        for s in students
-    ]
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(
-            text="← Пред.", callback_data=f"slist_page:{action_prefix}:{page - 1}",
-        ))
-    if (page + 1) * _STUDENT_PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton(
-            text="След. →", callback_data=f"slist_page:{action_prefix}:{page + 1}",
-        ))
-    if nav:
-        buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="« Отмена", callback_data=back_cb)])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
 def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_student: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Групповое: {rate_group} руб.", callback_data=f"edit_rate:group:{teacher_id}")],
