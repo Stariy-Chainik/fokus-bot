@@ -802,15 +802,15 @@ async def cb_partner_clear_do(
 # ─── Заявки педагогов на создание новых учеников ─────────────────────────────
 
 def _find_similar_students(all_students: list, name: str) -> list:
-    """Substring-match по токенам имени (длина ≥ 3). Возвращает до 10 похожих."""
-    tokens = [t.lower() for t in name.split() if len(t) >= 3]
-    if not tokens:
+    """Точное совпадение по первому слову (фамилии), без учёта регистра. До 10 шт."""
+    parts = name.split()
+    if not parts:
         return []
-    similar = []
-    for s in all_students:
-        sn = s.name.lower()
-        if any(t in sn for t in tokens):
-            similar.append(s)
+    surname = parts[0].lower()
+    similar = [
+        s for s in all_students
+        if s.name.split() and s.name.split()[0].lower() == surname
+    ]
     return similar[:10]
 
 
@@ -895,9 +895,10 @@ async def cb_approve_student_request(
         rows.append([InlineKeyboardButton(
             text="❌ Отменить", callback_data=f"req_reject:{req_id}",
         )])
+        surname = name.split()[0] if name.split() else name
         await callback.message.edit_text(
             f"📝 Заявка от <b>{req.teacher_name}</b> на ученика <b>{name}</b>.\n\n"
-            f"⚠️ Найдены похожие ученики в базе:",
+            f"⚠️ В базе уже есть ученики с фамилией «<b>{surname}</b>»:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
         await callback.answer()
