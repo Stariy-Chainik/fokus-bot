@@ -15,3 +15,14 @@ class RequestStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class GroupBillingMode(str, Enum):
+    NONE = "none"
+    PER_VISIT = "per_visit"
+    SUBSCRIPTION = "subscription"
+
+
+class StudentGroupTier(str, Enum):
+    FULL = "full"
+    SHORT = "short"

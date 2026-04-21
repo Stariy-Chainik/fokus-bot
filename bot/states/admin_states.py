@@ -51,3 +51,10 @@ class AddGroupStates(StatesGroup):
 
 class EditGroupNameStates(StatesGroup):
     entering_name = State()
+
+
+class GroupBillingStates(StatesGroup):
+    entering_duration_short = State()
+    entering_price_short = State()
+    entering_duration_full = State()
+    entering_price_full = State()

@@ -5,10 +5,11 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User, StudentRequest
+from bot.models import User, StudentRequest, GroupBillingMode, StudentGroupTier
 from bot.repositories import (
     StudentRepository, TeacherRepository, UserRepository,
-    GroupRepository, BranchRepository, StudentRequestRepository,
+    GroupRepository, BranchRepository, StudentGroupRepository,
+    StudentRequestRepository,
 )
 from bot.services import TeacherVisibilityService
 from bot.models.enums import RequestStatus
@@ -98,6 +99,7 @@ async def cb_pairs_soloists_groups(
 async def cb_pairs_soloists_list(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -106,7 +108,8 @@ async def cb_pairs_soloists_list(
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
     all_students = await student_repo.get_all()
-    grp_students = [s for s in all_students if s.group_id == group_id]
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
+    grp_students = [s for s in all_students if s.student_id in member_ids]
 
     if mode == "pairs":
         by_id = {s.student_id: s for s in all_students}
@@ -180,6 +183,7 @@ async def cb_pairs_soloists_list(
 async def cb_admin_create_pair(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     """Админ: выбор первого ученика для новой пары (из солистов группы).
     Дальше — стандартный поток partner_assign:<id>."""
@@ -191,9 +195,10 @@ async def cb_admin_create_pair(
     group_name = group.name if group else group_id
     back_cb = f"sp_brn:pairs:{group.branch_id}" if group else "admin:students"
 
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
     soloists = sorted(
         [s for s in await student_repo.get_all()
-         if s.group_id == group_id and not s.partner_id],
+         if s.student_id in member_ids and not s.partner_id],
         key=lambda s: s.name,
     )
     if not soloists:
@@ -220,6 +225,7 @@ async def cb_admin_create_pair(
 async def cb_admin_pair_lead(
     callback: CallbackQuery, user: User | None, state: FSMContext,
     student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     """Админ: выбор лидера через «Создать пару» — как partner_assign, но помнит группу."""
     if not _is_admin(user):
@@ -231,12 +237,13 @@ async def cb_admin_pair_lead(
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     candidates: list = []
     for other in all_students:
         if other.student_id == student_id:
             continue
-        if other.group_id != group_id:
+        if other.student_id not in member_ids:
             continue
         if other.student_id == student.partner_id:
             continue
@@ -334,11 +341,13 @@ async def _render_student_card(
     student_repo: StudentRepository, teacher_repo: TeacherRepository,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     student = await student_repo.get_by_id(student_id)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    student.group_ids = await student_group_repo.get_groups_for_student(student_id)
     teacher_ids = await visibility.teachers_for_student(student_id)
     if teacher_ids:
         all_teachers = await teacher_repo.get_all()
@@ -353,21 +362,55 @@ async def _render_student_card(
     else:
         partner_text = "— (солист)"
 
-    if student.group_id:
-        group = await group_repo.get_by_id(student.group_id)
-        if group:
-            branch = await branch_repo.get_by_id(group.branch_id)
-            branch_name = branch.name if branch else group.branch_id
-            group_text = f"<b>{group.name}</b> ({branch_name})"
-        else:
-            group_text = f"(не найдена: {student.group_id})"
+    # Блок «Группы» — список с филиалом; тариф показываем для группы с dual-pricing.
+    primary_group = None
+    if student.group_ids:
+        group_lines: list[str] = []
+        for gid in student.group_ids:
+            g = await group_repo.get_by_id(gid)
+            if g:
+                if primary_group is None:
+                    primary_group = g
+                branch = await branch_repo.get_by_id(g.branch_id)
+                branch_name = branch.name if branch else g.branch_id
+                mode_marker = ""
+                if g.billing_mode == GroupBillingMode.PER_VISIT:
+                    mode_marker = f" · 💰 {g.price_full}₽/{g.duration_full}м"
+                group_lines.append(f"  • <b>{g.name}</b> ({branch_name}){mode_marker}")
+            else:
+                group_lines.append(f"  • (не найдена: {gid})")
+        groups_block = "\n".join(group_lines)
     else:
-        group_text = "<i>не задана</i>"
+        groups_block = "  <i>не задана</i>"
+
+    tier_toggle = None
+    tier_line = ""
+    # Показ тарифа имеет смысл только для групп с dual-pricing (PER_VISIT + duration_short != duration_full).
+    if primary_group is not None and primary_group.billing_mode == GroupBillingMode.PER_VISIT:
+        if student.group_tier == StudentGroupTier.SHORT:
+            tier_line = (
+                f"\n🕐 Тариф: <b>короткий</b> — "
+                f"{primary_group.duration_short} мин / {primary_group.price_short}₽"
+            )
+            tier_toggle = (
+                student.group_tier.value,
+                f"🕐 Переключить на полный ({primary_group.duration_full} мин / {primary_group.price_full}₽)",
+            )
+        else:
+            tier_line = (
+                f"\n🕐 Тариф: <b>полный</b> — "
+                f"{primary_group.duration_full} мин / {primary_group.price_full}₽"
+            )
+            tier_toggle = (
+                student.group_tier.value,
+                f"🕐 Переключить на короткий ({primary_group.duration_short} мин / {primary_group.price_short}₽)",
+            )
 
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
         f"ID: {student.student_id}\n"
-        f"🏢 Группа: {group_text}\n\n"
+        f"🏢 Группы:\n{groups_block}"
+        f"{tier_line}\n\n"
         f"Педагоги:\n{teachers_text}\n\n"
         f"Партнёр: {partner_text}"
     )
@@ -375,9 +418,53 @@ async def _render_student_card(
         text,
         reply_markup=kb_student_card(
             student_id, has_partner=bool(student.partner_id), back_cb=back_cb,
+            tier_toggle=tier_toggle,
+            has_groups=bool(student.group_ids),
         ),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("student_tier_toggle:"))
+async def cb_student_tier_toggle(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    gids = await student_group_repo.get_groups_for_student(student_id)
+    if not gids:
+        await callback.answer("У ученика не задана группа", show_alert=True)
+        return
+    # Тариф переключается относительно первой PER_VISIT группы ученика.
+    per_visit_group = None
+    for gid in gids:
+        g = await group_repo.get_by_id(gid)
+        if g and g.billing_mode == GroupBillingMode.PER_VISIT:
+            per_visit_group = g
+            break
+    if per_visit_group is None:
+        await callback.answer("Ни у одной группы ученика не включён биллинг per-visit", show_alert=True)
+        return
+    new_tier = (
+        StudentGroupTier.FULL if student.group_tier == StudentGroupTier.SHORT
+        else StudentGroupTier.SHORT
+    )
+    await student_repo.update_tier(student_id, new_tier)
+    await _render_student_card(
+        callback, student_id, "students:list",
+        student_repo, teacher_repo, visibility, group_repo, branch_repo,
+        student_group_repo,
+    )
 
 
 @router.callback_query(F.data.startswith("student_card:"))
@@ -386,6 +473,7 @@ async def cb_student_card(
     student_repo: StudentRepository, teacher_repo: TeacherRepository,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -394,6 +482,7 @@ async def cb_student_card(
     await _render_student_card(
         callback, student_id, "students:list",
         student_repo, teacher_repo, visibility, group_repo, branch_repo,
+        student_group_repo,
     )
 
 
@@ -403,6 +492,7 @@ async def cb_student_card_from_sp(
     student_repo: StudentRepository, teacher_repo: TeacherRepository,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -412,6 +502,7 @@ async def cb_student_card_from_sp(
     await _render_student_card(
         callback, student_id, back_cb,
         student_repo, teacher_repo, visibility, group_repo, branch_repo,
+        student_group_repo,
     )
 
 
@@ -541,6 +632,7 @@ async def cb_confirm_add_student(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     student_repo: StudentRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -552,7 +644,7 @@ async def cb_confirm_add_student(
         group_id = data.get("group_id") or ""
         group_info = ""
         if group_id:
-            await student_repo.update_group(student.student_id, group_id)
+            await student_group_repo.add(student.student_id, group_id)
             group = await group_repo.get_by_id(group_id)
             if group:
                 branch = await branch_repo.get_by_id(group.branch_id)
@@ -634,6 +726,7 @@ async def cb_delete_student_branch(
 async def cb_delete_student_group(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -643,8 +736,9 @@ async def cb_delete_student_group(
     group_name = group.name if group else group_id
     back_cb = f"del_st_brn:{group.branch_id}" if group else "students:delete"
 
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
     grp_students = sorted(
-        [s for s in await student_repo.get_all() if s.group_id == group_id],
+        [s for s in await student_repo.get_all() if s.student_id in member_ids],
         key=lambda s: s.name,
     )
     if not grp_students:
@@ -697,11 +791,13 @@ async def cb_delete_student_do(
     callback: CallbackQuery,
     user: User | None,
     student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, group_id, student_id = callback.data.split(":", 2)
+    await student_group_repo.remove_all_for_student(student_id)
     ok = await student_repo.delete(student_id)
     text = f"Ученик {student_id} удалён." if ok else "Ученик не найден."
     await callback.message.edit_text(
@@ -719,6 +815,7 @@ async def cb_partner_assign_start(
     user: User | None,
     state: FSMContext,
     student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -729,7 +826,8 @@ async def cb_partner_assign_start(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    if not student.group_id:
+    student_gids = set(await student_group_repo.get_groups_for_student(student_id))
+    if not student_gids:
         await callback.message.edit_text(
             "У ученика не задана группа — сначала назначьте группу.",
             reply_markup=kb_back(f"student_card:{student_id}"),
@@ -737,13 +835,15 @@ async def cb_partner_assign_start(
         await callback.answer()
         return
 
-    # Кандидаты — ученики из той же группы.
+    # Кандидаты — ученики, у которых есть хотя бы одна общая группа с текущим.
+    sg_map = await student_group_repo.get_map_by_student()
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
     candidates: list = []
     for other in all_students:
         if other.student_id == student_id:
             continue
-        if other.group_id != student.group_id:
+        other_gids = set(sg_map.get(other.student_id, []))
+        if not (other_gids & student_gids):
             continue
         if other.student_id == student.partner_id:
             continue
@@ -894,6 +994,157 @@ async def cb_partner_clear_do(
     await callback.answer()
 
 
+# ─── Управление группами ученика ─────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("student_groups_add:"))
+async def cb_student_groups_add_branches(
+    callback: CallbackQuery, user: User | None,
+    branch_repo: BranchRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
+    if not branches:
+        await callback.message.edit_text(
+            "Филиалов нет.", reply_markup=kb_back(f"student_card:{student_id}"),
+        )
+        await callback.answer()
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=f"🏢 {b.name}",
+            callback_data=f"sg_add_brn:{student_id}:{b.branch_id}",
+        )]
+        for b in branches
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"student_card:{student_id}")])
+    await callback.message.edit_text(
+        "<b>Добавить в группу — выберите филиал:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sg_add_brn:"))
+async def cb_student_groups_add_pick_group(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, student_id, branch_id = callback.data.split(":", 2)
+    groups = sorted(
+        [g for g in await group_repo.get_all() if g.branch_id == branch_id],
+        key=lambda g: (g.sort_order, g.name),
+    )
+    current = set(await student_group_repo.get_groups_for_student(student_id))
+    available = [g for g in groups if g.group_id not in current]
+    if not available:
+        await callback.message.edit_text(
+            "В этом филиале нет групп, в которых ученика ещё нет.",
+            reply_markup=kb_back(f"student_groups_add:{student_id}"),
+        )
+        await callback.answer()
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=f"💃 {g.name}",
+            callback_data=f"sg_add_do:{student_id}:{g.group_id}",
+        )]
+        for g in available
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"student_groups_add:{student_id}")])
+    await callback.message.edit_text(
+        "<b>Выберите группу:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sg_add_do:"))
+async def cb_student_groups_add_do(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, student_id, group_id = callback.data.split(":", 2)
+    await student_group_repo.add(student_id, group_id)
+    group = await group_repo.get_by_id(group_id)
+    toast = f"Добавлен в группу «{group.name}»" if group else "Добавлен в группу"
+    await callback.answer(toast, show_alert=False)
+    await _render_student_card(
+        callback, student_id, "students:list",
+        student_repo, teacher_repo, visibility, group_repo, branch_repo,
+        student_group_repo,
+    )
+
+
+@router.callback_query(F.data.startswith("student_groups_remove:"))
+async def cb_student_groups_remove_list(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    gids = await student_group_repo.get_groups_for_student(student_id)
+    if not gids:
+        await callback.answer("У ученика нет групп", show_alert=True)
+        return
+    rows: list = []
+    for gid in gids:
+        g = await group_repo.get_by_id(gid)
+        if g:
+            branch = await branch_repo.get_by_id(g.branch_id)
+            bname = branch.name if branch else "—"
+            label = f"{g.name} ({bname})"
+        else:
+            label = gid
+        rows.append([InlineKeyboardButton(
+            text=label, callback_data=f"sg_rm_do:{student_id}:{gid}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"student_card:{student_id}")])
+    await callback.message.edit_text(
+        "<b>Убрать из группы — выберите группу:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sg_rm_do:"))
+async def cb_student_groups_remove_do(
+    callback: CallbackQuery, user: User | None,
+    student_repo: StudentRepository, teacher_repo: TeacherRepository,
+    visibility: TeacherVisibilityService,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, student_id, group_id = callback.data.split(":", 2)
+    await student_group_repo.remove(student_id, group_id)
+    group = await group_repo.get_by_id(group_id)
+    toast = f"Убран из группы «{group.name}»" if group else "Убран из группы"
+    await callback.answer(toast, show_alert=False)
+    await _render_student_card(
+        callback, student_id, "students:list",
+        student_repo, teacher_repo, visibility, group_repo, branch_repo,
+        student_group_repo,
+    )
+
+
 # ─── Заявки педагогов на создание новых учеников ─────────────────────────────
 
 def _find_similar_students(all_students: list, name: str) -> list:
@@ -955,6 +1206,7 @@ async def cb_approve_student_request(
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -996,7 +1248,7 @@ async def cb_approve_student_request(
         return
     student = await student_repo.add(name=name)
     if req.group_id:
-        await student_repo.update_group(student.student_id, req.group_id)
+        await student_group_repo.add(student.student_id, req.group_id)
     await _notify_teacher_student_created(callback.bot, req, student.name)
     await callback.message.edit_text(
         f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
@@ -1015,6 +1267,7 @@ async def cb_create_new_student_request(
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -1031,7 +1284,7 @@ async def cb_create_new_student_request(
         return
     student = await student_repo.add(name=req.student_name)
     if req.group_id:
-        await student_repo.update_group(student.student_id, req.group_id)
+        await student_group_repo.add(student.student_id, req.group_id)
     await _notify_teacher_student_created(callback.bot, req, student.name)
     await callback.message.edit_text(
         f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
@@ -1049,6 +1302,7 @@ async def cb_link_existing_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -1067,27 +1321,36 @@ async def cb_link_existing_student_request(
     ):
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    group_match = bool(req.group_id) and student.group_id == req.group_id
+    # Ученик может состоять в N группах — проверяем членство, а не «основную» группу.
+    student_gids = set(await student_group_repo.get_groups_for_student(student_id))
+    already_in = bool(req.group_id) and req.group_id in student_gids
+    added_to_group = False
+    if req.group_id and not already_in:
+        await student_group_repo.add(student_id, req.group_id)
+        added_to_group = True
     try:
-        if group_match:
+        if already_in:
             teacher_note = (
                 f"✅ Ученик <b>{student.name}</b> уже в вашей группе — пользуйтесь."
+            )
+        elif added_to_group:
+            teacher_note = (
+                f"✅ Ученик <b>{student.name}</b> добавлен в вашу группу — пользуйтесь."
             )
         else:
             teacher_note = (
                 f"ℹ️ По вашей заявке админ выбрал существующего ученика "
-                f"<b>{student.name}</b>. Он числится в другой группе, поэтому "
-                f"не появится в ваших списках автоматически — свяжитесь с админом."
+                f"<b>{student.name}</b>."
             )
         await callback.bot.send_message(req.teacher_tg_id, teacher_note)
     except Exception as exc:
         logger.error("Не удалось уведомить педагога о привязке ученика: %s", exc)
-    admin_note = (
-        "Группа совпадает — ученик виден педагогу."
-        if group_match
-        else "⚠️ Группа ученика отличается от заявленной — педагог не увидит "
-             "его в своих списках. При необходимости переведите ученика в нужную группу."
-    )
+    if already_in:
+        admin_note = "Ученик уже состоит в этой группе — педагог его видит."
+    elif added_to_group:
+        admin_note = "Ученик добавлен в группу заявки — педагог теперь его видит."
+    else:
+        admin_note = "Группа в заявке не указана."
     await callback.message.edit_text(
         f"🔗 Выбран ученик <b>{student.name}</b> (ID: {student.student_id}).\n{admin_note}",
     )

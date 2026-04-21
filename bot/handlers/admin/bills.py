@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.repositories import (
     StudentRepository, PaymentRepository, TeacherRepository,
-    BranchRepository, GroupRepository,
+    BranchRepository, GroupRepository, StudentGroupRepository,
 )
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
@@ -67,6 +67,7 @@ async def cb_bills_choose_period(callback: CallbackQuery, user: User | None) -> 
 async def cb_bills_choose_branch(
     callback: CallbackQuery, user: User | None,
     branch_repo: BranchRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -74,7 +75,8 @@ async def cb_bills_choose_branch(
     period = callback.data.split(":", 1)[1]
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     students = await student_repo.get_all()
-    has_no_group = any(not s.group_id for s in students)
+    sg_map = await student_group_repo.get_map_by_student()
+    has_no_group = any(not sg_map.get(s.student_id) for s in students)
 
     rows = [
         [InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"bvb:{period}:{b.branch_id}")]
@@ -102,6 +104,7 @@ async def cb_bills_choose_branch(
 async def cb_bills_choose_group(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -109,8 +112,9 @@ async def cb_bills_choose_group(
     _, period, branch_id = callback.data.split(":", 2)
 
     if branch_id == "none":
+        sg_map = await student_group_repo.get_map_by_student()
         students = sorted(
-            [s for s in await student_repo.get_all() if not s.group_id],
+            [s for s in await student_repo.get_all() if not sg_map.get(s.student_id)],
             key=lambda s: s.name,
         )
         if not students:
@@ -154,6 +158,7 @@ async def cb_bills_choose_group(
 async def cb_bills_choose_student(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -163,8 +168,9 @@ async def cb_bills_choose_student(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
     students = sorted(
-        [s for s in await student_repo.get_all() if s.group_id == group_id],
+        [s for s in await student_repo.get_all() if s.student_id in member_ids],
         key=lambda s: s.name,
     )
     if not students:
@@ -193,7 +199,6 @@ async def cb_bills_show(
     student_repo: StudentRepository,
     payment_repo: PaymentRepository,
     payment_service: PaymentService,
-    group_repo: GroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -211,7 +216,7 @@ async def cb_bills_show(
     bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
     if not bills:
         await callback.message.edit_text(
-            f"У {student.name} за {display_period(period_month)} нет индивидуальных занятий.",
+            f"У {student.name} за {display_period(period_month)} нет занятий к оплате.",
             reply_markup=kb_back(back_cb),
         )
         await callback.answer()
@@ -219,10 +224,6 @@ async def cb_bills_show(
 
     payments = await payment_repo.get_by_student_and_period(student_id, period_month)
     pay_by_teacher = {p.teacher_id: p for p in payments}
-
-    not_submitted_ids = await payment_service.teachers_not_submitted(
-        list(bills.keys()), period_month,
-    )
 
     lines = [f"<b>Счёт: {student.name}</b>", f"Период: {display_period(period_month)}", ""]
     grand_total = 0
@@ -232,15 +233,23 @@ async def cb_bills_show(
         p = pay_by_teacher.get(teacher_id)
         if p and p.status.value == "paid":
             status = f"✅ Оплачен ({p.paid_at or ''})"
-        elif teacher_id in not_submitted_ids:
-            status = "🔴 Период не сдан педагогом"
         elif p:
             status = "📋 Ожидает оплаты"
         else:
             status = "⏳ Счёт не создан"
         lines.append(f"👨‍🏫 <b>{agg['name']}</b> — {subtotal} руб. — {status}")
-        for b in agg["items"]:
-            lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
+        items = agg["items"]
+        individual = [b for b in items if b.lesson_type != "group"]
+        group_items = [b for b in items if b.lesson_type == "group"]
+        if individual:
+            lines.append("  <i>Индивидуальные:</i>")
+            for b in individual:
+                lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
+        if group_items:
+            group_total = sum(b.amount for b in group_items)
+            lines.append(f"  <i>Групповые ({len(group_items)} посещений, {group_total} руб.):</i>")
+            for b in group_items:
+                lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
         lines.append("")
     lines.append(f"Итого: {grand_total} руб.")
 
@@ -263,7 +272,9 @@ async def cb_bill_send(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository,
     teacher_repo: TeacherRepository,
+    group_repo: GroupRepository,
     payment_service: PaymentService,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -304,7 +315,6 @@ async def cb_bill_send(
             )
             return
 
-        # Все сдали — создаём счета и шлём (заглушка).
         invoices = await payment_service.get_or_create_invoices_for_student_period(
             student, period_month,
         )
@@ -312,15 +322,45 @@ async def cb_bill_send(
             "Заглушка отправки счетов родителю student=%s period=%s invoices=%d",
             student_id, period_month, len(invoices),
         )
+
+        gids = await student_group_repo.get_groups_for_student(student_id)
+        group_names: list[str] = []
+        for gid in gids:
+            g = await group_repo.get_by_id(gid)
+            if g:
+                group_names.append(g.name)
+
+        preview = [
+            "📄 <b>Счёт за обучение</b>",
+            "",
+            f"Ученик: <b>{student.name}</b>",
+        ]
+        if group_names:
+            preview.append("Группы: " + ", ".join(group_names))
+        preview.append(f"Месяц: {display_period(period_month)}")
+        preview.append("")
+
+        grand_total = 0
+        for teacher_id, agg in bills.items():
+            grand_total += agg["total"]
+            preview.append(f"👨‍🏫 <b>{agg['name']}</b>")
+            for b in agg["items"]:
+                preview.append(
+                    f"  • {format_date_display(b.date)} · {b.duration_min} мин · {b.amount} ₽"
+                )
+            preview.append("")
+        preview.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
+
         back_cb = (
             f"bvb:{period_month}:none" if group_id == "none"
             else f"bvg:{period_month}:{group_id}"
         )
+        header = (
+            "📤 <i>Шаблон сообщения родителю (авто-отправка пока не включена — "
+            "скопируй и отправь вручную):</i>\n\n"
+        )
         await callback.message.edit_text(
-            f"📤 <b>Счёт отправлен родителю</b> (заглушка)\n\n"
-            f"Ученик: <b>{student.name}</b>\n"
-            f"Период: {display_period(period_month)}\n"
-            f"Счетов: {len(invoices)}",
+            header + "\n".join(preview),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
                 [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
@@ -349,6 +389,7 @@ async def cb_confirm_payment_start(callback: CallbackQuery, user: User | None) -
 async def cb_confirm_payment_choose_branch(
     callback: CallbackQuery, user: User | None,
     branch_repo: BranchRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -356,7 +397,8 @@ async def cb_confirm_payment_choose_branch(
     period = callback.data.split(":", 1)[1]
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     students = await student_repo.get_all()
-    has_no_group = any(not s.group_id for s in students)
+    sg_map = await student_group_repo.get_map_by_student()
+    has_no_group = any(not sg_map.get(s.student_id) for s in students)
 
     rows = [
         [InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"pcpb:{period}:{b.branch_id}")]
@@ -384,6 +426,7 @@ async def cb_confirm_payment_choose_branch(
 async def cb_confirm_payment_choose_group(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -391,8 +434,9 @@ async def cb_confirm_payment_choose_group(
     _, period, branch_id = callback.data.split(":", 2)
 
     if branch_id == "none":
+        sg_map = await student_group_repo.get_map_by_student()
         students = sorted(
-            [s for s in await student_repo.get_all() if not s.group_id],
+            [s for s in await student_repo.get_all() if not sg_map.get(s.student_id)],
             key=lambda s: s.name,
         )
         if not students:
@@ -436,6 +480,7 @@ async def cb_confirm_payment_choose_group(
 async def cb_confirm_payment_choose_student(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -445,8 +490,9 @@ async def cb_confirm_payment_choose_student(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
     students = sorted(
-        [s for s in await student_repo.get_all() if s.group_id == group_id],
+        [s for s in await student_repo.get_all() if s.student_id in member_ids],
         key=lambda s: s.name,
     )
     if not students:

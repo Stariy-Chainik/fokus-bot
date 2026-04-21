@@ -8,12 +8,13 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.models.enums import LessonType
-from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, GroupRepository
+from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, GroupRepository, StudentRepository
 from bot.services import LessonService
 from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu
 from bot.keyboards.admin import kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
+from bot.utils import parse_attendees
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
@@ -315,7 +316,7 @@ async def cb_lessons_page(
 async def cb_lesson_detail(
     callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
-    group_repo: GroupRepository,
+    group_repo: GroupRepository, student_repo: StudentRepository,
     state: FSMContext,
 ) -> None:
     if not _is_teacher_or_admin(user):
@@ -344,6 +345,24 @@ async def cb_lesson_detail(
         lines.append(f"Ученик 1: {lesson.student_1_name}")
     if lesson.student_2_name:
         lines.append(f"Ученик 2: {lesson.student_2_name}")
+
+    if lesson.type == LessonType.GROUP and lesson.attendees:
+        entries = parse_attendees(lesson.attendees, default_duration=lesson.duration_min)
+        if entries:
+            lines.append("")
+            lines.append(f"<b>Присутствовали ({len(entries)}):</b>")
+            total = 0
+            for e in entries:
+                st = await student_repo.get_by_id(e.student_id)
+                name = st.name if st else e.student_id
+                if e.amount > 0:
+                    lines.append(f"  • {name} · {e.duration_min} мин · {e.amount}₽")
+                    total += e.amount
+                else:
+                    lines.append(f"  • {name} · {e.duration_min} мин · пробное")
+            if total > 0:
+                lines.append(f"<b>Итого: {total} ₽</b>")
+
     if locked:
         lines.append("")
         lines.append("🔒 Период сдан — редактирование недоступно.")

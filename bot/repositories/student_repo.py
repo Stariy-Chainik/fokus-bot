@@ -1,26 +1,32 @@
 import logging
 from typing import Optional
-from bot.models import Student
+from bot.models import Student, StudentGroupTier
 from bot.utils import generate_student_id
 from .base import BaseRepository
 
 logger = logging.getLogger(__name__)
 
-# Колонки листа `students` (1-based): student_id | name | partner_id | group_id
+# Колонки листа `students` (1-based):
+# 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело, не читаем/не пишем) | 5 group_tier
+# Колонка 4 оставлена в таблице для отката; данные живут в листе student_groups.
 _PARTNER_COL = 3
-_GROUP_COL = 4
+_TIER_COL = 5
 
 
 def _row_to_student(row: dict) -> Student:
     partner_raw = row.get("partner_id")
     partner_id = str(partner_raw).strip() if partner_raw else ""
-    group_raw = row.get("group_id")
-    group_id = str(group_raw).strip() if group_raw else ""
+    tier_raw = str(row.get("group_tier") or "").strip().lower()
+    try:
+        tier = StudentGroupTier(tier_raw) if tier_raw else StudentGroupTier.FULL
+    except ValueError:
+        tier = StudentGroupTier.FULL
     return Student(
         student_id=str(row["student_id"]),
         name=str(row["name"]),
         partner_id=partner_id or None,
-        group_id=group_id,
+        group_ids=[],
+        group_tier=tier,
     )
 
 
@@ -41,8 +47,9 @@ class StudentRepository(BaseRepository):
     async def add(self, name: str) -> Student:
         existing_ids = [s.student_id for s in await self.get_all()]
         student_id = generate_student_id(existing_ids)
-        await self._append_row([student_id, name, "", ""])
-        return Student(student_id=student_id, name=name, partner_id=None, group_id="")
+        # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
+        await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])
+        return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])
 
     async def update_name(self, student_id: str, name: str) -> bool:
         row_idx = await self._find_row_index("student_id", student_id)
@@ -51,11 +58,11 @@ class StudentRepository(BaseRepository):
         await self._update_cell(row_idx, 2, name)
         return True
 
-    async def update_group(self, student_id: str, group_id: str) -> bool:
+    async def update_tier(self, student_id: str, tier: StudentGroupTier) -> bool:
         row_idx = await self._find_row_index("student_id", student_id)
         if row_idx is None:
             return False
-        await self._update_cell(row_idx, _GROUP_COL, group_id)
+        await self._update_cell(row_idx, _TIER_COL, tier.value)
         return True
 
     async def delete(self, student_id: str) -> bool:

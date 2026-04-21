@@ -48,6 +48,12 @@ python -m bot
 | `SHEET_LESSONS` | — | Имя листа lessons |
 | `SHEET_BILLING` | — | Имя листа billing |
 | `SHEET_PAYMENTS` | — | Имя листа student_period_payments |
+| `SHEET_BRANCHES` | — | Имя листа branches |
+| `SHEET_GROUPS` | — | Имя листа groups |
+| `SHEET_TEACHER_GROUPS` | — | Имя листа teacher_groups |
+| `SHEET_STUDENT_GROUPS` | — | Имя листа student_groups (M:N ученик↔группа) |
+| `SHEET_STUDENT_REQUESTS` | — | Имя листа student_requests |
+| `SHEET_TEACHER_PERIOD_SUBMISSIONS` | — | Имя листа teacher_period_submissions |
 
 ---
 
@@ -74,6 +80,14 @@ python -m bot
 | student_id | name |
 |---|---|
 | STU-0001 | Петров Иван |
+
+#### student_groups
+| student_id | group_id |
+|---|---|
+| STU-0001 | GRP-0001 |
+| STU-0001 | GRP-0008 |
+
+Одна строка на пару (ученик, группа). Ученик может состоять в нескольких группах.
 
 #### lessons
 | lesson_id | teacher_id | teacher_name | type | student_1_id | student_1_name | student_2_id | student_2_name | date | duration_min | earned | recorded_at | updated_at |

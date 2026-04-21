@@ -145,9 +145,9 @@ StudentPeriodPayment (student_period_payments)
 
 ```
 Branch 1───* Group
-Group  1───* Student (через student.group_id)
+Group  *───* Student (через student_groups — ученик в N группах)
 Group  *───* Teacher (через teacher_groups)
-Teacher *───* Student (деривативно: student.group_id ∈ teacher.groups)
+Teacher *───* Student (деривативно: student.groups ∩ teacher.groups ≠ ∅)
 Student 1───1 Student (partner_id, двусторонний)
 Teacher 1───* Lesson
 Lesson  *───1 Student (student_1)
@@ -501,13 +501,13 @@ amount = rate_for_student * duration_min / 45
 
 ---
 
-## Google Sheets (11 вкладок)
+## Google Sheets (12 вкладок)
 
 | Вкладка | Ключ | Описание |
 |---------|------|----------|
 | users | user_id | Telegram-аккаунты, привязка admin/teacher |
 | teachers | teacher_id | Педагоги и ставки |
-| students | student_id | Ученики, group_id, partner_id |
+| students | student_id | Ученики, partner_id, group_tier (колонка group_id — legacy, не читается) |
 | lessons | lesson_id | Все записанные занятия |
 | billing | - | Не используется (legacy, on-demand) |
 | student_period_payments | payment_id | Счета учеников |
@@ -515,6 +515,7 @@ amount = rate_for_student * duration_min / 45
 | branches | branch_id | Филиалы |
 | groups | group_id | Тренировочные группы |
 | teacher_groups | teacher_id + group_id | Связь педагог-группа |
+| student_groups | student_id + group_id | Принадлежность ученика к N группам |
 
 Кеш: BaseRepository хранит кеш всех строк с TTL 300 секунд.
 

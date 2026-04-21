@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     sheet_branches: str = Field(default="branches", alias="SHEET_BRANCHES")
     sheet_groups: str = Field(default="groups", alias="SHEET_GROUPS")
     sheet_teacher_groups: str = Field(default="teacher_groups", alias="SHEET_TEACHER_GROUPS")
+    sheet_student_groups: str = Field(default="student_groups", alias="SHEET_STUDENT_GROUPS")
     sheet_student_requests: str = Field(default="student_requests", alias="SHEET_STUDENT_REQUESTS")
 
     # Server / Railway

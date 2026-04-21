@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.repositories import (
     StudentRepository, GroupRepository, BranchRepository, TeacherGroupRepository,
+    StudentGroupRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ async def cb_t_group_card(
     group_repo: GroupRepository,
     branch_repo: BranchRepository,
     student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -83,8 +85,9 @@ async def cb_t_group_card(
     branch = await branch_repo.get_by_id(group.branch_id)
     branch_name = branch.name if branch else "—"
 
+    member_ids = set(await student_group_repo.get_students_for_group(gid))
     members = sorted(
-        [s for s in await student_repo.get_all() if s.group_id == gid],
+        [s for s in await student_repo.get_all() if s.student_id in member_ids],
         key=lambda s: s.name,
     )
 

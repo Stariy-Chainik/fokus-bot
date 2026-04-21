@@ -30,6 +30,7 @@ def kb_my_student_card(
     rows = [
         [InlineKeyboardButton(text="✏️ Изменить имя", callback_data=f"t_rename_student:{student_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -42,6 +43,7 @@ def kb_my_pair_card(
         [InlineKeyboardButton(text="🔄 Изменить партнёра", callback_data=f"t_partner_assign:{student_id}")],
         [InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"t_partner_clear:{student_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
     ])
 
 
@@ -104,6 +106,42 @@ def kb_attendance_yes_no() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
         ],
     ])
+
+
+def kb_group_roster_per_visit(
+    students: list, selected_ids: set, tiers: dict,
+    price_short: int, duration_short: int,
+    price_full: int, duration_full: int,
+    back_cb: str = "lesson_back:attendance",
+) -> InlineKeyboardMarkup:
+    """
+    Ростер группы с per-visit биллингом. Рядом с именем — тариф ученика.
+    Смена тарифа — через карточку ученика (админ).
+    tiers: dict[student_id -> "short" | "full"].
+    """
+    rows = []
+    for s in students:
+        mark = "✅" if s.student_id in selected_ids else "⬜"
+        tier = tiers.get(s.student_id, "full")
+        if tier == "short":
+            suffix = f"{duration_short}м · {price_short}₽"
+        else:
+            suffix = f"{duration_full}м · {price_full}₽"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {s.name} · {suffix}",
+            callback_data=f"ms_toggle:{s.student_id}",
+        )])
+    all_selected = students and len(selected_ids) == len(students)
+    toggle_all_text = "◻️ Снять всех" if all_selected else "☑️ Отметить всех"
+    rows.append([InlineKeyboardButton(text=toggle_all_text, callback_data="ms_all")])
+    rows.append([
+        InlineKeyboardButton(text=f"💾 Подтвердить ({len(selected_ids)})", callback_data="ms_confirm"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson_back:duration") -> InlineKeyboardMarkup:

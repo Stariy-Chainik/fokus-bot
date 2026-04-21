@@ -4,7 +4,7 @@ from __future__ import annotations
 и управление партнёром в рамках учеников своих групп.
 
 Видимость ученика педагогу — через TeacherVisibilityService
-(student.group_id ∈ teacher_groups[teacher_id]).
+(множество групп ученика пересекается с группами педагога).
 """
 import logging
 import uuid
@@ -17,6 +17,7 @@ from bot.models import User
 from bot.repositories import (
     StudentRepository, TeacherRepository, UserRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository, StudentRequestRepository,
+    StudentGroupRepository,
 )
 from bot.services import TeacherVisibilityService
 from bot.states import PartnerAssignStates, TeacherAddStudentStates, TeacherRenameStudentStates
@@ -160,7 +161,7 @@ async def cb_my_pairs_list(
     mine = await visibility.students_for_teacher(user.teacher_id)
     mine_ids = {s.student_id for s in mine}
 
-    grp_students = [s for s in mine if s.group_id == group_id]
+    grp_students = [s for s in mine if group_id in s.group_ids]
     by_id = {s.student_id: s for s in mine}
     seen: set[tuple[str, str]] = set()
     pairs = []
@@ -298,10 +299,17 @@ async def _render_student_card(
         return
 
     mine = await visibility.students_for_teacher(user.teacher_id)
-    mine_ids = {s.student_id for s in mine}
+    mine_by_id = {s.student_id: s for s in mine}
+    mine_ids = set(mine_by_id)
     if student.student_id not in mine_ids:
         await callback.answer("Ученик не в вашей группе", show_alert=True)
         return
+    # mine уже содержит hydrated group_ids — возьмём их оттуда.
+    student.group_ids = mine_by_id[student.student_id].group_ids
+    # Для back_cb выбираем группу, которая одновременно и у педагога, и у ученика.
+    teacher_gids = await visibility.visible_group_ids(user.teacher_id)
+    shared_gids = [gid for gid in student.group_ids if gid in teacher_gids]
+    primary_gid = shared_gids[0] if shared_gids else ""
 
     if student.partner_id:
         partner = await student_repo.get_by_id(student.partner_id)
@@ -322,7 +330,7 @@ async def _render_student_card(
     )
     if back_to_pairs and student.partner_id:
         pairs_back_cb = (
-            f"t_pairs_grp:{student.group_id}" if student.group_id
+            f"t_pairs_grp:{primary_gid}" if primary_gid
             else "teacher:my_pairs"
         )
         kb = kb_my_pair_card(
@@ -332,7 +340,7 @@ async def _render_student_card(
         )
     else:
         back_cb = (
-            f"t_solo_grp:{student.group_id}" if student.group_id
+            f"t_solo_grp:{primary_gid}" if primary_gid
             else "teacher:my_soloists"
         )
         kb = kb_my_student_card(
@@ -715,6 +723,7 @@ async def _submit_new_student(
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     """Финализирует создание ученика: либо сразу (педагог-админ), либо заявкой."""
     # Shortcut: педагог-админ создаёт ученика сам, без заявки.
@@ -722,7 +731,7 @@ async def _submit_new_student(
     if user.is_admin:
         try:
             student = await student_repo.add(name=student_name)
-            await student_repo.update_group(student.student_id, group_id)
+            await student_group_repo.add(student.student_id, group_id)
         except Exception as exc:
             logger.error("Ошибка self-service создания ученика педагогом-админом: %s", exc)
             await callback.answer("Не удалось создать ученика. Попробуйте позже.", show_alert=True)
@@ -806,6 +815,7 @@ async def cb_request_new_student_send(
     teacher_repo: TeacherRepository, user_repo: UserRepository,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     """Отправить заявку. Если группа уже известна (педагог пришёл из экрана группы) —
     отправляем без повторного выбора. Иначе показываем выбор группы (fallback)."""
@@ -828,6 +838,7 @@ async def cb_request_new_student_send(
             callback, state, user, student_name, preset_group_id,
             teacher_repo, user_repo, student_repo,
             student_request_repo, group_repo, branch_repo,
+            student_group_repo,
         )
         return
 
@@ -877,6 +888,7 @@ async def cb_request_new_student_with_group(
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -894,4 +906,5 @@ async def cb_request_new_student_with_group(
         callback, state, user, student_name, group_id,
         teacher_repo, user_repo, student_repo,
         student_request_repo, group_repo, branch_repo,
+        student_group_repo,
     )

@@ -5,17 +5,18 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
+from bot.models import User, GroupBillingMode
 from datetime import date
 
 from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
-    TeacherRepository, StudentRepository,
+    TeacherRepository, StudentRepository, StudentGroupRepository,
 )
 from bot.services import PaymentService
 from bot.states import (
     AddBranchStates, EditBranchNameStates,
     AddGroupStates, EditGroupNameStates,
+    GroupBillingStates,
 )
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period
@@ -60,6 +61,7 @@ def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKey
 def _kb_group_card(group_id: str, branch_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
+        [InlineKeyboardButton(text="💰 Биллинг ученикам", callback_data=f"group_billing:{group_id}")],
         [InlineKeyboardButton(text="📤 Разослать счета группе", callback_data=f"group_send_bills:{group_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
     ])
@@ -294,6 +296,7 @@ async def cb_group_card(
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -310,7 +313,8 @@ async def cb_group_card(
     teachers_map = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
     teachers_list = ", ".join(teachers_map.get(tid, tid) for tid in teacher_ids) or "—"
 
-    students = [s for s in await student_repo.get_all() if s.group_id == group_id]
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
+    students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
     students.sort(key=lambda s: s.name)
     students_text = "\n".join(f"  • {s.name}" for s in students) or "  —"
 
@@ -419,7 +423,8 @@ async def cb_group_del_confirm(
         return
     await callback.message.edit_text(
         f"<b>Удалить группу «{group.name}»?</b>\n"
-        "Связи педагогов с группой будут удалены, у учеников обнулится group_id.",
+        "Связи педагогов с группой будут удалены, ученики будут изъяты из этой группы "
+        "(в остальных своих группах они остаются).",
         reply_markup=kb_confirm(
             f"confirm_del_group:{group_id}", f"branch_card:{group.branch_id}",
             confirm_text="🗑 Удалить",
@@ -432,7 +437,7 @@ async def cb_group_del_confirm(
 async def cb_group_del_do(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, teacher_group_repo: TeacherGroupRepository,
-    student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -443,10 +448,8 @@ async def cb_group_del_do(
         await callback.answer("Группа не найдена", show_alert=True)
         return
     branch_id = group.branch_id
-    # Обнуляем group_id у учеников этой группы
-    for s in await student_repo.get_all():
-        if s.group_id == group_id:
-            await student_repo.update_group(s.student_id, "")
+    # Удаляем членство учеников в этой группе
+    await student_group_repo.remove_all_for_group(group_id)
     # Удаляем связи педагог↔группа
     await teacher_group_repo.remove_all_for_group(group_id)
     # Удаляем саму группу
@@ -511,6 +514,7 @@ async def cb_group_send_bills(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
     teacher_repo: TeacherRepository, payment_service: PaymentService,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -529,7 +533,8 @@ async def cb_group_send_bills(
     _group_send_in_progress.add(lock_key)
 
     try:
-        students = [s for s in await student_repo.get_all() if s.group_id == group_id]
+        member_ids = set(await student_group_repo.get_students_for_group(group_id))
+        students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
         if not students:
             await callback.answer("В группе нет учеников", show_alert=True)
             return
@@ -546,7 +551,7 @@ async def cb_group_send_bills(
 
         if not all_teacher_ids:
             await callback.answer(
-                f"За {display_period(period_month)} нет индивидуальных занятий учеников группы.",
+                f"За {display_period(period_month)} нет занятий к оплате у учеников группы.",
                 show_alert=True,
             )
             return
@@ -581,3 +586,209 @@ async def cb_group_send_bills(
         )
     finally:
         _group_send_in_progress.discard(lock_key)
+
+
+# ─── Биллинг ученикам (per-visit) ────────────────────────────────────────────
+
+_MODE_TITLES = {
+    GroupBillingMode.NONE: "не выставляется (группа бесплатная или абонемент)",
+    GroupBillingMode.PER_VISIT: "по посещениям (per-visit)",
+    GroupBillingMode.SUBSCRIPTION: "абонемент (зарезервировано)",
+}
+
+
+def _kb_group_billing(group_id: str, mode: GroupBillingMode) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if mode == GroupBillingMode.PER_VISIT:
+        rows.append([InlineKeyboardButton(
+            text="✏️ Изменить тарифы", callback_data=f"group_billing_edit:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="🚫 Отключить биллинг", callback_data=f"group_billing_off:{group_id}",
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
+            text="💰 Включить биллинг по посещениям",
+            callback_data=f"group_billing_edit:{group_id}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _billing_text(group_name: str, mode: GroupBillingMode,
+                  price_short: int, duration_short: int,
+                  price_full: int, duration_full: int) -> str:
+    lines = [
+        f"💰 <b>Биллинг группы «{group_name}»</b>",
+        "",
+        f"Режим: {_MODE_TITLES.get(mode, mode.value)}",
+    ]
+    if mode == GroupBillingMode.PER_VISIT:
+        lines += [
+            "",
+            f"🕐 Короткий тариф: {duration_short} мин — {price_short}₽",
+            f"🕐 Полный тариф: {duration_full} мин — {price_full}₽",
+            "",
+            "Тариф ученика выбирается в его карточке.",
+            "На занятии у педагога появятся отметки длительности.",
+        ]
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data.startswith("group_billing:"))
+async def cb_group_billing(
+    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    await callback.message.edit_text(
+        _billing_text(
+            group.name, group.billing_mode,
+            group.price_short, group.duration_short,
+            group.price_full, group.duration_full,
+        ),
+        reply_markup=_kb_group_billing(group_id, group.billing_mode),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("group_billing_off:"))
+async def cb_group_billing_off(
+    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    await group_repo.update_billing(
+        group_id, GroupBillingMode.NONE,
+        group.price_short, group.duration_short,
+        group.price_full, group.duration_full,
+    )
+    await callback.message.edit_text(
+        _billing_text(
+            group.name, GroupBillingMode.NONE,
+            group.price_short, group.duration_short,
+            group.price_full, group.duration_full,
+        ),
+        reply_markup=_kb_group_billing(group_id, GroupBillingMode.NONE),
+    )
+    await callback.answer("Биллинг отключён")
+
+
+@router.callback_query(F.data.startswith("group_billing_edit:"))
+async def cb_group_billing_edit(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    await state.set_state(GroupBillingStates.entering_duration_short)
+    await state.update_data(group_id=group_id)
+    await callback.message.edit_text(
+        "<b>Настройка тарифов (шаг 1/4)</b>\n\n"
+        f"Текущий короткий тариф: {group.duration_short} мин.\n"
+        "Введите длительность короткого тарифа в минутах (например, 35):",
+        reply_markup=kb_back(f"group_billing:{group_id}"),
+    )
+    await callback.answer()
+
+
+def _parse_positive_int(raw: str) -> int | None:
+    raw = (raw or "").strip().replace(" ", "")
+    if not raw.isdigit():
+        return None
+    v = int(raw)
+    return v if v > 0 else None
+
+
+@router.message(GroupBillingStates.entering_duration_short)
+async def group_billing_duration_short(message: Message, state: FSMContext) -> None:
+    v = _parse_positive_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число минут больше 0. Введите ещё раз:")
+        return
+    await state.update_data(duration_short=v)
+    await state.set_state(GroupBillingStates.entering_price_short)
+    await message.answer(
+        f"<b>Шаг 2/4</b>\n\n"
+        f"Короткий тариф: {v} мин.\n"
+        "Введите стоимость одного посещения короткого тарифа в рублях (например, 500):",
+    )
+
+
+@router.message(GroupBillingStates.entering_price_short)
+async def group_billing_price_short(message: Message, state: FSMContext) -> None:
+    v = _parse_positive_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число рублей больше 0. Введите ещё раз:")
+        return
+    await state.update_data(price_short=v)
+    await state.set_state(GroupBillingStates.entering_duration_full)
+    await message.answer(
+        f"<b>Шаг 3/4</b>\n\n"
+        "Введите длительность полного тарифа в минутах (например, 60):",
+    )
+
+
+@router.message(GroupBillingStates.entering_duration_full)
+async def group_billing_duration_full(message: Message, state: FSMContext) -> None:
+    v = _parse_positive_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число минут больше 0. Введите ещё раз:")
+        return
+    await state.update_data(duration_full=v)
+    await state.set_state(GroupBillingStates.entering_price_full)
+    await message.answer(
+        f"<b>Шаг 4/4</b>\n\n"
+        f"Полный тариф: {v} мин.\n"
+        "Введите стоимость одного посещения полного тарифа в рублях (например, 850):",
+    )
+
+
+@router.message(GroupBillingStates.entering_price_full)
+async def group_billing_price_full(
+    message: Message, state: FSMContext, group_repo: GroupRepository,
+) -> None:
+    v = _parse_positive_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число рублей больше 0. Введите ещё раз:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    group_id = data["group_id"]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await message.answer("Группа не найдена.", reply_markup=kb_back("admin:branches"))
+        return
+    duration_short = int(data["duration_short"])
+    price_short = int(data["price_short"])
+    duration_full = int(data["duration_full"])
+    price_full = v
+    await group_repo.update_billing(
+        group_id, GroupBillingMode.PER_VISIT,
+        price_short, duration_short, price_full, duration_full,
+    )
+    await message.answer(
+        _billing_text(
+            group.name, GroupBillingMode.PER_VISIT,
+            price_short, duration_short, price_full, duration_full,
+        ),
+        reply_markup=_kb_group_billing(group_id, GroupBillingMode.PER_VISIT),
+    )

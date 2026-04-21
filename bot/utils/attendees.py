@@ -1,0 +1,59 @@
+"""
+Парсер/сериализатор поля Lesson.attendees.
+
+Два формата в одном поле:
+  • старый CSV:       "STU-0001,STU-0002"       — только id, длительность = duration_min занятия, сумма = 0.
+  • расширенный:      "STU-0001:60:850,STU-0002:35:500"
+                      id : duration_min : amount_snapshot (рубли)
+
+Используется:
+  - record_lesson при записи группового занятия с billing_mode=per_visit (запись в новом формате);
+  - биллинг-сервис при расчёте счёта ученика (чтение).
+"""
+from __future__ import annotations
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AttendeeEntry:
+    student_id: str
+    duration_min: int
+    amount: int  # рубли; 0 для пробных или неоплачиваемых групп
+
+
+def parse_attendees(raw: str | None, default_duration: int = 60) -> list[AttendeeEntry]:
+    """
+    Разбирает attendees. Пустая строка/None → пустой список.
+    Старый формат (нет ':') → duration=default_duration, amount=0.
+    """
+    if not raw:
+        return []
+    out: list[AttendeeEntry] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        parts = token.split(":")
+        sid = parts[0].strip()
+        if not sid:
+            continue
+        try:
+            dur = int(parts[1]) if len(parts) > 1 and parts[1] else default_duration
+        except ValueError:
+            dur = default_duration
+        try:
+            amt = int(parts[2]) if len(parts) > 2 and parts[2] else 0
+        except ValueError:
+            amt = 0
+        out.append(AttendeeEntry(student_id=sid, duration_min=dur, amount=amt))
+    return out
+
+
+def serialize_attendees(entries: list[AttendeeEntry]) -> str:
+    """Всегда пишем расширенный формат id:duration:amount."""
+    return ",".join(f"{e.student_id}:{e.duration_min}:{e.amount}" for e in entries)
+
+
+def attendee_ids(raw: str | None) -> list[str]:
+    """Быстрый список id без полного разбора — для мест, где нужны только ученики."""
+    return [e.student_id for e in parse_attendees(raw)]

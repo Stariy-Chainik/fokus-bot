@@ -24,6 +24,7 @@ from bot.repositories import (
     LessonRepository, PaymentRepository,
     TeacherPeriodSubmissionRepository,
     BranchRepository, GroupRepository, TeacherGroupRepository,
+    StudentGroupRepository,
     StudentRequestRepository,
 )
 from bot.services import (
@@ -71,13 +72,14 @@ def _build_dispatcher(storage) -> Dispatcher:
     branch_repo = BranchRepository(sheets_client, settings.sheet_branches)
     group_repo = GroupRepository(sheets_client, settings.sheet_groups)
     teacher_group_repo = TeacherGroupRepository(sheets_client, settings.sheet_teacher_groups)
+    student_group_repo = StudentGroupRepository(sheets_client, settings.sheet_student_groups)
     student_request_repo = StudentRequestRepository(sheets_client, settings.sheet_student_requests)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, submission_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
-    visibility = TeacherVisibilityService(student_repo, teacher_group_repo)
+    visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
 
     # ── DI: зависимости во все хендлеры через workflow_data ──────────────────
     dp["user_repo"] = user_repo
@@ -89,6 +91,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["branch_repo"] = branch_repo
     dp["group_repo"] = group_repo
     dp["teacher_group_repo"] = teacher_group_repo
+    dp["student_group_repo"] = student_group_repo
     dp["student_request_repo"] = student_request_repo
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service

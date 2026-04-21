@@ -55,14 +55,31 @@ def kb_student_paged(students: list, page: int, total: int) -> InlineKeyboardMar
 
 def kb_student_card(
     student_id: str, has_partner: bool, back_cb: str = "students:list",
+    tier_toggle: tuple[str, str] | None = None,
+    has_groups: bool = False,
 ) -> InlineKeyboardMarkup:
+    """
+    tier_toggle: (current_tier, label) — если задан, добавит кнопку смены тарифа.
+    has_groups: если у ученика есть хоть одна группа, показываем кнопку «Убрать из группы».
+    """
+    group_row = [InlineKeyboardButton(
+        text="➕ Добавить в группу", callback_data=f"student_groups_add:{student_id}",
+    )]
+    if has_groups:
+        group_row.append(InlineKeyboardButton(
+            text="➖ Убрать из группы", callback_data=f"student_groups_remove:{student_id}",
+        ))
+    rows = [group_row]
+
     partner_label = "🔄 Изменить партнёра" if has_partner else "💃 Назначить партнёра"
-    rows = [
-        [InlineKeyboardButton(text=partner_label, callback_data=f"partner_assign:{student_id}")],
-    ]
+    rows.append([InlineKeyboardButton(text=partner_label, callback_data=f"partner_assign:{student_id}")])
     if has_partner:
         rows.append([InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"partner_clear:{student_id}")])
+    if tier_toggle is not None:
+        _, label = tier_toggle
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"student_tier_toggle:{student_id}")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -95,10 +112,12 @@ def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:me
 
 def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Занятия педагога", callback_data=f"aedl_t:{teacher_id}")],
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
         [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
         [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data=f"del_teacher:{teacher_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
     ])
 
 
@@ -124,5 +143,6 @@ def kb_confirm(
 
 def kb_back(cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Назад", callback_data=cb)]
+        [InlineKeyboardButton(text="« Назад", callback_data=cb)],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
     ])

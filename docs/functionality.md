@@ -24,7 +24,8 @@
 - Поиск по имени (с пагинацией, экранированием `_`/`:` в запросе).
 - Списки: пары / солисты (сгруппированы по тренировочным группам).
 - Добавить (с выбором группы) / удалить (пагинация 20/стр).
-- Карточка: назначить партнёра / убрать партнёра.
+- Карточка: назначить партнёра / убрать партнёра, добавить/убрать из группы.
+- Ученик может состоять в нескольких группах (базовая + платные экстра-группы).
 
 **Заявки педагогов** (`📝 Заявки`)
 - Список pending-заявок на новых учеников.
@@ -83,7 +84,9 @@
 ---
 
 ## 🗄️ Данные (Google Sheets)
-`users`, `teachers`, `students`, `branches`, `groups`, `teacher_groups`, `lessons`, `payments`, `submitted_periods`, `student_requests`.
+`users`, `teachers`, `students`, `branches`, `groups`, `teacher_groups`, `student_groups`, `lessons`, `payments`, `submitted_periods`, `student_requests`.
+
+`student_groups(student_id, group_id)` — M:N связь ученика и групп. Колонка `students.group_id` — legacy, не читается.
 
 Кэш: TTL 300с, инвалидация на каждую запись.
 

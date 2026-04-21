@@ -13,19 +13,22 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
+from bot.models import User, GroupBillingMode, StudentGroupTier
 from bot.models.enums import LessonType
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
+    StudentGroupRepository,
 )
 from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
     kb_lesson_type, kb_lesson_type_after_save, kb_duration, kb_teacher_menu,
     kb_attendance_yes_no, kb_pair_multi_select, kb_multi_select,
+    kb_group_roster_per_visit,
     kb_group_branch_picker, kb_group_picker,
 )
+from bot.utils import AttendeeEntry, serialize_attendees
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
 
@@ -41,9 +44,12 @@ def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
 
 
-async def _all_students_in_group(group_id: str, student_repo):
+async def _all_students_in_group(
+    group_id: str, student_repo, student_group_repo: StudentGroupRepository,
+):
     """Все ученики группы (без фильтра по педагогу) — для отметки присутствующих."""
-    members = [s for s in await student_repo.get_all() if s.group_id == group_id]
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
+    members = [s for s in await student_repo.get_all() if s.student_id in member_ids]
     members.sort(key=lambda s: s.name)
     return members
 
@@ -93,9 +99,12 @@ async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, sta
 
 
 @router.callback_query(F.data == "teacher:cancel_lesson")
-async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext, user: User | None) -> None:
     await state.clear()
-    await callback.message.edit_text("Отменено.", reply_markup=kb_teacher_menu())
+    can_switch = bool(user and user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "Отменено.", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+    )
     await callback.answer()
 
 
@@ -316,12 +325,13 @@ async def _show_group_roster(
     callback: CallbackQuery, state: FSMContext, group_id: str,
     user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    members = await _all_students_in_group(group_id, student_repo)
+    members = await _all_students_in_group(group_id, student_repo, student_group_repo)
     if not members:
         await state.clear()
         await callback.message.edit_text(
@@ -329,14 +339,36 @@ async def _show_group_roster(
             reply_markup=kb_teacher_menu(),
         )
         return
-    await state.update_data(selected_group_id=group_id, selected_ids=[])
+    state_update: dict = {"selected_group_id": group_id, "selected_ids": []}
+    if group.billing_mode == GroupBillingMode.PER_VISIT:
+        state_update["per_visit_tiers"] = {
+            s.student_id: s.group_tier.value for s in members
+        }
+    else:
+        state_update["per_visit_tiers"] = {}
+    await state.update_data(**state_update)
     await state.set_state(RecordLessonStates.selecting_attendees)
     data = await state.get_data()
-    await callback.message.edit_text(
-        f"{_header(data)}Группа: <b>{group.name}</b>\n"
-        f"Отметьте присутствующих ({len(members)} в составе):",
-        reply_markup=kb_multi_select(members, set(), back_cb="lesson_back:attendance", show_toggle_all=True),
-    )
+
+    if group.billing_mode == GroupBillingMode.PER_VISIT:
+        text = (
+            f"{_header(data)}Группа: <b>{group.name}</b>\n"
+            f"Отметьте присутствующих ({len(members)} в составе).\n"
+            f"Тариф ученика — в его карточке."
+        )
+        kb = kb_group_roster_per_visit(
+            members, set(), data["per_visit_tiers"],
+            group.price_short, group.duration_short,
+            group.price_full, group.duration_full,
+            back_cb="lesson_back:attendance",
+        )
+    else:
+        text = (
+            f"{_header(data)}Группа: <b>{group.name}</b>\n"
+            f"Отметьте присутствующих ({len(members)} в составе):"
+        )
+        kb = kb_multi_select(members, set(), back_cb="lesson_back:attendance", show_toggle_all=True)
+    await callback.message.edit_text(text, reply_markup=kb)
 
 
 async def _show_pair_list(
@@ -514,15 +546,17 @@ async def cb_group_pick(
 async def cb_attendance_no(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     teacher_repo: TeacherRepository, lesson_service: LessonService,
+    group_repo: GroupRepository,
 ) -> None:
     await state.update_data(selected_ids=[])
-    await _finalize(callback, state, user, teacher_repo, None, lesson_service)
+    await _finalize(callback, state, user, teacher_repo, None, lesson_service, group_repo)
 
 
 @router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance)
 async def cb_attendance_yes(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -532,7 +566,7 @@ async def cb_attendance_yes(
     if not gid:
         await callback.answer("Группа не выбрана", show_alert=True)
         return
-    await _show_group_roster(callback, state, gid, user, student_repo, group_repo)
+    await _show_group_roster(callback, state, gid, user, student_repo, group_repo, student_group_repo)
     await callback.answer()
 
 
@@ -541,6 +575,8 @@ async def cb_attendance_yes(
 async def _refresh_multi_select(
     callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
+    group_repo: GroupRepository | None = None,
+    student_group_repo: StudentGroupRepository | None = None,
 ) -> None:
     data = await state.get_data()
     selected = set(data.get("selected_ids", []))
@@ -554,26 +590,42 @@ async def _refresh_multi_select(
             mine = await visibility.students_for_teacher(user.teacher_id)
             back_cb = "lesson_back:duration"
     elif cur_state == RecordLessonStates.selecting_attendees.state and gid:
-        mine = await _all_students_in_group(gid, student_repo)
+        assert student_group_repo is not None, "student_group_repo required for attendance roster"
+        mine = await _all_students_in_group(gid, student_repo, student_group_repo)
         back_cb = "lesson_back:attendance"
     else:
         mine = await visibility.students_for_teacher(user.teacher_id)
         back_cb = "lesson_back:attendance"
-    show_toggle_all = bool(gid) and cur_state in (
-        RecordLessonStates.selecting_attendees.state,
-        RecordLessonStates.selecting_soloists.state,
-    )
-    await callback.message.edit_reply_markup(
-        reply_markup=kb_multi_select(
+
+    per_visit_tiers = data.get("per_visit_tiers") or {}
+    group = None
+    if per_visit_tiers and gid and group_repo is not None:
+        group = await group_repo.get_by_id(gid)
+
+    if group is not None and group.billing_mode == GroupBillingMode.PER_VISIT:
+        kb = kb_group_roster_per_visit(
+            mine, selected, per_visit_tiers,
+            group.price_short, group.duration_short,
+            group.price_full, group.duration_full,
+            back_cb=back_cb,
+        )
+    else:
+        show_toggle_all = bool(gid) and cur_state in (
+            RecordLessonStates.selecting_attendees.state,
+            RecordLessonStates.selecting_soloists.state,
+        )
+        kb = kb_multi_select(
             mine, selected, back_cb=back_cb, show_toggle_all=show_toggle_all,
-        ),
-    )
+        )
+    await callback.message.edit_reply_markup(reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("ms_toggle:"))
 async def cb_ms_toggle(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
+    group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -591,7 +643,9 @@ async def cb_ms_toggle(
     else:
         selected.append(student_id)
     await state.update_data(selected_ids=selected)
-    await _refresh_multi_select(callback, state, user, visibility, student_repo)
+    await _refresh_multi_select(
+        callback, state, user, visibility, student_repo, group_repo, student_group_repo,
+    )
     await callback.answer()
 
 
@@ -599,6 +653,8 @@ async def cb_ms_toggle(
 async def cb_ms_all(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
+    group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -610,7 +666,7 @@ async def cb_ms_all(
     data = await state.get_data()
     gid = data.get("selected_group_id")
     if gid and cur == RecordLessonStates.selecting_attendees.state:
-        mine = await _all_students_in_group(gid, student_repo)
+        mine = await _all_students_in_group(gid, student_repo, student_group_repo)
     elif gid and cur == RecordLessonStates.selecting_soloists.state:
         mine = await visibility.students_in_group_for_teacher(user.teacher_id, gid)
     else:
@@ -619,7 +675,9 @@ async def cb_ms_all(
     selected = list(data.get("selected_ids", []))
     new_selected = [] if len(selected) == len(all_ids) else all_ids
     await state.update_data(selected_ids=new_selected)
-    await _refresh_multi_select(callback, state, user, visibility, student_repo)
+    await _refresh_multi_select(
+        callback, state, user, visibility, student_repo, group_repo, student_group_repo,
+    )
     await callback.answer()
 
 
@@ -627,7 +685,7 @@ async def cb_ms_all(
 async def cb_ms_confirm(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     teacher_repo: TeacherRepository, student_repo: StudentRepository,
-    lesson_service: LessonService,
+    lesson_service: LessonService, group_repo: GroupRepository,
 ) -> None:
     cur = await state.get_state()
     if cur not in (RecordLessonStates.selecting_attendees.state, RecordLessonStates.selecting_soloists.state):
@@ -638,7 +696,7 @@ async def cb_ms_confirm(
     if not selected:
         await callback.answer("Никто не отмечен", show_alert=True)
         return
-    await _finalize(callback, state, user, teacher_repo, student_repo, lesson_service)
+    await _finalize(callback, state, user, teacher_repo, student_repo, lesson_service, group_repo)
 
 
 # ─── Pair: мульти-выбор пар ──────────────────────────────────────────────────
@@ -687,6 +745,7 @@ async def _finalize(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     teacher_repo: TeacherRepository, student_repo: StudentRepository | None,
     lesson_service: LessonService,
+    group_repo: GroupRepository | None = None,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -713,8 +772,30 @@ async def _finalize(
 
         if kind == "group":
             attendee_ids = list(data.get("selected_ids", []))
-            attendees_csv = ",".join(attendee_ids) if attendee_ids else None
             group_id = data.get("selected_group_id") or ""
+            tiers = data.get("per_visit_tiers") or {}
+            group = None
+            if group_id and group_repo is not None:
+                group = await group_repo.get_by_id(group_id)
+            if (
+                attendee_ids and group is not None
+                and group.billing_mode == GroupBillingMode.PER_VISIT
+            ):
+                entries: list[AttendeeEntry] = []
+                for sid in attendee_ids:
+                    tier = tiers.get(sid, StudentGroupTier.FULL.value)
+                    if tier == StudentGroupTier.SHORT.value:
+                        dur = group.duration_short
+                        amt = group.price_short
+                    else:
+                        dur = group.duration_full
+                        amt = group.price_full
+                    entries.append(AttendeeEntry(
+                        student_id=sid, duration_min=dur, amount=amt,
+                    ))
+                attendees_csv = serialize_attendees(entries)
+            else:
+                attendees_csv = ",".join(attendee_ids) if attendee_ids else None
             lesson = await lesson_service.create(
                 teacher=teacher,
                 lesson_type=LessonType.GROUP,

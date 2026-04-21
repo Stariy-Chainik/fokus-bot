@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .enums import LessonType, PaymentStatus, RequestStatus
+from .enums import LessonType, PaymentStatus, RequestStatus, GroupBillingMode, StudentGroupTier
 
 
 @dataclass
@@ -26,7 +26,8 @@ class Student:
     student_id: str
     name: str
     partner_id: Optional[str] = None
-    group_id: str = ""
+    group_ids: list[str] = field(default_factory=list)
+    group_tier: StudentGroupTier = StudentGroupTier.FULL
 
 
 @dataclass
@@ -45,11 +46,22 @@ class Group:
     created_at: str = ""
     updated_at: str = ""
     sort_order: int = 0
+    billing_mode: GroupBillingMode = GroupBillingMode.NONE
+    price_short: int = 0
+    duration_short: int = 35
+    price_full: int = 0
+    duration_full: int = 60
 
 
 @dataclass
 class TeacherGroup:
     teacher_id: str
+    group_id: str
+
+
+@dataclass
+class StudentGroup:
+    student_id: str
     group_id: str
 
 
@@ -89,6 +101,7 @@ class Billing:
     payment_id: Optional[str]  # проставляется после оплаты
     created_at: str
     updated_at: str
+    lesson_type: Optional[str] = None  # "pair" | "soloist" | "group" — для отображения
 
 
 @dataclass
