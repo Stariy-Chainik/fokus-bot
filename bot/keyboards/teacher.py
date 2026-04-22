@@ -5,9 +5,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def kb_teacher_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="✏️ Отметить занятие", callback_data="teacher:record_lesson")],
-        [InlineKeyboardButton(text="💃 Мои пары", callback_data="teacher:my_pairs")],
-        [InlineKeyboardButton(text="🎯 Мои солисты", callback_data="teacher:my_soloists")],
-        [InlineKeyboardButton(text="🏢 Мои группы", callback_data="teacher:my_groups")],
+        [InlineKeyboardButton(text="💃 Пары", callback_data="teacher:my_pairs")],
+        [InlineKeyboardButton(text="🎯 Солисты", callback_data="teacher:my_soloists")],
+        [InlineKeyboardButton(text="🏢 Группы", callback_data="teacher:my_groups")],
         [InlineKeyboardButton(text="📋 Мои занятия", callback_data="teacher:my_lessons")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],

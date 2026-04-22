@@ -58,3 +58,8 @@ class GroupBillingStates(StatesGroup):
     entering_price_short = State()
     entering_duration_full = State()
     entering_price_full = State()
+
+
+class GroupAddStudentStates(StatesGroup):
+    """Админ добавляет ученика в группу: ввод ФИО → поиск → выбор/создание."""
+    searching = State()

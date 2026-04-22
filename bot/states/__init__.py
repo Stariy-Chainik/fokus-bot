@@ -11,8 +11,12 @@ from .admin_states import (
     AddGroupStates,
     EditGroupNameStates,
     GroupBillingStates,
+    GroupAddStudentStates,
 )
-from .teacher_states import TeacherAddStudentStates, TeacherRenameStudentStates
+from .teacher_states import (
+    TeacherRenameStudentStates,
+    TeacherGroupAddStudentStates,
+)
 
 __all__ = [
     "RecordLessonStates",
@@ -23,11 +27,12 @@ __all__ = [
     "ConfirmPaymentStates",
     "StudentListStates",
     "PartnerAssignStates",
-    "TeacherAddStudentStates",
     "TeacherRenameStudentStates",
     "AddBranchStates",
     "EditBranchNameStates",
     "AddGroupStates",
     "EditGroupNameStates",
     "GroupBillingStates",
+    "GroupAddStudentStates",
+    "TeacherGroupAddStudentStates",
 ]
