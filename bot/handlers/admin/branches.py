@@ -58,11 +58,13 @@ def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKey
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _kb_group_card(group_id: str, branch_id: str, has_members: bool) -> InlineKeyboardMarkup:
+def _kb_group_card(group_id: str, branch_id: str, students: list) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"group_add_student:{group_id}")],
+        [InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"student_card:{s.student_id}")]
+        for s in students
     ]
-    if has_members:
+    rows.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"group_add_student:{group_id}")])
+    if students:
         rows.append([InlineKeyboardButton(text="➖ Убрать ученика", callback_data=f"group_rm_student:{group_id}")])
     rows += [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
@@ -318,18 +320,17 @@ async def _render_group_card(
     member_ids = set(await student_group_repo.get_students_for_group(group_id))
     students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
     students.sort(key=lambda s: s.name)
-    students_text = "\n".join(f"  • {s.name}" for s in students) or "  —"
 
     text = (
         f"💃 <b>{group.name}</b>\n"
         f"🏢 Филиал: {branch_name}\n"
         f"ID: {group.group_id}\n\n"
         f"👨‍🏫 Педагоги: {teachers_list}\n\n"
-        f"👩‍🎓 Ученики ({len(students)}):\n{students_text}"
+        f"👩‍🎓 Учеников: {len(students)}"
     )
     await message.edit_text(
         text,
-        reply_markup=_kb_group_card(group_id, group.branch_id, bool(students)),
+        reply_markup=_kb_group_card(group_id, group.branch_id, students),
     )
 
 

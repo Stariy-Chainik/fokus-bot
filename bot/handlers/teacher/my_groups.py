@@ -79,11 +79,13 @@ async def cb_my_groups(
 
 # ─── Карточка группы ────────────────────────────────────────────────────────
 
-def _kb_t_group_card(group_id: str, has_members: bool) -> InlineKeyboardMarkup:
+def _kb_t_group_card(group_id: str, students: list) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"t_grp_add:{group_id}")],
+        [InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"t_student_card:{s.student_id}")]
+        for s in students
     ]
-    if has_members:
+    rows.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"t_grp_add:{group_id}")])
+    if students:
         rows.append([InlineKeyboardButton(text="➖ Убрать ученика", callback_data=f"t_grp_rm:{group_id}")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data="teacher:my_groups")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -106,17 +108,13 @@ async def _render_t_group_card(
         [s for s in await student_repo.get_all() if s.student_id in member_ids],
         key=lambda s: s.name,
     )
-    lines = [
-        f"<b>🏢 {branch_name} / {group.name}</b>",
-        "",
-        f"Учеников: {len(members)}",
-    ]
-    if members:
-        lines.append("")
-        lines.extend(f"• {s.name}" for s in members)
+    text = (
+        f"<b>🏢 {branch_name} / {group.name}</b>\n\n"
+        f"Учеников: {len(members)}"
+    )
     await message.edit_text(
-        "\n".join(lines),
-        reply_markup=_kb_t_group_card(group_id, bool(members)),
+        text,
+        reply_markup=_kb_t_group_card(group_id, members),
     )
 
 
