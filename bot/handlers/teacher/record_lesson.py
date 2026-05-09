@@ -27,6 +27,7 @@ from bot.keyboards.teacher import (
     kb_attendance_yes_no, kb_pair_multi_select, kb_pair_from_soloists,
     kb_multi_select, kb_group_roster_per_visit,
     kb_group_branch_picker, kb_group_picker, kb_shared_group_picker,
+    _PROXY_BUTTONS,
 )
 from bot.keyboards.admin import kb_admin_menu
 from bot.utils import AttendeeEntry, serialize_attendees
@@ -118,6 +119,11 @@ async def cb_proxy_record_start(callback: CallbackQuery, user: User | None, stat
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
+    # Проверяем право на прокси: либо admin, либо ассистент из _PROXY_BUTTONS
+    allowed = user.is_admin or (user.teacher_id in _PROXY_BUTTONS)  # type: ignore[union-attr]
+    if not allowed:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
     await state.clear()
     await state.update_data(proxy_teacher_id=teacher_id)
     await state.set_state(RecordLessonStates.choosing_date)
@@ -1288,9 +1294,11 @@ async def _finalize(
             f"🔒 {exc}\nОбратитесь к администратору.", reply_markup=_menu_kb(user, data),
         )
     except ValueError as exc:
+        await state.clear()
         await callback.message.edit_text(f"Ошибка: {exc}", reply_markup=_menu_kb(user, data))
     except Exception as exc:
         logger.error("Ошибка записи занятия: %s", exc)
+        await state.clear()
         await callback.message.edit_text(
             "Ошибка при сохранении занятия. Попробуйте позже.", reply_markup=_menu_kb(user, data),
         )

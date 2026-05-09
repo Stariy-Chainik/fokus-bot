@@ -69,6 +69,18 @@ class PaymentRepository(BaseRepository):
         ])
         return payment
 
+    async def update_amount(self, payment_id: str, new_amount: int) -> bool:
+        records = await self._all_records()
+        ts_now = now_str()
+        for i, row in enumerate(records):
+            if str(row.get("payment_id")) == payment_id:
+                row_idx = i + 2
+                await self._update_cell(row_idx, 5, new_amount)   # total_amount
+                await self._update_cell(row_idx, 11, ts_now)      # updated_at
+                self._invalidate_cache()
+                return True
+        return False
+
     async def confirm(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
         """Подтверждает оплату: status=paid, paid_at=now, confirmed_by_tg_id."""
         records = await self._all_records()

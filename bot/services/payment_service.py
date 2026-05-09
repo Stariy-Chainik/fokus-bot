@@ -69,12 +69,13 @@ class PaymentService:
                 student.student_id, period_month, teacher_id,
             )
             if existing:
-                # Сумма могла измениться (добавили/удалили занятие) — refresh, если ещё не оплачен
                 if existing.status != PaymentStatus.PAID and existing.total_amount != agg["total"]:
                     logger.info(
-                        "Сумма счёта %s изменилась: %d → %d (refresh)",
+                        "Сумма счёта %s изменилась: %d → %d",
                         existing.payment_id, existing.total_amount, agg["total"],
                     )
+                    await self._payment_repo.update_amount(existing.payment_id, agg["total"])
+                    existing.total_amount = agg["total"]
                 invoices.append(existing)
                 continue
             now = now_str()
