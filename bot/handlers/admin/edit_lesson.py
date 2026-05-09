@@ -96,7 +96,7 @@ async def _show_lessons(
         title_frag = ""
     type_frag = {
         "group": " · групповые",
-        "individual": " · соло",
+        "individual": " · индивидуальные",
     }.get(filter_type or "", "")
 
     back_cb = f"aedl_dates:{teacher_id}"
