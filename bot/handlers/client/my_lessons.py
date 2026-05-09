@@ -68,7 +68,6 @@ async def _show_lessons(
         lines.append(f"\n<b>{student.name}:</b>")
 
         for ls in lessons:
-            total_lessons += 1
             teacher = await teacher_repo.get_by_id(ls.teacher_id)
             teacher_short = _short_name(ls.teacher_name)
 
@@ -78,6 +77,11 @@ async def _show_lessons(
                     if row.student_id == student.student_id:
                         amount += row.amount
 
+            # Групповые занятия без тарификации (абонемент/NONE) не показываем
+            if ls.type == LessonType.GROUP and amount == 0:
+                continue
+
+            total_lessons += 1
             date_prefix = f"{format_date_short_with_wd(ls.date)} — " if is_month else ""
             type_tag = " (группа)" if ls.type == LessonType.GROUP else ""
             amount_part = f" · {amount} ₽" if amount > 0 else ""
