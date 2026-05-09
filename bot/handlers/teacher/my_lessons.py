@@ -141,7 +141,7 @@ async def _show_lessons(
         title_frag = ""
     type_frag = {
         "group": " · групповые",
-        "individual": " · индивидуальные",
+        "individual": " · соло",
     }.get(filter_type or "", "")
 
     locked = _locked_ids(lessons, periods)
