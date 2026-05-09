@@ -15,6 +15,7 @@ from bot.keyboards.admin import kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
 from bot.utils import parse_attendees
+from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
@@ -104,6 +105,7 @@ async def _show_lessons(
     submission_repo: TeacherPeriodSubmissionRepository,
     state: FSMContext,
     filter_date: str | None = None, filter_month: str | None = None,
+    filter_type: str | None = None,
 ) -> None:
     mode = await _get_mode(state)
     lessons = await lesson_repo.get_by_teacher(user.teacher_id)
@@ -116,6 +118,11 @@ async def _show_lessons(
     if mode == "delete":
         lessons = [ls for ls in lessons if ls.date[:7] not in periods]
 
+    if filter_type == "group":
+        lessons = [ls for ls in lessons if ls.type == LessonType.GROUP]
+    elif filter_type == "individual":
+        lessons = [ls for ls in lessons if ls.type == LessonType.INDIVIDUAL]
+
     lessons.sort(key=lambda ls: ls.date, reverse=True)
 
     if filter_date:
@@ -124,7 +131,7 @@ async def _show_lessons(
         filter_tag = f"m-{filter_month}"
     else:
         filter_tag = "all"
-    await state.update_data(lm_filter_tag=filter_tag)
+    await state.update_data(lm_filter_tag=filter_tag, lm_filter_type=filter_type)
 
     if filter_date:
         title_frag = f"за {format_date_display(filter_date)}"
@@ -132,22 +139,32 @@ async def _show_lessons(
         title_frag = f"за {_month_label(filter_month)}"
     else:
         title_frag = ""
+    type_frag = {
+        "group": " · групповые",
+        "individual": " · индивидуальные",
+    }.get(filter_type or "", "")
 
+    locked = _locked_ids(lessons, periods)
     if not lessons:
-        extra = " (или все уже в сданных периодах)" if mode == "delete" else ""
+        extra = " (или все в сданных периодах)" if mode == "delete" else ""
+        # Всё равно показываем клавиатуру списка — чтобы можно было переключить тип-фильтр.
         await callback.message.edit_text(
-            f"Занятий {title_frag} не найдено{extra}.",
-            reply_markup=_date_filter_kb(),
+            f"Занятий {title_frag}{type_frag} не найдено{extra}.",
+            reply_markup=kb_lesson_list(
+                [], page=0, page_size=PAGE_SIZE,
+                locked_ids=locked, filter_date=filter_date, filter_month=filter_month,
+                filter_type=filter_type,
+            ),
         )
         return
 
-    locked = _locked_ids(lessons, periods)
-    header = f"<b>Занятия {title_frag}</b> ({len(lessons)}):" if title_frag else f"<b>Занятия</b> ({len(lessons)}):"
+    header = f"<b>Занятия {title_frag}{type_frag}</b> ({len(lessons)}):" if title_frag else f"<b>Занятия</b>{type_frag} ({len(lessons)}):"
     await callback.message.edit_text(
         header,
         reply_markup=kb_lesson_list(
             lessons, page=0, page_size=PAGE_SIZE,
             locked_ids=locked, filter_date=filter_date, filter_month=filter_month,
+            filter_type=filter_type,
         ),
     )
 
@@ -272,6 +289,18 @@ async def cb_lv_pick(
     await callback.answer()
 
 
+def _parse_type_code(code: str) -> str | None:
+    return {"g": "group", "i": "individual"}.get(code)
+
+
+def _parse_filter_tag(tag: str) -> tuple[str | None, str | None]:
+    if tag.startswith("m-"):
+        return None, tag[2:]
+    if tag == "all":
+        return None, None
+    return tag, None
+
+
 @router.callback_query(F.data.startswith("lessons_page:"))
 async def cb_lessons_page(
     callback: CallbackQuery, user: User | None, state: FSMContext,
@@ -284,12 +313,9 @@ async def cb_lessons_page(
     parts = callback.data.split(":")
     page = int(parts[1])
     tag = parts[2] if len(parts) > 2 else "all"
-    filter_date: str | None = None
-    filter_month: str | None = None
-    if tag.startswith("m-"):
-        filter_month = tag[2:]
-    elif tag != "all":
-        filter_date = tag
+    type_code = parts[3] if len(parts) > 3 else "a"
+    filter_date, filter_month = _parse_filter_tag(tag)
+    filter_type = _parse_type_code(type_code)
 
     mode = await _get_mode(state)
     lessons = await lesson_repo.get_by_teacher(user.teacher_id)
@@ -301,13 +327,39 @@ async def cb_lessons_page(
     periods = await _submitted_periods(user.teacher_id, submission_repo)
     if mode == "delete":
         lessons = [ls for ls in lessons if ls.date[:7] not in periods]
+
+    if filter_type == "group":
+        lessons = [ls for ls in lessons if ls.type == LessonType.GROUP]
+    elif filter_type == "individual":
+        lessons = [ls for ls in lessons if ls.type == LessonType.INDIVIDUAL]
+
     lessons.sort(key=lambda ls: ls.date, reverse=True)
     locked = _locked_ids(lessons, periods)
     await callback.message.edit_reply_markup(
         reply_markup=kb_lesson_list(
             lessons, page=page, page_size=PAGE_SIZE,
             locked_ids=locked, filter_date=filter_date, filter_month=filter_month,
+            filter_type=filter_type,
         ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("lessons_type:"))
+async def cb_lessons_type(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    lesson_repo: LessonRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, type_code, tag = callback.data.split(":", 2)
+    filter_type = _parse_type_code(type_code)
+    filter_date, filter_month = _parse_filter_tag(tag)
+    await _show_lessons(
+        callback, user, lesson_repo, submission_repo, state,
+        filter_date=filter_date, filter_month=filter_month, filter_type=filter_type,
     )
     await callback.answer()
 
@@ -345,6 +397,10 @@ async def cb_lesson_detail(
         lines.append(f"Ученик 1: {lesson.student_1_name}")
     if lesson.student_2_name:
         lines.append(f"Ученик 2: {lesson.student_2_name}")
+    if lesson.student_3_name:
+        lines.append(f"Ученик 3: {lesson.student_3_name}")
+    if lesson.student_4_name:
+        lines.append(f"Ученик 4: {lesson.student_4_name}")
 
     if lesson.type == LessonType.GROUP and lesson.attendees:
         entries = parse_attendees(lesson.attendees, default_duration=lesson.duration_min)
@@ -377,8 +433,7 @@ async def cb_lesson_detail(
             back_cb = "teacher:lesson_view" if data.get("lm_mode") == "view" else "teacher:lesson_delete"
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
-    await callback.message.edit_text("\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))
-    await callback.answer()
+    await show_card(callback, "\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))
 
 
 

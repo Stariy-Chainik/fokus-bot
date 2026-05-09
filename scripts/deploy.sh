@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Deploy fokus-bot to Timeweb VPS.
+# Deploy fokus-bot to Hetzner VPS (Nuremberg).
 # Usage: ./scripts/deploy.sh
 set -euo pipefail
 
-HOST="root@147.45.146.247"
+HOST="root@178.104.240.252"
 REMOTE="/opt/fokus-bot/"
 SERVICE="fokus-bot"
 

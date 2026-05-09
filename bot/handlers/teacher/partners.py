@@ -24,6 +24,7 @@ from bot.keyboards.teacher import (
     kb_my_student_card, kb_my_pair_card,
     kb_t_partner_candidates, kb_t_confirm,
 )
+from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_partners")
@@ -345,8 +346,7 @@ async def _render_student_card(
             can_manage=can_manage,
             back_cb=back_cb,
         )
-    await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
+    await show_card(callback, text, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("t_student_card:"))

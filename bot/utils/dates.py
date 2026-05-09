@@ -25,3 +25,16 @@ def display_period(period_month: str) -> str:
     """Переводит YYYY-MM → ММ.ГГГГ для отображения."""
     dt = datetime.strptime(period_month, "%Y-%m")
     return dt.strftime("%m.%Y")
+
+
+_MONTHS_RU_SHORT = [
+    "янв", "фев", "мар", "апр", "май", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек",
+]
+_WEEKDAYS_RU_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def format_date_short_with_wd(value: str) -> str:
+    """Переводит YYYY-MM-DD → «23 апр, чт» — для заголовков группировки по дате."""
+    dt = datetime.strptime(value, DATE_FMT)
+    return f"{dt.day} {_MONTHS_RU_SHORT[dt.month - 1]}, {_WEEKDAYS_RU_SHORT[dt.weekday()]}"

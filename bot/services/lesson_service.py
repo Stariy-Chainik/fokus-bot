@@ -44,6 +44,10 @@ class LessonService:
         student_1_name: str | None = None,
         student_2_id: str | None = None,
         student_2_name: str | None = None,
+        student_3_id: str | None = None,
+        student_3_name: str | None = None,
+        student_4_id: str | None = None,
+        student_4_name: str | None = None,
         attendees: str | None = None,
         group_id: str = "",
     ) -> Lesson:
@@ -72,6 +76,10 @@ class LessonService:
             updated_at=now,
             attendees=attendees,
             group_id=group_id,
+            student_3_id=student_3_id,
+            student_3_name=student_3_name,
+            student_4_id=student_4_id,
+            student_4_name=student_4_name,
         )
 
         await self._lesson_repo.add(lesson)

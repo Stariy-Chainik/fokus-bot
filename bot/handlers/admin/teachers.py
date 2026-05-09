@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User
 from datetime import date
+from dateutil.relativedelta import relativedelta
 
 from bot.repositories import (
     TeacherRepository, UserRepository,
@@ -15,6 +16,8 @@ from bot.repositories import (
 )
 from bot.states import AddTeacherStates, EditTeacherRatesStates
 from bot.keyboards.admin import kb_teacher_list, kb_teacher_card, kb_rate_select, kb_confirm, kb_back
+from bot.handlers.common import show_card
+from bot.utils.dates import display_period
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_teachers")
@@ -27,7 +30,7 @@ def _is_admin(user: User | None) -> bool:
 # ─── Список педагогов ────────────────────────────────────────────────────────
 
 def _kb_teachers_list_with_status(
-    teachers: list, submitted_ids: set[str], period_label: str,
+    teachers: list, submitted_ids: set[str],
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for t in teachers:
@@ -61,16 +64,15 @@ async def cb_teachers_list(
         )
         await callback.answer()
         return
-    current = date.today().strftime("%Y-%m")
+    prev = (date.today() - relativedelta(months=1)).strftime("%Y-%m")
     submitted_ids = {
         s.teacher_id for s in await submission_repo.get_all()
-        if s.period_month == current
+        if s.period_month == prev
     }
-    from bot.utils.dates import display_period
     await callback.message.edit_text(
-        f"<b>Педагоги</b>\nСтатус сдачи периода: {display_period(current)}\n"
+        f"<b>Педагоги</b>\nСтатус сдачи периода: {display_period(prev)}\n"
         "🟢 — сдан, 🔴 — открыт",
-        reply_markup=_kb_teachers_list_with_status(teachers, submitted_ids, current),
+        reply_markup=_kb_teachers_list_with_status(teachers, submitted_ids),
     )
     await callback.answer()
 
@@ -112,8 +114,7 @@ async def cb_teacher_card(
         f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n\n"
         f"🏢 Группы:\n{groups_block}"
     )
-    await callback.message.edit_text(text, reply_markup=kb_teacher_card(teacher_id))
-    await callback.answer()
+    await show_card(callback, text, reply_markup=kb_teacher_card(teacher_id))
 
 
 def _kb_teacher_groups_edit(teacher_id: str, groups: list, branches: dict, draft: set[str]) -> InlineKeyboardMarkup:
@@ -163,7 +164,7 @@ async def _render_teacher_card(
         f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n\n"
         f"🏢 Группы:\n{groups_block}"
     )
-    await callback.message.edit_text(text, reply_markup=kb_teacher_card(teacher_id))
+    await show_card(callback, text, reply_markup=kb_teacher_card(teacher_id))
 
 
 @router.callback_query(F.data.startswith("t_edit_groups:"))

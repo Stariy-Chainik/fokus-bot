@@ -73,11 +73,30 @@ def kb_t_confirm(
     ])
 
 
+def kb_shared_group_picker(
+    groups: list,
+    counts: dict,
+    total: int,
+) -> InlineKeyboardMarkup:
+    buttons = []
+    for g in groups:
+        cnt = counts.get(g.group_id, 0)
+        label = f"✓ {g.name} ({cnt})" if cnt > 0 else g.name
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"shared_group:{g.group_id}")])
+    if total >= 2:
+        buttons.append([InlineKeyboardButton(
+            text=f"✅ Подтвердить ({total} выбрано)", callback_data="shared_confirm",
+        )])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="lesson_back:duration")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def kb_lesson_type() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_kind:group")],
         [InlineKeyboardButton(text="💃 Парное", callback_data="lesson_kind:pair")],
-        [InlineKeyboardButton(text="👤 Индивидуальное (соло)", callback_data="lesson_kind:soloist")],
+        [InlineKeyboardButton(text="👤 Соло-занятие", callback_data="lesson_kind:soloist")],
+        [InlineKeyboardButton(text="🎯 Соло 2 и больше", callback_data="lesson_kind:shared")],
         [
             InlineKeyboardButton(text="« Назад", callback_data="lesson_back:date"),
             InlineKeyboardButton(text="« Отмена", callback_data="teacher:cancel_lesson"),
@@ -90,7 +109,8 @@ def kb_lesson_type_after_save() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_kind:group")],
         [InlineKeyboardButton(text="💃 Парное", callback_data="lesson_kind:pair")],
-        [InlineKeyboardButton(text="👤 Индивидуальное (соло)", callback_data="lesson_kind:soloist")],
+        [InlineKeyboardButton(text="👤 Соло-занятие", callback_data="lesson_kind:soloist")],
+        [InlineKeyboardButton(text="🎯 Соло 2 и больше", callback_data="lesson_kind:shared")],
         [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
     ])
 
@@ -115,8 +135,8 @@ def kb_group_roster_per_visit(
     back_cb: str = "lesson_back:attendance",
 ) -> InlineKeyboardMarkup:
     """
-    Ростер группы с per-visit биллингом. Рядом с именем — тариф ученика.
-    Смена тарифа — через карточку ученика (админ).
+    Ростер группы с per-visit биллингом. Рядом с именем — тариф на это занятие.
+    Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
     tiers: dict[student_id -> "short" | "full"].
     """
     rows = []
@@ -124,13 +144,21 @@ def kb_group_roster_per_visit(
         mark = "✅" if s.student_id in selected_ids else "⬜"
         tier = tiers.get(s.student_id, "full")
         if tier == "short":
-            suffix = f"{duration_short}м · {price_short}₽"
+            suffix = f"{duration_short}м {price_short}₽"
+            alt_text = f"🔄 {duration_full}м"
         else:
-            suffix = f"{duration_full}м · {price_full}₽"
-        rows.append([InlineKeyboardButton(
-            text=f"{mark} {s.name} · {suffix}",
-            callback_data=f"ms_toggle:{s.student_id}",
-        )])
+            suffix = f"{duration_full}м {price_full}₽"
+            alt_text = f"🔄 {duration_short}м"
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{mark} {s.name} · {suffix}",
+                callback_data=f"ms_toggle:{s.student_id}",
+            ),
+            InlineKeyboardButton(
+                text=alt_text,
+                callback_data=f"ms_tier:{s.student_id}",
+            ),
+        ])
     all_selected = students and len(selected_ids) == len(students)
     toggle_all_text = "◻️ Снять всех" if all_selected else "☑️ Отметить всех"
     rows.append([InlineKeyboardButton(text=toggle_all_text, callback_data="ms_all")])
@@ -144,7 +172,10 @@ def kb_group_roster_per_visit(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson_back:duration") -> InlineKeyboardMarkup:
+def kb_pair_multi_select(
+    pairs: list, selected_keys: set,
+    back_cb: str = "lesson_back:duration",
+) -> InlineKeyboardMarkup:
     """pairs: list[tuple[Student a, Student b]]. Чекбоксы для мульти-выбора пар.
     Ключ — a.student_id (партнёр определяется по partner_id)."""
     rows = []
@@ -157,6 +188,32 @@ def kb_pair_multi_select(pairs: list, selected_keys: set, back_cb: str = "lesson
     rows.append([
         InlineKeyboardButton(text=f"💾 Подтвердить ({len(selected_keys)})", callback_data="pair_confirm"),
     ])
+    rows.append([
+        InlineKeyboardButton(text="« Назад", callback_data=back_cb),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_pair_from_soloists(
+    soloists: list, selected_ids: set,
+    back_cb: str = "lesson_back:duration",
+    done_label: str | None = None,
+    done_cb: str = "pso_confirm",
+    finish_label: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Чекбоксы для выбора 2–4 солистов как разового индивидуального занятия.
+    finish_label — если задан, добавляет кнопку прямого завершения (shared_confirm) над кнопкой «назад»."""
+    rows = []
+    for s in soloists:
+        mark = "✅" if s.student_id in selected_ids else "⬜"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {s.name}", callback_data=f"pso_toggle:{s.student_id}",
+        )])
+    if finish_label:
+        rows.append([InlineKeyboardButton(text=finish_label, callback_data="shared_confirm")])
+    label = done_label if done_label is not None else f"💾 Подтвердить ({len(selected_ids)}/1–4)"
+    rows.append([InlineKeyboardButton(text=label, callback_data=done_cb)])
     rows.append([
         InlineKeyboardButton(text="« Назад", callback_data=back_cb),
         InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
@@ -216,6 +273,7 @@ def kb_group_picker(groups: list, back_cb: str) -> InlineKeyboardMarkup:
 def kb_duration(back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="30 мин", callback_data="duration:30"),
             InlineKeyboardButton(text="35 мин", callback_data="duration:35"),
             InlineKeyboardButton(text="45 мин", callback_data="duration:45"),
             InlineKeyboardButton(text="60 мин", callback_data="duration:60"),
@@ -242,11 +300,16 @@ def kb_lesson_list(
     locked_ids: set | None = None,
     filter_date: str | None = None,
     filter_month: str | None = None,
+    filter_type: str | None = None,
     back_cb: str = "teacher:lesson_delete",
+    type_cb_prefix: str = "lessons_type",
 ) -> InlineKeyboardMarkup:
-    """Список занятий педагога с пагинацией. locked_ids — занятия из сданного периода.
-    filter_date/filter_month сохраняются в callback пагинации, чтобы не терять фильтр при листании."""
-    from bot.utils.dates import format_date_display
+    """Список занятий с пагинацией. locked_ids — занятия из сданного периода.
+    filter_date/filter_month/filter_type сохраняются в callback пагинации и между перерисовками.
+    filter_type: None=все, "group"=групповые, "individual"=парные/соло.
+    type_cb_prefix: префикс callback для переключателя типа ("lessons_type" для педагога,
+    "aedl_type:{teacher_id}" для админа)."""
+    from bot.utils.dates import format_date_display, format_date_short_with_wd
     locked_ids = locked_ids or set()
     start = page * page_size
     page_lessons = lessons[start: start + page_size]
@@ -256,29 +319,58 @@ def kb_lesson_list(
         filter_tag = f"m-{filter_month}"
     else:
         filter_tag = "all"
+    type_code = {"group": "g", "individual": "i"}.get(filter_type or "", "a")
 
     from bot.models.enums import LessonType
     buttons = []
+
+    def _tbtn(label: str, code: str) -> InlineKeyboardButton:
+        marker = "● " if code == type_code else ""
+        return InlineKeyboardButton(
+            text=f"{marker}{label}",
+            callback_data=f"{type_cb_prefix}:{code}:{filter_tag}",
+        )
+    buttons.append([
+        _tbtn("Все", "a"),
+        _tbtn("👥 Групповые", "g"),
+        _tbtn("👤 Индив.", "i"),
+    ])
+
+    group_by_date = filter_date is None
+    current_date: str | None = None
     for ls in page_lessons:
-        date_display = format_date_display(ls.date)
         lock_icon = "🔒 " if ls.lesson_id in locked_ids else ""
         if ls.type == LessonType.GROUP:
             who = "группа"
-        elif ls.student_2_name:
-            who = f"{ls.student_1_name} ↔ {ls.student_2_name}"
         else:
-            who = ls.student_1_name or "—"
-        label = f"{lock_icon}{date_display} | {ls.duration_min}м | {who}"
+            names = [n for n in (
+                ls.student_1_name, ls.student_2_name,
+                ls.student_3_name, ls.student_4_name,
+            ) if n]
+            if len(names) >= 2:
+                who = " + ".join(names)
+            else:
+                who = names[0] if names else "—"
+
+        if group_by_date and ls.date != current_date:
+            current_date = ls.date
+            buttons.append([InlineKeyboardButton(
+                text=f"━━━ 📅 {format_date_short_with_wd(ls.date)} ━━━",
+                callback_data="noop",
+            )])
+            label = f"{lock_icon}{ls.duration_min}м · {who}"
+        else:
+            label = f"{lock_icon}{format_date_display(ls.date)} · {ls.duration_min}м · {who}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"lesson_detail:{ls.lesson_id}")])
 
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton(
-            text="← Пред.", callback_data=f"lessons_page:{page - 1}:{filter_tag}",
+            text="← Пред.", callback_data=f"lessons_page:{page - 1}:{filter_tag}:{type_code}",
         ))
     if start + page_size < len(lessons):
         nav_row.append(InlineKeyboardButton(
-            text="След. →", callback_data=f"lessons_page:{page + 1}:{filter_tag}",
+            text="След. →", callback_data=f"lessons_page:{page + 1}:{filter_tag}:{type_code}",
         ))
     if nav_row:
         buttons.append(nav_row)

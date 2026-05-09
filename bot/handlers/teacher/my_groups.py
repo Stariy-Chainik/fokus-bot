@@ -13,6 +13,7 @@ from bot.repositories import (
     StudentGroupRepository, TeacherRepository, UserRepository, StudentRequestRepository,
 )
 from bot.states import TeacherGroupAddStudentStates
+from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_groups")
@@ -112,8 +113,8 @@ async def _render_t_group_card(
         f"<b>🏢 {branch_name} / {group.name}</b>\n\n"
         f"Учеников: {len(members)}"
     )
-    await message.edit_text(
-        text,
+    await show_card(
+        message, text,
         reply_markup=_kb_t_group_card(group_id, members),
     )
 

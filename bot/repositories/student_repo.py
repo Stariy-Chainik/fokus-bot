@@ -7,10 +7,11 @@ from .base import BaseRepository
 logger = logging.getLogger(__name__)
 
 # Колонки листа `students` (1-based):
-# 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело, не читаем/не пишем) | 5 group_tier
-# Колонка 4 оставлена в таблице для отката; данные живут в листе student_groups.
+# 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
 _PARTNER_COL = 3
 _TIER_COL = 5
+_CLIENT_ID_COL = 6
+_PARENT_TG_IDS_COL = 7
 
 
 def _row_to_student(row: dict) -> Student:
@@ -21,12 +22,21 @@ def _row_to_student(row: dict) -> Student:
         tier = StudentGroupTier(tier_raw) if tier_raw else StudentGroupTier.FULL
     except ValueError:
         tier = StudentGroupTier.FULL
+    client_id_raw = row.get("client_id")
+    client_id = str(client_id_raw).strip() if client_id_raw else None
+    tg_ids_raw = str(row.get("parent_tg_ids") or "").strip()
+    parent_tg_ids = [
+        int(x) for x in tg_ids_raw.split(",")
+        if x.strip().lstrip("-").isdigit()
+    ]
     return Student(
         student_id=str(row["student_id"]),
         name=str(row["name"]),
         partner_id=partner_id or None,
         group_ids=[],
         group_tier=tier,
+        client_id=client_id or None,
+        parent_tg_ids=parent_tg_ids,
     )
 
 
@@ -131,6 +141,50 @@ class StudentRepository(BaseRepository):
             except Exception as rollback_exc:
                 logger.error("set_partner: откат не удался: %s", rollback_exc)
             raise
+
+    async def set_client_id(self, student_id: str, client_id: str) -> bool:
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _CLIENT_ID_COL, client_id)
+        return True
+
+    async def clear_client_id(self, student_id: str) -> bool:
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _CLIENT_ID_COL, "")
+        return True
+
+    async def get_students_for_client(self, client_id: str) -> list[Student]:
+        return [s for s in await self.get_all() if s.client_id == client_id]
+
+    async def get_by_parent_tg_id(self, tg_id: int) -> list[Student]:
+        return [s for s in await self.get_all() if tg_id in s.parent_tg_ids]
+
+    async def add_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
+        student = await self.get_by_id(student_id)
+        if student is None:
+            return False
+        if tg_id in student.parent_tg_ids:
+            return True
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        new_ids = student.parent_tg_ids + [tg_id]
+        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, ",".join(str(i) for i in new_ids))
+        return True
+
+    async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
+        student = await self.get_by_id(student_id)
+        if student is None:
+            return False
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        new_ids = [i for i in student.parent_tg_ids if i != tg_id]
+        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, ",".join(str(i) for i in new_ids))
+        return True
 
     async def clear_partner(self, student_id: str) -> None:
         """Разрывает связь с обеих сторон. Безопасно вызывать для солиста."""

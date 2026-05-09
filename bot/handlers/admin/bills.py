@@ -3,16 +3,18 @@ import logging
 from datetime import date
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
 from bot.models import User
 from bot.repositories import (
     StudentRepository, PaymentRepository, TeacherRepository,
     BranchRepository, GroupRepository, StudentGroupRepository,
+    ClientRepository,
 )
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
-from bot.utils.dates import display_period, format_date_display
+from bot.utils.dates import display_period, format_date_display, format_date_short_with_wd
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_bills")
@@ -243,13 +245,21 @@ async def cb_bills_show(
         group_items = [b for b in items if b.lesson_type == "group"]
         if individual:
             lines.append("  <i>Индивидуальные:</i>")
-            for b in individual:
-                lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
+            cur_date: str | None = None
+            for b in sorted(individual, key=lambda x: x.date):
+                if b.date != cur_date:
+                    cur_date = b.date
+                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
+                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
         if group_items:
             group_total = sum(b.amount for b in group_items)
             lines.append(f"  <i>Групповые ({len(group_items)} посещений, {group_total} руб.):</i>")
-            for b in group_items:
-                lines.append(f"  {format_date_display(b.date)} | {b.duration_min} мин | {b.amount} руб.")
+            cur_date = None
+            for b in sorted(group_items, key=lambda x: x.date):
+                if b.date != cur_date:
+                    cur_date = b.date
+                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
+                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
         lines.append("")
     lines.append(f"Итого: {grand_total} руб.")
 
@@ -265,7 +275,33 @@ async def cb_bills_show(
     await callback.answer()
 
 
-# ─── Отправка родителю (заглушка) ─────────────────────────────────────────────
+# ─── Отправка родителю ────────────────────────────────────────────────────────
+
+def _build_bill_text(student_name: str, group_names: list[str], period_month: str, bills: dict) -> tuple[str, int]:
+    """Возвращает (text, grand_total) — текст счёта в родительском формате."""
+    lines = [
+        "📄 <b>Счёт за обучение</b>",
+        "",
+        f"Ученик: <b>{student_name}</b>",
+    ]
+    if group_names:
+        lines.append("Группы: " + ", ".join(group_names))
+    lines.append(f"Месяц: {display_period(period_month)}")
+    lines.append("")
+    grand_total = 0
+    for agg in bills.values():
+        grand_total += agg["total"]
+        lines.append(f"👨‍🏫 <b>{agg['name']}</b>")
+        cur_date: str | None = None
+        for b in sorted(agg["items"], key=lambda x: x.date):
+            if b.date != cur_date:
+                cur_date = b.date
+                lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
+            lines.append(f"    · {b.duration_min} мин · {b.amount} ₽")
+        lines.append("")
+    lines.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
+    return "\n".join(lines), grand_total
+
 
 @router.callback_query(F.data.startswith("bill_send:"))
 async def cb_bill_send(
@@ -275,12 +311,12 @@ async def cb_bill_send(
     group_repo: GroupRepository,
     payment_service: PaymentService,
     student_group_repo: StudentGroupRepository,
+    client_repo: ClientRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     parts = callback.data.split(":")
-    # bill_send:{student_id}:{period_month}[:{group_id}] — group_id опционален для обратной совместимости
     student_id = parts[1]
     period_month = parts[2]
     group_id = parts[3] if len(parts) > 3 else "none"
@@ -318,10 +354,6 @@ async def cb_bill_send(
         invoices = await payment_service.get_or_create_invoices_for_student_period(
             student, period_month,
         )
-        logger.info(
-            "Заглушка отправки счетов родителю student=%s period=%s invoices=%d",
-            student_id, period_month, len(invoices),
-        )
 
         gids = await student_group_repo.get_groups_for_student(student_id)
         group_names: list[str] = []
@@ -330,42 +362,82 @@ async def cb_bill_send(
             if g:
                 group_names.append(g.name)
 
-        preview = [
-            "📄 <b>Счёт за обучение</b>",
-            "",
-            f"Ученик: <b>{student.name}</b>",
-        ]
-        if group_names:
-            preview.append("Группы: " + ", ".join(group_names))
-        preview.append(f"Месяц: {display_period(period_month)}")
-        preview.append("")
-
-        grand_total = 0
-        for teacher_id, agg in bills.items():
-            grand_total += agg["total"]
-            preview.append(f"👨‍🏫 <b>{agg['name']}</b>")
-            for b in agg["items"]:
-                preview.append(
-                    f"  • {format_date_display(b.date)} · {b.duration_min} мин · {b.amount} ₽"
-                )
-            preview.append("")
-        preview.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
+        bill_text, grand_total = _build_bill_text(student.name, group_names, period_month, bills)
 
         back_cb = (
             f"bvb:{period_month}:none" if group_id == "none"
             else f"bvg:{period_month}:{group_id}"
         )
-        header = (
-            "📤 <i>Шаблон сообщения родителю (авто-отправка пока не включена — "
-            "скопируй и отправь вручную):</i>\n\n"
-        )
-        await callback.message.edit_text(
-            header + "\n".join(preview),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
-                [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
-            ]),
-        )
+
+        # Проверяем — есть ли у ученика привязанный клиент с Telegram
+        client = await client_repo.get_by_id(student.client_id) if student.client_id else None
+        client_tg_id = client.tg_id if client else None
+
+        if client_tg_id:
+            # Реальная отправка клиенту
+            sent_invoices = 0
+            try:
+                await callback.bot.send_message(client_tg_id, bill_text)
+                if settings.payment_provider_token:
+                    for p in invoices:
+                        if p.status.value != "paid":
+                            try:
+                                await callback.bot.send_invoice(
+                                    chat_id=client_tg_id,
+                                    title=f"Занятия {display_period(period_month)}",
+                                    description=f"Педагог: {p.teacher_name or '—'}",
+                                    payload=p.payment_id,
+                                    provider_token=settings.payment_provider_token,
+                                    currency="RUB",
+                                    prices=[LabeledPrice(
+                                        label="Обучение",
+                                        amount=p.total_amount * 100,
+                                    )],
+                                )
+                                sent_invoices += 1
+                            except Exception as exc:
+                                logger.error("Ошибка отправки инвойса %s: %s", p.payment_id, exc)
+            except Exception as exc:
+                logger.error("Ошибка отправки сообщения клиенту tg_id=%s: %s", client_tg_id, exc)
+                await callback.message.edit_text(
+                    f"❌ Не удалось отправить — клиент заблокировал бота или не запускал /start.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
+                    ]),
+                )
+                await callback.answer()
+                return
+
+            status_line = f"✅ Счёт отправлен клиенту {client.name}"
+            if sent_invoices:
+                status_line += f" + {sent_invoices} кнопок оплаты"
+            logger.info("Счёт отправлен student=%s period=%s client_tg_id=%s", student_id, period_month, client_tg_id)
+            await callback.message.edit_text(
+                status_line,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
+                    [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
+                ]),
+            )
+        else:
+            # Клиент не привязан — показать шаблон для ручной отправки
+            if client:
+                header = (
+                    "⚠️ <i>Клиент ещё не заходил в бот (нет Telegram). "
+                    "Скопируй и отправь вручную:</i>\n\n"
+                )
+            else:
+                header = (
+                    "📤 <i>Клиент не привязан. "
+                    "Скопируй и отправь вручную:</i>\n\n"
+                )
+            await callback.message.edit_text(
+                header + bill_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
+                    [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
+                ]),
+            )
         await callback.answer()
     finally:
         _sending_in_progress.discard(lock_key)

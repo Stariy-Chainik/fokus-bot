@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     sheet_teacher_groups: str = Field(default="teacher_groups", alias="SHEET_TEACHER_GROUPS")
     sheet_student_groups: str = Field(default="student_groups", alias="SHEET_STUDENT_GROUPS")
     sheet_student_requests: str = Field(default="student_requests", alias="SHEET_STUDENT_REQUESTS")
+    sheet_clients: str = Field(default="clients", alias="SHEET_CLIENTS")
+
+    # Payments
+    payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
 
     # Server / Railway
     # Если задан — бот запускается в webhook-режиме (рекомендуется для продакшена).

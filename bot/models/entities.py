@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .enums import LessonType, PaymentStatus, RequestStatus, GroupBillingMode, StudentGroupTier
+from .enums import LessonType, PaymentStatus, RequestStatus, GroupBillingMode, StudentGroupTier, InviteCodeStatus
 
 
 @dataclass
@@ -22,12 +22,36 @@ class Teacher:
 
 
 @dataclass
+class Client:
+    client_id: str
+    name: str
+    tg_id: Optional[int] = None
+    created_at: str = ""
+    phone: Optional[str] = None
+
+
+@dataclass
+class ClientInviteCode:
+    code_id: str
+    code: str
+    client_id: str
+    created_by: int
+    created_at: str
+    expires_at: str
+    status: str          # InviteCodeStatus
+    used_at: Optional[str] = None
+    used_by_tg_id: Optional[int] = None
+
+
+@dataclass
 class Student:
     student_id: str
     name: str
     partner_id: Optional[str] = None
     group_ids: list[str] = field(default_factory=list)
     group_tier: StudentGroupTier = StudentGroupTier.FULL
+    client_id: Optional[str] = None
+    parent_tg_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -81,9 +105,15 @@ class Lesson:
     recorded_at: str           # YYYY-MM-DD HH:MM:SS
     updated_at: str            # YYYY-MM-DD HH:MM:SS
     # CSV student_id присутствовавших — используется только для group-занятий;
-    # для individual всегда пусто (учеников видно по student_1/2_id).
+    # для individual всегда пусто (учеников видно по student_1..4_id).
     attendees: Optional[str] = None
     group_id: str = ""  # заполнено только для групповых занятий, если педагог выбрал тренировочную группу
+    # INDIVIDUAL занятие может содержать 1–4 учеников; student_3/4 — опциональные
+    # дополнительные слоты (для разовых микрогрупп из солистов).
+    student_3_id: Optional[str] = None
+    student_3_name: Optional[str] = None
+    student_4_id: Optional[str] = None
+    student_4_name: Optional[str] = None
 
 
 @dataclass

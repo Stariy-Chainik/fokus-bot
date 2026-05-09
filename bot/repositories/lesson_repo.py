@@ -22,6 +22,10 @@ def _row_to_lesson(row: dict) -> Lesson:
         updated_at=str(row["updated_at"]),
         attendees=str(row["attendees"]) if row.get("attendees") else None,
         group_id=str(row.get("group_id") or ""),
+        student_3_id=str(row["student_3_id"]) if row.get("student_3_id") else None,
+        student_3_name=str(row["student_3_name"]) if row.get("student_3_name") else None,
+        student_4_id=str(row["student_4_id"]) if row.get("student_4_id") else None,
+        student_4_name=str(row["student_4_name"]) if row.get("student_4_name") else None,
     )
 
 
@@ -49,7 +53,7 @@ class LessonRepository(BaseRepository):
         for ls in await self.get_all():
             if not ls.date.startswith(period_month):
                 continue
-            if ls.student_1_id == student_id or ls.student_2_id == student_id:
+            if student_id in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id):
                 out.append(ls)
                 continue
             if ls.type == LessonType.GROUP and ls.attendees \
@@ -77,6 +81,10 @@ class LessonRepository(BaseRepository):
             lesson.updated_at,
             lesson.attendees or "",
             lesson.group_id or "",
+            lesson.student_3_id or "",
+            lesson.student_3_name or "",
+            lesson.student_4_id or "",
+            lesson.student_4_name or "",
         ])
         return lesson
 
@@ -107,5 +115,9 @@ class LessonRepository(BaseRepository):
             lesson.updated_at,
             lesson.attendees or "",
             lesson.group_id or "",
+            lesson.student_3_id or "",
+            lesson.student_3_name or "",
+            lesson.student_4_id or "",
+            lesson.student_4_name or "",
         ])
         return True

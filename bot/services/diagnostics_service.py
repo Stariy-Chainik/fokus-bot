@@ -34,7 +34,7 @@ class DiagnosticsService:
         for ls in lessons:
             if ls.teacher_id not in teacher_ids:
                 missing_teacher.append(ls.lesson_id)
-            for sid in (ls.student_1_id, ls.student_2_id):
+            for sid in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id):
                 if sid and sid not in student_ids:
                     missing_student.append(ls.lesson_id)
                     break

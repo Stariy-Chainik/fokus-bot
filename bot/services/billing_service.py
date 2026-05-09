@@ -52,22 +52,21 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
 
     base_amount = round(teacher.rate_for_student * lesson.duration_min / 45)
 
-    if lesson.student_1_id and not lesson.student_2_id:
-        rows.append(_make(
-            lesson.student_1_id, lesson.student_1_name or "",
-            base_amount, lesson.duration_min,
-        ))
-    elif lesson.student_1_id and lesson.student_2_id:
-        half = base_amount // 2
-        amount_1 = half + (base_amount - half * 2)
-        amount_2 = half
-        rows.append(_make(
-            lesson.student_1_id, lesson.student_1_name or "",
-            amount_1, lesson.duration_min,
-        ))
-        rows.append(_make(
-            lesson.student_2_id, lesson.student_2_name or "",
-            amount_2, lesson.duration_min,
-        ))
+    slots = [
+        (lesson.student_1_id, lesson.student_1_name),
+        (lesson.student_2_id, lesson.student_2_name),
+        (lesson.student_3_id, lesson.student_3_name),
+        (lesson.student_4_id, lesson.student_4_name),
+    ]
+    participants = [(sid, sname or "") for sid, sname in slots if sid]
+    if not participants:
+        return rows
+
+    n = len(participants)
+    per = base_amount // n
+    remainder = base_amount - per * n
+    for i, (sid, sname) in enumerate(participants):
+        amount = per + (remainder if i == 0 else 0)
+        rows.append(_make(sid, sname, amount, lesson.duration_min))
 
     return rows

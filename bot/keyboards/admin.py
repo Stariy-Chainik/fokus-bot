@@ -1,3 +1,4 @@
+from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
@@ -7,9 +8,9 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],
         [InlineKeyboardButton(text="📝 Заявки", callback_data="admin:requests")],
         [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
-        [InlineKeyboardButton(text="💰 Зарплата педагога за период", callback_data="salaries:view")],
         [InlineKeyboardButton(text="🧾 Счёт ученика за период", callback_data="bills:view")],
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
+        [InlineKeyboardButton(text="📝 Отметить занятие", callback_data="admin:record_lesson")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
     ]
@@ -57,10 +58,12 @@ def kb_student_card(
     student_id: str, has_partner: bool, back_cb: str = "students:list",
     tier_toggle: tuple[str, str] | None = None,
     has_groups: bool = False,
+    client_rows: list | None = None,
 ) -> InlineKeyboardMarkup:
     """
     tier_toggle: (current_tier, label) — если задан, добавит кнопку смены тарифа.
     has_groups: если у ученика есть хоть одна группа, показываем кнопку «Убрать из группы».
+    client_rows: список строк кнопок управления клиентом [(label, cb), ...] на строку.
     """
     group_row = [InlineKeyboardButton(
         text="➕ Добавить в группу", callback_data=f"student_groups_add:{student_id}",
@@ -78,6 +81,9 @@ def kb_student_card(
     if tier_toggle is not None:
         _, label = tier_toggle
         rows.append([InlineKeyboardButton(text=label, callback_data=f"student_tier_toggle:{student_id}")])
+    if client_rows:
+        for row_items in client_rows:
+            rows.append([InlineKeyboardButton(text=lbl, callback_data=cb) for lbl, cb in row_items])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -113,6 +119,7 @@ def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:me
 def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Занятия педагога", callback_data=f"aedl_t:{teacher_id}")],
+        [InlineKeyboardButton(text="💰 Зарплата за период", callback_data=f"salary_teacher:{teacher_id}")],
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
         [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
         [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data=f"del_teacher:{teacher_id}")],

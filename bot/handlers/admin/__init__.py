@@ -6,6 +6,8 @@ from .bills import router as bills_router
 from .diagnostics import router as diagnostics_router
 from .edit_lesson import router as edit_lesson_router
 from .branches import router as branches_router
+from .client_requests import router as client_requests_router
+from .record_lesson import router as record_lesson_router
 
 router = Router(name="admin")
 router.include_routers(
@@ -16,4 +18,6 @@ router.include_routers(
     diagnostics_router,
     edit_lesson_router,
     branches_router,
+    client_requests_router,
+    record_lesson_router,
 )

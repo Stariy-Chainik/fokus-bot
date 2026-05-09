@@ -49,3 +49,11 @@ def generate_branch_id(existing: list[str]) -> str:
 
 def generate_group_id(existing: list[str]) -> str:
     return _next_id("GRP", 4, existing)
+
+
+def generate_client_id(existing: list[str]) -> str:
+    return _next_id("CLT", 4, existing)
+
+
+def generate_invite_code_id(existing: list[str]) -> str:
+    return _next_id("INV", 6, existing)

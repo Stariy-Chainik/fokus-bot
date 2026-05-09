@@ -7,50 +7,47 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.repositories import UserRepository, TeacherRepository
+from bot.repositories import UserRepository, TeacherRepository, StudentRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
+from bot.keyboards.client import kb_client_menu
 
 logger = logging.getLogger(__name__)
 router = Router(name="common")
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, user: User | None, user_repo: UserRepository, teacher_repo: TeacherRepository) -> None:
+async def show_card(
+    event: CallbackQuery | Message,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Удалить старое сообщение и отправить карточку снизу — чтобы чат не прыгал вверх."""
+    target = event.message if isinstance(event, CallbackQuery) else event
+    try:
+        await target.delete()
+    except Exception:
+        pass
+    await target.answer(text, reply_markup=reply_markup)
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+
+@router.message(CommandStart(deep_link=False))
+async def cmd_start(
+    message: Message, user: User | None,
+    user_repo: UserRepository, teacher_repo: TeacherRepository,
+    student_repo: StudentRepository,
+) -> None:
+    tg_id = message.from_user.id
+
+    if user is None or (not user.is_admin and not user.teacher_id):
+        students = await student_repo.get_by_parent_tg_id(tg_id)
+        if students:
+            await message.answer("Добро пожаловать!\n\nВыберите раздел:", reply_markup=kb_client_menu())
+            return
+
     if user is None:
-        # Автоматически регистрируем нового пользователя
-        tg_user = message.from_user
-        try:
-            await user_repo.add(tg_id=tg_user.id)
-            logger.info("Новый пользователь зарегистрирован: tg_id=%s", tg_user.id)
-        except Exception as exc:
-            logger.error("Ошибка авторегистрации tg_id=%s: %s", tg_user.id, exc)
-
-        # Уведомляем всех администраторов
-        name_parts = [tg_user.first_name or "", tg_user.last_name or ""]
-        full_name = " ".join(p for p in name_parts if p).strip() or "—"
-        username = f"@{tg_user.username}" if tg_user.username else "нет"
-        notify_text = (
-            f"🆕 Новый пользователь зарегистрировался:\n\n"
-            f"Имя: {full_name}\n"
-            f"Username: {username}\n"
-            f"Telegram ID: <code>{tg_user.id}</code>\n\n"
-            f"Добавьте его как педагога через меню Администратора → Педагоги → Добавить"
-        )
-        notify_kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text="➕ Добавить как педагога",
-                callback_data=f"add_teacher_prefill:{tg_user.id}",
-            )
-        ]])
-        admins = [u for u in await user_repo.get_all() if u.is_admin]
-        for admin in admins:
-            try:
-                await message.bot.send_message(admin.tg_id, notify_text, reply_markup=notify_kb)
-            except Exception:
-                pass  # Если администратор недоступен — не прерываем
-
         await message.answer(
-            "Добро пожаловать!\n\nВы зарегистрированы. Ожидайте, пока администратор назначит вам роль."
+            "Добро пожаловать!\n\nВведите фамилию ученика для регистрации:",
         )
         return
 
@@ -207,9 +204,23 @@ async def cb_teacher_menu(callback: CallbackQuery, user: User | None, state: FSM
 
 
 @router.callback_query(F.data == "go:home")
-async def cb_go_home(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+async def cb_go_home(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository,
+) -> None:
     """Быстрый возврат в главное меню активной роли (чистит FSM, сохраняет роль)."""
     role_hint = await _clear_state_preserve_role(state)
+
+    # Клиентская роль
+    if user is None or (not user.is_admin and not user.teacher_id):
+        students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+        if students:
+            await callback.message.edit_text(
+                "Выберите раздел:", reply_markup=kb_client_menu(),
+            )
+            await callback.answer()
+            return
+
     if user is None:
         await callback.message.edit_text("Сначала отправьте /start для регистрации.")
         await callback.answer()

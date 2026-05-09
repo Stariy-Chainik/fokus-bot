@@ -63,3 +63,11 @@ class GroupBillingStates(StatesGroup):
 class GroupAddStudentStates(StatesGroup):
     """Админ добавляет ученика в группу: ввод ФИО → поиск → выбор/создание."""
     searching = State()
+
+
+class ClientCreateStates(StatesGroup):
+    entering_phone = State()
+
+
+class ClientRegStates(StatesGroup):
+    adding_child = State()

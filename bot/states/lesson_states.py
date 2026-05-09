@@ -9,7 +9,10 @@ class RecordLessonStates(StatesGroup):
     choosing_group = State()             # group: выбор тренировочной группы
     selecting_attendees = State()        # group: чекбоксы присутствующих в выбранной группе
     choosing_pair = State()              # pair: чекбоксы пар (мульти-выбор)
+    picking_pair_soloists = State()      # pair: выбор ровно двух солистов как разовой пары
     selecting_soloists = State()         # soloist: чекбоксы
+    choosing_shared_group = State()      # shared: выбор группы для добавления учеников
+    picking_shared_in_group = State()    # shared: чекбоксы учеников внутри выбранной группы
     choosing_duration = State()
 
 

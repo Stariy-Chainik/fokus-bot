@@ -20,6 +20,7 @@ from bot.states import (
 )
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period
+from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_branches")
@@ -155,10 +156,10 @@ async def cb_branch_card(
         f"ID: {branch.branch_id}\n\n"
         f"Групп: {len(groups)}"
     )
-    await callback.message.edit_text(
-        text, reply_markup=_kb_branch_card(branch_id, groups, has_groups=bool(groups)),
+    await show_card(
+        callback, text,
+        reply_markup=_kb_branch_card(branch_id, groups, has_groups=bool(groups)),
     )
-    await callback.answer()
 
 
 # ─── Переименование филиала ──────────────────────────────────────────────────
@@ -328,8 +329,8 @@ async def _render_group_card(
         f"👨‍🏫 Педагоги: {teachers_list}\n\n"
         f"👩‍🎓 Учеников: {len(students)}"
     )
-    await message.edit_text(
-        text,
+    await show_card(
+        message, text,
         reply_markup=_kb_group_card(group_id, group.branch_id, students),
     )
 

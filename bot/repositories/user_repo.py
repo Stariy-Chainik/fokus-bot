@@ -59,6 +59,9 @@ class UserRepository(BaseRepository):
                 return True
         return False
 
+    async def get_admins(self) -> list[User]:
+        return [u for u in await self.get_all() if u.is_admin]
+
     async def delete_by_teacher_id(self, teacher_id: str) -> bool:
         """Удаляет пользователя из таблицы при удалении педагога."""
         records = await self._all_records()

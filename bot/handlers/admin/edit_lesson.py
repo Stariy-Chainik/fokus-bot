@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherRepository
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.teacher import kb_lesson_list
@@ -74,12 +75,17 @@ def _month_picker_kb(teacher_id: str) -> InlineKeyboardMarkup:
 async def _show_lessons(
     callback: CallbackQuery, lesson_repo: LessonRepository, teacher_id: str,
     filter_date: str | None = None, filter_month: str | None = None,
+    filter_type: str | None = None,
 ) -> None:
     lessons = await lesson_repo.get_by_teacher(teacher_id)
     if filter_date:
         lessons = [ls for ls in lessons if ls.date == filter_date]
     elif filter_month:
         lessons = [ls for ls in lessons if ls.date[:7] == filter_month]
+    if filter_type == "group":
+        lessons = [ls for ls in lessons if ls.type == LessonType.GROUP]
+    elif filter_type == "individual":
+        lessons = [ls for ls in lessons if ls.type == LessonType.INDIVIDUAL]
     lessons.sort(key=lambda ls: ls.date, reverse=True)
 
     if filter_date:
@@ -88,21 +94,32 @@ async def _show_lessons(
         title_frag = f"за {_month_label(filter_month)}"
     else:
         title_frag = ""
+    type_frag = {
+        "group": " · групповые",
+        "individual": " · индивидуальные",
+    }.get(filter_type or "", "")
 
     back_cb = f"aedl_dates:{teacher_id}"
+    type_cb_prefix = f"aedl_type:{teacher_id}"
     if not lessons:
         await callback.message.edit_text(
-            f"Занятий {title_frag} не найдено.",
-            reply_markup=kb_back(back_cb),
+            f"Занятий {title_frag}{type_frag} не найдено.",
+            reply_markup=kb_lesson_list(
+                [], page=0, page_size=PAGE_SIZE,
+                filter_date=filter_date, filter_month=filter_month,
+                filter_type=filter_type,
+                back_cb=back_cb, type_cb_prefix=type_cb_prefix,
+            ),
         )
         return
-    header = f"<b>Занятия {title_frag}</b> ({len(lessons)}):" if title_frag else f"<b>Занятия</b> ({len(lessons)}):"
+    header = f"<b>Занятия {title_frag}{type_frag}</b> ({len(lessons)}):" if title_frag else f"<b>Занятия</b>{type_frag} ({len(lessons)}):"
     await callback.message.edit_text(
         header,
         reply_markup=kb_lesson_list(
             lessons, page=0, page_size=PAGE_SIZE,
             filter_date=filter_date, filter_month=filter_month,
-            back_cb=back_cb,
+            filter_type=filter_type,
+            back_cb=back_cb, type_cb_prefix=type_cb_prefix,
         ),
     )
 
@@ -265,6 +282,29 @@ async def cb_admin_lessons_cal_pick(
         await callback.answer("Сессия истекла, начните сначала", show_alert=True)
         return
     await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("aedl_type:"))
+async def cb_admin_lessons_type(
+    callback: CallbackQuery, user: User | None,
+    lesson_repo: LessonRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, teacher_id, type_code, tag = callback.data.split(":", 3)
+    filter_type = {"g": "group", "i": "individual"}.get(type_code)
+    filter_date: str | None = None
+    filter_month: str | None = None
+    if tag.startswith("m-"):
+        filter_month = tag[2:]
+    elif tag != "all":
+        filter_date = tag
+    await _show_lessons(
+        callback, lesson_repo, teacher_id,
+        filter_date=filter_date, filter_month=filter_month, filter_type=filter_type,
+    )
     await callback.answer()
 
 

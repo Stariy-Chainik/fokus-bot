@@ -30,7 +30,7 @@ def _period_buttons(teacher_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=display_period(p), callback_data=f"salary_period:{teacher_id}:{p}")]
         for p in periods
     ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data="salaries:view")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"teacher_card:{teacher_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
