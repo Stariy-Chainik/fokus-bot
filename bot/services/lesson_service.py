@@ -54,6 +54,9 @@ class LessonService:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
 
+        if group_id and await self._lesson_repo.group_lesson_exists(teacher.teacher_id, group_id, lesson_date):
+            raise ValueError("Занятие этой группы на выбранную дату уже записано")
+
         await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
 
         now = now_str()
