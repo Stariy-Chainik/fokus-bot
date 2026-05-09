@@ -1,8 +1,16 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Педагоги, от имени которых может записывать занятия другой педагог (ассистент)
+_PROXY_BUTTONS: dict[str, list[tuple[str, str]]] = {
+    "TCH-0002": [
+        ("📝 Занятие Никишина", "proxy_record:TCH-0005"),
+        ("📝 Занятие Криворчук", "proxy_record:TCH-0008"),
+    ],
+}
 
-def kb_teacher_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
+
+def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="✏️ Отметить занятие", callback_data="teacher:record_lesson")],
         [InlineKeyboardButton(text="💃 Пары", callback_data="teacher:my_pairs")],
@@ -12,6 +20,9 @@ def kb_teacher_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
     ]
+    if teacher_id and teacher_id in _PROXY_BUTTONS:
+        for label, cb in _PROXY_BUTTONS[teacher_id]:
+            rows.append([InlineKeyboardButton(text=label, callback_data=cb)])
     if can_switch_role:
         rows.append([InlineKeyboardButton(text="🔄 Режим администратора", callback_data="mode:admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

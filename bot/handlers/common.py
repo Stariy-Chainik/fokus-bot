@@ -60,7 +60,7 @@ async def cmd_start(
         return
 
     if user.teacher_id:
-        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu())
+        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu(teacher_id=user.teacher_id))
         return
 
     # Пользователь зарегистрирован, но teacher_id не привязан.
@@ -72,7 +72,7 @@ async def cmd_start(
         can_switch = bool(user.is_admin)
         await message.answer(
             "Добро пожаловать!\n\nВыберите действие:",
-            reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+            reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=teacher.teacher_id),
         )
         return
 
@@ -126,7 +126,7 @@ async def _show_role_menu(
     if role == "admin":
         text, kb = "Меню администратора:", kb_admin_menu(can_switch_role=can_switch)
     else:
-        text, kb = "Меню педагога:", kb_teacher_menu(can_switch_role=can_switch)
+        text, kb = "Меню педагога:", kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id)
 
     # send_target может быть Message (cmd_menu) или callback.message (edit_text).
     if hasattr(send_target, "edit_text"):
@@ -172,7 +172,7 @@ async def cb_mode_teacher(callback: CallbackQuery, user: User | None, state: FSM
     await _set_current_role(state, "teacher")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
-        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id),
     )
     await callback.answer()
 
@@ -198,7 +198,7 @@ async def cb_teacher_menu(callback: CallbackQuery, user: User | None, state: FSM
     await _set_current_role(state, "teacher")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
-        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+        "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id),
     )
     await callback.answer()
 

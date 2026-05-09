@@ -52,10 +52,10 @@ def _tid(user: User, data: dict) -> str | None:
 
 def _menu_kb(user: User | None, data: dict) -> InlineKeyboardMarkup:
     """Клавиатура «назад» с учётом роли (педагог / прокси-админ)."""
-    if user and (not user.teacher_id or data.get("proxy_teacher_id")):
+    if user and user.is_admin and (not user.teacher_id or data.get("proxy_teacher_id")):
         return kb_admin_menu()
     can_switch = bool(user and user.is_admin and user.teacher_id)
-    return kb_teacher_menu(can_switch_role=can_switch)
+    return kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id if user else None)
 
 
 async def _all_students_in_group(
@@ -112,17 +112,32 @@ async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, sta
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("proxy_record:"))
+async def cb_proxy_record_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    await state.clear()
+    await state.update_data(proxy_teacher_id=teacher_id)
+    await state.set_state(RecordLessonStates.choosing_date)
+    await callback.message.edit_text(
+        "<b>Отметить занятие</b>\nВыберите дату:", reply_markup=_date_picker_kb(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "teacher:cancel_lesson")
 async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext, user: User | None) -> None:
     data = await state.get_data()
     is_proxy = bool(data.get("proxy_teacher_id"))
     await state.clear()
-    if is_proxy or (user and user.is_admin and not user.teacher_id):
+    if user and user.is_admin and (is_proxy or not user.teacher_id):
         await callback.message.edit_text("Отменено.", reply_markup=kb_admin_menu())
     else:
         can_switch = bool(user and user.is_admin and user.teacher_id)
         await callback.message.edit_text(
-            "Отменено.", reply_markup=kb_teacher_menu(can_switch_role=can_switch),
+            "Отменено.", reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id if user else None),
         )
     await callback.answer()
 
