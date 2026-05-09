@@ -144,7 +144,7 @@ def kb_group_roster_per_visit(
     price_short: int, duration_short: int,
     price_full: int, duration_full: int,
     back_cb: str = "lesson_back:attendance",
-) -> InlineKeyboardMarkup:
+) -> InlineKeyboardMarkup:  # price_short/price_full не показываем педагогу
     """
     Ростер группы с per-visit биллингом. Рядом с именем — тариф на это занятие.
     Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
@@ -155,10 +155,10 @@ def kb_group_roster_per_visit(
         mark = "✅" if s.student_id in selected_ids else "⬜"
         tier = tiers.get(s.student_id, "full")
         if tier == "short":
-            suffix = f"{duration_short}м {price_short}₽"
+            suffix = f"{duration_short}м"
             alt_text = f"🔄 {duration_full}м"
         else:
-            suffix = f"{duration_full}м {price_full}₽"
+            suffix = f"{duration_full}м"
             alt_text = f"🔄 {duration_short}м"
         rows.append([
             InlineKeyboardButton(
