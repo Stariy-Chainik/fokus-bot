@@ -150,26 +150,27 @@ def kb_group_roster_per_visit(
     Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
     tiers: dict[student_id -> "short" | "full"].
     """
+    has_short = price_short > 0
     rows = []
     for s in students:
         mark = "✅" if s.student_id in selected_ids else "⬜"
         tier = tiers.get(s.student_id, "full")
-        if tier == "short":
+        if has_short and tier == "short":
             suffix = f"{duration_short}м"
             alt_text = f"🔄 {duration_full}м"
         else:
             suffix = f"{duration_full}м"
             alt_text = f"🔄 {duration_short}м"
-        rows.append([
-            InlineKeyboardButton(
-                text=f"{mark} {s.name} · {suffix}",
-                callback_data=f"ms_toggle:{s.student_id}",
-            ),
-            InlineKeyboardButton(
+        row = [InlineKeyboardButton(
+            text=f"{mark} {s.name} · {suffix}",
+            callback_data=f"ms_toggle:{s.student_id}",
+        )]
+        if has_short:
+            row.append(InlineKeyboardButton(
                 text=alt_text,
                 callback_data=f"ms_tier:{s.student_id}",
-            ),
-        ])
+            ))
+        rows.append(row)
     all_selected = students and len(selected_ids) == len(students)
     toggle_all_text = "◻️ Снять всех" if all_selected else "☑️ Отметить всех"
     rows.append([InlineKeyboardButton(text=toggle_all_text, callback_data="ms_all")])

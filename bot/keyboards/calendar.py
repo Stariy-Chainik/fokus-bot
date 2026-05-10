@@ -28,6 +28,7 @@ def kb_calendar(
     year: int, month: int, prefix: str,
     min_date: date | None = None, max_date: date | None = None,
     cancel_cb: str = "teacher:menu",
+    highlight_dates: set[date] | None = None,
 ) -> InlineKeyboardMarkup:
     """Inline-календарь на указанный месяц.
 
@@ -58,8 +59,10 @@ def kb_calendar(
             if (min_date and d < min_date) or (max_date and d > max_date):
                 row.append(InlineKeyboardButton(text=f"·{day}·", callback_data="noop"))
             else:
+                has_lesson = highlight_dates and d in highlight_dates
+                label = f"• {day}" if has_lesson else str(day)
                 row.append(InlineKeyboardButton(
-                    text=str(day), callback_data=f"{prefix}_pick:{d.isoformat()}",
+                    text=label, callback_data=f"{prefix}_pick:{d.isoformat()}",
                 ))
         rows.append(row)
 
