@@ -1148,6 +1148,8 @@ async def _finalize(
         kind = data.get("kind")
         lesson_date = data["lesson_date"]
         duration = int(data["duration_min"])
+        _is_admin_mode = user and user.is_admin and (not user.teacher_id or data.get("proxy_teacher_id"))
+        after_save_kb = kb_lesson_type_after_save(back_cb="admin:menu" if _is_admin_mode else "teacher:menu")
 
         if kind == "group":
             attendee_ids = list(data.get("selected_ids", []))
@@ -1190,7 +1192,7 @@ async def _finalize(
                 f"<b>✅ Групповое занятие записано</b>\nID: {lesson.lesson_id}\n"
                 f"Дата: {format_date_display(lesson.date)}{extra}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
-                reply_markup=kb_lesson_type_after_save(),
+                reply_markup=after_save_kb,
             )
 
         elif kind == "pair":
@@ -1219,7 +1221,7 @@ async def _finalize(
                 f"Дата: {format_date_display(lesson_date)}\n"
                 f"Пары: {'; '.join(pair_labels)}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
-                reply_markup=kb_lesson_type_after_save(),
+                reply_markup=after_save_kb,
             )
 
         elif kind == "shared":
@@ -1257,7 +1259,7 @@ async def _finalize(
                 f"Дата: {format_date_display(lesson_date)}\n"
                 f"Ученики ({len(students)}): {label}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
-                reply_markup=kb_lesson_type_after_save(),
+                reply_markup=after_save_kb,
             )
 
         elif kind == "soloist":
@@ -1281,7 +1283,7 @@ async def _finalize(
                 f"Дата: {format_date_display(lesson_date)}\n"
                 f"Ученики: {names}\n\n"
                 f"Продолжим? Выберите тип следующего занятия:",
-                reply_markup=kb_lesson_type_after_save(),
+                reply_markup=after_save_kb,
             )
         else:
             await state.clear()

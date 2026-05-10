@@ -115,14 +115,14 @@ def kb_lesson_type() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_lesson_type_after_save() -> InlineKeyboardMarkup:
+def kb_lesson_type_after_save(back_cb: str = "teacher:menu") -> InlineKeyboardMarkup:
     """После успешного сохранения: продолжить с тем же днём или выйти в меню."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Групповое", callback_data="lesson_kind:group")],
         [InlineKeyboardButton(text="💃 Парное", callback_data="lesson_kind:pair")],
         [InlineKeyboardButton(text="👤 Соло-занятие", callback_data="lesson_kind:soloist")],
         [InlineKeyboardButton(text="🎯 Соло 2 и больше", callback_data="lesson_kind:shared")],
-        [InlineKeyboardButton(text="« В меню", callback_data="teacher:menu")],
+        [InlineKeyboardButton(text="« В меню", callback_data=back_cb)],
     ])
 
 

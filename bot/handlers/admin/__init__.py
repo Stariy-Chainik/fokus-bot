@@ -8,6 +8,7 @@ from .edit_lesson import router as edit_lesson_router
 from .branches import router as branches_router
 from .client_requests import router as client_requests_router
 from .record_lesson import router as record_lesson_router
+from .profit import router as profit_router
 
 router = Router(name="admin")
 router.include_routers(
@@ -20,4 +21,5 @@ router.include_routers(
     branches_router,
     client_requests_router,
     record_lesson_router,
+    profit_router,
 )
