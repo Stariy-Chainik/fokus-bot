@@ -415,7 +415,7 @@ async def cb_lesson_detail(
                     lines.append(f"  • {name} · {e.duration_min} мин · {e.amount}₽")
                     total += e.amount
                 else:
-                    lines.append(f"  • {name} · {e.duration_min} мин · пробное")
+                    lines.append(f"  • {name} · {e.duration_min} мин · абонемент")
             if total > 0:
                 lines.append(f"<b>Итого: {total} ₽</b>")
 
