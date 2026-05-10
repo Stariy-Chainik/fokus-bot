@@ -70,6 +70,16 @@ class LessonRepository(BaseRepository):
             for ls in await self.get_all()
         )
 
+    async def individual_lesson_exists(self, teacher_id: str, student_id: str, lesson_date: str) -> bool:
+        for ls in await self.get_all():
+            if ls.teacher_id != teacher_id or ls.date != lesson_date:
+                continue
+            if ls.type == LessonType.INDIVIDUAL and student_id in (
+                ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id
+            ):
+                return True
+        return False
+
     async def add(self, lesson: Lesson) -> Lesson:
         await self._append_row([
             lesson.lesson_id,

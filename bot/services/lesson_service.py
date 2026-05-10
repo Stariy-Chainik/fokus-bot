@@ -57,6 +57,11 @@ class LessonService:
         if group_id and await self._lesson_repo.group_lesson_exists(teacher.teacher_id, group_id, lesson_date):
             raise ValueError("Занятие этой группы на выбранную дату уже записано")
 
+        if lesson_type == LessonType.INDIVIDUAL:
+            for sid in (student_1_id, student_2_id, student_3_id, student_4_id):
+                if sid and await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, sid, lesson_date):
+                    raise ValueError("Индивидуальное занятие с этим учеником на выбранную дату уже записано")
+
         await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
 
         now = now_str()
