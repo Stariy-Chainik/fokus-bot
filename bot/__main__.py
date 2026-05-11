@@ -111,6 +111,18 @@ def _build_dispatcher(storage) -> Dispatcher:
     return dp
 
 
+def _register_payment_webhook(app, dp: Dispatcher, bot: Bot) -> None:
+    """Регистрирует маршрут /yookassa-webhook в aiohttp app."""
+    from bot.handlers.client.payments import make_yookassa_webhook_handler
+    payment_service = dp["payment_service"]
+    user_repo = dp["user_repo"]
+    app.router.add_post(
+        "/yookassa-webhook",
+        make_yookassa_webhook_handler(payment_service, bot, user_repo),
+    )
+    logger.info("Маршрут /yookassa-webhook зарегистрирован")
+
+
 async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     from aiohttp import web
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -127,11 +139,11 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
 
     app = web.Application()
 
-    # Health-check endpoint — нужен Railway для определения жизнеспособности сервиса
     async def health(_request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
     app.router.add_get("/health", health)
+    _register_payment_webhook(app, dp, bot)
 
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=webhook_path)
     setup_application(app, dp, bot=bot)
@@ -142,7 +154,6 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     await site.start()
     logger.info("aiohttp сервер запущен на порту %d", settings.port)
 
-    # Держим сервер живым до получения сигнала остановки
     try:
         await asyncio.Event().wait()
     finally:
@@ -151,9 +162,22 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
 
 
 async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
+    from aiohttp import web
     logger.info("Запуск в режиме polling")
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+
+    # Отдельный aiohttp-сервер для приёма webhook-уведомлений ЮКасса
+    app = web.Application()
+    _register_payment_webhook(app, dp, bot)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", settings.payment_webhook_port).start()
+    logger.info("Payment webhook сервер запущен на порту %d", settings.payment_webhook_port)
+
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await runner.cleanup()
 
 
 async def main() -> None:

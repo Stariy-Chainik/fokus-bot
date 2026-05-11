@@ -6,8 +6,9 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
-from bot.models.enums import LessonType
+from bot.models.enums import LessonType, PaymentStatus
 from bot.repositories import StudentRepository, LessonRepository, TeacherRepository
+from bot.repositories.payment_repo import PaymentRepository
 from bot.keyboards.client import (
     kb_client_student_select, kb_lessons_period_select,
     kb_lessons_month_list, kb_lessons_back,
@@ -32,6 +33,7 @@ async def _show_lessons(
     student_repo: StudentRepository,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
+    payment_repo: PaymentRepository,
     period_str: str,
     student_id: str = "all",
 ) -> None:
@@ -65,6 +67,14 @@ async def _show_lessons(
         if not lessons:
             continue
 
+        # Загружаем статусы оплаты по уникальным периодам из занятий
+        periods_in_view = {ls.date[:7] for ls in lessons}
+        paid_keys: set[tuple[str, str]] = set()
+        for pm in periods_in_view:
+            for pay in await payment_repo.get_by_student_and_period(student.student_id, pm):
+                if pay.status == PaymentStatus.PAID:
+                    paid_keys.add((pm, pay.teacher_id))
+
         lines.append(f"\n<b>{student.name}:</b>")
 
         for ls in lessons:
@@ -85,8 +95,9 @@ async def _show_lessons(
             date_prefix = f"{format_date_short_with_wd(ls.date)} — " if is_month else ""
             type_tag = " (группа)" if ls.type == LessonType.GROUP else ""
             amount_part = f" · {amount} ₽" if amount > 0 else ""
+            paid_icon = " ✅" if (ls.date[:7], ls.teacher_id) in paid_keys else ""
             lines.append(
-                f"  • {date_prefix}{teacher_short}{type_tag} — {ls.duration_min} мин{amount_part}"
+                f"  • {date_prefix}{teacher_short}{type_tag} — {ls.duration_min} мин{amount_part}{paid_icon}"
             )
 
     if total_lessons == 0:
@@ -138,10 +149,11 @@ async def cb_cl_date(
     student_repo: StudentRepository,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
+    payment_repo: PaymentRepository,
 ) -> None:
     # cl_date:{student_id}:{date}
     _, student_id, period_str = callback.data.split(":", 2)
-    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, period_str, student_id)
+    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
     await callback.answer()
 
 
@@ -187,12 +199,13 @@ async def cb_cl_pick(
     student_repo: StudentRepository,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
+    payment_repo: PaymentRepository,
     state: FSMContext,
 ) -> None:
     period_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     student_id = data.get("cl_student_id", "all")
-    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, period_str, student_id)
+    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
     await callback.answer()
 
 
@@ -218,8 +231,9 @@ async def cb_cl_month(
     student_repo: StudentRepository,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
+    payment_repo: PaymentRepository,
 ) -> None:
     # cl_month:{student_id}:{ym}
     _, student_id, period_str = callback.data.split(":", 2)
-    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, period_str, student_id)
+    await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
     await callback.answer()

@@ -85,10 +85,17 @@ def kb_bills_list(periods: list[tuple[str, str, str]], student_id: str = "all") 
 def kb_bill_detail(payment_ids: list[str], can_pay: bool, period_month: str, student_id: str = "all") -> InlineKeyboardMarkup:
     rows = []
     if can_pay:
-        for pid in payment_ids:
-            rows.append([InlineKeyboardButton(
-                text="💳 Оплатить", callback_data=f"client_pay:{pid}",
-            )])
+        rows.append([InlineKeyboardButton(
+            text="💳 Оплатить онлайн",
+            callback_data=f"client_pay:{student_id}:{period_month}",
+        )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"cl_bills_stu:{student_id}")])
     rows.append([InlineKeyboardButton(text="« Меню", callback_data="go:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_bill_back(student_id: str, period_month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« К счёту", callback_data=f"client_bill:{student_id}:{period_month}")],
+        [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
+    ])

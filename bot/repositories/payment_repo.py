@@ -48,6 +48,12 @@ class PaymentRepository(BaseRepository):
     async def get_by_student(self, student_id: str) -> list[StudentPeriodPayment]:
         return [p for p in await self.get_all() if p.student_id == student_id]
 
+    async def get_by_id(self, payment_id: str) -> Optional[StudentPeriodPayment]:
+        for p in await self.get_all():
+            if p.payment_id == payment_id:
+                return p
+        return None
+
     async def get_existing_ids(self) -> list[str]:
         return [p.payment_id for p in await self.get_all()]
 
@@ -80,6 +86,28 @@ class PaymentRepository(BaseRepository):
                 self._invalidate_cache()
                 return True
         return False
+
+    async def confirm_all_for_period(
+        self, student_id: str, period_month: str, confirmed_by_tg_id: int,
+    ) -> int:
+        """Подтверждает все PENDING счета ученика за период. Возвращает кол-во обновлённых."""
+        records = await self._all_records()
+        ts_now = now_str()
+        count = 0
+        for i, row in enumerate(records):
+            if (str(row.get("student_id")) != student_id
+                    or str(row.get("period_month")) != period_month
+                    or str(row.get("status") or "pending") == PaymentStatus.PAID.value):
+                continue
+            row_idx = i + 2
+            await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)
+            await self._update_cell(row_idx, 7, ts_now)
+            await self._update_cell(row_idx, 8, confirmed_by_tg_id)
+            await self._update_cell(row_idx, 11, ts_now)
+            count += 1
+        if count:
+            self._invalidate_cache()
+        return count
 
     async def confirm(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
         """Подтверждает оплату: status=paid, paid_at=now, confirmed_by_tg_id."""

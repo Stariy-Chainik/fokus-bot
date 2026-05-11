@@ -28,8 +28,15 @@ class Settings(BaseSettings):
     sheet_student_requests: str = Field(default="student_requests", alias="SHEET_STUDENT_REQUESTS")
     sheet_clients: str = Field(default="clients", alias="SHEET_CLIENTS")
 
-    # Payments
+    # Payments — Telegram Payments (legacy)
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
+
+    # ЮКасса
+    yookassa_shop_id: str = Field(default="", alias="YOOKASSA_SHOP_ID")
+    yookassa_secret_key: str = Field(default="", alias="YOOKASSA_SECRET_KEY")
+    yookassa_return_url: str = Field(default="https://t.me/fokus_bot", alias="YOOKASSA_RETURN_URL")
+    payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
+    payment_webhook_port: int = Field(default=8081, alias="PAYMENT_WEBHOOK_PORT")
 
     # Server / Railway
     # Если задан — бот запускается в webhook-режиме (рекомендуется для продакшена).

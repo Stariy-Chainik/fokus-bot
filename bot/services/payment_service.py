@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import uuid
 
 from bot.models import StudentPeriodPayment, Student
 from bot.models.enums import PaymentStatus
@@ -119,6 +120,46 @@ class PaymentService:
         if ok:
             logger.info("Счёт %s подтверждён", payment_id)
         return ok
+
+    async def create_yookassa_payment(
+        self,
+        student_id: str,
+        student_name: str,
+        period_month: str,
+        total_amount: int,
+    ) -> str:
+        """Создаёт платёж в ЮКасса, возвращает confirmation_url для клиента."""
+        from yookassa import Configuration, Payment as YKPayment
+        from config.settings import settings
+        Configuration.configure(settings.yookassa_shop_id, settings.yookassa_secret_key)
+        idempotency_key = str(uuid.uuid4())
+        payment = YKPayment.create({
+            "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
+            "confirmation": {
+                "type": "redirect",
+                "return_url": settings.yookassa_return_url,
+            },
+            "capture": True,
+            "description": f"{student_name} — {period_month}",
+            "metadata": {
+                "student_id": student_id,
+                "period_month": period_month,
+            },
+        }, idempotency_key)
+        return payment.confirmation.confirmation_url
+
+    async def confirm_period(
+        self,
+        student_id: str,
+        period_month: str,
+        confirmed_by_tg_id: int,
+    ) -> int:
+        """Подтверждает все счета периода. Возвращает кол-во подтверждённых."""
+        count = await self._payment_repo.confirm_all_for_period(
+            student_id, period_month, confirmed_by_tg_id,
+        )
+        logger.info("Период %s ученика %s оплачен (%d счётов)", period_month, student_id, count)
+        return count
 
     async def teachers_not_submitted(
         self, teacher_ids: list[str], period_month: str,
