@@ -40,8 +40,8 @@ async def _calc_profit(
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
 ) -> tuple[list[tuple[str, str, int, int, int]], int, int]:
-    """Возвращает (строки по педагогам, итог_доход, итог_зарплата).
-    Строка: (teacher_id, имя, доход, зарплата, кол-во занятий).
+    """Возвращает (строки по педагогам, итог_выручка, итог_зарплата).
+    Строка: (teacher_id, имя, выручка, зарплата, кол-во занятий).
     """
     teachers = await teacher_repo.get_all()
     rows: list[tuple[str, str, int, int, int, int]] = []
@@ -87,12 +87,12 @@ def _format_profit(title: str, rows: list[tuple[str, str, int, int, int, int]], 
             parts.append(f"👤 {ind}")
         count_label = "  ".join(parts)
         lines.append(f"<b>{name}</b>  {count_label}")
-        lines.append(f"  Доход: {income} ₽  Зарплата: {salary} ₽")
+        lines.append(f"  Выручка: {income} ₽  Зарплата: {salary} ₽")
         lines.append(f"  Прибыль: <b>{profit} ₽</b> ({margin}%)")
         lines.append("")
     lines += [
         "──────────────",
-        f"Доход:    {total_income} ₽",
+        f"Выручка:    {total_income} ₽",
         f"Зарплата: {total_salary} ₽",
         f"<b>Прибыль:  {total_income - total_salary} ₽</b>",
     ]
@@ -300,7 +300,7 @@ async def cb_profit_detail(
         lines += [
             "",
             "──────────────",
-            f"Доход: {total_income} ₽  Зарплата: {total_salary} ₽",
+            f"Выручка: {total_income} ₽  Зарплата: {total_salary} ₽",
             f"<b>Прибыль: {total_profit} ₽ ({margin}%)</b>",
         ]
 
