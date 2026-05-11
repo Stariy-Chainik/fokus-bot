@@ -35,8 +35,13 @@ class Settings(BaseSettings):
     yookassa_shop_id: str = Field(default="", alias="YOOKASSA_SHOP_ID")
     yookassa_secret_key: str = Field(default="", alias="YOOKASSA_SECRET_KEY")
     yookassa_return_url: str = Field(default="https://t.me/fokus_bot", alias="YOOKASSA_RETURN_URL")
-    payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_webhook_port: int = Field(default=8081, alias="PAYMENT_WEBHOOK_PORT")
+
+    # Способы оплаты
+    payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")
+    payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
+    payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
+    payment_sbp_details: str = Field(default="", alias="PAYMENT_SBP_DETAILS")
 
     # Server / Railway
     # Если задан — бот запускается в webhook-режиме (рекомендуется для продакшена).

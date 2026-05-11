@@ -1,4 +1,5 @@
 from .lesson_states import RecordLessonStates, SubmitPeriodStates
+from .client_states import ReceiptStates
 from .admin_states import (
     AddTeacherStates,
     EditTeacherRatesStates,
@@ -39,4 +40,5 @@ __all__ = [
     "ClientCreateStates",
     "ClientRegStates",
     "TeacherGroupAddStudentStates",
+    "ReceiptStates",
 ]

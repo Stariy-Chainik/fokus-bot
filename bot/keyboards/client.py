@@ -99,3 +99,35 @@ def kb_bill_back(student_id: str, period_month: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="« К счёту", callback_data=f"client_bill:{student_id}:{period_month}")],
         [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
     ])
+
+
+def kb_payment_method(student_id: str, period_month: str, cash: bool, bank: bool, sbp: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if cash:
+        rows.append([InlineKeyboardButton(text="💵 Наличные", callback_data=f"pay_method:cash:{student_id}:{period_month}")])
+    if bank:
+        rows.append([InlineKeyboardButton(text="🏦 По реквизитам", callback_data=f"pay_method:bank:{student_id}:{period_month}")])
+    if sbp:
+        rows.append([InlineKeyboardButton(text="📱 СБП", callback_data=f"pay_method:sbp:{student_id}:{period_month}")])
+    rows.append([InlineKeyboardButton(text="« К счёту", callback_data=f"client_bill:{student_id}:{period_month}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_pay_cash(student_id: str, period_month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📨 Уведомить об оплате", callback_data=f"cash_notify:{student_id}:{period_month}")],
+        [InlineKeyboardButton(text="« Назад", callback_data=f"client_pay:{student_id}:{period_month}")],
+    ])
+
+
+def kb_pay_receipt(method: str, student_id: str, period_month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📎 Прикрепить чек", callback_data=f"receipt_upload:{method}:{student_id}:{period_month}")],
+        [InlineKeyboardButton(text="« Назад", callback_data=f"client_pay:{student_id}:{period_month}")],
+    ])
+
+
+def kb_cancel_receipt(student_id: str, period_month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Отмена", callback_data=f"client_pay:{student_id}:{period_month}")],
+    ])
