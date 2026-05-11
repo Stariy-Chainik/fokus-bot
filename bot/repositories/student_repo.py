@@ -25,8 +25,12 @@ def _row_to_student(row: dict) -> Student:
     client_id_raw = row.get("client_id")
     client_id = str(client_id_raw).strip() if client_id_raw else None
     tg_ids_raw = str(row.get("parent_tg_ids") or "").strip()
+    # Separator was changed from "," to "|" to avoid Google Sheets interpreting
+    # comma-separated numbers as a decimal number in Russian locale.
+    # Old comma-separated values are still supported for backwards compatibility.
+    sep = "|" if "|" in tg_ids_raw else ","
     parent_tg_ids = [
-        int(x) for x in tg_ids_raw.split(",")
+        int(x) for x in tg_ids_raw.split(sep)
         if x.strip().lstrip("-").isdigit()
     ]
     return Student(
@@ -172,7 +176,7 @@ class StudentRepository(BaseRepository):
         if row_idx is None:
             return False
         new_ids = student.parent_tg_ids + [tg_id]
-        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, ",".join(str(i) for i in new_ids))
+        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
         return True
 
     async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
@@ -183,7 +187,7 @@ class StudentRepository(BaseRepository):
         if row_idx is None:
             return False
         new_ids = [i for i in student.parent_tg_ids if i != tg_id]
-        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, ",".join(str(i) for i in new_ids))
+        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
         return True
 
     async def clear_partner(self, student_id: str) -> None:
