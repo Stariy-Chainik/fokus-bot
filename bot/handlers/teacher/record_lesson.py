@@ -18,7 +18,7 @@ from bot.models.enums import LessonType
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
-    StudentGroupRepository,
+    StudentGroupRepository, UserRepository,
 )
 from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
@@ -114,16 +114,125 @@ async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, sta
 
 
 @router.callback_query(F.data.startswith("proxy_record:"))
-async def cb_proxy_record_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+async def cb_proxy_record_start(
+    callback: CallbackQuery,
+    user: User | None,
+    state: FSMContext,
+    teacher_repo: TeacherRepository,
+    user_repo: UserRepository,
+) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
-    # Проверяем право на прокси: либо admin, либо ассистент из _PROXY_BUTTONS
     allowed = user.is_admin or (user.teacher_id in _PROXY_BUTTONS)  # type: ignore[union-attr]
     if not allowed:
         await callback.answer("Нет доступа", show_alert=True)
         return
+
+    # Администратор может записывать без подтверждения
+    if user.is_admin:
+        await state.clear()
+        await state.update_data(proxy_teacher_id=teacher_id)
+        await state.set_state(RecordLessonStates.choosing_date)
+        await callback.message.edit_text(
+            "<b>Отметить занятие</b>\nВыберите дату:", reply_markup=_date_picker_kb(),
+        )
+        await callback.answer()
+        return
+
+    # Ассистент (Клецова) — запрашивает разрешение у администратора
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    teacher_name = teacher.name if teacher else teacher_id
+
+    approve_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Разрешить", callback_data=f"proxy_approve:{callback.from_user.id}:{teacher_id}"),
+        InlineKeyboardButton(text="❌ Отказать", callback_data=f"proxy_deny:{callback.from_user.id}:{teacher_id}"),
+    ]])
+    msg = (
+        f"👤 <b>Запрос на запись занятия</b>\n\n"
+        f"Клецова хочет отметить занятие за <b>{teacher_name}</b>.\n"
+        f"Разрешить?"
+    )
+    admins = await user_repo.get_admins()
+    for admin in admins:
+        try:
+            await callback.bot.send_message(admin.tg_id, msg, reply_markup=approve_kb)
+        except Exception:
+            pass
+
+    can_switch = bool(user.is_admin and user.teacher_id)
+    await callback.message.edit_text(
+        "⏳ Запрос отправлен администратору. Ожидайте разрешения.",
+        reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("proxy_approve:"))
+async def cb_proxy_approve(callback: CallbackQuery, user: User | None) -> None:
+    if not user or not user.is_admin:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, requester_tg_id_str, teacher_id = callback.data.split(":", 2)
+    requester_tg_id = int(requester_tg_id_str)
+
+    start_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="▶ Начать запись", callback_data=f"proxy_record_go:{teacher_id}"),
+    ]])
+    try:
+        await callback.bot.send_message(
+            requester_tg_id,
+            "✅ Администратор разрешил запись. Нажмите кнопку для начала:",
+            reply_markup=start_kb,
+        )
+    except Exception:
+        pass
+
+    try:
+        await callback.message.edit_text(
+            (callback.message.text or "") + "\n\n✅ Разрешено",
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+    await callback.answer("Разрешено")
+
+
+@router.callback_query(F.data.startswith("proxy_deny:"))
+async def cb_proxy_deny(callback: CallbackQuery, user: User | None) -> None:
+    if not user or not user.is_admin:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, requester_tg_id_str, _teacher_id = callback.data.split(":", 2)
+    requester_tg_id = int(requester_tg_id_str)
+
+    try:
+        await callback.bot.send_message(
+            requester_tg_id,
+            "❌ Администратор отклонил запрос на запись занятия.",
+        )
+    except Exception:
+        pass
+
+    try:
+        await callback.message.edit_text(
+            (callback.message.text or "") + "\n\n❌ Отклонено",
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+    await callback.answer("Отклонено")
+
+
+@router.callback_query(F.data.startswith("proxy_record_go:"))
+async def cb_proxy_record_go(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
     await state.clear()
     await state.update_data(proxy_teacher_id=teacher_id)
     await state.set_state(RecordLessonStates.choosing_date)
