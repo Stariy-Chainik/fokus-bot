@@ -3,6 +3,7 @@ import logging
 from datetime import date
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 
@@ -91,10 +92,13 @@ async def _show_bills(
         await callback.answer()
         return
 
-    await callback.message.edit_text(
-        "<b>📋 Счета</b>",
-        reply_markup=kb_bills_list(period_rows, student_id),
-    )
+    try:
+        await callback.message.edit_text(
+            "<b>📋 Счета</b>",
+            reply_markup=kb_bills_list(period_rows, student_id),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 
@@ -158,6 +162,7 @@ async def cb_bill_detail(
 
     lines = [f"<b>📋 {_period_label(period_month)}</b>\n"]
     grand_total = 0
+    unpaid_total = 0
     payment_ids: list[str] = []
     all_paid = True
     has_invoices = False
@@ -169,24 +174,40 @@ async def cb_bill_detail(
         if not bills:
             continue
 
-        lines.append(f"<b>{student.name}:</b>")
-
-        for teacher_id, agg in bills.items():
-            teacher_name = agg["name"] or teacher_id
-            lines.append(f"<b>Педагог: {teacher_name}</b>")
-            for item in sorted(agg["items"], key=lambda b: b.date):
-                lines.append(f"  {format_date_display(item.date)}  {item.duration_min} мин  — {item.amount} руб.")
-            lines.append(f"  <i>Итого: {agg['total']} руб.</i>\n")
-            grand_total += agg["total"]
-
         invoices = await payment_service.get_or_create_invoices_for_student_period(
             student, period_month,
         )
+        invoices_by_teacher = {inv.teacher_id: inv for inv in invoices}
+
         for inv in invoices:
             has_invoices = True
             payment_ids.append(inv.payment_id)
             if inv.status != PaymentStatus.PAID:
                 all_paid = False
+
+        if len(students) > 1:
+            lines.append(f"<b>{student.name}:</b>")
+
+        for teacher_id, agg in bills.items():
+            inv = invoices_by_teacher.get(teacher_id)
+            teacher_paid = inv is not None and inv.status == PaymentStatus.PAID
+
+            teacher_name = agg["name"] or teacher_id
+            paid_mark = " ✅" if teacher_paid else ""
+            lines.append(f"<b>Педагог: {teacher_name}{paid_mark}</b>")
+
+            for item in sorted(agg["items"], key=lambda b: b.date):
+                lines.append(
+                    f"  {format_date_display(item.date)}  {item.duration_min} мин  — {item.amount} руб."
+                )
+
+            if teacher_paid:
+                lines.append(f"  <i>Итого: {agg['total']} руб. — оплачено</i>\n")
+            else:
+                lines.append(f"  <i>Итого: {agg['total']} руб.</i>\n")
+                unpaid_total += agg["total"]
+
+            grand_total += agg["total"]
 
     if grand_total == 0:
         await callback.message.edit_text(
@@ -196,11 +217,12 @@ async def cb_bill_detail(
         await callback.answer()
         return
 
-    lines.append(f"<b>Итого за месяц: {grand_total} руб.</b>")
-    if has_invoices:
-        lines.append("✅ Оплачен" if all_paid else "⏳ Ожидает оплаты")
+    if unpaid_total > 0:
+        lines.append(f"<b>К оплате: {unpaid_total} руб.</b>")
+    elif has_invoices and all_paid:
+        lines.append("✅ Период полностью оплачен")
 
-    can_pay = has_invoices and not all_paid
+    can_pay = has_invoices and not all_paid and unpaid_total > 0
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -223,16 +245,18 @@ async def _get_student_and_total(
     student_id: str,
     period_month: str,
 ) -> tuple | None:
-    """Возвращает (student, total) или None если нет доступа/начислений."""
+    """Возвращает (student, unpaid_total) или None если нет доступа/неоплаченных начислений."""
     all_students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     student = next((s for s in all_students if s.student_id == student_id), None)
     if not student:
         await callback.answer("Нет доступа", show_alert=True)
         return None
     bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
-    total = sum(agg["total"] for agg in bills.values())
+    invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
+    paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
+    total = sum(agg["total"] for tid, agg in bills.items() if tid not in paid_teachers)
     if total == 0:
-        await callback.answer("Нет начислений", show_alert=True)
+        await callback.answer("Нет неоплаченных начислений", show_alert=True)
         return None
     return student, total
 
@@ -260,10 +284,6 @@ async def cb_client_pay(
         await callback.answer("Этот счёт уже оплачен", show_alert=True)
         return
 
-    has_cash = settings.payment_cash_enabled
-    has_bank = bool(settings.payment_bank_details)
-    has_sbp  = bool(settings.payment_sbp_details)
-
     text = (
         f"<b>💳 Оплата за {_period_label(period_month)}</b>\n"
         f"Сумма: <b>{total} руб.</b>\n\n"
@@ -271,7 +291,7 @@ async def cb_client_pay(
     )
     await callback.message.edit_text(
         text,
-        reply_markup=kb_payment_method(student_id, period_month, has_cash, has_bank, has_sbp),
+        reply_markup=kb_payment_method(student_id, period_month, cash=True, bank=True, sbp=True),
     )
     await callback.answer()
 
@@ -310,14 +330,31 @@ async def cb_pay_method(
             "",
         ]
         if settings.payment_bank_details:
-            lines += [settings.payment_bank_details, ""]
+            lines += [settings.payment_bank_details.replace("\\n", "\n"), ""]
         lines.append("После оплаты прикрепите фото чека.")
         await callback.message.edit_text(
             "\n".join(lines),
             reply_markup=kb_pay_receipt(method, student_id, period_month),
         )
-        # Если задан URL QR-кода — отправляем отдельным фото
-        if settings.payment_qr_image_url:
+        # Отправляем QR-код
+        qr_sent = False
+        if settings.payment_qr_data:
+            try:
+                from io import BytesIO
+                import qrcode
+                img = qrcode.make(settings.payment_qr_data)
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                buf.seek(0)
+                from aiogram.types import BufferedInputFile
+                await callback.message.answer_photo(
+                    BufferedInputFile(buf.read(), filename="qr.png"),
+                    caption="QR-код для оплаты",
+                )
+                qr_sent = True
+            except Exception as exc:
+                logger.warning("Не удалось сгенерировать QR: %s", exc)
+        if not qr_sent and settings.payment_qr_image_url:
             try:
                 await callback.message.answer_photo(
                     settings.payment_qr_image_url,
@@ -433,7 +470,12 @@ async def on_receipt_photo(
     student_name = student.name if student else student_id
 
     bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
-    total = sum(agg["total"] for agg in bills.values())
+    if student:
+        invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
+        paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
+        total = sum(agg["total"] for tid, agg in bills.items() if tid not in paid_teachers)
+    else:
+        total = sum(agg["total"] for agg in bills.values())
     method_label = _METHOD_LABELS.get(method, method)
 
     caption = (
