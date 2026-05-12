@@ -124,6 +124,7 @@ def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💵 Выплата за день", callback_data=f"salary_day:{teacher_id}")],
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
         [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
+        [InlineKeyboardButton(text="🔓 Открыть период", callback_data=f"open_period_list:{teacher_id}")],
         [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data=f"del_teacher:{teacher_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],

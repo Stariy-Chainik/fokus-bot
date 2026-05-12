@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
+    payment_qr_data: str = Field(default="", alias="PAYMENT_QR_DATA")
     payment_sbp_details: str = Field(default="", alias="PAYMENT_SBP_DETAILS")
 
     # Server / Railway

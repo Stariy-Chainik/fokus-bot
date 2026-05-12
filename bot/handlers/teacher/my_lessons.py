@@ -431,6 +431,8 @@ async def cb_lesson_detail(
             back_cb = f"lessons_page:0:{tag}"
         else:
             back_cb = "teacher:lesson_view" if data.get("lm_mode") == "view" else "teacher:lesson_delete"
+    elif data.get("t_stu_les_back"):
+        back_cb = data["t_stu_les_back"]
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
     await show_card(callback, "\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))

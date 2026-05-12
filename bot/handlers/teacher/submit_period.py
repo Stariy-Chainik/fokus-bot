@@ -75,7 +75,11 @@ async def _show_confirm(
     await state.update_data(period_month=period_month, total=total)
     await state.set_state(SubmitPeriodStates.confirming)
 
-    rows = [[InlineKeyboardButton(text="💾 Подтвердить сдачу", callback_data="submit_confirm")]]
+    today = date.today()
+    can_submit = today.day >= 25
+    rows = []
+    if can_submit:
+        rows.append([InlineKeyboardButton(text="💾 Подтвердить сдачу", callback_data="submit_confirm")])
     # Если есть другие открытые периоды кроме текущего — дать возможность выбрать.
     others = [p for p in open_periods if p != period_month]
     if others:
@@ -84,12 +88,13 @@ async def _show_confirm(
         )])
     rows.append([InlineKeyboardButton(text="« Отмена", callback_data="teacher:menu")])
 
+    lock_note = "" if can_submit else f"\n\n⏳ Сдать период можно с 25-го числа (сегодня {today.day}-е)."
     await callback.message.edit_text(
         f"<b>Сдать период {display_period(period_month)}?</b>\n\n"
         f"Всего занятий: {total}\n"
         f"👥 Групповые ({group}): {gline}\n"
         f"👤 Индивидуальные ({ind}): {iline}\n\n"
-        "После сдачи редактирование занятий этого месяца станет недоступно.",
+        f"После сдачи редактирование занятий этого месяца станет недоступно.{lock_note}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -194,6 +199,10 @@ async def cb_submit_confirm(
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    if date.today().day < 25:
+        await callback.answer("Период можно сдать не раньше 25-го числа.", show_alert=True)
         return
 
     lock_key = f"{user.teacher_id}"

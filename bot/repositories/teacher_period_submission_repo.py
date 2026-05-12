@@ -42,3 +42,10 @@ class TeacherPeriodSubmissionRepository(BaseRepository):
             sub.total_earned,
         ])
         return sub
+
+    async def delete_by_teacher_and_period(self, teacher_id: str, period_month: str) -> bool:
+        for i, row in enumerate(await self._all_records()):
+            if str(row.get("teacher_id")) == teacher_id and str(row.get("period_month")) == period_month:
+                await self._delete_row(i + 2)
+                return True
+        return False

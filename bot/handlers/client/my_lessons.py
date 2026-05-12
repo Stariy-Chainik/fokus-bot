@@ -157,9 +157,31 @@ async def cb_cl_date(
     await callback.answer()
 
 
+async def _lesson_dates_for_student(
+    lesson_repo: LessonRepository,
+    students: list,
+    student_id: str,
+    year: int,
+    month: int,
+) -> set[date]:
+    period = f"{year}-{month:02d}"
+    target = students if student_id == "all" else [s for s in students if s.student_id == student_id]
+    result: set[date] = set()
+    for s in target:
+        for ls in await lesson_repo.get_by_student_and_period(s.student_id, period):
+            try:
+                result.add(date.fromisoformat(ls.date))
+            except ValueError:
+                pass
+    return result
+
+
 @router.callback_query(F.data.startswith("cl_calendar_s:"))
 async def cb_cl_calendar_s(
-    callback: CallbackQuery, student_repo: StudentRepository, state: FSMContext,
+    callback: CallbackQuery,
+    student_repo: StudentRepository,
+    lesson_repo: LessonRepository,
+    state: FSMContext,
 ) -> None:
     student_id = callback.data.split(":", 1)[1]
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
@@ -168,16 +190,21 @@ async def cb_cl_calendar_s(
         return
     await state.update_data(cl_student_id=student_id)
     today = date.today()
+    highlights = await _lesson_dates_for_student(lesson_repo, students, student_id, today.year, today.month)
     await callback.message.edit_text(
         "Выберите дату:",
-        reply_markup=kb_calendar(today.year, today.month, prefix="cl", cancel_cb=f"cl_stu:{student_id}"),
+        reply_markup=kb_calendar(today.year, today.month, prefix="cl",
+                                 cancel_cb=f"cl_stu:{student_id}", highlight_dates=highlights),
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("cl_nav:"))
 async def cb_cl_nav(
-    callback: CallbackQuery, student_repo: StudentRepository, state: FSMContext,
+    callback: CallbackQuery,
+    student_repo: StudentRepository,
+    lesson_repo: LessonRepository,
+    state: FSMContext,
 ) -> None:
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not students:
@@ -187,8 +214,10 @@ async def cb_cl_nav(
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
     student_id = data.get("cl_student_id", "all")
+    highlights = await _lesson_dates_for_student(lesson_repo, students, student_id, year, month)
     await callback.message.edit_reply_markup(
-        reply_markup=kb_calendar(year, month, prefix="cl", cancel_cb=f"cl_stu:{student_id}"),
+        reply_markup=kb_calendar(year, month, prefix="cl",
+                                 cancel_cb=f"cl_stu:{student_id}", highlight_dates=highlights),
     )
     await callback.answer()
 

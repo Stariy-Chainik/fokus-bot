@@ -39,6 +39,7 @@ def kb_my_student_card(
     """
     _ = has_partner, can_manage
     rows = [
+        [InlineKeyboardButton(text="📋 Занятия за период", callback_data=f"t_stu_les:{student_id}")],
         [InlineKeyboardButton(text="✏️ Изменить имя", callback_data=f"t_rename_student:{student_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
@@ -47,10 +48,12 @@ def kb_my_student_card(
 
 
 def kb_my_pair_card(
-    student_id: str, back_cb: str = "teacher:my_pairs",
+    student_id: str, partner_id: str,
+    back_cb: str = "teacher:my_pairs",
 ) -> InlineKeyboardMarkup:
     """Карточка пары (открыта из списка «Мои пары»)."""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Занятия пары", callback_data=f"t_pair_les:{student_id}:{partner_id}")],
         [InlineKeyboardButton(text="🔄 Изменить партнёра", callback_data=f"t_partner_assign:{student_id}")],
         [InlineKeyboardButton(text="❌ Убрать партнёра", callback_data=f"t_partner_clear:{student_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
