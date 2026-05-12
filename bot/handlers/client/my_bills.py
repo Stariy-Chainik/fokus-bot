@@ -291,7 +291,11 @@ async def cb_client_pay(
     )
     await callback.message.edit_text(
         text,
-        reply_markup=kb_payment_method(student_id, period_month, cash=True, bank=True, sbp=True),
+        reply_markup=kb_payment_method(
+            student_id, period_month,
+            cash=True, bank=True, sbp=True,
+            yookassa=bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
+        ),
     )
     await callback.answer()
 
@@ -376,6 +380,27 @@ async def cb_pay_method(
             "\n".join(lines),
             reply_markup=kb_pay_receipt(method, student_id, period_month),
         )
+
+    elif method == "yookassa":
+        student = _student
+        try:
+            url = await payment_service.create_yookassa_payment(
+                student.student_id, student.name, period_month, total,
+            )
+            await callback.message.edit_text(
+                f"<b>💳 Оплата картой онлайн</b>\n"
+                f"Сумма: <b>{total} руб.</b>\n\n"
+                f"Нажмите кнопку для перехода на страницу оплаты.\n"
+                f"После оплаты статус обновится автоматически.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Перейти к оплате", url=url)],
+                    [InlineKeyboardButton(text="« К счёту", callback_data=f"client_bill:{student_id}:{period_month}")],
+                ]),
+            )
+        except Exception as exc:
+            logger.error("Ошибка создания платежа ЮКасса: %s", exc)
+            await callback.answer("Ошибка при создании платежа. Попробуйте другой способ.", show_alert=True)
+            return
 
     await callback.answer()
 

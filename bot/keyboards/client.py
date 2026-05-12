@@ -86,7 +86,7 @@ def kb_bill_detail(payment_ids: list[str], can_pay: bool, period_month: str, stu
     rows = []
     if can_pay:
         rows.append([InlineKeyboardButton(
-            text="💳 Оплатить онлайн",
+            text="💳 Оплатить",
             callback_data=f"client_pay:{student_id}:{period_month}",
         )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"cl_bills_stu:{student_id}")])
@@ -101,8 +101,13 @@ def kb_bill_back(student_id: str, period_month: str) -> InlineKeyboardMarkup:
     ])
 
 
-def kb_payment_method(student_id: str, period_month: str, cash: bool, bank: bool, sbp: bool) -> InlineKeyboardMarkup:
+def kb_payment_method(
+    student_id: str, period_month: str,
+    cash: bool, bank: bool, sbp: bool, yookassa: bool = False,
+) -> InlineKeyboardMarkup:
     rows = []
+    if yookassa:
+        rows.append([InlineKeyboardButton(text="💳 Картой онлайн", callback_data=f"pay_method:yookassa:{student_id}:{period_month}")])
     if cash:
         rows.append([InlineKeyboardButton(text="💵 Наличные", callback_data=f"pay_method:cash:{student_id}:{period_month}")])
     if bank:
