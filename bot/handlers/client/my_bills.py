@@ -293,7 +293,7 @@ async def cb_client_pay(
         text,
         reply_markup=kb_payment_method(
             student_id, period_month,
-            cash=True, bank=True, sbp=True,
+            cash=False, bank=True, sbp=False,
             yookassa=bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
         ),
     )
