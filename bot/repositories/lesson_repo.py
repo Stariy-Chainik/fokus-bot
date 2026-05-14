@@ -111,6 +111,13 @@ class LessonRepository(BaseRepository):
         await self._delete_row(row_idx)
         return True
 
+    async def update_attendees(self, lesson_id: str, attendees: str) -> bool:
+        row_idx = await self._find_row_index("lesson_id", lesson_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, 14, attendees)
+        return True
+
     async def update(self, lesson: Lesson) -> bool:
         row_idx = await self._find_row_index("lesson_id", lesson.lesson_id)
         if row_idx is None:

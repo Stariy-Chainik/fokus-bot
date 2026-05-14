@@ -160,17 +160,15 @@ def kb_group_roster_per_visit(
         tier = tiers.get(s.student_id, "full")
         if has_short and tier == "short":
             suffix = f"{duration_short}м"
-            alt_text = f"🔄 {duration_full}м"
         else:
             suffix = f"{duration_full}м"
-            alt_text = f"🔄 {duration_short}м"
         row = [InlineKeyboardButton(
-            text=f"{mark} {s.name} · {suffix}",
+            text=f"{mark} {s.name}",
             callback_data=f"ms_toggle:{s.student_id}",
         )]
         if has_short:
             row.append(InlineKeyboardButton(
-                text=alt_text,
+                text=f"{suffix} ↕",
                 callback_data=f"ms_tier:{s.student_id}",
             ))
         rows.append(row)
