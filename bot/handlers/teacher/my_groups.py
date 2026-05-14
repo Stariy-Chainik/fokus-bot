@@ -173,7 +173,7 @@ def _kb_t_add_results(
             callback_data=f"t_grp_pick:{group_id}:{s.student_id}",
         )])
     parts = (query or "").strip().split()
-    if len(parts) == 2:
+    if len(parts) >= 2:
         rows.append([InlineKeyboardButton(
             text=f"✨ Создать нового «{' '.join(parts)}» (заявка админу)",
             callback_data=f"t_grp_new:{group_id}",
@@ -245,7 +245,7 @@ async def msg_t_grp_add_search(
             lines.append("Можно создать нового ученика (заявка админу).")
         else:
             lines.append("")
-            lines.append("Для создания нового введите ровно <b>Фамилию и Имя</b>.")
+            lines.append("Для создания нового введите <b>Фамилию и Имя</b> (можно с номером группы д/с).")
         await message.answer(
             "\n".join(lines),
             reply_markup=_kb_t_add_results(group_id, [], member_ids, query),
@@ -309,8 +309,8 @@ async def cb_t_grp_new(
     data = await state.get_data()
     query = str(data.get("query") or "").strip()
     parts = query.split()
-    if len(parts) != 2:
-        await callback.answer("Нужно ровно Фамилию и Имя", show_alert=True)
+    if len(parts) < 2:
+        await callback.answer("Нужно минимум Фамилию и Имя", show_alert=True)
         return
     student_name = " ".join(parts)
 
