@@ -60,11 +60,13 @@ def kb_student_card(
     tier_toggle: tuple[str, str] | None = None,
     has_groups: bool = False,
     client_rows: list | None = None,
+    has_kg_group: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     tier_toggle: (current_tier, label) — если задан, добавит кнопку смены тарифа.
     has_groups: если у ученика есть хоть одна группа, показываем кнопку «Убрать из группы».
     client_rows: список строк кнопок управления клиентом [(label, cb), ...] на строку.
+    has_kg_group: если True — кнопка «Изменить № группы д/с», иначе «Задать».
     """
     group_row = [InlineKeyboardButton(
         text="➕ Добавить в группу", callback_data=f"student_groups_add:{student_id}",
@@ -82,6 +84,8 @@ def kb_student_card(
     if tier_toggle is not None:
         _, label = tier_toggle
         rows.append([InlineKeyboardButton(text=label, callback_data=f"student_tier_toggle:{student_id}")])
+    kg_label = "🔢 Изменить № группы д/с" if has_kg_group else "🔢 Задать № группы д/с"
+    rows.append([InlineKeyboardButton(text=kg_label, callback_data=f"student_kg_group_edit:{student_id}")])
     if client_rows:
         for row_items in client_rows:
             rows.append([InlineKeyboardButton(text=lbl, callback_data=cb) for lbl, cb in row_items])

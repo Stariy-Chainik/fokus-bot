@@ -162,8 +162,9 @@ def kb_group_roster_per_visit(
             suffix = f"{duration_short}м"
         else:
             suffix = f"{duration_full}м"
+        kg = f" (гр.{s.kindergarten_group})" if s.kindergarten_group else ""
         row = [InlineKeyboardButton(
-            text=f"{mark} {s.name}",
+            text=f"{mark} {s.name}{kg}",
             callback_data=f"ms_toggle:{s.student_id}",
         )]
         if has_short:
