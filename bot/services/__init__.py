@@ -3,6 +3,7 @@ from .billing_service import calc_earned, build_billing_rows
 from .payment_service import PaymentService
 from .diagnostics_service import DiagnosticsService
 from .visibility import TeacherVisibilityService
+from .cloudkassir_service import CloudKassirService
 
 __all__ = [
     "LessonService",
@@ -11,4 +12,5 @@ __all__ = [
     "PaymentService",
     "DiagnosticsService",
     "TeacherVisibilityService",
+    "CloudKassirService",
 ]

@@ -12,7 +12,9 @@ from dateutil.relativedelta import relativedelta  # type: ignore
 from bot.models import User
 from bot.models.enums import PaymentStatus
 from bot.repositories import StudentRepository, UserRepository
+from bot.repositories.client_repo import ClientRepository
 from bot.services import PaymentService
+from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
 from bot.utils.dates import display_period, format_date_display
 from bot.keyboards.client import (
@@ -544,11 +546,24 @@ async def cb_receipt_confirm(
     callback: CallbackQuery,
     user: User | None,
     payment_service: PaymentService,
+    student_repo: StudentRepository,
+    client_repo: ClientRepository,
+    cloudkassir_service: CloudKassirService,
 ) -> None:
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, student_id, period_month = callback.data.split(":", 2)
+
+    # Получаем сумму к подтверждению до confirm (после — статус уже PAID)
+    student = await student_repo.get_by_id(student_id)
+    pending_total = 0
+    if student:
+        bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
+        invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
+        paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
+        pending_total = sum(agg["total"] for tid, agg in bills.items() if tid not in paid_teachers)
+
     count = await payment_service.confirm_period(student_id, period_month, callback.from_user.id)
     if count > 0:
         old_text = callback.message.caption or callback.message.text or ""
@@ -567,5 +582,20 @@ async def cb_receipt_confirm(
         except Exception:
             pass
         await callback.answer("Оплата подтверждена")
+
+        # Фискальный чек через CloudKassir
+        if student and pending_total > 0 and cloudkassir_service._public_id:
+            phone = None
+            if student.client_id:
+                client = await client_repo.get_by_id(student.client_id)
+                phone = client.phone if client else None
+            if phone:
+                await cloudkassir_service.send_income_receipt(
+                    phone, student.name, period_month, pending_total,
+                )
+            else:
+                logger.warning(
+                    "CloudKassir: нет телефона для student=%s, чек не выбит", student_id,
+                )
     else:
         await callback.answer("Счёт уже подтверждён или не найден", show_alert=True)

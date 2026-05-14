@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     yookassa_return_url: str = Field(default="https://t.me/fokus_bot", alias="YOOKASSA_RETURN_URL")
     payment_webhook_port: int = Field(default=8081, alias="PAYMENT_WEBHOOK_PORT")
 
+    # CloudKassir (онлайн-касса)
+    cloudkassir_public_id: str = Field(default="", alias="CLOUDKASSIR_PUBLIC_ID")
+    cloudkassir_api_secret: str = Field(default="", alias="CLOUDKASSIR_API_SECRET")
+
     # Способы оплаты
     payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")

@@ -30,6 +30,7 @@ from bot.repositories import (
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
+    CloudKassirService,
 )
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router, client_router
@@ -82,6 +83,10 @@ def _build_dispatcher(storage) -> Dispatcher:
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, submission_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
     visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
+    cloudkassir_service = CloudKassirService(
+        settings.cloudkassir_public_id,
+        settings.cloudkassir_api_secret,
+    )
 
     # ── DI: зависимости во все хендлеры через workflow_data ──────────────────
     dp["user_repo"] = user_repo
@@ -100,6 +105,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service
     dp["visibility"] = visibility
+    dp["cloudkassir_service"] = cloudkassir_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())
