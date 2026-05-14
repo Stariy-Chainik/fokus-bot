@@ -95,7 +95,10 @@ _MONTHS_RU = [
 def _kb_t_group_card(group, students: list) -> InlineKeyboardMarkup:
     group_id = group.group_id
     rows = [
-        [InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"t_student_card:{s.student_id}")]
+        [InlineKeyboardButton(
+            text=f"👤 {s.name}",
+            callback_data=f"t_student_card:{s.student_id}",
+        )]
         for s in students
     ]
     rows.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"t_grp_add:{group_id}")])
