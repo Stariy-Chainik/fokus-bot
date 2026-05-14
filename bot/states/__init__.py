@@ -20,6 +20,7 @@ from .admin_states import (
 from .teacher_states import (
     TeacherRenameStudentStates,
     TeacherGroupAddStudentStates,
+    TeacherKgGroupStates,
 )
 
 __all__ = [
@@ -42,5 +43,6 @@ __all__ = [
     "ClientRegStates",
     "KgGroupStates",
     "TeacherGroupAddStudentStates",
+    "TeacherKgGroupStates",
     "ReceiptStates",
 ]
