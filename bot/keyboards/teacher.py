@@ -31,7 +31,6 @@ def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None
 def kb_my_student_card(
     student_id: str, has_partner: bool, can_manage: bool,
     back_cb: str = "teacher:my_soloists",
-    has_kg_group: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Карточка ученика в интерфейсе педагога.
@@ -39,11 +38,9 @@ def kb_my_student_card(
     can_manage оставлен для совместимости сигнатуры.
     """
     _ = has_partner, can_manage
-    kg_label = "🔢 Изменить № группы д/с" if has_kg_group else "🔢 Задать № группы д/с"
     rows = [
         [InlineKeyboardButton(text="📋 Занятия за период", callback_data=f"t_stu_les:{student_id}")],
         [InlineKeyboardButton(text="✏️ Изменить имя", callback_data=f"t_rename_student:{student_id}")],
-        [InlineKeyboardButton(text=kg_label, callback_data=f"t_kg_group_edit:{student_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
     ]
@@ -165,9 +162,8 @@ def kb_group_roster_per_visit(
             suffix = f"{duration_short}м"
         else:
             suffix = f"{duration_full}м"
-        kg = f" (гр.{s.kindergarten_group})" if s.kindergarten_group else ""
         row = [InlineKeyboardButton(
-            text=f"{mark} {s.name}{kg}",
+            text=f"{mark} {s.name}",
             callback_data=f"ms_toggle:{s.student_id}",
         )]
         if has_short:

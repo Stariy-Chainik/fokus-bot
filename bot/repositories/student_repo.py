@@ -7,12 +7,11 @@ from .base import BaseRepository
 logger = logging.getLogger(__name__)
 
 # Колонки листа `students` (1-based):
-# 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids | 8 kindergarten_group
+# 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
 _PARENT_TG_IDS_COL = 7
-_KINDERGARTEN_GROUP_COL = 8
 
 
 def _row_to_student(row: dict) -> Student:
@@ -34,8 +33,6 @@ def _row_to_student(row: dict) -> Student:
         int(x) for x in tg_ids_raw.split(sep)
         if x.strip().lstrip("-").isdigit()
     ]
-    kg_raw = row.get("kindergarten_group")
-    kindergarten_group = str(kg_raw).strip() if kg_raw else None
     return Student(
         student_id=str(row["student_id"]),
         name=str(row["name"]),
@@ -44,7 +41,6 @@ def _row_to_student(row: dict) -> Student:
         group_tier=tier,
         client_id=client_id or None,
         parent_tg_ids=parent_tg_ids,
-        kindergarten_group=kindergarten_group or None,
     )
 
 
@@ -65,8 +61,8 @@ class StudentRepository(BaseRepository):
     async def add(self, name: str) -> Student:
         existing_ids = [s.student_id for s in await self.get_all()]
         student_id = generate_student_id(existing_ids)
-        # Колонка 4 (устаревшая group_id) заполняется пустой строкой. Колонка 8 — kindergarten_group.
-        await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value, "", "", ""])
+        # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
+        await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])
         return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])
 
     async def update_name(self, student_id: str, name: str) -> bool:
@@ -81,13 +77,6 @@ class StudentRepository(BaseRepository):
         if row_idx is None:
             return False
         await self._update_cell(row_idx, _TIER_COL, tier.value)
-        return True
-
-    async def update_kindergarten_group(self, student_id: str, value: str) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _KINDERGARTEN_GROUP_COL, value)
         return True
 
     async def delete(self, student_id: str) -> bool:

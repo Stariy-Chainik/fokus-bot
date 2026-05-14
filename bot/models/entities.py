@@ -52,7 +52,6 @@ class Student:
     group_tier: StudentGroupTier = StudentGroupTier.FULL
     client_id: Optional[str] = None
     parent_tg_ids: list[int] = field(default_factory=list)
-    kindergarten_group: Optional[str] = None
 
 
 @dataclass

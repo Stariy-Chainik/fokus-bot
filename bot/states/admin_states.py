@@ -71,7 +71,3 @@ class ClientCreateStates(StatesGroup):
 
 class ClientRegStates(StatesGroup):
     adding_child = State()
-
-
-class KgGroupStates(StatesGroup):
-    waiting_for_value = State()

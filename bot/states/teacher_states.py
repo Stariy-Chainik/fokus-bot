@@ -8,7 +8,3 @@ class TeacherRenameStudentStates(StatesGroup):
 class TeacherGroupAddStudentStates(StatesGroup):
     """Педагог добавляет ученика в свою группу: поиск → выбор/создание."""
     searching = State()
-
-
-class TeacherKgGroupStates(StatesGroup):
-    waiting_for_value = State()

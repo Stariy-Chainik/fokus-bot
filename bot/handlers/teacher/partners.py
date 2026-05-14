@@ -19,7 +19,7 @@ from bot.repositories import (
     StudentGroupRepository, LessonRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.services import TeacherVisibilityService
-from bot.states import PartnerAssignStates, TeacherRenameStudentStates, TeacherKgGroupStates
+from bot.states import PartnerAssignStates, TeacherRenameStudentStates
 from bot.keyboards.teacher import (
     kb_my_student_card, kb_my_pair_card,
     kb_t_partner_candidates, kb_t_confirm,
@@ -319,11 +319,9 @@ async def _render_student_card(
         can_manage = True
         note = ""
 
-    kg_line = f"\n🔢 Группа д/с: {student.kindergarten_group}" if student.kindergarten_group else ""
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
-        f"ID: {student.student_id}"
-        f"{kg_line}\n\n"
+        f"ID: {student.student_id}\n\n"
         f"Партнёр: {partner_name}"
         f"{note}"
     )
@@ -348,7 +346,6 @@ async def _render_student_card(
             has_partner=bool(student.partner_id),
             can_manage=can_manage,
             back_cb=back_cb,
-            has_kg_group=bool(student.kindergarten_group),
         )
     await show_card(callback, text, reply_markup=kb)
 
@@ -862,48 +859,3 @@ async def cb_t_pair_lessons_list(
     )
     await callback.answer()
 
-
-
-# ─── Номер группы детского сада (педагог) ────────────────────────────────────
-
-@router.callback_query(F.data.startswith("t_kg_group_edit:"))
-async def cb_t_kg_group_edit(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
-) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    student_id = callback.data.split(":", 1)[1]
-    await state.set_state(TeacherKgGroupStates.waiting_for_value)
-    await state.update_data(t_kg_student_id=student_id)
-    await callback.message.answer(
-        "Введите номер группы д/с (например: <b>1</b>, <b>5б</b>).\n"
-        "Введите <b>-</b> чтобы очистить.",
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.message(TeacherKgGroupStates.waiting_for_value)
-async def on_t_kg_group_value(
-    message: Message, state: FSMContext,
-    student_repo: StudentRepository,
-) -> None:
-    data = await state.get_data()
-    student_id = data.get("t_kg_student_id", "")
-    value = message.text.strip() if message.text else ""
-    if value == "-":
-        value = ""
-    await state.clear()
-    ok = await student_repo.update_kindergarten_group(student_id, value)
-    if not ok:
-        await message.answer("Ошибка: ученик не найден.")
-        return
-    label = f"Группа д/с: <b>{value}</b>" if value else "Группа д/с очищена."
-    await message.answer(
-        f"✅ {label}\n\nВернитесь в карточку ученика через меню.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="👩‍🎓 Карточка ученика", callback_data=f"t_student_card:{student_id}"),
-        ]]),
-    )
