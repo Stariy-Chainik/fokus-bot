@@ -394,10 +394,12 @@ def kb_lesson_list(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_lesson_detail(lesson, locked: bool = False, back_cb: str = "teacher:lesson_delete") -> InlineKeyboardMarkup:
+def kb_lesson_detail(lesson, locked: bool = False, back_cb: str = "teacher:lesson_delete",
+                     can_add_guest: bool = False) -> InlineKeyboardMarkup:
     """Карточка занятия. Правка полей не поддерживается — если педагог ошибся,
     он удаляет занятие и создаёт заново через «Отметить занятие».
     Если locked — период сдан, кнопки удаления нет.
+    can_add_guest — показывать кнопку «Добавить гостя» (GROUP PER_VISIT, не locked).
     """
     lesson_id = lesson.lesson_id
     rows: list[list[InlineKeyboardButton]] = []
@@ -408,6 +410,10 @@ def kb_lesson_detail(lesson, locked: bool = False, back_cb: str = "teacher:lesso
         rows.append([InlineKeyboardButton(
             text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}",
         )])
+        if can_add_guest:
+            rows.append([InlineKeyboardButton(
+                text="➕ Добавить гостя", callback_data=f"lesson_guest_list:{lesson_id}",
+            )])
 
     rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)

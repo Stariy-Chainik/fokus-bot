@@ -6,15 +6,18 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
+from bot.models import User, GroupBillingMode
 from bot.models.enums import LessonType
-from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, GroupRepository, StudentRepository
+from bot.repositories import (
+    LessonRepository, TeacherPeriodSubmissionRepository, GroupRepository,
+    StudentRepository, TeacherGroupRepository, StudentGroupRepository,
+)
 from bot.services import LessonService
 from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu
 from bot.keyboards.admin import kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
-from bot.utils import parse_attendees
+from bot.utils import parse_attendees, serialize_attendees, AttendeeEntry, attendee_ids
 from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
@@ -435,7 +438,14 @@ async def cb_lesson_detail(
         back_cb = data["t_stu_les_back"]
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
-    await show_card(callback, "\n".join(lines), reply_markup=kb_lesson_detail(lesson, locked, back_cb=back_cb))
+    can_add_guest = (
+        not locked
+        and lesson.type == LessonType.GROUP
+        and bool(lesson.group_id)
+    )
+    await show_card(callback, "\n".join(lines), reply_markup=kb_lesson_detail(
+        lesson, locked, back_cb=back_cb, can_add_guest=can_add_guest,
+    ))
 
 
 
@@ -493,3 +503,117 @@ async def cb_delete_lesson_do(
     back_kb = kb_back("admin:edit_lesson") if user.is_admin else kb_teacher_menu()
     await callback.message.edit_text(text, reply_markup=back_kb)
     await callback.answer()
+
+
+# ─── Добавить гостя в уже сохранённое групповое занятие ──────────────────────
+
+@router.callback_query(F.data.startswith("lesson_guest_list:"))
+async def cb_lesson_guest_list(
+    callback: CallbackQuery, user: User | None,
+    lesson_repo: LessonRepository,
+    group_repo: GroupRepository,
+    student_repo: StudentRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    student_group_repo: StudentGroupRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
+) -> None:
+    if not _is_teacher_or_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    lesson_id = callback.data.split(":", 1)[1]
+    lesson = await lesson_repo.get_by_id(lesson_id)
+    if not lesson:
+        await callback.answer("Занятие не найдено", show_alert=True)
+        return
+
+    # Уже присутствующие
+    present_ids = set(attendee_ids(lesson.attendees)) if lesson.attendees else set()
+
+    # Ученики из всех групп педагога
+    teacher_id = lesson.teacher_id
+    all_gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    all_students: dict[str, object] = {}
+    for gid in sorted(all_gids):
+        member_ids = set(await student_group_repo.get_students_for_group(gid))
+        for s in await student_repo.get_all():
+            if s.student_id in member_ids and s.student_id not in present_ids:
+                all_students[s.student_id] = s
+
+    candidates = sorted(all_students.values(), key=lambda s: s.name)
+    if not candidates:
+        await callback.answer("Все ученики уже отмечены.", show_alert=True)
+        return
+
+    rows = [
+        [InlineKeyboardButton(
+            text=s.name,
+            callback_data=f"lesson_guest_pick:{lesson_id}:{s.student_id}",
+        )]
+        for s in candidates
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"lesson_detail:{lesson_id}")])
+    await callback.message.edit_text(
+        f"<b>Выберите гостя</b> (уже отмечено: {len(present_ids)}):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("lesson_guest_pick:"))
+async def cb_lesson_guest_pick(
+    callback: CallbackQuery, user: User | None,
+    lesson_repo: LessonRepository,
+    group_repo: GroupRepository,
+    student_repo: StudentRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
+    state: FSMContext,
+) -> None:
+    if not _is_teacher_or_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, lesson_id, student_id = callback.data.split(":", 2)
+    lesson = await lesson_repo.get_by_id(lesson_id)
+    if not lesson:
+        await callback.answer("Занятие не найдено", show_alert=True)
+        return
+
+    periods = await _submitted_periods(lesson.teacher_id, submission_repo)
+    if lesson.date[:7] in periods:
+        await callback.answer("🔒 Период сдан.", show_alert=True)
+        return
+
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+
+    # Определяем стоимость по группе
+    group = await group_repo.get_by_id(lesson.group_id) if lesson.group_id else None
+    if group and group.billing_mode == GroupBillingMode.PER_VISIT:
+        amount = group.price_full
+    else:
+        amount = 0
+
+    new_entry = AttendeeEntry(
+        student_id=student_id,
+        duration_min=lesson.duration_min,
+        amount=amount,
+    )
+
+    existing = parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)
+    if any(e.student_id == student_id for e in existing):
+        await callback.answer("Этот ученик уже отмечен.", show_alert=True)
+        return
+
+    existing.append(new_entry)
+    new_attendees = serialize_attendees(existing)
+    await lesson_repo.update_attendees(lesson_id, new_attendees)
+
+    await callback.answer(f"✅ {student.name} добавлен(а).")
+    # Обновить карточку занятия
+    lesson.attendees = new_attendees
+    await callback.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="« К занятию", callback_data=f"lesson_detail:{lesson_id}"),
+        ]])
+    )
