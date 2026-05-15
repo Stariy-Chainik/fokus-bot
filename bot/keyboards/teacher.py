@@ -147,32 +147,34 @@ def kb_group_roster_per_visit(
     price_short: int, duration_short: int,
     price_full: int, duration_full: int,
     back_cb: str = "lesson_back:attendance",
+    extra_students: list | None = None,
 ) -> InlineKeyboardMarkup:  # price_short/price_full не показываем педагогу
     """
     Ростер группы с per-visit биллингом. Рядом с именем — тариф на это занятие.
     Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
     tiers: dict[student_id -> "short" | "full"].
+    extra_students: ученики из других групп педагога (показываются ниже разделителя).
     """
     has_short = price_short > 0
-    rows = []
-    for s in students:
+
+    def _student_row(s) -> list:
         mark = "✅" if s.student_id in selected_ids else "⬜"
         tier = tiers.get(s.student_id, "full")
-        if has_short and tier == "short":
-            suffix = f"{duration_short}м"
-        else:
-            suffix = f"{duration_full}м"
-        row = [InlineKeyboardButton(
-            text=f"{mark} {s.name}",
-            callback_data=f"ms_toggle:{s.student_id}",
-        )]
+        suffix = f"{duration_short}м" if has_short and tier == "short" else f"{duration_full}м"
+        row = [InlineKeyboardButton(text=f"{mark} {s.name}", callback_data=f"ms_toggle:{s.student_id}")]
         if has_short:
-            row.append(InlineKeyboardButton(
-                text=f"{suffix} ↕",
-                callback_data=f"ms_tier:{s.student_id}",
-            ))
-        rows.append(row)
-    all_selected = students and len(selected_ids) == len(students)
+            row.append(InlineKeyboardButton(text=f"{suffix} ↕", callback_data=f"ms_tier:{s.student_id}"))
+        return row
+
+    rows = [_student_row(s) for s in students]
+
+    if extra_students:
+        rows.append([InlineKeyboardButton(text="─── из других групп ───", callback_data="noop")])
+        rows.extend(_student_row(s) for s in extra_students)
+
+    main_ids = {s.student_id for s in students}
+    main_selected = {sid for sid in selected_ids if sid in main_ids}
+    all_selected = bool(students) and len(main_selected) == len(students)
     toggle_all_text = "◻️ Снять всех" if all_selected else "☑️ Отметить всех"
     rows.append([InlineKeyboardButton(text=toggle_all_text, callback_data="ms_all")])
     rows.append([
