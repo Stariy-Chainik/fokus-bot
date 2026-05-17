@@ -412,7 +412,7 @@ def kb_lesson_detail(lesson, locked: bool = False, back_cb: str = "teacher:lesso
         )])
         if can_add_guest:
             rows.append([InlineKeyboardButton(
-                text="➕ Добавить гостя", callback_data=f"lesson_guest_list:{lesson_id}",
+                text="➕ Добавить ученика", callback_data=f"lesson_guest_list:{lesson_id}",
             )])
 
     rows.append([InlineKeyboardButton(text="« Назад к списку", callback_data=back_cb)])

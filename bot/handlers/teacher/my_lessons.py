@@ -553,7 +553,7 @@ async def cb_lesson_guest_list(
     ]
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"lesson_detail:{lesson_id}")])
     await callback.message.edit_text(
-        f"<b>Выберите гостя</b> (уже отмечено: {len(present_ids)}):",
+        f"<b>Выберите ученика</b> (уже отмечено: {len(present_ids)}):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
