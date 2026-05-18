@@ -148,12 +148,14 @@ def kb_group_roster_per_visit(
     price_full: int, duration_full: int,
     back_cb: str = "lesson_back:attendance",
     extra_students: list | None = None,
+    show_add_other: bool = False,
 ) -> InlineKeyboardMarkup:  # price_short/price_full не показываем педагогу
     """
     Ростер группы с per-visit биллингом. Рядом с именем — тариф на это занятие.
     Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
     tiers: dict[student_id -> "short" | "full"].
     extra_students: ученики из других групп педагога (показываются ниже разделителя).
+    show_add_other: показать кнопку «➕ Добавить из других групп».
     """
     has_short = price_short > 0
 
@@ -172,6 +174,11 @@ def kb_group_roster_per_visit(
         rows.append([InlineKeyboardButton(text="─── из других групп ───", callback_data="noop")])
         rows.extend(_student_row(s) for s in extra_students)
 
+    if show_add_other:
+        rows.append([InlineKeyboardButton(
+            text="➕ Добавить из других групп", callback_data="ms_add_other",
+        )])
+
     main_ids = {s.student_id for s in students}
     main_selected = {sid for sid in selected_ids if sid in main_ids}
     all_selected = bool(students) and len(main_selected) == len(students)
@@ -184,6 +191,32 @@ def kb_group_roster_per_visit(
         InlineKeyboardButton(text="« Назад", callback_data=back_cb),
         InlineKeyboardButton(text="❌ Отмена", callback_data="teacher:cancel_lesson"),
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_other_groups_picker(groups: list) -> InlineKeyboardMarkup:
+    """Список других групп педагога для добавления учеников в ростер."""
+    rows = [
+        [InlineKeyboardButton(text=g.name, callback_data=f"ms_other_group:{g.group_id}")]
+        for g in groups
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="ms_other_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_other_group_students(students: list, picked_ids: set) -> InlineKeyboardMarkup:
+    """Ростер учеников выбранной чужой группы: галочка/нет, Подтвердить, Назад."""
+    rows = [
+        [InlineKeyboardButton(
+            text=f"{'✅' if s.student_id in picked_ids else '⬜'} {s.name}",
+            callback_data=f"ms_other_pick:{s.student_id}",
+        )]
+        for s in students
+    ]
+    rows.append([InlineKeyboardButton(
+        text=f"✅ Подтвердить ({len(picked_ids)})", callback_data="ms_other_confirm",
+    )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="ms_add_other")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -26,6 +26,7 @@ from bot.keyboards.teacher import (
     kb_lesson_type, kb_lesson_type_after_save, kb_duration, kb_teacher_menu,
     kb_attendance_yes_no, kb_pair_multi_select, kb_pair_from_soloists,
     kb_multi_select, kb_group_roster_per_visit,
+    kb_other_groups_picker, kb_other_group_students,
     kb_group_branch_picker, kb_group_picker, kb_shared_group_picker,
     _PROXY_BUTTONS,
 )
@@ -524,25 +525,18 @@ async def _show_group_roster(
             reply_markup=_menu_kb(user, proxy_data),
         )
         return
-    state_update: dict = {"selected_group_id": group_id, "selected_ids": [], "extra_student_ids": []}
-    extra_students: list = []
+    state_update: dict = {
+        "selected_group_id": group_id, "selected_ids": [], "extra_student_ids": [],
+        "has_other_groups": False,
+    }
     if group.billing_mode == GroupBillingMode.PER_VISIT:
         tiers: dict = {s.student_id: s.group_tier.value for s in members}
-        # Загружаем учеников из других групп педагога (не состоящих в основной)
+        # Узнаём есть ли у педагога другие группы (для кнопки «Добавить из других групп»)
         if teacher_group_repo is not None:
             teacher_id = _tid(user, proxy_data)
             all_teacher_gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
-            member_ids = {s.student_id for s in members}
-            extra_seen: set[str] = set()
-            for other_gid in sorted(all_teacher_gids - {group_id}):
-                for s in await _all_students_in_group(other_gid, student_repo, student_group_repo):
-                    if s.student_id not in member_ids and s.student_id not in extra_seen:
-                        extra_students.append(s)
-                        extra_seen.add(s.student_id)
-                        tiers.setdefault(s.student_id, StudentGroupTier.FULL.value)
-            extra_students.sort(key=lambda s: s.name)
+            state_update["has_other_groups"] = bool(all_teacher_gids - {group_id})
         state_update["per_visit_tiers"] = tiers
-        state_update["extra_student_ids"] = [s.student_id for s in extra_students]
     else:
         state_update["per_visit_tiers"] = {}
     await state.update_data(**state_update)
@@ -550,10 +544,9 @@ async def _show_group_roster(
     data = await state.get_data()
 
     if group.billing_mode == GroupBillingMode.PER_VISIT:
-        extra_hint = f" + {len(extra_students)} из других групп" if extra_students else ""
         text = (
             f"{_header(data)}Группа: <b>{group.name}</b>\n"
-            f"Отметьте присутствующих ({len(members)} в составе{extra_hint}).\n"
+            f"Отметьте присутствующих ({len(members)} в составе).\n"
             f"<i>Кнопка справа — текущий тариф (↕ нажмите чтобы сменить).</i>"
         )
         kb = kb_group_roster_per_visit(
@@ -561,7 +554,8 @@ async def _show_group_roster(
             group.price_short, group.duration_short,
             group.price_full, group.duration_full,
             back_cb="lesson_back:attendance",
-            extra_students=extra_students or None,
+            extra_students=None,
+            show_add_other=state_update["has_other_groups"],
         )
     else:
         text = (
@@ -879,6 +873,7 @@ async def _refresh_multi_select(
             group.price_full, group.duration_full,
             back_cb=back_cb,
             extra_students=extra_students or None,
+            show_add_other=bool(data.get("has_other_groups")),
         )
     else:
         show_toggle_all = bool(gid) and cur_state in (
@@ -1009,6 +1004,210 @@ async def cb_ms_confirm(
         await callback.answer("Никто не отмечен", show_alert=True)
         return
     await _finalize(callback, state, user, teacher_repo, student_repo, lesson_service, group_repo)
+
+
+# ─── Добавление учеников из других групп педагога ───────────────────────────
+
+@router.callback_query(F.data == "ms_add_other", RecordLessonStates.selecting_attendees)
+async def cb_ms_add_other(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    main_gid = data.get("selected_group_id")
+    teacher_id = _tid(user, data)
+    all_gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    other_gids = all_gids - {main_gid}
+    groups = []
+    for gid in sorted(other_gids):
+        g = await group_repo.get_by_id(gid)
+        if g:
+            groups.append(g)
+    groups.sort(key=lambda g: g.name)
+    if not groups:
+        await callback.answer("У вас нет других групп.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "<b>Из какой группы добавить учеников?</b>",
+        reply_markup=kb_other_groups_picker(groups),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ms_other_group:"), RecordLessonStates.selecting_attendees)
+async def cb_ms_other_group(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    other_gid = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    main_gid = data.get("selected_group_id")
+    main_member_ids = set(await student_group_repo.get_students_for_group(main_gid)) if main_gid else set()
+    students = [
+        s for s in await _all_students_in_group(other_gid, student_repo, student_group_repo)
+        if s.student_id not in main_member_ids
+    ]
+    if not students:
+        await callback.answer("В этой группе нет учеников вне основного состава.", show_alert=True)
+        return
+    # Инициализируем временные выборки на основе уже добавленных extras
+    current_extras = set(data.get("extra_student_ids") or [])
+    picked = [s.student_id for s in students if s.student_id in current_extras]
+    await state.update_data(extra_pick_group_id=other_gid, extra_pick_ids=picked)
+    group = await group_repo.get_by_id(other_gid)
+    await callback.message.edit_text(
+        f"<b>Из группы «{group.name if group else other_gid}»</b>\n"
+        f"Отметьте учеников для добавления в ростер:",
+        reply_markup=kb_other_group_students(students, set(picked)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ms_other_pick:"), RecordLessonStates.selecting_attendees)
+async def cb_ms_other_pick(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    student_repo: StudentRepository, group_repo: GroupRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    student_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    other_gid = data.get("extra_pick_group_id")
+    if not other_gid:
+        await callback.answer()
+        return
+    picked = list(data.get("extra_pick_ids") or [])
+    if student_id in picked:
+        picked.remove(student_id)
+    else:
+        picked.append(student_id)
+    await state.update_data(extra_pick_ids=picked)
+
+    main_gid = data.get("selected_group_id")
+    main_member_ids = set(await student_group_repo.get_students_for_group(main_gid)) if main_gid else set()
+    students = [
+        s for s in await _all_students_in_group(other_gid, student_repo, student_group_repo)
+        if s.student_id not in main_member_ids
+    ]
+    await callback.message.edit_reply_markup(
+        reply_markup=kb_other_group_students(students, set(picked)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "ms_other_confirm", RecordLessonStates.selecting_attendees)
+async def cb_ms_other_confirm(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
+    group_repo: GroupRepository, student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    other_gid = data.get("extra_pick_group_id")
+    picked = set(data.get("extra_pick_ids") or [])
+
+    # Учеников из этой группы убираем из extras, потом докидываем новых picked
+    current_extras = list(data.get("extra_student_ids") or [])
+    if other_gid:
+        from_this_group = set(await student_group_repo.get_students_for_group(other_gid))
+        current_extras = [sid for sid in current_extras if sid not in from_this_group]
+    # Добавляем выбранных (без дублей)
+    for sid in picked:
+        if sid not in current_extras:
+            current_extras.append(sid)
+
+    # Тарифы для новых extras — full по умолчанию
+    tiers = dict(data.get("per_visit_tiers") or {})
+    for sid in current_extras:
+        tiers.setdefault(sid, StudentGroupTier.FULL.value)
+
+    await state.update_data(
+        extra_student_ids=current_extras,
+        per_visit_tiers=tiers,
+        extra_pick_group_id=None,
+        extra_pick_ids=[],
+    )
+
+    # Перерисуем основной ростер
+    main_gid = data.get("selected_group_id")
+    group = await group_repo.get_by_id(main_gid) if main_gid else None
+    members = await _all_students_in_group(main_gid, student_repo, student_group_repo) if main_gid else []
+    extras_objs = []
+    if current_extras:
+        by_id = {s.student_id: s for s in await student_repo.get_all()}
+        extras_objs = sorted(
+            [by_id[sid] for sid in current_extras if sid in by_id], key=lambda s: s.name,
+        )
+    selected = set(data.get("selected_ids", []))
+    text = (
+        f"{_header(data)}Группа: <b>{group.name if group else main_gid}</b>\n"
+        f"Отметьте присутствующих ({len(members)} в составе"
+        f"{f' + {len(extras_objs)} из других групп' if extras_objs else ''}).\n"
+        f"<i>Кнопка справа — текущий тариф (↕ нажмите чтобы сменить).</i>"
+    )
+    kb = kb_group_roster_per_visit(
+        members, selected, tiers,
+        group.price_short if group else 0, group.duration_short if group else 0,
+        group.price_full if group else 0, group.duration_full if group else 0,
+        back_cb="lesson_back:attendance",
+        extra_students=extras_objs or None,
+        show_add_other=bool(data.get("has_other_groups")),
+    )
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer("Добавлено" if picked else "Без изменений")
+
+
+@router.callback_query(F.data == "ms_other_cancel", RecordLessonStates.selecting_attendees)
+async def cb_ms_other_cancel(
+    callback: CallbackQuery, state: FSMContext, user: User | None,
+    visibility: TeacherVisibilityService, student_repo: StudentRepository,
+    group_repo: GroupRepository, student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_teacher(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.update_data(extra_pick_group_id=None, extra_pick_ids=[])
+    # Возвращаемся в основной ростер
+    data = await state.get_data()
+    main_gid = data.get("selected_group_id")
+    group = await group_repo.get_by_id(main_gid) if main_gid else None
+    members = await _all_students_in_group(main_gid, student_repo, student_group_repo) if main_gid else []
+    current_extras = list(data.get("extra_student_ids") or [])
+    extras_objs = []
+    if current_extras:
+        by_id = {s.student_id: s for s in await student_repo.get_all()}
+        extras_objs = sorted(
+            [by_id[sid] for sid in current_extras if sid in by_id], key=lambda s: s.name,
+        )
+    selected = set(data.get("selected_ids", []))
+    tiers = dict(data.get("per_visit_tiers") or {})
+    text = (
+        f"{_header(data)}Группа: <b>{group.name if group else main_gid}</b>\n"
+        f"Отметьте присутствующих ({len(members)} в составе"
+        f"{f' + {len(extras_objs)} из других групп' if extras_objs else ''}).\n"
+        f"<i>Кнопка справа — текущий тариф (↕ нажмите чтобы сменить).</i>"
+    )
+    kb = kb_group_roster_per_visit(
+        members, selected, tiers,
+        group.price_short if group else 0, group.duration_short if group else 0,
+        group.price_full if group else 0, group.duration_full if group else 0,
+        back_cb="lesson_back:attendance",
+        extra_students=extras_objs or None,
+        show_add_other=bool(data.get("has_other_groups")),
+    )
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
 
 
 # ─── Pair: мульти-выбор пар ──────────────────────────────────────────────────
