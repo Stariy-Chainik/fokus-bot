@@ -71,12 +71,17 @@ class LessonRepository(BaseRepository):
         )
 
     async def individual_lesson_exists(self, teacher_id: str, student_id: str, lesson_date: str) -> bool:
+        # Считаем только настоящие соло-занятия (1 ученик). Парные индивидуальные
+        # не блокируют — ученик может быть в паре И в соло в один день.
         for ls in await self.get_all():
             if ls.teacher_id != teacher_id or ls.date != lesson_date:
                 continue
-            if ls.type == LessonType.INDIVIDUAL and student_id in (
-                ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id
-            ):
+            if ls.type != LessonType.INDIVIDUAL:
+                continue
+            sids = [sid for sid in (
+                ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id,
+            ) if sid]
+            if len(sids) == 1 and sids[0] == student_id:
                 return True
         return False
 
