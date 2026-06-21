@@ -539,7 +539,7 @@ _group_send_in_progress: set[str] = set()
 async def cb_group_send_bills(
     callback: CallbackQuery, user: User | None,
     group_repo: GroupRepository, student_repo: StudentRepository,
-    teacher_repo: TeacherRepository, payment_service: PaymentService,
+    payment_service: PaymentService,
     student_group_repo: StudentGroupRepository,
 ) -> None:
     if not _is_admin(user):
@@ -565,38 +565,23 @@ async def cb_group_send_bills(
             await callback.answer("В группе нет учеников", show_alert=True)
             return
 
-        # Собираем педагогов из всех счетов учеников группы
-        all_teacher_ids: set[str] = set()
         per_student_bills: dict[str, dict] = {}
+        any_bills = False
         for s in students:
             bills = await payment_service.compute_bills_for_student_period(
                 s.student_id, period_month,
             )
             per_student_bills[s.student_id] = bills
-            all_teacher_ids.update(bills.keys())
+            if bills:
+                any_bills = True
 
-        if not all_teacher_ids:
+        if not any_bills:
             await callback.answer(
                 f"За {display_period(period_month)} нет занятий к оплате у учеников группы.",
                 show_alert=True,
             )
             return
 
-        not_submitted = await payment_service.teachers_not_submitted(
-            list(all_teacher_ids), period_month,
-        )
-        if not_submitted:
-            names = []
-            for tid in not_submitted:
-                t = await teacher_repo.get_by_id(tid)
-                names.append(t.name if t else tid)
-            await callback.answer(
-                "Период не сдан педагогами:\n" + "\n".join(names),
-                show_alert=True,
-            )
-            return
-
-        # Все сдали — создаём счета и отправляем (заглушка)
         total_invoices = 0
         for s in students:
             if not per_student_bills[s.student_id]:

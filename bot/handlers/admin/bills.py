@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.repositories import (
-    StudentRepository, PaymentRepository, TeacherRepository,
+    StudentRepository, PaymentRepository,
     BranchRepository, GroupRepository, StudentGroupRepository,
     ClientRepository,
 )
@@ -307,7 +307,6 @@ def _build_bill_text(student_name: str, group_names: list[str], period_month: st
 async def cb_bill_send(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository,
-    teacher_repo: TeacherRepository,
     group_repo: GroupRepository,
     payment_service: PaymentService,
     student_group_repo: StudentGroupRepository,
@@ -337,20 +336,6 @@ async def cb_bill_send(
             await callback.answer("В счёте нет занятий", show_alert=True)
             return
 
-        not_submitted = await payment_service.teachers_not_submitted(
-            list(bills.keys()), period_month,
-        )
-        if not_submitted:
-            names = []
-            for tid in not_submitted:
-                t = await teacher_repo.get_by_id(tid)
-                names.append(t.name if t else tid)
-            await callback.answer(
-                "Период не сдан педагогами:\n" + "\n".join(names),
-                show_alert=True,
-            )
-            return
-
         invoices = await payment_service.get_or_create_invoices_for_student_period(
             student, period_month,
         )
@@ -369,21 +354,32 @@ async def cb_bill_send(
             else f"bvg:{period_month}:{group_id}"
         )
 
-        # Проверяем — есть ли у ученика привязанный клиент с Telegram
+        # Собираем получателей: привязанный клиент + все родители ученика
         client = await client_repo.get_by_id(student.client_id) if student.client_id else None
-        client_tg_id = client.tg_id if client else None
+        recipients: list[int] = []
+        if client and client.tg_id:
+            recipients.append(client.tg_id)
+        for pid in (student.parent_tg_ids or []):
+            if pid not in recipients:
+                recipients.append(pid)
 
-        if client_tg_id:
-            # Реальная отправка клиенту
+        if recipients:
+            # Реальная отправка родителям
+            sent_to = 0
             sent_invoices = 0
-            try:
-                await callback.bot.send_message(client_tg_id, bill_text)
+            for tg_id in recipients:
+                try:
+                    await callback.bot.send_message(tg_id, bill_text)
+                    sent_to += 1
+                except Exception as exc:
+                    logger.error("Ошибка отправки сообщения родителю tg_id=%s: %s", tg_id, exc)
+                    continue
                 if settings.payment_provider_token:
                     for p in invoices:
                         if p.status.value != "paid":
                             try:
                                 await callback.bot.send_invoice(
-                                    chat_id=client_tg_id,
+                                    chat_id=tg_id,
                                     title=f"Занятия {display_period(period_month)}",
                                     description=f"Педагог: {p.teacher_name or '—'}",
                                     payload=p.payment_id,
@@ -397,10 +393,10 @@ async def cb_bill_send(
                                 sent_invoices += 1
                             except Exception as exc:
                                 logger.error("Ошибка отправки инвойса %s: %s", p.payment_id, exc)
-            except Exception as exc:
-                logger.error("Ошибка отправки сообщения клиенту tg_id=%s: %s", client_tg_id, exc)
+
+            if sent_to == 0:
                 await callback.message.edit_text(
-                    f"❌ Не удалось отправить — клиент заблокировал бота или не запускал /start.",
+                    "❌ Не удалось отправить — родитель заблокировал бота или не запускал /start.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
                     ]),
@@ -408,10 +404,13 @@ async def cb_bill_send(
                 await callback.answer()
                 return
 
-            status_line = f"✅ Счёт отправлен клиенту {client.name}"
+            status_line = f"✅ Счёт отправлен родителю ({sent_to} из {len(recipients)})"
             if sent_invoices:
                 status_line += f" + {sent_invoices} кнопок оплаты"
-            logger.info("Счёт отправлен student=%s period=%s client_tg_id=%s", student_id, period_month, client_tg_id)
+            logger.info(
+                "Счёт отправлен student=%s period=%s recipients=%s sent=%s",
+                student_id, period_month, recipients, sent_to,
+            )
             await callback.message.edit_text(
                 status_line,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -420,7 +419,7 @@ async def cb_bill_send(
                 ]),
             )
         else:
-            # Клиент не привязан — показать шаблон для ручной отправки
+            # Нет ни клиента, ни родителей с доступом — показать шаблон для ручной отправки
             if client:
                 header = (
                     "⚠️ <i>Клиент ещё не заходил в бот (нет Telegram). "
@@ -428,7 +427,7 @@ async def cb_bill_send(
                 )
             else:
                 header = (
-                    "📤 <i>Клиент не привязан. "
+                    "📤 <i>Родитель не привязан. "
                     "Скопируй и отправь вручную:</i>\n\n"
                 )
             await callback.message.edit_text(

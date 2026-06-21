@@ -7,7 +7,6 @@ from bot.models.enums import PaymentStatus
 from bot.utils import generate_payment_id, now_str
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
-    TeacherPeriodSubmissionRepository,
 )
 from .billing_service import build_billing_rows
 
@@ -20,12 +19,10 @@ class PaymentService:
         payment_repo: PaymentRepository,
         lesson_repo: LessonRepository,
         teacher_repo: TeacherRepository,
-        submission_repo: TeacherPeriodSubmissionRepository,
     ) -> None:
         self._payment_repo = payment_repo
         self._lesson_repo = lesson_repo
         self._teacher_repo = teacher_repo
-        self._submission_repo = submission_repo
 
     async def compute_bills_for_student_period(
         self, student_id: str, period_month: str,
@@ -161,13 +158,3 @@ class PaymentService:
         logger.info("Период %s ученика %s оплачен (%d счётов)", period_month, student_id, count)
         return count
 
-    async def teachers_not_submitted(
-        self, teacher_ids: list[str], period_month: str,
-    ) -> list[str]:
-        """Из списка teacher_id возвращает тех, кто ещё не сдал период."""
-        not_submitted: list[str] = []
-        for tid in teacher_ids:
-            sub = await self._submission_repo.get_by_teacher_and_period(tid, period_month)
-            if sub is None:
-                not_submitted.append(tid)
-        return not_submitted

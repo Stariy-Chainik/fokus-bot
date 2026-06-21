@@ -80,7 +80,7 @@ def _build_dispatcher(storage) -> Dispatcher:
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
-    payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, submission_repo)
+    payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo)
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
     visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
     cloudkassir_service = CloudKassirService(
