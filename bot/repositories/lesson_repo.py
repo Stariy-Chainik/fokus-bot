@@ -64,12 +64,6 @@ class LessonRepository(BaseRepository):
     async def get_existing_ids(self) -> list[str]:
         return [ls.lesson_id for ls in await self.get_all()]
 
-    async def group_lesson_exists(self, teacher_id: str, group_id: str, lesson_date: str) -> bool:
-        return any(
-            ls.teacher_id == teacher_id and ls.group_id == group_id and ls.date == lesson_date
-            for ls in await self.get_all()
-        )
-
     async def individual_lesson_exists(self, teacher_id: str, student_id: str, lesson_date: str) -> bool:
         # Считаем только настоящие соло-занятия (1 ученик). Парные индивидуальные
         # не блокируют — ученик может быть в паре И в соло в один день.
