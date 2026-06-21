@@ -428,20 +428,21 @@ def kb_lesson_list(
 
 
 def kb_lesson_detail(lesson, locked: bool = False, back_cb: str = "teacher:lesson_delete",
-                     can_add_guest: bool = False) -> InlineKeyboardMarkup:
+                     can_add_guest: bool = False, is_admin: bool = False) -> InlineKeyboardMarkup:
     """Карточка занятия. Правка полей не поддерживается — если педагог ошибся,
     он удаляет занятие и создаёт заново через «Отметить занятие».
-    Если locked — период сдан, кнопки удаления нет.
-    can_add_guest — показывать кнопку «Добавить гостя» (GROUP PER_VISIT, не locked).
+    Если locked и не админ — кнопки удаления нет. Админу доступно всё всегда.
+    can_add_guest — показывать кнопку «Добавить гостя» (GROUP PER_VISIT).
     """
     lesson_id = lesson.lesson_id
     rows: list[list[InlineKeyboardButton]] = []
 
-    if locked:
+    if locked and not is_admin:
         rows.append([InlineKeyboardButton(text="🔒 Период сдан", callback_data="noop")])
     else:
+        del_text = "🗑 Удалить занятие (🔒 период сдан)" if locked else "🗑 Удалить занятие"
         rows.append([InlineKeyboardButton(
-            text="🗑 Удалить занятие", callback_data=f"delete_lesson:{lesson_id}",
+            text=del_text, callback_data=f"delete_lesson:{lesson_id}",
         )])
         if can_add_guest:
             rows.append([InlineKeyboardButton(

@@ -50,6 +50,7 @@ class LessonService:
         student_4_name: str | None = None,
         attendees: str | None = None,
         group_id: str = "",
+        bypass_period_lock: bool = False,
     ) -> Lesson:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
@@ -59,7 +60,8 @@ class LessonService:
                 if sid and await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, sid, lesson_date):
                     raise ValueError("Индивидуальное занятие с этим учеником на выбранную дату уже записано")
 
-        await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
+        if not bypass_period_lock:
+            await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
 
         now = now_str()
         existing_ids = await self._lesson_repo.get_existing_ids()
@@ -98,6 +100,7 @@ class LessonService:
         lesson_date: str,
         duration_min: int,
         pairs: list[tuple[str, str, str, str]],
+        bypass_period_lock: bool = False,
     ) -> list[Lesson]:
         created: list[Lesson] = []
         for a_id, a_name, b_id, b_name in pairs:
@@ -110,6 +113,7 @@ class LessonService:
                 student_1_name=a_name,
                 student_2_id=b_id,
                 student_2_name=b_name,
+                bypass_period_lock=bypass_period_lock,
             )
             created.append(lesson)
         return created
@@ -120,6 +124,7 @@ class LessonService:
         lesson_date: str,
         duration_min: int,
         students: list[tuple[str, str]],
+        bypass_period_lock: bool = False,
     ) -> list[Lesson]:
         created: list[Lesson] = []
         for sid, sname in students:
@@ -130,6 +135,7 @@ class LessonService:
                 duration_min=duration_min,
                 student_1_id=sid,
                 student_1_name=sname,
+                bypass_period_lock=bypass_period_lock,
             )
             created.append(lesson)
         return created

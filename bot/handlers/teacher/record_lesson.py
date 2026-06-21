@@ -1498,6 +1498,7 @@ async def _finalize(
         duration = int(data["duration_min"])
         _is_admin_mode = user and user.is_admin and (not user.teacher_id or data.get("proxy_teacher_id"))
         after_save_kb = kb_lesson_type_after_save(back_cb="admin:menu" if _is_admin_mode else "teacher:menu")
+        bypass_lock = bool(user and user.is_admin)
 
         if kind == "group":
             attendee_ids = list(data.get("selected_ids", []))
@@ -1532,6 +1533,7 @@ async def _finalize(
                 duration_min=duration,
                 attendees=attendees_csv,
                 group_id=group_id,
+                bypass_period_lock=bypass_lock,
             )
             extra = f"\nОтмечено: {len(attendee_ids)}" if attendee_ids else ""
             await state.set_data({"lesson_date": lesson_date, "proxy_teacher_id": data.get("proxy_teacher_id")})
@@ -1561,6 +1563,7 @@ async def _finalize(
                 lesson_date=lesson_date,
                 duration_min=duration,
                 pairs=pairs_data,
+                bypass_period_lock=bypass_lock,
             )
             await state.set_data({"lesson_date": lesson_date, "proxy_teacher_id": data.get("proxy_teacher_id")})
             await state.set_state(RecordLessonStates.choosing_kind)
@@ -1597,6 +1600,7 @@ async def _finalize(
                 student_2_id=ids[1], student_2_name=names[1],
                 student_3_id=ids[2], student_3_name=names[2],
                 student_4_id=ids[3], student_4_name=names[3],
+                bypass_period_lock=bypass_lock,
             )
             label = " + ".join(s.name for s in students)
             await state.set_data({"lesson_date": lesson_date, "proxy_teacher_id": data.get("proxy_teacher_id")})
@@ -1622,6 +1626,7 @@ async def _finalize(
                 lesson_date=lesson_date,
                 duration_min=duration,
                 students=students,
+                bypass_period_lock=bypass_lock,
             )
             names = ", ".join(n for _, n in students)
             await state.set_data({"lesson_date": lesson_date, "proxy_teacher_id": data.get("proxy_teacher_id")})

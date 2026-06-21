@@ -424,7 +424,10 @@ async def cb_lesson_detail(
 
     if locked:
         lines.append("")
-        lines.append("🔒 Период сдан — редактирование недоступно.")
+        if user.is_admin:
+            lines.append("🔒 Период сдан педагогом — редактирование доступно только администратору.")
+        else:
+            lines.append("🔒 Период сдан — редактирование недоступно.")
 
     data = await state.get_data()
     from_teacher_flow = bool(data.get("lm_mode"))
@@ -439,12 +442,13 @@ async def cb_lesson_detail(
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
     can_add_guest = (
-        not locked
+        (not locked or bool(user.is_admin))
         and lesson.type == LessonType.GROUP
         and bool(lesson.group_id)
     )
     await show_card(callback, "\n".join(lines), reply_markup=kb_lesson_detail(
         lesson, locked, back_cb=back_cb, can_add_guest=can_add_guest,
+        is_admin=bool(user.is_admin),
     ))
 
 
@@ -577,10 +581,11 @@ async def cb_lesson_guest_pick(
         await callback.answer("Занятие не найдено", show_alert=True)
         return
 
-    periods = await _submitted_periods(lesson.teacher_id, submission_repo)
-    if lesson.date[:7] in periods:
-        await callback.answer("🔒 Период сдан.", show_alert=True)
-        return
+    if not user.is_admin:
+        periods = await _submitted_periods(lesson.teacher_id, submission_repo)
+        if lesson.date[:7] in periods:
+            await callback.answer("🔒 Период сдан.", show_alert=True)
+            return
 
     student = await student_repo.get_by_id(student_id)
     if not student:
