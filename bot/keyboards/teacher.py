@@ -9,6 +9,9 @@ _PROXY_BUTTONS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Педагоги, у которых есть доступ к выставлению счетов по своим группам
+BILLING_TEACHERS: set[str] = {"TCH-0009"}  # Контарева
+
 
 def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None) -> InlineKeyboardMarkup:
     rows = [
@@ -20,6 +23,8 @@ def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
     ]
+    if teacher_id and teacher_id in BILLING_TEACHERS:
+        rows.append([InlineKeyboardButton(text="💰 Счета учеников", callback_data="teacher:bills")])
     if teacher_id and teacher_id in _PROXY_BUTTONS:
         for label, cb in _PROXY_BUTTONS[teacher_id]:
             rows.append([InlineKeyboardButton(text=label, callback_data=cb)])
