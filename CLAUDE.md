@@ -108,7 +108,6 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `StudentGroupRepository` | `student_groups` | Many-to-many student ↔ group (join table) |
 | `ClientRepository` | `clients` | Parent entities; phone (normalized) + optional tg_id |
 | `StudentRequestRepository` | `student_requests` | Teacher-submitted requests to add a new student (admin approves) |
-| `ClientInviteCodeRepository` | `invite_codes` | 6-digit invite codes with TTL (currently unused by handlers, kept for future) |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).
 
@@ -125,7 +124,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 
 ### Models & enums
 
-Dataclasses in [bot/models/entities.py](bot/models/entities.py): `User`, `Teacher`, `Student`, `Lesson`, `Billing` (virtual), `StudentPeriodPayment`, `TeacherPeriodSubmission`, `Branch`, `Group`, `TeacherGroup`, `StudentGroup`, `Client`, `StudentRequest`, `ClientInviteCode`.
+Dataclasses in [bot/models/entities.py](bot/models/entities.py): `User`, `Teacher`, `Student`, `Lesson`, `Billing` (virtual), `StudentPeriodPayment`, `TeacherPeriodSubmission`, `Branch`, `Group`, `TeacherGroup`, `StudentGroup`, `Client`, `StudentRequest`.
 
 Enums in [bot/models/enums.py](bot/models/enums.py):
 - `LessonType`: `GROUP` | `INDIVIDUAL`
@@ -133,7 +132,6 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
 - `RequestStatus`: `PENDING` | `APPROVED` | `REJECTED`
 - `GroupBillingMode`: `NONE` | `PER_VISIT` | `SUBSCRIPTION` (last one not implemented)
 - `StudentGroupTier`: `FULL` | `SHORT` (used only by kindergarten groups ЮБ/БП)
-- `InviteCodeStatus`: `ACTIVE` | `USED` | `EXPIRED` | `REVOKED`
 
 ### Utils
 

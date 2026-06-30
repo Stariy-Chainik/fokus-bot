@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from .enums import LessonType, PaymentStatus, RequestStatus, GroupBillingMode, StudentGroupTier, InviteCodeStatus
+from .enums import LessonType, PaymentStatus, RequestStatus, GroupBillingMode, StudentGroupTier
 
 
 @dataclass
@@ -28,19 +28,6 @@ class Client:
     tg_id: Optional[int] = None
     created_at: str = ""
     phone: Optional[str] = None
-
-
-@dataclass
-class ClientInviteCode:
-    code_id: str
-    code: str
-    client_id: str
-    created_by: int
-    created_at: str
-    expires_at: str
-    status: str          # InviteCodeStatus
-    used_at: Optional[str] = None
-    used_by_tg_id: Optional[int] = None
 
 
 @dataclass

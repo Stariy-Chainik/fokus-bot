@@ -2,18 +2,18 @@ from .entities import (
     User, Teacher, Student, Lesson, Billing,
     StudentPeriodPayment, TeacherPeriodSubmission,
     Branch, Group, TeacherGroup, StudentGroup, StudentRequest,
-    Client, ClientInviteCode,
+    Client,
 )
 from .enums import (
     LessonType, PaymentStatus, RequestStatus,
-    GroupBillingMode, StudentGroupTier, InviteCodeStatus,
+    GroupBillingMode, StudentGroupTier,
 )
 
 __all__ = [
     "User", "Teacher", "Student", "Lesson", "Billing",
     "StudentPeriodPayment", "TeacherPeriodSubmission",
     "Branch", "Group", "TeacherGroup", "StudentGroup", "StudentRequest",
-    "Client", "ClientInviteCode",
+    "Client",
     "LessonType", "PaymentStatus", "RequestStatus",
-    "GroupBillingMode", "StudentGroupTier", "InviteCodeStatus",
+    "GroupBillingMode", "StudentGroupTier",
 ]

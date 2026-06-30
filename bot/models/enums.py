@@ -26,10 +26,3 @@ class GroupBillingMode(str, Enum):
 class StudentGroupTier(str, Enum):
     FULL = "full"
     SHORT = "short"
-
-
-class InviteCodeStatus(str, Enum):
-    ACTIVE = "active"
-    USED = "used"
-    EXPIRED = "expired"
-    REVOKED = "revoked"
