@@ -28,6 +28,13 @@ def _is_teacher(user: User | None) -> bool:
     return user is not None and user.teacher_id is not None
 
 
+def _can_submit(today: date, period_month: str) -> bool:
+    """Сдать период можно с 25-го числа этого периода.
+    Для прошлых месяцев — всегда (они уже закончились)."""
+    year, month = (int(p) for p in period_month.split("-"))
+    return today >= date(year, month, 25)
+
+
 async def _period_breakdown(
     teacher_id: str, period_month: str, lesson_repo: LessonRepository,
 ) -> tuple[int, int, int, str, str]:
@@ -76,7 +83,7 @@ async def _show_confirm(
     await state.set_state(SubmitPeriodStates.confirming)
 
     today = date.today()
-    can_submit = today.day >= 25
+    can_submit = _can_submit(today, period_month)
     rows = []
     if can_submit:
         rows.append([InlineKeyboardButton(text="💾 Подтвердить сдачу", callback_data="submit_confirm")])
@@ -88,7 +95,7 @@ async def _show_confirm(
         )])
     rows.append([InlineKeyboardButton(text="« Отмена", callback_data="teacher:menu")])
 
-    lock_note = "" if can_submit else f"\n\n⏳ Сдать период можно с 25-го числа (сегодня {today.day}-е)."
+    lock_note = "" if can_submit else f"\n\n⏳ Сдать период можно с 25-го числа этого месяца (сегодня {today.day}-е)."
     await callback.message.edit_text(
         f"<b>Сдать период {display_period(period_month)}?</b>\n\n"
         f"Всего занятий: {total}\n"
