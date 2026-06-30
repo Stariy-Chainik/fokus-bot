@@ -441,6 +441,11 @@ async def cb_lesson_detail(
         back_cb = data["t_stu_les_back"]
     else:
         back_cb = "admin:edit_lesson" if user.is_admin else "teacher:lesson_delete"
+        logger.info(
+            "lesson_detail back fallback: lesson=%s user=%s admin=%s → %s "
+            "(no lm_mode / t_stu_les_back in FSM — likely state loss)",
+            lesson.lesson_id, callback.from_user.id, user.is_admin, back_cb,
+        )
     can_add_guest = (
         (not locked or bool(user.is_admin))
         and lesson.type == LessonType.GROUP

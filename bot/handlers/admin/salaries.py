@@ -24,7 +24,7 @@ def _is_admin(user: User | None) -> bool:
     return user is not None and user.is_admin
 
 
-def _period_buttons(teacher_id: str) -> InlineKeyboardMarkup:
+def _period_buttons(teacher_id: str, back_cb: str) -> InlineKeyboardMarkup:
     from dateutil.relativedelta import relativedelta  # type: ignore
     today = date.today()
     periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
@@ -32,7 +32,7 @@ def _period_buttons(teacher_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=display_period(p), callback_data=f"salary_period:{teacher_id}:{p}")]
         for p in periods
     ]
-    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=f"teacher_card:{teacher_id}")])
+    buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -56,14 +56,36 @@ async def cb_salaries_choose_teacher(
 
 
 @router.callback_query(F.data.startswith("salary_teacher:"))
-async def cb_salary_choose_period(callback: CallbackQuery, user: User | None) -> None:
+async def cb_salary_choose_period(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+) -> None:
+    """Вход из salaries:view — back ведёт в список педагогов."""
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
+    await state.update_data(salary_back_cb="salaries:view")
     await callback.message.edit_text(
         f"<b>Выберите период для педагога {teacher_id}:</b>",
-        reply_markup=_period_buttons(teacher_id),
+        reply_markup=_period_buttons(teacher_id, back_cb="salaries:view"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tc_salary:"))
+async def cb_salary_from_card(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+) -> None:
+    """Вход из карточки педагога — back ведёт обратно в карточку."""
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    back_cb = f"teacher_card:{teacher_id}"
+    await state.update_data(salary_back_cb=back_cb)
+    await callback.message.edit_text(
+        f"<b>Выберите период для педагога {teacher_id}:</b>",
+        reply_markup=_period_buttons(teacher_id, back_cb=back_cb),
     )
     await callback.answer()
 
@@ -72,6 +94,7 @@ async def cb_salary_choose_period(callback: CallbackQuery, user: User | None) ->
 async def cb_salary_show(
     callback: CallbackQuery,
     user: User | None,
+    state: FSMContext,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
@@ -81,7 +104,15 @@ async def cb_salary_show(
         return
     _, teacher_id, period_month = callback.data.split(":", 2)
     teacher = await teacher_repo.get_by_id(teacher_id)
-    back_cb = f"salary_teacher:{teacher_id}"
+    data = await state.get_data()
+    # «Назад» из счёта периода ведёт обратно к выбору периода. Кэшированный
+    # entry-point определяет, куда ведёт «Назад» из выбора периода.
+    period_back = data.get("salary_back_cb", f"teacher_card:{teacher_id}")
+    back_cb = (
+        f"tc_salary:{teacher_id}"
+        if period_back == f"teacher_card:{teacher_id}"
+        else f"salary_teacher:{teacher_id}"
+    )
     if not teacher:
         await callback.answer("Педагог не найден", show_alert=True)
         return

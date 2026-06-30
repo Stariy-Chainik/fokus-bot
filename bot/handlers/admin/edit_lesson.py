@@ -38,7 +38,7 @@ def _shift_month(y: int, m: int, delta: int) -> tuple[int, int]:
     return idx // 12, idx % 12 + 1
 
 
-def _date_filter_kb(teacher_id: str) -> InlineKeyboardMarkup:
+def _date_filter_kb(teacher_id: str, back_cb: str = "admin:edit_lesson") -> InlineKeyboardMarkup:
     today = date.today()
     yesterday = today - timedelta(days=1)
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -55,7 +55,7 @@ def _date_filter_kb(teacher_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📅 Другая дата", callback_data=f"aedl_manual:{teacher_id}")],
         [InlineKeyboardButton(text="📋 За месяц", callback_data=f"aedl_month_pick:{teacher_id}")],
         [InlineKeyboardButton(text="📚 Все занятия", callback_data=f"aedl_all:{teacher_id}")],
-        [InlineKeyboardButton(text="« Назад", callback_data="admin:edit_lesson")],
+        [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
     ])
 
 
@@ -153,10 +153,28 @@ async def cb_admin_lessons_dates(
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
-    await state.update_data(aedl_teacher_id=teacher_id)
+    await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb="admin:edit_lesson")
     await callback.message.edit_text(
         "<b>За какую дату показать занятия?</b>",
-        reply_markup=_date_filter_kb(teacher_id),
+        reply_markup=_date_filter_kb(teacher_id, back_cb="admin:edit_lesson"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tc_lessons:"))
+async def cb_admin_lessons_from_card(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+) -> None:
+    """Вход из карточки педагога — back ведёт обратно в карточку."""
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    teacher_id = callback.data.split(":", 1)[1]
+    back_cb = f"teacher_card:{teacher_id}"
+    await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb=back_cb)
+    await callback.message.edit_text(
+        "<b>За какую дату показать занятия?</b>",
+        reply_markup=_date_filter_kb(teacher_id, back_cb=back_cb),
     )
     await callback.answer()
 
@@ -169,10 +187,12 @@ async def cb_admin_lessons_dates_back(
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    back_cb = data.get("aedl_back_cb", "admin:edit_lesson")
     await state.update_data(aedl_teacher_id=teacher_id)
     await callback.message.edit_text(
         "<b>За какую дату показать занятия?</b>",
-        reply_markup=_date_filter_kb(teacher_id),
+        reply_markup=_date_filter_kb(teacher_id, back_cb=back_cb),
     )
     await callback.answer()
 
