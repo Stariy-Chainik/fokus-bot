@@ -156,6 +156,7 @@ async def cb_mode_admin(callback: CallbackQuery, user: User | None, state: FSMCo
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await _clear_state_preserve_role(state)
     await _set_current_role(state, "admin")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
@@ -169,6 +170,7 @@ async def cb_mode_teacher(callback: CallbackQuery, user: User | None, state: FSM
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await _clear_state_preserve_role(state)
     await _set_current_role(state, "teacher")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
@@ -182,6 +184,7 @@ async def cb_admin_menu(callback: CallbackQuery, user: User | None, state: FSMCo
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await _clear_state_preserve_role(state)
     await _set_current_role(state, "admin")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
@@ -195,6 +198,7 @@ async def cb_teacher_menu(callback: CallbackQuery, user: User | None, state: FSM
     if user is None or not user.teacher_id:
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await _clear_state_preserve_role(state)
     await _set_current_role(state, "teacher")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
