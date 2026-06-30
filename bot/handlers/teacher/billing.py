@@ -15,7 +15,7 @@ from datetime import date
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
-from bot.keyboards.teacher import BILLING_TEACHERS, kb_teacher_menu
+from bot.keyboards.teacher import BILLING_TEACHERS
 from bot.models import User
 from bot.repositories import (
     ClientRepository, GroupRepository, StudentGroupRepository,

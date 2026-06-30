@@ -45,9 +45,6 @@ class PaymentRepository(BaseRepository):
                 return p
         return None
 
-    async def get_by_student(self, student_id: str) -> list[StudentPeriodPayment]:
-        return [p for p in await self.get_all() if p.student_id == student_id]
-
     async def get_by_id(self, payment_id: str) -> Optional[StudentPeriodPayment]:
         for p in await self.get_all():
             if p.payment_id == payment_id:

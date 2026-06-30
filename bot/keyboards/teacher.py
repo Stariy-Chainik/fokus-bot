@@ -339,15 +339,6 @@ def kb_duration(back_cb: str = "lesson_back:kind") -> InlineKeyboardMarkup:
     ])
 
 
-def kb_yes_no(yes_cb: str, no_cb: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да", callback_data=yes_cb),
-            InlineKeyboardButton(text="❌ Нет", callback_data=no_cb),
-        ]
-    ])
-
-
 def kb_lesson_list(
     lessons: list, page: int = 0, page_size: int = 10,
     locked_ids: set | None = None,

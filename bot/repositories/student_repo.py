@@ -54,10 +54,6 @@ class StudentRepository(BaseRepository):
                 return s
         return None
 
-    async def search_by_name(self, prefix: str) -> list[Student]:
-        prefix_lower = prefix.lower()
-        return [s for s in await self.get_all() if s.name.lower().startswith(prefix_lower)]
-
     async def add(self, name: str) -> Student:
         existing_ids = [s.student_id for s in await self.get_all()]
         student_id = generate_student_id(existing_ids)
@@ -153,16 +149,6 @@ class StudentRepository(BaseRepository):
         await self._update_cell(row_idx, _CLIENT_ID_COL, client_id)
         return True
 
-    async def clear_client_id(self, student_id: str) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _CLIENT_ID_COL, "")
-        return True
-
-    async def get_students_for_client(self, client_id: str) -> list[Student]:
-        return [s for s in await self.get_all() if s.client_id == client_id]
-
     async def get_by_parent_tg_id(self, tg_id: int) -> list[Student]:
         return [s for s in await self.get_all() if tg_id in s.parent_tg_ids]
 
@@ -176,17 +162,6 @@ class StudentRepository(BaseRepository):
         if row_idx is None:
             return False
         new_ids = student.parent_tg_ids + [tg_id]
-        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
-        return True
-
-    async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
-        student = await self.get_by_id(student_id)
-        if student is None:
-            return False
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        new_ids = [i for i in student.parent_tg_ids if i != tg_id]
         await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
         return True
 

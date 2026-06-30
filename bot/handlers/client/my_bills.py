@@ -16,7 +16,7 @@ from bot.repositories.client_repo import ClientRepository
 from bot.services import PaymentService
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
-from bot.utils.dates import display_period, format_date_display
+from bot.utils.dates import format_date_display
 from bot.keyboards.client import (
     kb_client_menu, kb_client_student_select, kb_bills_list,
     kb_bill_detail, kb_bill_back,

@@ -10,7 +10,6 @@ from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import TeacherRepository, LessonRepository
 from bot.services import calc_earned, build_billing_rows
-from bot.keyboards.admin import kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd
 

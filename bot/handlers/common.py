@@ -4,7 +4,7 @@ import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository, StudentRepository

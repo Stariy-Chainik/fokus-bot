@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.services import DiagnosticsService
-from bot.keyboards.admin import kb_back
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_diagnostics")

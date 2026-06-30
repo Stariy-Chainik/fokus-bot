@@ -24,12 +24,9 @@ class LessonService:
         self._submission_repo = submission_repo
         self._teacher_repo = teacher_repo
 
-    async def is_period_submitted(self, teacher_id: str, period_month: str) -> bool:
-        sub = await self._submission_repo.get_by_teacher_and_period(teacher_id, period_month)
-        return sub is not None
-
     async def _ensure_not_submitted(self, teacher_id: str, period_month: str) -> None:
-        if await self.is_period_submitted(teacher_id, period_month):
+        sub = await self._submission_repo.get_by_teacher_and_period(teacher_id, period_month)
+        if sub is not None:
             raise PermissionError(f"Период {period_month} уже сдан на оплату")
 
     # ─── Создание занятий ─────────────────────────────────────────────────

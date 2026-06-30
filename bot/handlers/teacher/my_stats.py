@@ -6,7 +6,6 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
-from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown

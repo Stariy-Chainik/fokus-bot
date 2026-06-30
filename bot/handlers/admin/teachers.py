@@ -10,12 +10,12 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 
 from bot.repositories import (
-    TeacherRepository, UserRepository,
+    TeacherRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
     TeacherPeriodSubmissionRepository,
 )
 from bot.states import AddTeacherStates, EditTeacherRatesStates
-from bot.keyboards.admin import kb_teacher_list, kb_teacher_card, kb_rate_select, kb_confirm, kb_back
+from bot.keyboards.admin import kb_teacher_card, kb_rate_select, kb_confirm, kb_back
 from bot.handlers.common import show_card
 from bot.utils.dates import display_period
 

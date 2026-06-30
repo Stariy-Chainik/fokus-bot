@@ -14,7 +14,7 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.bill_format import build_bill_text
-from bot.utils.dates import display_period, format_date_display, format_date_short_with_wd
+from bot.utils.dates import display_period, format_date_short_with_wd
 from config.settings import settings
 
 logger = logging.getLogger(__name__)

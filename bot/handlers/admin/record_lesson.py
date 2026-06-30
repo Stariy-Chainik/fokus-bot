@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.repositories import TeacherRepository
-from bot.keyboards.admin import kb_admin_menu, kb_teacher_list
+from bot.keyboards.admin import kb_teacher_list
 from bot.states import RecordLessonStates
 
 logger = logging.getLogger(__name__)
