@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+# Тесты запускаются из корня репозитория: `.venv/bin/python -m pytest`
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # urllib3 предупреждает про LibreSSL на macOS-venv — шум, не относится к тестам.
+    "ignore::Warning:urllib3",
+]
