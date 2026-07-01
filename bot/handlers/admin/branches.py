@@ -20,6 +20,7 @@ from bot.states import (
 )
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period
+from bot.utils.locks import InProgressGuard
 from bot.handlers.common import show_card
 
 logger = logging.getLogger(__name__)
@@ -531,7 +532,7 @@ async def cb_gt_toggle(
     await callback.answer()
 
 
-_group_send_in_progress: set[str] = set()
+_group_send_in_progress = InProgressGuard()
 
 
 @router.callback_query(F.data.startswith("group_send_bills:"))

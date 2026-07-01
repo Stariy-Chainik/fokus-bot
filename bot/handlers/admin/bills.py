@@ -15,13 +15,14 @@ from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.bill_format import build_bill_text
 from bot.utils.dates import display_period, format_date_short_with_wd
+from bot.utils.locks import InProgressGuard
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_bills")
 
-_confirming_in_progress: set[str] = set()
-_sending_in_progress: set[str] = set()
+_confirming_in_progress = InProgressGuard()
+_sending_in_progress = InProgressGuard()
 
 
 from bot.handlers.access import is_admin as _is_admin

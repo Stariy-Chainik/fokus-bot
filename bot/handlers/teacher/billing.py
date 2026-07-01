@@ -24,13 +24,14 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.utils.bill_format import build_bill_text
 from bot.utils.dates import display_period
+from bot.utils.locks import InProgressGuard
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_billing")
 
-_sending: set[str] = set()
-_group_sending: set[str] = set()
+_sending = InProgressGuard()
+_group_sending = InProgressGuard()
 
 
 def _can_bill(user: User | None) -> bool:

@@ -17,11 +17,12 @@ from bot.keyboards.teacher import kb_teacher_menu
 from bot.utils import generate_submission_id, now_str
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown
+from bot.utils.locks import InProgressGuard
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_submit_period")
 
-_submitting: set[str] = set()
+_submitting = InProgressGuard()
 
 
 from bot.handlers.access import is_teacher as _is_teacher

@@ -4,7 +4,7 @@ from __future__ import annotations
 Порядок: Дата → Тип (группа/пара/соло) → Длительность → ветка → создание.
 Группа: опциональная отметка присутствующих. Пара: выбор одной пары.
 Соло: мульти-выбор учеников (включая тех, кто в паре — если пришли одни).
-Защита от двойного нажатия — set _confirming_lesson_ids по tg_id.
+Защита от двойного нажатия — InProgressGuard _confirming_lesson_ids по tg_id.
 """
 import logging
 from datetime import date, timedelta
@@ -34,11 +34,12 @@ from bot.keyboards.admin import kb_admin_menu
 from bot.utils import AttendeeEntry, serialize_attendees
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
+from bot.utils.locks import InProgressGuard
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_record_lesson")
 
-_confirming_lesson_ids: set[str] = set()
+_confirming_lesson_ids = InProgressGuard()
 
 _KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло"}
 
