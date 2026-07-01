@@ -24,8 +24,7 @@ _confirming_in_progress: set[str] = set()
 _sending_in_progress: set[str] = set()
 
 
-def _is_admin(user: User | None) -> bool:
-    return user is not None and user.is_admin
+from bot.handlers.access import is_admin as _is_admin
 
 
 def _period_buttons(student_id: str, action_prefix: str) -> InlineKeyboardMarkup:

@@ -24,8 +24,7 @@ router = Router(name="teacher_submit_period")
 _submitting: set[str] = set()
 
 
-def _is_teacher(user: User | None) -> bool:
-    return user is not None and user.teacher_id is not None
+from bot.handlers.access import is_teacher as _is_teacher
 
 
 def _can_submit(today: date, period_month: str) -> bool:

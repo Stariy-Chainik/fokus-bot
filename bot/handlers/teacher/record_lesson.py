@@ -43,8 +43,7 @@ _confirming_lesson_ids: set[str] = set()
 _KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло"}
 
 
-def _is_teacher(user: User | None) -> bool:
-    return user is not None and (user.teacher_id is not None or user.is_admin)
+from bot.handlers.access import is_teacher_or_admin as _is_teacher
 
 
 def _tid(user: User, data: dict) -> str | None:

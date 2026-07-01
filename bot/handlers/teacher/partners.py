@@ -30,8 +30,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="teacher_partners")
 
 
-def _is_teacher(user: User | None) -> bool:
-    return user is not None and user.teacher_id is not None
+from bot.handlers.access import is_teacher as _is_teacher
 
 
 # ─── Мои солисты: выбор группы → список ──────────────────────────────────────

@@ -24,8 +24,7 @@ _MONTHS_RU = [
 ]
 
 
-def _is_admin(user: User | None) -> bool:
-    return user is not None and user.is_admin
+from bot.handlers.access import is_admin as _is_admin
 
 
 def _month_label(ym: str) -> str:

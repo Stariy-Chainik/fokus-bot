@@ -30,12 +30,10 @@ _MONTHS_RU = [
 ]
 
 
-def _is_teacher(user: User | None) -> bool:
-    return user is not None and user.teacher_id is not None
-
-
-def _is_teacher_or_admin(user: User | None) -> bool:
-    return user is not None and (user.teacher_id is not None or user.is_admin)
+from bot.handlers.access import (
+    is_teacher as _is_teacher,
+    is_teacher_or_admin as _is_teacher_or_admin,
+)
 
 
 def _can_view_lesson(user: User | None, lesson) -> bool:

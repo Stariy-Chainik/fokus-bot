@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_students")
 
 
-def _is_admin(user: User | None) -> bool:
-    return user is not None and user.is_admin
+from bot.handlers.access import is_admin as _is_admin
 
 
 @router.callback_query(F.data == "admin:students")

@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_groups")
 
 
-def _is_teacher(user: User | None) -> bool:
-    return user is not None and user.teacher_id is not None
+from bot.handlers.access import is_teacher as _is_teacher
 
 
 async def _owns_group(teacher_id: str, group_id: str, tg_repo: TeacherGroupRepository) -> bool:
