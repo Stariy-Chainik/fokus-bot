@@ -5,12 +5,13 @@ Billing-строки больше не хранятся: счёт ученика
 from bot.models import Lesson, Billing, Teacher
 from bot.models.enums import LessonType
 from bot.utils import parse_attendees
+from bot.utils.constants import MINUTES_PER_UNIT
 
 
 def calc_earned(lesson_type: LessonType, duration_min: int, teacher: Teacher) -> int:
     """earned = ставка × (duration_min / 45). Количество учеников не влияет."""
     rate = teacher.rate_group if lesson_type == LessonType.GROUP else teacher.rate_for_teacher
-    return round(rate * duration_min / 45)
+    return round(rate * duration_min / MINUTES_PER_UNIT)
 
 
 def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
@@ -50,7 +51,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
                 ))
         return rows
 
-    base_amount = round(teacher.rate_for_student * lesson.duration_min / 45)
+    base_amount = round(teacher.rate_for_student * lesson.duration_min / MINUTES_PER_UNIT)
 
     slots = [
         (lesson.student_1_id, lesson.student_1_name),

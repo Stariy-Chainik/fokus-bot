@@ -6,3 +6,7 @@ bot/keyboards/admin.py — это отдельный концерн, намер�
 """
 
 PAGE_SIZE = 20
+
+# Единица нормирования тарифов: ставки заданы «за 45 минут».
+# earned = ставка × (duration_min / MINUTES_PER_UNIT). См. billing_service.
+MINUTES_PER_UNIT = 45

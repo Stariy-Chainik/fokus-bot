@@ -1,16 +1,9 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Педагоги, от имени которых может записывать занятия другой педагог (ассистент)
-_PROXY_BUTTONS: dict[str, list[tuple[str, str]]] = {
-    "TCH-0002": [
-        ("📝 Занятие Никишина", "proxy_record:TCH-0005"),
-        ("📝 Занятие Криворчук", "proxy_record:TCH-0008"),
-    ],
-}
-
-# Педагоги, у которых есть доступ к выставлению счетов по своим группам
-BILLING_TEACHERS: set[str] = {"TCH-0009"}  # Контарева
+# Спецроли персонала вынесены в bot/staff.py — там правятся кадровые изменения.
+# Имена сохранены для существующих импортёров (record_lesson, teacher/billing).
+from bot.staff import PROXY_BUTTONS as _PROXY_BUTTONS, BILLING_TEACHERS  # noqa: F401
 
 
 def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None) -> InlineKeyboardMarkup:

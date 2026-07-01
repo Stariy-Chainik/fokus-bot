@@ -5,13 +5,13 @@
 
 ## Роли и доступ
 - **Три роли:** admin, teacher, client (родитель). Определяются по `User.is_admin` и `User.teacher_id` — [bot/models/entities.py:6-11](../bot/models/entities.py#L11). Пользователь загружается по `tg_id` в `AuthMiddleware`.
-- **Спецроль «Клецова» (TCH-0002):** ассистент, может записывать занятия за Никишина (TCH-0005) и Криворчук (TCH-0008) через прокси; прокси требует одобрения админа — [bot/keyboards/teacher.py:5-11](../bot/keyboards/teacher.py#L5).
-- **Спецроль «Контарева» (TCH-0009):** педагог с доступом к выставлению счетов, но **только по своим группам** — [bot/keyboards/teacher.py:13](../bot/keyboards/teacher.py#L13).
+- **Спецроль «Клецова» (TCH-0002):** ассистент, может записывать занятия за Никишина (TCH-0005) и Криворчук (TCH-0008) через прокси; прокси требует одобрения админа — [bot/staff.py](../bot/staff.py) (`PROXY_BUTTONS`).
+- **Спецроль «Контарева» (TCH-0009):** педагог с доступом к выставлению счетов, но **только по своим группам** — [bot/staff.py](../bot/staff.py) (`BILLING_TEACHERS`).
 
 ## Зарплата педагога
 - **`earned = round(rate × duration_min / 45)`**, количество учеников не влияет — [bot/services/billing_service.py:10-13](../bot/services/billing_service.py#L10).
   - `rate = rate_group` для группового занятия, `rate = rate_for_teacher` для индивидуального.
-- Единица нормирования — **45 минут** (магическое число, продублировано в billing_service.py:13,53).
+- Единица нормирования — **45 минут** (`MINUTES_PER_UNIT` в [bot/utils/constants.py](../bot/utils/constants.py)).
 
 ## Счёт ученика (сумма к оплате)
 - **Индивидуальное занятие:** `base = round(rate_for_student × duration_min / 45)`, делится **поровну** между участниками (слоты student_1..4), **целый остаток достаётся первому** ученику — [billing_service.py:53-70](../bot/services/billing_service.py#L53). Для пары сумма двух строк точно равна полной стоимости.
