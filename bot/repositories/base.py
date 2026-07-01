@@ -5,8 +5,8 @@ from __future__ import annotations
 Ключевые решения для продакшена:
 - Все public-методы async: gspread-вызовы уходят в asyncio.to_thread(),
   event loop не блокируется.
-- TTL-кеш (30 сек) на get_all_records: снижает нагрузку на Sheets API
-  (лимит 60 req/min). Инвалидируется при любой записи.
+- TTL-кеш (300 сек / 5 мин, см. _CACHE_TTL) на get_all_records: снижает
+  нагрузку на Sheets API (лимит 60 req/min). Инвалидируется при любой записи.
 - Retry с backoff для HTTP 429 / 503: временные сбои API не долетают до пользователя.
 """
 import asyncio
