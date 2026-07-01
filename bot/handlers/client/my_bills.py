@@ -16,7 +16,7 @@ from bot.repositories.client_repo import ClientRepository
 from bot.services import PaymentService
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
-from bot.utils.dates import format_date_display
+from bot.utils.dates import format_date_display, month_name_ru
 from bot.keyboards.client import (
     kb_client_menu, kb_client_student_select, kb_bills_list,
     kb_bill_detail, kb_bill_back,
@@ -27,15 +27,9 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 router = Router(name="client_bills")
 
-_MONTHS_RU = [
-    "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-]
-
-
 def _period_label(period_month: str) -> str:
     year, month = period_month.split("-")
-    return f"{_MONTHS_RU[int(month)]} {year}"
+    return f"{month_name_ru(int(month))} {year}"
 
 
 async def _show_bills(

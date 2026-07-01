@@ -16,18 +16,14 @@ from bot.services import LessonService
 from bot.keyboards.teacher import kb_lesson_list, kb_lesson_detail, kb_teacher_menu
 from bot.keyboards.admin import kb_back
 from bot.keyboards.calendar import kb_calendar
-from bot.utils.dates import format_date_display
+from bot.utils.dates import format_date_display, month_name_ru
 from bot.utils import parse_attendees, serialize_attendees, AttendeeEntry, attendee_ids
 from bot.handlers.common import show_card
+from bot.utils.constants import PAGE_SIZE
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
-PAGE_SIZE = 20
 
-_MONTHS_RU = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-]
 
 
 from bot.handlers.access import (
@@ -46,7 +42,7 @@ def _can_view_lesson(user: User | None, lesson) -> bool:
 
 def _month_label(ym: str) -> str:
     y, m = ym.split("-")
-    return f"{_MONTHS_RU[int(m) - 1]} {y}"
+    return f"{month_name_ru(int(m))} {y}"
 
 
 def _shift_month(y: int, m: int, delta: int) -> tuple[int, int]:

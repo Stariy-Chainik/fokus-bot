@@ -1,7 +1,7 @@
 """Характеризующие тесты для bot/utils/dates.py."""
 from bot.utils.dates import (
     format_date_display, period_month_from_date, display_period,
-    format_date_short_with_wd,
+    format_date_short_with_wd, month_name_ru,
 )
 
 
@@ -21,3 +21,9 @@ def test_format_date_short_with_wd():
     # 23 апреля 2026 — четверг.
     assert format_date_short_with_wd("2026-04-23") == "23 апр, чт"
     assert format_date_short_with_wd("2026-01-01") == "1 янв, чт"
+
+
+def test_month_name_ru_is_1_based():
+    assert month_name_ru(1) == "Январь"
+    assert month_name_ru(4) == "Апрель"
+    assert month_name_ru(12) == "Декабрь"

@@ -20,6 +20,7 @@ from bot.repositories import (
 from bot.states import TeacherGroupAddStudentStates
 from bot.handlers.common import show_card
 from bot.utils.attendees import attendee_ids
+from bot.utils.dates import month_name_ru
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_groups")
@@ -85,10 +86,6 @@ async def cb_my_groups(
 
 # ─── Карточка группы ────────────────────────────────────────────────────────
 
-_MONTHS_RU = [
-    "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-]
 
 
 def _kb_t_group_card(group, students: list) -> InlineKeyboardMarkup:
@@ -477,7 +474,7 @@ async def cb_t_grp_attendance(
     for ym in months:
         y, m = ym.split("-")
         rows.append([InlineKeyboardButton(
-            text=f"{_MONTHS_RU[int(m)]} {y}",
+            text=f"{month_name_ru(int(m))} {y}",
             callback_data=f"t_grp_att_m:{group_id}:{ym}",
         )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"t_group_card:{group_id}")])
@@ -528,7 +525,7 @@ async def cb_t_grp_att_month(
                 attendance[sid].append(ls.date)
 
     y, m = period_month.split("-")
-    month_label = f"{_MONTHS_RU[int(m)]} {y}"
+    month_label = f"{month_name_ru(int(m))} {y}"
 
     lines = [
         f"<b>📊 {group.name}</b>",
