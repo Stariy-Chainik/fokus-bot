@@ -226,7 +226,7 @@ async def cb_admin_create_pair(
 async def cb_admin_pair_lead(
     callback: CallbackQuery, user: User | None, state: FSMContext,
     student_repo: StudentRepository,
-    student_group_repo: StudentGroupRepository,
+    student_service: StudentService,
 ) -> None:
     """Админ: выбор лидера через «Создать пару» — как partner_assign, но помнит группу."""
     if not _is_admin(user):
@@ -238,17 +238,7 @@ async def cb_admin_pair_lead(
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
         return
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    candidates: list = []
-    for other in all_students:
-        if other.student_id == student_id:
-            continue
-        if other.student_id not in member_ids:
-            continue
-        if other.student_id == student.partner_id:
-            continue
-        candidates.append((other, bool(other.partner_id)))
+    candidates = await student_service.partner_candidates_in_group(student, group_id)
     if not candidates:
         await callback.message.edit_text(
             "В этой группе нет других учеников для пары.",
@@ -805,7 +795,7 @@ async def cb_partner_assign_start(
     user: User | None,
     state: FSMContext,
     student_repo: StudentRepository,
-    student_group_repo: StudentGroupRepository,
+    student_service: StudentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -816,28 +806,15 @@ async def cb_partner_assign_start(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    student_gids = set(await student_group_repo.get_groups_for_student(student_id))
-    if not student_gids:
+    # Кандидаты — ученики, у которых есть хотя бы одна общая группа с текущим.
+    candidates = await student_service.partner_candidates(student)
+    if candidates is None:
         await callback.message.edit_text(
             "У ученика не задана группа — сначала назначьте группу.",
             reply_markup=kb_back(f"student_card:{student_id}"),
         )
         await callback.answer()
         return
-
-    # Кандидаты — ученики, у которых есть хотя бы одна общая группа с текущим.
-    sg_map = await student_group_repo.get_map_by_student()
-    all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    candidates: list = []
-    for other in all_students:
-        if other.student_id == student_id:
-            continue
-        other_gids = set(sg_map.get(other.student_id, []))
-        if not (other_gids & student_gids):
-            continue
-        if other.student_id == student.partner_id:
-            continue
-        candidates.append((other, bool(other.partner_id)))
 
     if not candidates:
         await callback.message.edit_text(

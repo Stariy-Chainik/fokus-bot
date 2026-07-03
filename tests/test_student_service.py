@@ -60,6 +60,9 @@ class _FakeStudentGroupRepo:
     async def get_students_for_group(self, group_id):
         return [sid for sid, gids in self._s2g.items() if group_id in gids]
 
+    async def get_map_by_student(self):
+        return {sid: list(gids) for sid, gids in self._s2g.items()}
+
 
 class _FakeByIdRepo:
     """Общий фейк для справочных репо с get_all/get_by_id (teacher/group/branch/client)."""
@@ -175,3 +178,69 @@ def test_dangling_client_reference_kept_on_student():
     # Клиент не найден — рендер предложит «Создать клиента», client_id остаётся.
     assert card.client is None
     assert card.student.client_id == "CLT-0001"
+
+
+# ─── partner_candidates ──────────────────────────────────────────────────────
+
+def _pair_world():
+    """Мини-мир для кандидатов: G1 = {STU-1, STU-2, STU-3}, G2 = {STU-4}.
+
+    STU-2 уже в паре со STU-3 (⚠️-флаг), STU-4 в другой группе — не кандидат.
+    """
+    students = [
+        Student("STU-1", "Бета Ученик"),
+        Student("STU-2", "Альфа Ученик", partner_id="STU-3"),
+        Student("STU-3", "Гамма Ученик", partner_id="STU-2"),
+        Student("STU-4", "Дельта Ученик"),
+    ]
+    student_to_groups = {
+        "STU-1": ["GRP-0001"], "STU-2": ["GRP-0001"],
+        "STU-3": ["GRP-0001"], "STU-4": ["GRP-0002"],
+    }
+    return students, student_to_groups
+
+
+def test_partner_candidates_none_when_student_has_no_groups():
+    svc = _service(student_to_groups={"STU-1": [], "STU-2": []})
+    student = _run(svc.get_student_card("STU-1")).student
+    assert _run(svc.partner_candidates(student)) is None
+
+
+def test_partner_candidates_shared_group_sorted_with_partner_flag():
+    students, s2g = _pair_world()
+    svc = _service(students=students, student_to_groups=s2g)
+    lead = students[0]  # STU-1, без партнёра
+    result = _run(svc.partner_candidates(lead))
+    # Сортировка по имени; сам ученик и чужая группа исключены; флаг — «уже в паре».
+    assert [(s.student_id, flag) for s, flag in result] == [
+        ("STU-2", True), ("STU-3", True),
+    ]
+
+
+def test_partner_candidates_excludes_current_partner():
+    students, s2g = _pair_world()
+    svc = _service(students=students, student_to_groups=s2g)
+    lead = students[1]  # STU-2, партнёр STU-3
+    result = _run(svc.partner_candidates(lead))
+    # Текущий партнёр (STU-3) исключён, остаётся только STU-1.
+    assert [(s.student_id, flag) for s, flag in result] == [("STU-1", False)]
+
+
+def test_partner_candidates_empty_when_alone_in_group():
+    svc = _service(student_to_groups={"STU-1": ["GRP-0001"], "STU-2": []})
+    student = _run(svc.get_student_card("STU-1")).student
+    result = _run(svc.partner_candidates(student))
+    assert result == []  # группы есть, кандидатов нет — не None
+
+
+def test_partner_candidates_in_group_limits_to_members():
+    students, s2g = _pair_world()
+    svc = _service(students=students, student_to_groups=s2g)
+    lead = students[0]  # STU-1
+    result = _run(svc.partner_candidates_in_group(lead, "GRP-0001"))
+    assert [(s.student_id, flag) for s, flag in result] == [
+        ("STU-2", True), ("STU-3", True),
+    ]
+    # Лид не обязан быть членом группы — кандидаты берутся из состава group_id.
+    other_group = _run(svc.partner_candidates_in_group(lead, "GRP-0002"))
+    assert [(s.student_id, flag) for s, flag in other_group] == [("STU-4", False)]

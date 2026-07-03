@@ -52,6 +52,49 @@ class StudentService:
         self._client_repo = client_repo
         self._visibility = visibility
 
+    async def partner_candidates(self, student: Student) -> list[tuple[Student, bool]] | None:
+        """Кандидаты в партнёры: ученики хотя бы с одной общей группой.
+
+        None — у ученика вообще нет групп (отдельный экран в UI).
+        Кандидат — (ученик, «у него уже есть партнёр»), сортировка по имени;
+        сам ученик и его текущий партнёр исключены.
+        """
+        student_gids = set(
+            await self._student_group_repo.get_groups_for_student(student.student_id)
+        )
+        if not student_gids:
+            return None
+        sg_map = await self._student_group_repo.get_map_by_student()
+        all_students = sorted(await self._student_repo.get_all(), key=lambda s: s.name)
+        candidates: list[tuple[Student, bool]] = []
+        for other in all_students:
+            if other.student_id == student.student_id:
+                continue
+            other_gids = set(sg_map.get(other.student_id, []))
+            if not (other_gids & student_gids):
+                continue
+            if other.student_id == student.partner_id:
+                continue
+            candidates.append((other, bool(other.partner_id)))
+        return candidates
+
+    async def partner_candidates_in_group(
+        self, student: Student, group_id: str,
+    ) -> list[tuple[Student, bool]]:
+        """Кандидаты в партнёры среди членов одной группы (поток «Создать пару»)."""
+        member_ids = set(await self._student_group_repo.get_students_for_group(group_id))
+        all_students = sorted(await self._student_repo.get_all(), key=lambda s: s.name)
+        candidates: list[tuple[Student, bool]] = []
+        for other in all_students:
+            if other.student_id == student.student_id:
+                continue
+            if other.student_id not in member_ids:
+                continue
+            if other.student_id == student.partner_id:
+                continue
+            candidates.append((other, bool(other.partner_id)))
+        return candidates
+
     async def get_student_card(self, student_id: str) -> StudentCard | None:
         """Собрать данные карточки ученика; None — ученик не найден."""
         student = await self._student_repo.get_by_id(student_id)
