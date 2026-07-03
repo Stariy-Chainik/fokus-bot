@@ -4,7 +4,10 @@ from .ids import (
     generate_submission_id, generate_branch_id, generate_group_id,
 )
 from .dates import now_str, format_date_display, period_month_from_date
-from .attendees import AttendeeEntry, parse_attendees, serialize_attendees, attendee_ids
+from .attendees import (
+    AttendeeEntry, parse_attendees, serialize_attendees, attendee_ids,
+    build_group_attendees_csv,
+)
 
 __all__ = [
     "generate_teacher_id", "generate_student_id", "generate_lesson_id",
@@ -12,4 +15,5 @@ __all__ = [
     "generate_submission_id", "generate_branch_id", "generate_group_id",
     "now_str", "format_date_display", "period_month_from_date",
     "AttendeeEntry", "parse_attendees", "serialize_attendees", "attendee_ids",
+    "build_group_attendees_csv",
 ]

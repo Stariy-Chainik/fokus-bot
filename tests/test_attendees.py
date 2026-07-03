@@ -2,8 +2,11 @@
 
 Фиксируют ТЕКУЩЕЕ поведение bot/utils/attendees.py — эталон для рефакторинга.
 """
+from bot.models import Group
+from bot.models.enums import GroupBillingMode
 from bot.utils.attendees import (
     AttendeeEntry, parse_attendees, serialize_attendees, attendee_ids,
+    build_group_attendees_csv,
 )
 
 
@@ -68,3 +71,44 @@ def test_attendee_ids_returns_only_ids():
     assert attendee_ids("STU-1:60:700,STU-2:35:500") == ["STU-1", "STU-2"]
     assert attendee_ids("STU-1,STU-2") == ["STU-1", "STU-2"]
     assert attendee_ids(None) == []
+
+
+# ─── build_group_attendees_csv (снапшот на момент записи занятия) ────────────
+
+def _per_visit_group(**over):
+    base = dict(
+        group_id="GRP-0017", branch_id="BRN-001", name="БП Спортивная",
+        billing_mode=GroupBillingMode.PER_VISIT,
+        price_short=500, duration_short=35, price_full=700, duration_full=60,
+    )
+    base.update(over)
+    return Group(**base)
+
+
+def test_build_per_visit_snapshot_full_and_short():
+    csv = build_group_attendees_csv(
+        _per_visit_group(),
+        ["STU-1", "STU-2"],
+        {"STU-2": "short"},  # STU-1 без записи в tiers → default FULL
+    )
+    assert csv == "STU-1:60:700,STU-2:35:500"
+
+
+def test_build_none_mode_group_writes_old_csv():
+    group = _per_visit_group(billing_mode=GroupBillingMode.NONE)
+    assert build_group_attendees_csv(group, ["STU-1", "STU-2"], {}) == "STU-1,STU-2"
+
+
+def test_build_missing_group_writes_old_csv():
+    # Группа не найдена (битая ссылка) — старый формат, как и раньше.
+    assert build_group_attendees_csv(None, ["STU-1"], {}) == "STU-1"
+
+
+def test_build_empty_attendees_returns_none():
+    assert build_group_attendees_csv(_per_visit_group(), [], {}) is None
+    assert build_group_attendees_csv(None, [], {}) is None
+
+
+def test_build_unknown_tier_value_falls_back_to_full():
+    csv = build_group_attendees_csv(_per_visit_group(), ["STU-1"], {"STU-1": "garbage"})
+    assert csv == "STU-1:60:700"

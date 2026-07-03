@@ -31,7 +31,7 @@ from bot.keyboards.teacher import (
     _PROXY_BUTTONS,
 )
 from bot.keyboards.admin import kb_admin_menu
-from bot.utils import AttendeeEntry, serialize_attendees
+from bot.utils import build_group_attendees_csv
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display
 from bot.utils.locks import InProgressGuard
@@ -1507,25 +1507,7 @@ async def _finalize(
             group = None
             if group_id and group_repo is not None:
                 group = await group_repo.get_by_id(group_id)
-            if (
-                attendee_ids and group is not None
-                and group.billing_mode == GroupBillingMode.PER_VISIT
-            ):
-                entries: list[AttendeeEntry] = []
-                for sid in attendee_ids:
-                    tier = tiers.get(sid, StudentGroupTier.FULL.value)
-                    if tier == StudentGroupTier.SHORT.value:
-                        dur = group.duration_short
-                        amt = group.price_short
-                    else:
-                        dur = group.duration_full
-                        amt = group.price_full
-                    entries.append(AttendeeEntry(
-                        student_id=sid, duration_min=dur, amount=amt,
-                    ))
-                attendees_csv = serialize_attendees(entries)
-            else:
-                attendees_csv = ",".join(attendee_ids) if attendee_ids else None
+            attendees_csv = build_group_attendees_csv(group, attendee_ids, tiers)
             lesson = await lesson_service.create(
                 teacher=teacher,
                 lesson_type=LessonType.GROUP,

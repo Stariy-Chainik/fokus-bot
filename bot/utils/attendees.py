@@ -12,6 +12,12 @@
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from bot.models.enums import GroupBillingMode, StudentGroupTier
+
+if TYPE_CHECKING:
+    from bot.models import Group
 
 
 @dataclass(frozen=True)
@@ -57,3 +63,29 @@ def serialize_attendees(entries: list[AttendeeEntry]) -> str:
 def attendee_ids(raw: str | None) -> list[str]:
     """Быстрый список id без полного разбора — для мест, где нужны только ученики."""
     return [e.student_id for e in parse_attendees(raw)]
+
+
+def build_group_attendees_csv(
+    group: "Group | None", attendee_ids: list[str], tiers: dict[str, str],
+) -> str | None:
+    """Собрать attendees для группового занятия на момент записи.
+
+    PER_VISIT-группа → расширенный формат со снапшотом тарифа: по tier
+    ученика (default FULL) берутся duration/price short|full из группы.
+    Иначе — старый CSV из id, либо None при пустом списке.
+    """
+    if attendee_ids and group is not None and group.billing_mode == GroupBillingMode.PER_VISIT:
+        entries: list[AttendeeEntry] = []
+        for sid in attendee_ids:
+            tier = tiers.get(sid, StudentGroupTier.FULL.value)
+            if tier == StudentGroupTier.SHORT.value:
+                dur = group.duration_short
+                amt = group.price_short
+            else:
+                dur = group.duration_full
+                amt = group.price_full
+            entries.append(AttendeeEntry(
+                student_id=sid, duration_min=dur, amount=amt,
+            ))
+        return serialize_attendees(entries)
+    return ",".join(attendee_ids) if attendee_ids else None
