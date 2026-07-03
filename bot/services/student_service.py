@@ -32,6 +32,14 @@ class StudentCardGroup:
 
 
 @dataclass
+class CreatedStudent:
+    """Результат создания ученика с (опциональной) группой."""
+    student: Student
+    group: Group | None = None   # None — группа не задана или не найдена
+    branch_name: str = ""        # имя филиала, либо «—», если филиал не найден
+
+
+@dataclass
 class StudentCard:
     """Данные карточки ученика — всё для отрисовки без обращений к репозиториям."""
     student: Student                  # group_ids уже проставлены
@@ -60,6 +68,19 @@ class StudentService:
         self._student_group_repo = student_group_repo
         self._client_repo = client_repo
         self._visibility = visibility
+
+    async def create_with_group(self, name: str, group_id: str) -> CreatedStudent:
+        """Создать ученика и, если group_id непуст, добавить в группу."""
+        student = await self._student_repo.add(name)
+        group = None
+        branch_name = ""
+        if group_id:
+            await self._student_group_repo.add(student.student_id, group_id)
+            group = await self._group_repo.get_by_id(group_id)
+            if group:
+                branch = await self._branch_repo.get_by_id(group.branch_id)
+                branch_name = branch.name if branch else "—"
+        return CreatedStudent(student=student, group=group, branch_name=branch_name)
 
     async def toggle_tier(self, student_id: str) -> TierToggleError | None:
         """Переключить тариф SHORT↔FULL; None — успех, иначе причина отказа.

@@ -35,6 +35,11 @@ class _FakeStudentRepo:
                 s.group_tier = tier
                 return
 
+    async def add(self, name):
+        student = Student(f"STU-NEW-{len(self._students) + 1}", name)
+        self._students.append(student)
+        return student
+
 
 class _FakeTeacherGroupRepo:
     def __init__(self, teacher_to_groups):
@@ -68,6 +73,10 @@ class _FakeStudentGroupRepo:
 
     async def get_map_by_student(self):
         return {sid: list(gids) for sid, gids in self._s2g.items()}
+
+    async def add(self, student_id, group_id):
+        self._s2g.setdefault(student_id, []).append(group_id)
+        self._all.append(StudentGroup(student_id=student_id, group_id=group_id))
 
 
 class _FakeByIdRepo:
@@ -184,6 +193,42 @@ def test_dangling_client_reference_kept_on_student():
     # Клиент не найден — рендер предложит «Создать клиента», client_id остаётся.
     assert card.client is None
     assert card.student.client_id == "CLT-0001"
+
+
+# ─── create_with_group ───────────────────────────────────────────────────────
+
+def test_create_with_group_links_and_describes_group():
+    svc = _service()
+    created = _run(svc.create_with_group("Сидоров Сеня", "GRP-0001"))
+    assert created.student.name == "Сидоров Сеня"
+    assert created.group.name == "ЮБ"
+    assert created.branch_name == "Центр"
+    card = _run(svc.get_student_card(created.student.student_id))
+    assert card.student.group_ids == ["GRP-0001"]
+
+
+def test_create_without_group():
+    svc = _service()
+    created = _run(svc.create_with_group("Сидоров Сеня", ""))
+    assert created.group is None and created.branch_name == ""
+    card = _run(svc.get_student_card(created.student.student_id))
+    assert card.student.group_ids == []
+
+
+def test_create_with_unknown_group_still_links_membership():
+    # Как в старом хендлере: членство пишется до чтения группы,
+    # битый group_id даёт запись + пустой group_info.
+    svc = _service()
+    created = _run(svc.create_with_group("Сидоров Сеня", "GRP-GONE"))
+    assert created.group is None
+    card = _run(svc.get_student_card(created.student.student_id))
+    assert card.student.group_ids == ["GRP-GONE"]
+
+
+def test_create_with_group_missing_branch_shows_dash():
+    svc = _service(branches=[])
+    created = _run(svc.create_with_group("Сидоров Сеня", "GRP-0001"))
+    assert created.branch_name == "—"
 
 
 # ─── toggle_tier ─────────────────────────────────────────────────────────────

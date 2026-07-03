@@ -599,9 +599,7 @@ async def cb_add_student_group(
 @router.callback_query(F.data == "confirm_add_student")
 async def cb_confirm_add_student(
     callback: CallbackQuery, state: FSMContext, user: User | None,
-    student_repo: StudentRepository,
-    group_repo: GroupRepository, branch_repo: BranchRepository,
-    student_group_repo: StudentGroupRepository,
+    student_service: StudentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -609,20 +607,18 @@ async def cb_confirm_add_student(
     data = await state.get_data()
     await state.clear()
     try:
-        student = await student_repo.add(data["name"])
-        group_id = data.get("group_id") or ""
+        created = await student_service.create_with_group(
+            data["name"], data.get("group_id") or "",
+        )
         group_info = ""
-        if group_id:
-            await student_group_repo.add(student.student_id, group_id)
-            group = await group_repo.get_by_id(group_id)
-            if group:
-                branch = await branch_repo.get_by_id(group.branch_id)
-                bname = branch.name if branch else "—"
-                group_info = f"\nГруппа: <b>{group.name}</b> (филиал «{bname}»)"
+        if created.group:
+            group_info = (
+                f"\nГруппа: <b>{created.group.name}</b> (филиал «{created.branch_name}»)"
+            )
         await callback.message.edit_text(
             f"<b>✅ Ученик добавлен</b>\n\n"
-            f"Имя: <b>{student.name}</b>\n"
-            f"ID: <code>{student.student_id}</code>"
+            f"Имя: <b>{created.student.name}</b>\n"
+            f"ID: <code>{created.student.student_id}</code>"
             f"{group_info}",
             reply_markup=kb_back("admin:students"),
         )
