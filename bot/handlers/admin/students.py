@@ -102,8 +102,8 @@ async def cb_pairs_soloists_groups(
 @router.callback_query(F.data.startswith("sp_grp:"))
 async def cb_pairs_soloists_list(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, group_repo: GroupRepository,
-    student_group_repo: StudentGroupRepository,
+    group_repo: GroupRepository,
+    student_service: StudentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -111,27 +111,9 @@ async def cb_pairs_soloists_list(
     _, mode, group_id = callback.data.split(":")
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
-    all_students = await student_repo.get_all()
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    grp_students = [s for s in all_students if s.student_id in member_ids]
 
     if mode == "pairs":
-        by_id = {s.student_id: s for s in all_students}
-        seen: set[tuple[str, str]] = set()
-        pairs = []
-        for s in grp_students:
-            if not s.partner_id:
-                continue
-            partner = by_id.get(s.partner_id)
-            if not partner:
-                continue
-            key = tuple(sorted([s.student_id, partner.student_id]))
-            if key in seen:
-                continue
-            seen.add(key)
-            a, b = (s, partner) if s.name <= partner.name else (partner, s)
-            pairs.append((a, b))
-
+        pairs = await student_service.pairs_in_group(group_id)
         back_cb = f"sp_brn:{mode}:{group.branch_id}" if group else "admin:students"
         if not pairs:
             await callback.message.edit_text(
@@ -144,7 +126,6 @@ async def cb_pairs_soloists_list(
             await callback.answer()
             return
 
-        pairs.sort(key=lambda p: p[0].name)
         buttons = []
         for a, b in pairs:
             buttons.append([InlineKeyboardButton(
@@ -158,7 +139,7 @@ async def cb_pairs_soloists_list(
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
     else:
-        soloists = sorted([s for s in grp_students if not s.partner_id], key=lambda s: s.name)
+        soloists = await student_service.soloists_in_group(group_id)
         if not soloists:
             await callback.message.edit_text(
                 f"В группе «{group_name}» солистов нет.",
@@ -186,8 +167,8 @@ async def cb_pairs_soloists_list(
 @router.callback_query(F.data.startswith("admin_create_pair:"))
 async def cb_admin_create_pair(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, group_repo: GroupRepository,
-    student_group_repo: StudentGroupRepository,
+    group_repo: GroupRepository,
+    student_service: StudentService,
 ) -> None:
     """Админ: выбор первого ученика для новой пары (из солистов группы).
     Дальше — стандартный поток partner_assign:<id>."""
@@ -199,12 +180,7 @@ async def cb_admin_create_pair(
     group_name = group.name if group else group_id
     back_cb = f"sp_brn:pairs:{group.branch_id}" if group else "admin:students"
 
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    soloists = sorted(
-        [s for s in await student_repo.get_all()
-         if s.student_id in member_ids and not s.partner_id],
-        key=lambda s: s.name,
-    )
+    soloists = await student_service.soloists_in_group(group_id)
     if not soloists:
         await callback.message.edit_text(
             f"В группе «{group_name}» нет солистов, из которых можно собрать пару.",

@@ -293,6 +293,62 @@ def test_toggle_tier_flips_full_to_short_and_back():
     assert _run(svc.get_student_card("STU-1")).student.group_tier == StudentGroupTier.FULL
 
 
+# ─── pairs_in_group / soloists_in_group ──────────────────────────────────────
+
+def test_pairs_in_group_dedup_order_and_outside_partner():
+    students = [
+        Student("STU-1", "Яшин Я", partner_id="STU-2"),
+        Student("STU-2", "Азов А", partner_id="STU-1"),
+        Student("STU-3", "Мидин М"),
+        Student("STU-4", "Вне Группы", partner_id="STU-3"),
+    ]
+    # STU-3 в паре с STU-4, который НЕ член группы; STU-3.partner_id пуст —
+    # значит пара (STU-3, STU-4) видна только через STU-4... которого нет в группе.
+    svc = _service(students=students, student_to_groups={
+        "STU-1": ["GRP-0001"], "STU-2": ["GRP-0001"], "STU-3": ["GRP-0001"],
+        "STU-4": [],
+    })
+    pairs = _run(svc.pairs_in_group("GRP-0001"))
+    # Симметричная пара STU-1↔STU-2 попала один раз, (a, b) по имени: Азов < Яшин.
+    assert [(a.student_id, b.student_id) for a, b in pairs] == [("STU-2", "STU-1")]
+
+
+def test_pairs_in_group_includes_partner_outside_group():
+    students = [
+        Student("STU-1", "Бобров Б", partner_id="STU-9"),
+        Student("STU-9", "Аистов А", partner_id="STU-1"),
+    ]
+    svc = _service(students=students, student_to_groups={
+        "STU-1": ["GRP-0001"], "STU-9": [],
+    })
+    pairs = _run(svc.pairs_in_group("GRP-0001"))
+    # Партнёр вне группы всё равно показывается — достаточно членства одного.
+    assert [(a.student_id, b.student_id) for a, b in pairs] == [("STU-9", "STU-1")]
+
+
+def test_pairs_in_group_skips_dangling_partner():
+    students = [Student("STU-1", "Бобров Б", partner_id="STU-GONE")]
+    svc = _service(students=students, student_to_groups={"STU-1": ["GRP-0001"]})
+    assert _run(svc.pairs_in_group("GRP-0001")) == []
+
+
+def test_soloists_in_group_sorted_members_only():
+    students = [
+        Student("STU-1", "Яшин Я"),
+        Student("STU-2", "Азов А"),
+        Student("STU-3", "Мидин М", partner_id="STU-2"),
+        Student("STU-4", "Вне Группы"),
+    ]
+    svc = _service(students=students, student_to_groups={
+        "STU-1": ["GRP-0001"], "STU-2": ["GRP-0001"], "STU-3": ["GRP-0001"],
+        "STU-4": [],
+    })
+    soloists = _run(svc.soloists_in_group("GRP-0001"))
+    # Только члены группы без партнёра, по имени. STU-2 в паре? Нет:
+    # у STU-2 partner_id пуст — партнёрство помечено только у STU-3.
+    assert [s.student_id for s in soloists] == ["STU-2", "STU-1"]
+
+
 # ─── partner_candidates ──────────────────────────────────────────────────────
 
 def _pair_world():

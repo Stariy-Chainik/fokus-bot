@@ -116,6 +116,42 @@ class StudentService:
         await self._student_repo.update_tier(student_id, new_tier)
         return None
 
+    async def pairs_in_group(self, group_id: str) -> list[tuple[Student, Student]]:
+        """Пары группы: (a, b) упорядочены по имени, симметричные связи дедуплицированы.
+
+        Достаточно членства одного из двух — партнёр может быть вне группы.
+        Сортировка пар по имени первого ученика.
+        """
+        all_students = await self._student_repo.get_all()
+        member_ids = set(await self._student_group_repo.get_students_for_group(group_id))
+        grp_students = [s for s in all_students if s.student_id in member_ids]
+        by_id = {s.student_id: s for s in all_students}
+        seen: set[tuple[str, str]] = set()
+        pairs: list[tuple[Student, Student]] = []
+        for s in grp_students:
+            if not s.partner_id:
+                continue
+            partner = by_id.get(s.partner_id)
+            if not partner:
+                continue
+            key = tuple(sorted([s.student_id, partner.student_id]))
+            if key in seen:
+                continue
+            seen.add(key)
+            a, b = (s, partner) if s.name <= partner.name else (partner, s)
+            pairs.append((a, b))
+        pairs.sort(key=lambda p: p[0].name)
+        return pairs
+
+    async def soloists_in_group(self, group_id: str) -> list[Student]:
+        """Солисты группы (члены без партнёра), по имени."""
+        member_ids = set(await self._student_group_repo.get_students_for_group(group_id))
+        return sorted(
+            [s for s in await self._student_repo.get_all()
+             if s.student_id in member_ids and not s.partner_id],
+            key=lambda s: s.name,
+        )
+
     async def partner_candidates(self, student: Student) -> list[tuple[Student, bool]] | None:
         """Кандидаты в партнёры: ученики хотя бы с одной общей группой.
 
