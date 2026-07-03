@@ -30,7 +30,7 @@ from bot.repositories import (
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
-    CloudKassirService, StudentService,
+    CloudKassirService, StudentService, StudentRequestService,
 )
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router, client_router
@@ -87,6 +87,9 @@ def _build_dispatcher(storage) -> Dispatcher:
         student_repo, teacher_repo, group_repo, branch_repo,
         student_group_repo, client_repo, visibility,
     )
+    student_request_service = StudentRequestService(
+        student_request_repo, student_repo, student_group_repo,
+    )
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
         settings.cloudkassir_api_secret,
@@ -110,6 +113,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["diagnostics_service"] = diagnostics_service
     dp["visibility"] = visibility
     dp["student_service"] = student_service
+    dp["student_request_service"] = student_request_service
     dp["cloudkassir_service"] = cloudkassir_service
 
     # ── Middleware ────────────────────────────────────────────────────────────

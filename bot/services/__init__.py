@@ -5,6 +5,7 @@ from .diagnostics_service import DiagnosticsService
 from .visibility import TeacherVisibilityService
 from .cloudkassir_service import CloudKassirService
 from .student_service import StudentService, TierToggleError
+from .student_request_service import StudentRequestService, LinkExistingOutcome
 
 __all__ = [
     "LessonService",
@@ -16,4 +17,6 @@ __all__ = [
     "CloudKassirService",
     "StudentService",
     "TierToggleError",
+    "StudentRequestService",
+    "LinkExistingOutcome",
 ]

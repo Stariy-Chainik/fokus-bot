@@ -6,13 +6,16 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User, StudentRequest, GroupBillingMode, StudentGroupTier
+from bot.models import User, Student, StudentRequest, GroupBillingMode, StudentGroupTier
 from bot.repositories import (
     StudentRepository, UserRepository,
     GroupRepository, BranchRepository, StudentGroupRepository,
     StudentRequestRepository, ClientRepository,
 )
-from bot.services import StudentService, TierToggleError
+from bot.services import (
+    StudentService, TierToggleError,
+    StudentRequestService, LinkExistingOutcome,
+)
 from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates, ClientCreateStates
 from bot.handlers.common import show_card
@@ -1143,13 +1146,31 @@ async def _group_toast(
     return f"Ученик «{student_name}» добавлен в группу «{group.name}» (филиал «{bname}»)"
 
 
+async def _finish_created_request(
+    callback: CallbackQuery, req: StudentRequest, student: Student,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+) -> None:
+    """Общий хвост req_approve/req_create_new: уведомления, экран, тост."""
+    await _notify_teacher_student_created(callback.bot, req, student.name)
+    await callback.message.edit_text(
+        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
+        reply_markup=kb_back("admin:menu"),
+    )
+    await _notify_other_admins(
+        callback.bot, req, callback.message.chat.id,
+        f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
+    )
+    toast = await _group_toast(student.name, req.group_id or "", group_repo, branch_repo)
+    await callback.answer(toast, show_alert=True)
+
+
 @router.callback_query(F.data.startswith("req_approve:"))
 async def cb_approve_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
-    student_group_repo: StudentGroupRepository,
+    student_request_service: StudentRequestService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -1184,34 +1205,19 @@ async def cb_approve_student_request(
         await callback.answer()
         return
     # Дублей нет — атомарно помечаем как APPROVED, затем создаём
-    if not await student_request_repo.mark_resolved(
-        req_id, RequestStatus.APPROVED, callback.from_user.id,
-    ):
+    student = await student_request_service.approve_create(req, callback.from_user.id)
+    if student is None:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    student = await student_repo.add(name=name)
-    if req.group_id:
-        await student_group_repo.add(student.student_id, req.group_id)
-    await _notify_teacher_student_created(callback.bot, req, student.name)
-    await callback.message.edit_text(
-        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
-        reply_markup=kb_back("admin:menu"),
-    )
-    await _notify_other_admins(
-        callback.bot, req, callback.message.chat.id,
-        f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
-    )
-    toast = await _group_toast(student.name, req.group_id or "", group_repo, branch_repo)
-    await callback.answer(toast, show_alert=True)
+    await _finish_created_request(callback, req, student, group_repo, branch_repo)
 
 
 @router.callback_query(F.data.startswith("req_create_new:"))
 async def cb_create_new_student_request(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
-    student_group_repo: StudentGroupRepository,
+    student_request_service: StudentRequestService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -1221,25 +1227,11 @@ async def cb_create_new_student_request(
     if not req or req.status != RequestStatus.PENDING:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    if not await student_request_repo.mark_resolved(
-        req_id, RequestStatus.APPROVED, callback.from_user.id,
-    ):
+    student = await student_request_service.approve_create(req, callback.from_user.id)
+    if student is None:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    student = await student_repo.add(name=req.student_name)
-    if req.group_id:
-        await student_group_repo.add(student.student_id, req.group_id)
-    await _notify_teacher_student_created(callback.bot, req, student.name)
-    await callback.message.edit_text(
-        f"✅ Ученик <b>{student.name}</b> создан (ID: {student.student_id}).",
-        reply_markup=kb_back("admin:menu"),
-    )
-    await _notify_other_admins(
-        callback.bot, req, callback.message.chat.id,
-        f"✅ Заявка обработана админом @{callback.from_user.username or callback.from_user.id}",
-    )
-    toast = await _group_toast(student.name, req.group_id or "", group_repo, branch_repo)
-    await callback.answer(toast, show_alert=True)
+    await _finish_created_request(callback, req, student, group_repo, branch_repo)
 
 
 @router.callback_query(F.data.startswith("req_link_existing:"))
@@ -1247,7 +1239,7 @@ async def cb_link_existing_student_request(
     callback: CallbackQuery, user: User | None,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
-    student_group_repo: StudentGroupRepository,
+    student_request_service: StudentRequestService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -1261,24 +1253,18 @@ async def cb_link_existing_student_request(
     if not student:
         await callback.answer("Ученик не найден.", show_alert=True)
         return
-    if not await student_request_repo.mark_resolved(
-        req_id, RequestStatus.APPROVED, callback.from_user.id,
-    ):
+    outcome = await student_request_service.approve_link_existing(
+        req, student_id, callback.from_user.id,
+    )
+    if outcome is None:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    # Ученик может состоять в N группах — проверяем членство, а не «основную» группу.
-    student_gids = set(await student_group_repo.get_groups_for_student(student_id))
-    already_in = bool(req.group_id) and req.group_id in student_gids
-    added_to_group = False
-    if req.group_id and not already_in:
-        await student_group_repo.add(student_id, req.group_id)
-        added_to_group = True
     try:
-        if already_in:
+        if outcome is LinkExistingOutcome.ALREADY_IN_GROUP:
             teacher_note = (
                 f"✅ Ученик <b>{student.name}</b> уже в вашей группе — пользуйтесь."
             )
-        elif added_to_group:
+        elif outcome is LinkExistingOutcome.ADDED_TO_GROUP:
             teacher_note = (
                 f"✅ Ученик <b>{student.name}</b> добавлен в вашу группу — пользуйтесь."
             )
@@ -1290,9 +1276,9 @@ async def cb_link_existing_student_request(
         await callback.bot.send_message(req.teacher_tg_id, teacher_note)
     except Exception as exc:
         logger.error("Не удалось уведомить педагога о привязке ученика: %s", exc)
-    if already_in:
+    if outcome is LinkExistingOutcome.ALREADY_IN_GROUP:
         admin_note = "Ученик уже состоит в этой группе — педагог его видит."
-    elif added_to_group:
+    elif outcome is LinkExistingOutcome.ADDED_TO_GROUP:
         admin_note = "Ученик добавлен в группу заявки — педагог теперь его видит."
     else:
         admin_note = "Группа в заявке не указана."
