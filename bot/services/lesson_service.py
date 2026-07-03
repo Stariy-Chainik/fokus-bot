@@ -115,6 +115,34 @@ class LessonService:
             created.append(lesson)
         return created
 
+    async def create_shared_individual(
+        self,
+        teacher: Teacher,
+        lesson_date: str,
+        duration_min: int,
+        students: list[tuple[str, str]],
+        bypass_period_lock: bool = False,
+    ) -> Lesson:
+        """Одно INDIVIDUAL-занятие на 2-4 солистов (счёт делится поровну).
+
+        Слоты student_1..4 канонизируются: сортировка по student_id,
+        недостающие — None.
+        """
+        ordered = sorted(students, key=lambda s: s[0])
+        ids = [sid for sid, _ in ordered] + [None] * (4 - len(ordered))
+        names = [name for _, name in ordered] + [None] * (4 - len(ordered))
+        return await self.create(
+            teacher=teacher,
+            lesson_type=LessonType.INDIVIDUAL,
+            lesson_date=lesson_date,
+            duration_min=duration_min,
+            student_1_id=ids[0], student_1_name=names[0],
+            student_2_id=ids[1], student_2_name=names[1],
+            student_3_id=ids[2], student_3_name=names[2],
+            student_4_id=ids[3], student_4_name=names[3],
+            bypass_period_lock=bypass_period_lock,
+        )
+
     async def create_soloist_batch(
         self,
         teacher: Teacher,

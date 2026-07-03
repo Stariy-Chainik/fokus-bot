@@ -1571,17 +1571,11 @@ async def _finalize(
                 await callback.answer("Ученики не найдены", show_alert=True)
                 return
             students.sort(key=lambda s: s.student_id)
-            ids = [s.student_id for s in students] + [None] * (4 - len(students))
-            names = [s.name for s in students] + [None] * (4 - len(students))
-            lesson = await lesson_service.create(
+            lesson = await lesson_service.create_shared_individual(
                 teacher=teacher,
-                lesson_type=LessonType.INDIVIDUAL,
                 lesson_date=lesson_date,
                 duration_min=duration,
-                student_1_id=ids[0], student_1_name=names[0],
-                student_2_id=ids[1], student_2_name=names[1],
-                student_3_id=ids[2], student_3_name=names[2],
-                student_4_id=ids[3], student_4_name=names[3],
+                students=[(s.student_id, s.name) for s in students],
                 bypass_period_lock=bypass_lock,
             )
             label = " + ".join(s.name for s in students)
