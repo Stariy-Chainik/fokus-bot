@@ -204,6 +204,33 @@ model StudentPeriodPayment {
   @@unique([studentId, teacherId, periodMonth])   // один счёт на (student,teacher,period)
 }
 
+// Внешний онлайн-платёж (ЮКасса) — для верификации webhook и сверки (§6.1).
+// В боте не хранился (см. FOUND_BUGS.md B4) — в веб-версии обязателен.
+model ExternalPayment {
+  id          String   @id @default(cuid())
+  provider    String   @default("yookassa")
+  externalId  String   @unique          // payment.id ЮКассы
+  studentId   String
+  periodMonth String                    // "YYYY-MM"
+  amount      Int                       // ₽; сверяется с webhook перед подтверждением
+  status      String   @default("pending") // pending|succeeded|canceled (зеркало провайдера)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([studentId, periodMonth])
+}
+
+// Загруженный чек (реквизиты/СБП) — только для UI-состояния «ждёт подтверждения» (§6.1).
+model Receipt {
+  id          String   @id @default(cuid())
+  studentId   String
+  periodMonth String
+  method      String                    // bank|sbp
+  fileId      String                    // telegram file_id или путь в сторадже
+  uploadedBy  BigInt                    // tgId родителя
+  uploadedAt  DateTime @default(now())
+  @@index([studentId, periodMonth])
+}
+
 model TeacherPeriodSubmission {
   submissionId String   @id         // SUB-xxxxxx
   teacherId    String
@@ -380,14 +407,59 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
 - `GET /students/:id/bills/:period` → счёт, сгруппированный по педагогам (`compute`, on-demand).
 - `POST /payments/invoices` `{ studentId, periodMonth }` → get-or-create инвойсы (обновляет только не-PAID).
 - `POST /payments/:id/confirm` (одиночный) · `POST /periods/:studentId/:month/confirm` (все PENDING→PAID + фискализация).
-- `POST /payments/yookassa` `{ studentId, periodMonth, amount }` → `{ confirmationUrl }`.
-- `POST /webhooks/yookassa` (подтверждение по `metadata.studentId/periodMonth`).
+- `POST /payments/yookassa` `{ studentId, periodMonth }` → `{ confirmationUrl, externalPaymentId }`.
+  **Сумму клиент НЕ передаёт** — сервер вычисляет её из неоплаченных инвойсов (§6.1).
+- `POST /webhooks/yookassa` — с обязательной перепроверкой через API ЮКассы (§6.1).
+- `GET /payments/external/:id/status` → `{ status }` — кнопка «проверить ещё раз» (§6.1).
 
 **Прочее** (admin): `GET /salaries?period=`, `GET /profit?period=`, `GET /requests` +
 `POST /requests/:id/approve|reject`, `GET /diagnostics`.
 
 **Client**: `GET /me/children`, `GET /me/lessons?...`, `GET /me/bills?...`, `POST /me/add-child` (заявка),
 `POST /me/pay/...`.
+
+### 6.1 Проверка оплат на стороне клиента (решение)
+
+**Принцип: фронт никогда не решает, оплачено ли, — он только отображает статус с сервера.**
+`PAID` ставится ровно двумя путями: (а) верифицированный webhook ЮКассы, (б) подтверждение
+админа (наличные / реквизиты / СБП). Всё остальное — отображение.
+
+**Поток онлайн-оплаты (ЮКасса):**
+```
+1. Клиент жмёт «Оплатить» → POST /payments/yookassa { studentId, periodMonth }
+   Сервер: проверяет initData-сессию и что studentId принадлежит родителю (tgId ∈ parentTgIds);
+   ВЫЧИСЛЯЕТ сумму из PENDING-инвойсов (от клиента сумму не принимает);
+   создаёт платёж в ЮКассе (idempotency key = uuid) и СОХРАНЯЕТ ExternalPayment
+   (externalId ЮКассы + studentId + periodMonth + amount); отдаёт confirmationUrl.
+2. Фронт открывает confirmationUrl; после оплаты пользователь возвращается по return_url.
+3. Фронт показывает «Проверяем оплату…» и поллит GET /students/:id/bills/:period
+   каждые 2–3 с, до ~90 с. (Поллинг, не WebSocket/SSE: сессии Mini App короткие,
+   лёгкий запрос раз в 2–3 с в течение минуты — простейшее надёжное решение.)
+4. Параллельно приходит webhook: сервер НЕ верит телу запроса — берёт object.id,
+   запрашивает статус у API ЮКассы (GET /payments/{id}) и подтверждает период только
+   при реальном `succeeded` и совпадении суммы с ExternalPayment. Повторные webhook
+   безопасны: confirm_period идемпотентен (PAID пропускается).
+5. Поллинг видит PAID → фронт показывает ✅.
+6. Если за 90 с статус не сменился: «Платёж обрабатывается, статус обновится автоматически»
+   + кнопка «Проверить ещё раз» → GET /payments/external/:id/status (сервер сам опрашивает
+   ЮКассу по сохранённому externalId — страховка от потерянного webhook).
+```
+
+**Ручные способы (наличные / реквизиты / СБП):** статус остаётся PENDING до подтверждения
+админом (как в боте). Для UX хранить факт загрузки чека (модель `Receipt`: studentId, period,
+fileId, uploadedAt) и показывать промежуточное состояние «чек отправлен, ждёт подтверждения» —
+домен (PENDING/PAID) не меняется, это чисто отображение.
+
+**✅ на занятиях** — как в боте: вычисляется на сервере (`(period, teacher)` имеет PAID-инвойс),
+фронт только рендерит.
+
+**Чек-лист безопасности платежей:**
+- сумма — только серверный расчёт; от клиента не принимается;
+- принадлежность ученика родителю проверяется на каждом платёжном эндпоинте;
+- webhook перепроверяется через API ЮКассы (текущий бот этого НЕ делает — см.
+  [FOUND_BUGS.md B4](FOUND_BUGS.md); в веб-версии обязательно);
+- idempotency key при создании платежа; идемпотентное подтверждение;
+- `ExternalPayment` хранит внешний id → возможна сверка и ручная перепроверка.
 
 ---
 
