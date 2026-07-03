@@ -40,6 +40,20 @@ class _FakeStudentRepo:
         self._students.append(student)
         return student
 
+    async def delete(self, student_id):
+        # Как настоящий репозиторий: сначала рвёт пару, потом удаляет строку.
+        student = next((s for s in self._students if s.student_id == student_id), None)
+        if student is None:
+            return False
+        if student.partner_id:
+            partner = next(
+                (s for s in self._students if s.student_id == student.partner_id), None,
+            )
+            if partner:
+                partner.partner_id = None
+        self._students.remove(student)
+        return True
+
 
 class _FakeTeacherGroupRepo:
     def __init__(self, teacher_to_groups):
@@ -77,6 +91,10 @@ class _FakeStudentGroupRepo:
     async def add(self, student_id, group_id):
         self._s2g.setdefault(student_id, []).append(group_id)
         self._all.append(StudentGroup(student_id=student_id, group_id=group_id))
+
+    async def remove_all_for_student(self, student_id):
+        self._s2g.pop(student_id, None)
+        self._all = [sg for sg in self._all if sg.student_id != student_id]
 
 
 class _FakeByIdRepo:
@@ -229,6 +247,24 @@ def test_create_with_group_missing_branch_shows_dash():
     svc = _service(branches=[])
     created = _run(svc.create_with_group("Сидоров Сеня", "GRP-0001"))
     assert created.branch_name == "—"
+
+
+# ─── delete_student ──────────────────────────────────────────────────────────
+
+def test_delete_student_removes_memberships_and_row():
+    svc = _service(students=[
+        Student("STU-1", "Иванов Ваня", partner_id="STU-2", client_id="CLT-0001"),
+        Student("STU-2", "Петров Петя", partner_id="STU-1"),
+    ])
+    assert _run(svc.delete_student("STU-1")) is True
+    assert _run(svc.get_student_card("STU-1")) is None
+    # Пара разорвана: у бывшего партнёра нет висячей ссылки.
+    partner_card = _run(svc.get_student_card("STU-2"))
+    assert partner_card.student.partner_id is None
+
+
+def test_delete_unknown_student_returns_false():
+    assert _run(_service().delete_student("STU-404")) is False
 
 
 # ─── toggle_tier ─────────────────────────────────────────────────────────────

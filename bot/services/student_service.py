@@ -82,6 +82,14 @@ class StudentService:
                 branch_name = branch.name if branch else "—"
         return CreatedStudent(student=student, group=group, branch_name=branch_name)
 
+    async def delete_student(self, student_id: str) -> bool:
+        """Удалить ученика: сначала членства в группах, затем строку ученика.
+
+        Пара рвётся внутри student_repo.delete(). False — ученик не найден.
+        """
+        await self._student_group_repo.remove_all_for_student(student_id)
+        return await self._student_repo.delete(student_id)
+
     async def toggle_tier(self, student_id: str) -> TierToggleError | None:
         """Переключить тариф SHORT↔FULL; None — успех, иначе причина отказа.
 

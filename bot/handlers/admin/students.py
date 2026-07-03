@@ -755,15 +755,13 @@ async def cb_delete_student_confirm(
 async def cb_delete_student_do(
     callback: CallbackQuery,
     user: User | None,
-    student_repo: StudentRepository,
-    student_group_repo: StudentGroupRepository,
+    student_service: StudentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, group_id, student_id = callback.data.split(":", 2)
-    await student_group_repo.remove_all_for_student(student_id)
-    ok = await student_repo.delete(student_id)
+    ok = await student_service.delete_student(student_id)
     text = f"Ученик {student_id} удалён." if ok else "Ученик не найден."
     await callback.message.edit_text(
         text, reply_markup=kb_back(f"del_st_grp:{group_id}"),
