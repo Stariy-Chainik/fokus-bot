@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User, Student, StudentRequest, GroupBillingMode, StudentGroupTier
 from bot.repositories import (
-    StudentRepository, UserRepository,
+    StudentRepository,
     GroupRepository, BranchRepository, StudentGroupRepository,
     StudentRequestRepository, ClientRepository,
 )
@@ -20,7 +20,7 @@ from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates, ClientCreateStates
 from bot.handlers.common import show_card
 from bot.keyboards.admin import (
-    kb_students_menu, kb_teacher_list,
+    kb_students_menu,
     kb_student_paged, kb_student_card, kb_partner_candidates,
     kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
 )
