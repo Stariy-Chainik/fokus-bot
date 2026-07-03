@@ -5,6 +5,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository, StudentRepository
@@ -24,7 +25,7 @@ async def show_card(
     target = event.message if isinstance(event, CallbackQuery) else event
     try:
         await target.delete()
-    except Exception:
+    except TelegramBadRequest:
         pass
     await target.answer(text, reply_markup=reply_markup)
     if isinstance(event, CallbackQuery):
@@ -133,7 +134,7 @@ async def _show_role_menu(
         try:
             await send_target.edit_text(text, reply_markup=kb)
             return
-        except Exception:
+        except TelegramBadRequest:
             pass
     await send_target.answer(text, reply_markup=kb)
 

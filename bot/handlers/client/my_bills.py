@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from aiogram import Router, F
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 
@@ -431,8 +431,8 @@ async def cb_cash_notify(
     for admin in admins:
         try:
             await callback.bot.send_message(admin.tg_id, msg, reply_markup=confirm_kb)
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось уведомить админа о наличной оплате tg_id=%s: %s", admin.tg_id, exc)
 
     await callback.message.edit_text(
         "✅ Администратор уведомлён. Ожидайте подтверждения.",
@@ -526,8 +526,8 @@ async def on_receipt_photo(
                     admin.tg_id, message.document.file_id,
                     caption=caption, reply_markup=confirm_kb,
                 )
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось отправить чек админу tg_id=%s: %s", admin.tg_id, exc)
 
     await message.answer(
         "✅ Чек отправлен администратору. Ожидайте подтверждения.",
@@ -573,7 +573,7 @@ async def cb_receipt_confirm(
                     old_text + confirmed_suffix,
                     reply_markup=None,
                 )
-        except Exception:
+        except TelegramBadRequest:
             pass
         await callback.answer("Оплата подтверждена")
 

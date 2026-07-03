@@ -8,6 +8,7 @@ from datetime import date
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramAPIError
 from dateutil.relativedelta import relativedelta  # type: ignore
 
 from bot.models import User
@@ -350,8 +351,8 @@ async def cb_t_grp_new(
         try:
             msg = await callback.bot.send_message(admin.tg_id, notify_text, reply_markup=admin_kb)
             admin_msgs.append((msg.chat.id, msg.message_id))
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось уведомить админа о заявке tg_id=%s: %s", admin.tg_id, exc)
 
     try:
         await student_request_repo.add(

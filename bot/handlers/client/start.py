@@ -5,6 +5,7 @@ from aiogram import Router, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository, UserRepository
@@ -188,8 +189,8 @@ async def cb_add_child_request(
                 admin.tg_id, notify_text,
                 reply_markup=kb_admin_approve_child(tg_id, student_id),
             )
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось отправить админу заявку на второго ребёнка tg_id=%s: %s", admin.tg_id, exc)
 
     logger.info("Запрос на добавление: tg_id=%s → student_id=%s", tg_id, student_id)
     await callback.message.edit_text(

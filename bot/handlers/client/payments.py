@@ -4,6 +4,7 @@ import logging
 
 from aiogram import Router, F
 from aiogram.types import Message, PreCheckoutQuery
+from aiogram.exceptions import TelegramAPIError
 from aiohttp import web
 
 from bot.models.enums import PaymentStatus
@@ -47,8 +48,8 @@ def make_yookassa_webhook_handler(payment_service: PaymentService, bot, user_rep
             for admin in admins:
                 try:
                     await bot.send_message(admin.tg_id, msg)
-                except Exception:
-                    pass
+                except TelegramAPIError as exc:
+                    logger.warning("Не удалось уведомить админа об оплате tg_id=%s: %s", admin.tg_id, exc)
 
         return web.Response(status=200)
     return handler
@@ -96,8 +97,8 @@ async def on_successful_payment(
         for admin in admins:
             try:
                 await message.bot.send_message(admin.tg_id, notify)
-            except Exception:
-                pass
+            except TelegramAPIError as exc:
+                logger.warning("Не удалось уведомить админа об оплате tg_id=%s: %s", admin.tg_id, exc)
     else:
         logger.warning("confirm_payment вернул False для %s", payment_id)
         await message.answer("✅ Оплата получена! Спасибо.")

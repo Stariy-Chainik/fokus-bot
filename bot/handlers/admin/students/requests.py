@@ -5,6 +5,7 @@ import logging
 from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User, Student, StudentRequest, GroupBillingMode, StudentGroupTier
 from bot.repositories import (
@@ -57,8 +58,8 @@ async def _notify_other_admins(
             await bot.edit_message_text(
                 resolution_text, chat_id=chat_id, message_id=message_id,
             )
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось обновить уведомление у админа chat_id=%s: %s", chat_id, exc)
 
 
 async def _notify_teacher_student_created(bot, req: StudentRequest, student_name: str) -> None:

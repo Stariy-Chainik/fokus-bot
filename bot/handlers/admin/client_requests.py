@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository
@@ -43,8 +44,8 @@ async def cb_admin_child_ok(
             f"✅ Заявка одобрена!\n\nВы привязаны к ученику <b>{student.name}</b>.\n\nВыберите раздел:",
             reply_markup=kb_client_menu(),
         )
-    except Exception:
-        pass
+    except TelegramAPIError as exc:
+        logger.warning("Не удалось уведомить родителя об одобрении заявки tg_id=%s: %s", parent_tg_id, exc)
 
     await callback.message.edit_text(
         f"✅ Одобрено\n\nУченик: {student.name}\ntg_id: {parent_tg_id}",
@@ -76,8 +77,8 @@ async def cb_admin_child_no(
             "❌ Администратор отклонил вашу заявку.",
             reply_markup=kb_client_menu(),
         )
-    except Exception:
-        pass
+    except TelegramAPIError as exc:
+        logger.warning("Не удалось уведомить родителя об отклонении заявки tg_id=%s: %s", parent_tg_id, exc)
 
     await callback.message.edit_text(
         f"❌ Отклонено\n\nУченик: {student_name}\ntg_id: {parent_tg_id}",

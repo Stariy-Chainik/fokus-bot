@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 
 from bot.models import User, GroupBillingMode, StudentGroupTier
 from bot.models.enums import LessonType
@@ -95,8 +96,8 @@ async def cb_proxy_record_start(
     for admin in admins:
         try:
             await callback.bot.send_message(admin.tg_id, msg, reply_markup=approve_kb)
-        except Exception:
-            pass
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось отправить админу запрос на прокси-запись tg_id=%s: %s", admin.tg_id, exc)
 
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
@@ -123,15 +124,15 @@ async def cb_proxy_approve(callback: CallbackQuery, user: User | None) -> None:
             "✅ Администратор разрешил запись. Нажмите кнопку для начала:",
             reply_markup=start_kb,
         )
-    except Exception:
-        pass
+    except TelegramAPIError as exc:
+        logger.warning("Не удалось уведомить педагога о разрешении прокси-записи tg_id=%s: %s", requester_tg_id, exc)
 
     try:
         await callback.message.edit_text(
             (callback.message.text or "") + "\n\n✅ Разрешено",
             reply_markup=None,
         )
-    except Exception:
+    except TelegramBadRequest:
         pass
     await callback.answer("Разрешено")
 
@@ -149,15 +150,15 @@ async def cb_proxy_deny(callback: CallbackQuery, user: User | None) -> None:
             requester_tg_id,
             "❌ Администратор отклонил запрос на запись занятия.",
         )
-    except Exception:
-        pass
+    except TelegramAPIError as exc:
+        logger.warning("Не удалось уведомить педагога об отклонении прокси-записи tg_id=%s: %s", requester_tg_id, exc)
 
     try:
         await callback.message.edit_text(
             (callback.message.text or "") + "\n\n❌ Отклонено",
             reply_markup=None,
         )
-    except Exception:
+    except TelegramBadRequest:
         pass
     await callback.answer("Отклонено")
 
