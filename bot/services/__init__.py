@@ -4,6 +4,7 @@ from .payment_service import PaymentService
 from .diagnostics_service import DiagnosticsService
 from .visibility import TeacherVisibilityService
 from .cloudkassir_service import CloudKassirService
+from .student_service import StudentService
 
 __all__ = [
     "LessonService",
@@ -13,4 +14,5 @@ __all__ = [
     "DiagnosticsService",
     "TeacherVisibilityService",
     "CloudKassirService",
+    "StudentService",
 ]
