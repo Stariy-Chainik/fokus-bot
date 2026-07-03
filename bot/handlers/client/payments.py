@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json as _json
 import logging
 
@@ -16,6 +17,84 @@ logger = logging.getLogger(__name__)
 router = Router(name="client_payments")
 
 
+async def _fetch_payment_from_api(payment_id: str):
+    """Запрашивает платёж напрямую у API ЮКассы (server-to-server, по кредам магазина).
+
+    Возвращает объект платежа (status/metadata/amount) или None, если ЮКасса
+    не сконфигурирована. Синхронный SDK — в to_thread, чтобы не блокировать loop.
+    """
+    from yookassa import Configuration, Payment as YKPayment
+    from config.settings import settings
+    if not settings.yookassa_shop_id or not settings.yookassa_secret_key:
+        return None
+    Configuration.configure(settings.yookassa_shop_id, settings.yookassa_secret_key)
+    return await asyncio.to_thread(YKPayment.find_one, payment_id)
+
+
+async def process_yookassa_event(
+    event: dict,
+    payment_service: PaymentService,
+    bot,
+    user_repo: UserRepository,
+    fetch_payment=_fetch_payment_from_api,
+) -> int:
+    """Обрабатывает событие webhook ЮКассы. Возвращает HTTP-статус ответа.
+
+    Телу запроса НЕ доверяем (см. docs/FOUND_BUGS.md B4): из него берётся только
+    object.id, после чего статус, metadata и сумма перепроверяются напрямую у API
+    ЮКассы. Подтверждаем период только при реальном status == succeeded.
+    200 — принято/проигнорировано; 500 — ЮКасса повторит уведомление позже.
+    """
+    if event.get("event") != "payment.succeeded":
+        return 200
+
+    payment_id = event.get("object", {}).get("id")
+    if not payment_id:
+        logger.warning("YooKassa webhook: нет object.id в теле — игнорируем")
+        return 200
+
+    try:
+        payment = await fetch_payment(payment_id)
+    except Exception as exc:
+        logger.error("YooKassa webhook: не удалось проверить платёж %s через API: %s", payment_id, exc)
+        return 500  # временная ошибка — пусть ЮКасса ретраит
+
+    if payment is None:
+        logger.warning("YooKassa webhook: платёж %s не найден/SDK не сконфигурирован — игнорируем", payment_id)
+        return 200
+    if getattr(payment, "status", None) != "succeeded":
+        logger.warning(
+            "YooKassa webhook: платёж %s имеет статус %r, не succeeded — игнорируем (возможна подделка)",
+            payment_id, getattr(payment, "status", None),
+        )
+        return 200
+
+    meta = getattr(payment, "metadata", None) or {}
+    student_id = meta.get("student_id")
+    period_month = meta.get("period_month")
+    if not student_id or not period_month:
+        logger.warning("YooKassa webhook: у платежа %s нет student_id/period_month в metadata", payment_id)
+        return 200
+
+    count = await payment_service.confirm_period(student_id, period_month, 0)
+    if count > 0:
+        amount = getattr(getattr(payment, "amount", None), "value", "?")
+        msg = (
+            f"💰 Оплата через ЮКасса\n\n"
+            f"Ученик: {student_id}\n"
+            f"Период: {period_month}\n"
+            f"Сумма: {amount} руб."
+        )
+        admins = await user_repo.get_admins()
+        for admin in admins:
+            try:
+                await bot.send_message(admin.tg_id, msg)
+            except TelegramAPIError as exc:
+                logger.warning("Не удалось уведомить админа об оплате tg_id=%s: %s", admin.tg_id, exc)
+
+    return 200
+
+
 def make_yookassa_webhook_handler(payment_service: PaymentService, bot, user_repo: UserRepository):
     """Фабрика aiohttp-обработчика для webhook ЮКасса."""
     async def handler(request: web.Request) -> web.Response:
@@ -24,34 +103,8 @@ def make_yookassa_webhook_handler(payment_service: PaymentService, bot, user_rep
             event = _json.loads(body)
         except Exception:
             return web.Response(status=400)
-
-        if event.get("event") != "payment.succeeded":
-            return web.Response(status=200)
-
-        meta = event.get("object", {}).get("metadata", {})
-        student_id = meta.get("student_id")
-        period_month = meta.get("period_month")
-        if not student_id or not period_month:
-            logger.warning("YooKassa webhook: нет student_id/period_month в metadata")
-            return web.Response(status=200)
-
-        count = await payment_service.confirm_period(student_id, period_month, 0)
-        if count > 0:
-            amount = event.get("object", {}).get("amount", {}).get("value", "?")
-            msg = (
-                f"💰 Оплата через ЮКасса\n\n"
-                f"Ученик: {student_id}\n"
-                f"Период: {period_month}\n"
-                f"Сумма: {amount} руб."
-            )
-            admins = await user_repo.get_admins()
-            for admin in admins:
-                try:
-                    await bot.send_message(admin.tg_id, msg)
-                except TelegramAPIError as exc:
-                    logger.warning("Не удалось уведомить админа об оплате tg_id=%s: %s", admin.tg_id, exc)
-
-        return web.Response(status=200)
+        status = await process_yookassa_event(event, payment_service, bot, user_repo)
+        return web.Response(status=status)
     return handler
 
 

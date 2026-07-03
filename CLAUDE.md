@@ -81,7 +81,7 @@ bot/handlers/
     start.py             # client registration FSM (search → confirm) + admin approval
     my_lessons.py        # lesson history; ✅ on paid; per-child or "all"
     my_bills.py          # invoices by month + payment methods + receipt upload
-    payments.py          # YooKassa webhook handler + Telegram Payments pre_checkout
+    payments.py          # YooKassa webhook (verified via API re-fetch) + Telegram Payments pre_checkout
 ```
 
 Each handler file exports one `Router`. Aggregated in `bot/handlers/{admin,teacher,client}/__init__.py`, then in `bot/handlers/__init__.py`, registered in `bot/__main__.py`.
@@ -220,6 +220,8 @@ Invoices stored as `StudentPeriodPayment` — one per `(student, teacher, period
 4. 💳 Картой онлайн — YooKassa link (`YOOKASSA_SHOP_ID` + `YOOKASSA_SECRET_KEY`).
 
 Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_states.py](bot/states/client_states.py)). On receipt: admins receive the photo/document with a «✅ Подтвердить оплату» button. Admin confirms → `confirm_period()` → all PENDING invoices for that `(student, period)` → PAID. If `CLOUDKASSIR_PUBLIC_ID` is set and the linked client has a phone, `CloudKassirService.send_income_receipt()` then fires a fiscal receipt for the paid amount.
+
+**YooKassa webhook is verified** ([payments.py: process_yookassa_event](bot/handlers/client/payments.py)): the request body is **not trusted** — only `object.id` is taken from it, then the payment is re-fetched from the YooKassa API (`Payment.find_one`); status/metadata/amount come from the API response. Period is confirmed only on real `succeeded`. Network error during verification → HTTP 500 (YooKassa retries). Tests: [tests/test_yookassa_webhook.py](tests/test_yookassa_webhook.py).
 
 **Important**: if a lesson is added to a period after its invoice was marked PAID, the new amount will **not** be auto-billed — `confirm_period` skips PAID records. Either reopen the period (admin via «🔓 Открыть период») or create a second invoice manually.
 

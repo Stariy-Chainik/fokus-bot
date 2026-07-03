@@ -21,15 +21,16 @@
 - **Почему баг:** скорее незавершённая фича «пара из солистов», чем осознанный код; мёртвые ветки затрудняют декомпозицию P5.
 - **Репро:** нет (недостижимо). Кандидат на удаление отдельным коммитом «Remove dead code» после подтверждения, что фича не планируется.
 
-## B4. Webhook ЮКассы не верифицирует запрос (безопасность)
-- **Где:** [bot/handlers/client/payments.py:19-54](../bot/handlers/client/payments.py#L19) — `make_yookassa_webhook_handler`.
-- **Симптом:** любой, кто знает URL `/yookassa-webhook`, может POST-запросом с телом
+## B4. Webhook ЮКассы не верифицирует запрос (безопасность) — ✅ ИСПРАВЛЕНО
+- **Где:** [bot/handlers/client/payments.py](../bot/handlers/client/payments.py) — `make_yookassa_webhook_handler`.
+- **Симптом (был):** любой, кто знает URL `/yookassa-webhook`, мог POST-запросом с телом
   `{"event":"payment.succeeded","object":{"metadata":{"student_id":"STU-…","period_month":"YYYY-MM"}}}`
   перевести все счета периода в PAID без оплаты.
-- **Почему баг:** тело запроса принимается на веру — нет ни IP-allowlist ЮКассы, ни перепроверки
-  статуса платежа через API ЮКассы (`GET /payments/{id}`). Плюс `payment_id` ЮКассы нигде не
-  сохраняется — сверка (reconciliation) и ручная перепроверка невозможны.
-- **Репро:** `curl -X POST http://<host>:8081/yookassa-webhook -d '{...}'` с телом выше.
-- **Фикс (когда дойдём):** при получении webhook брать `object.id` и запрашивать статус у API
-  ЮКассы; подтверждать только при реальном `succeeded`. Правильная схема для веб-версии описана
-  в [MINIAPP_BUILD.md §6.1](MINIAPP_BUILD.md).
+- **Почему баг:** тело запроса принималось на веру — ни IP-allowlist ЮКассы, ни перепроверки
+  статуса платежа через API ЮКассы.
+- **Исправлено (2026-07):** `process_yookassa_event` берёт из тела только `object.id` и
+  перепроверяет платёж напрямую у API ЮКассы (`Payment.find_one`); статус/metadata/сумма —
+  из ответа API. Подтверждение — только при реальном `succeeded`; сетевая ошибка проверки →
+  HTTP 500 (ЮКасса ретраит). Покрыто тестами [tests/test_yookassa_webhook.py](../tests/test_yookassa_webhook.py).
+- **Остаток (в веб-версии):** хранение внешнего `payment_id` для сверки/ручной перепроверки —
+  модель `ExternalPayment` в [MINIAPP_BUILD.md §6.1](MINIAPP_BUILD.md).
