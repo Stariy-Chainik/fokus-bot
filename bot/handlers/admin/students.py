@@ -12,7 +12,7 @@ from bot.repositories import (
     GroupRepository, BranchRepository, StudentGroupRepository,
     StudentRequestRepository, ClientRepository,
 )
-from bot.services import StudentService
+from bot.services import StudentService, TierToggleError
 from bot.models.enums import RequestStatus
 from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates, ClientCreateStates
 from bot.handlers.common import show_card
@@ -424,40 +424,26 @@ async def _render_student_card(
     )
 
 
+_TIER_TOGGLE_ALERTS = {
+    TierToggleError.STUDENT_NOT_FOUND: "Ученик не найден",
+    TierToggleError.NO_GROUPS: "У ученика не задана группа",
+    TierToggleError.NO_PER_VISIT_GROUP: "Ни у одной группы ученика не включён биллинг per-visit",
+}
+
+
 @router.callback_query(F.data.startswith("student_tier_toggle:"))
 async def cb_student_tier_toggle(
     callback: CallbackQuery, user: User | None,
-    student_repo: StudentRepository, group_repo: GroupRepository,
-    student_group_repo: StudentGroupRepository,
     student_service: StudentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     student_id = callback.data.split(":", 1)[1]
-    student = await student_repo.get_by_id(student_id)
-    if not student:
-        await callback.answer("Ученик не найден", show_alert=True)
+    error = await student_service.toggle_tier(student_id)
+    if error is not None:
+        await callback.answer(_TIER_TOGGLE_ALERTS[error], show_alert=True)
         return
-    gids = await student_group_repo.get_groups_for_student(student_id)
-    if not gids:
-        await callback.answer("У ученика не задана группа", show_alert=True)
-        return
-    # Тариф переключается относительно первой PER_VISIT группы ученика.
-    per_visit_group = None
-    for gid in gids:
-        g = await group_repo.get_by_id(gid)
-        if g and g.billing_mode == GroupBillingMode.PER_VISIT:
-            per_visit_group = g
-            break
-    if per_visit_group is None:
-        await callback.answer("Ни у одной группы ученика не включён биллинг per-visit", show_alert=True)
-        return
-    new_tier = (
-        StudentGroupTier.FULL if student.group_tier == StudentGroupTier.SHORT
-        else StudentGroupTier.SHORT
-    )
-    await student_repo.update_tier(student_id, new_tier)
     await _render_student_card(callback, student_id, "students:list", student_service)
 
 

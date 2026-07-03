@@ -4,7 +4,7 @@ from .payment_service import PaymentService
 from .diagnostics_service import DiagnosticsService
 from .visibility import TeacherVisibilityService
 from .cloudkassir_service import CloudKassirService
-from .student_service import StudentService
+from .student_service import StudentService, TierToggleError
 
 __all__ = [
     "LessonService",
@@ -15,4 +15,5 @@ __all__ = [
     "TeacherVisibilityService",
     "CloudKassirService",
     "StudentService",
+    "TierToggleError",
 ]

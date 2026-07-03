@@ -5,13 +5,22 @@
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
+from enum import Enum
 
 from bot.models import Student, Group, Client
+from bot.models.enums import GroupBillingMode, StudentGroupTier
 from bot.repositories import (
     StudentRepository, TeacherRepository, GroupRepository,
     BranchRepository, StudentGroupRepository, ClientRepository,
 )
 from .visibility import TeacherVisibilityService
+
+
+class TierToggleError(str, Enum):
+    """Причина отказа переключения тарифа (тексты алертов — в хендлере)."""
+    STUDENT_NOT_FOUND = "student_not_found"
+    NO_GROUPS = "no_groups"
+    NO_PER_VISIT_GROUP = "no_per_visit_group"
 
 
 @dataclass
@@ -51,6 +60,32 @@ class StudentService:
         self._student_group_repo = student_group_repo
         self._client_repo = client_repo
         self._visibility = visibility
+
+    async def toggle_tier(self, student_id: str) -> TierToggleError | None:
+        """Переключить тариф SHORT↔FULL; None — успех, иначе причина отказа.
+
+        Тариф переключается относительно первой PER_VISIT группы ученика.
+        """
+        student = await self._student_repo.get_by_id(student_id)
+        if not student:
+            return TierToggleError.STUDENT_NOT_FOUND
+        gids = await self._student_group_repo.get_groups_for_student(student_id)
+        if not gids:
+            return TierToggleError.NO_GROUPS
+        per_visit_group = None
+        for gid in gids:
+            g = await self._group_repo.get_by_id(gid)
+            if g and g.billing_mode == GroupBillingMode.PER_VISIT:
+                per_visit_group = g
+                break
+        if per_visit_group is None:
+            return TierToggleError.NO_PER_VISIT_GROUP
+        new_tier = (
+            StudentGroupTier.FULL if student.group_tier == StudentGroupTier.SHORT
+            else StudentGroupTier.SHORT
+        )
+        await self._student_repo.update_tier(student_id, new_tier)
+        return None
 
     async def partner_candidates(self, student: Student) -> list[tuple[Student, bool]] | None:
         """Кандидаты в партнёры: ученики хотя бы с одной общей группой.

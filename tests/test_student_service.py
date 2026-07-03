@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from bot.models import Student, Teacher, Group, Branch, Client, StudentGroup
 from bot.models.enums import GroupBillingMode, StudentGroupTier
-from bot.services import StudentService, TeacherVisibilityService
+from bot.services import StudentService, TeacherVisibilityService, TierToggleError
 
 
 def _run(coro):
@@ -28,6 +28,12 @@ class _FakeStudentRepo:
             if s.student_id == student_id:
                 return replace(s)
         return None
+
+    async def update_tier(self, student_id, tier):
+        for s in self._students:
+            if s.student_id == student_id:
+                s.group_tier = tier
+                return
 
 
 class _FakeTeacherGroupRepo:
@@ -178,6 +184,32 @@ def test_dangling_client_reference_kept_on_student():
     # Клиент не найден — рендер предложит «Создать клиента», client_id остаётся.
     assert card.client is None
     assert card.student.client_id == "CLT-0001"
+
+
+# ─── toggle_tier ─────────────────────────────────────────────────────────────
+
+def test_toggle_tier_unknown_student():
+    assert _run(_service().toggle_tier("STU-404")) is TierToggleError.STUDENT_NOT_FOUND
+
+
+def test_toggle_tier_no_groups():
+    assert _run(_service().toggle_tier("STU-2")) is TierToggleError.NO_GROUPS
+
+
+def test_toggle_tier_no_per_visit_group():
+    svc = _service(groups=[
+        Group(group_id="GRP-0001", branch_id="BRN-001", name="ЮБ",
+              billing_mode=GroupBillingMode.NONE),
+    ])
+    assert _run(svc.toggle_tier("STU-1")) is TierToggleError.NO_PER_VISIT_GROUP
+
+
+def test_toggle_tier_flips_full_to_short_and_back():
+    svc = _service()
+    assert _run(svc.toggle_tier("STU-1")) is None
+    assert _run(svc.get_student_card("STU-1")).student.group_tier == StudentGroupTier.SHORT
+    assert _run(svc.toggle_tier("STU-1")) is None
+    assert _run(svc.get_student_card("STU-1")).student.group_tier == StudentGroupTier.FULL
 
 
 # ─── partner_candidates ──────────────────────────────────────────────────────
