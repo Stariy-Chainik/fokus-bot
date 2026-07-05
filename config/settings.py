@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     cloudkassir_public_id: str = Field(default="", alias="CLOUDKASSIR_PUBLIC_ID")
     cloudkassir_api_secret: str = Field(default="", alias="CLOUDKASSIR_API_SECRET")
 
+    # Контроль оплат
+    # Долги считаются начиная с этого периода (YYYY-MM); пусто — за всё время.
+    # Нужен, чтобы месяцы до внедрения учёта оплат не показывались как «долг».
+    debtors_since_period: str = Field(default="", alias="DEBTORS_SINCE_PERIOD")
+
     # Способы оплаты
     payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")

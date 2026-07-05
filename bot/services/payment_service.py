@@ -102,13 +102,16 @@ class PaymentService:
             invoices.append(payment)
         return invoices
 
-    async def compute_debt_map(self) -> dict[str, dict[str, int]]:
+    async def compute_debt_map(self, since_period: str | None = None) -> dict[str, dict[str, int]]:
         """Карта долгов по всем ученикам и периодам: student_id → {period_month → долг ₽}.
 
         Долг считается on-demand так же, как «К оплате» у родителя: начисления
         (build_billing_rows по всем занятиям) минус оплаченные (student, teacher,
         period) со статусом PAID. Наличие/отсутствие выставленного счёта роли
         не играет. amount=0 (абонемент) в долг не входит.
+
+        since_period ("YYYY-MM") — учитывать только периоды >= since_period;
+        None/"" — за всё время. Отсекает месяцы до внедрения учёта оплат.
         """
         lessons = await self._lesson_repo.get_all()
         teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
@@ -132,6 +135,8 @@ class PaymentService:
 
         debts: dict[str, dict[str, int]] = {}
         for (sid, tid, period), amount in accrued.items():
+            if since_period and period < since_period:
+                continue
             if amount <= 0 or (sid, tid, period) in paid:
                 continue
             per_student = debts.setdefault(sid, {})

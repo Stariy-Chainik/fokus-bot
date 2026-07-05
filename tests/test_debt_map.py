@@ -145,3 +145,25 @@ def test_lesson_with_unknown_teacher_skipped():
         [_teacher("TCH-0001")], [],
     )
     assert _run(svc.compute_debt_map()) == {}
+
+
+def test_since_period_cuts_older_months():
+    """Месяцы до since_period — не долг (до внедрения учёта платили мимо системы)."""
+    svc = _service(
+        [
+            _lesson("LES-1", "TCH-0001", "2026-05-10", s1="STU-A"),
+            _lesson("LES-2", "TCH-0001", "2026-07-01", s1="STU-A"),
+        ],
+        [_teacher()], [],
+    )
+    assert _run(svc.compute_debt_map(since_period="2026-07")) == {
+        "STU-A": {"2026-07": 1000},
+    }
+
+
+def test_since_period_empty_means_all_time():
+    svc = _service(
+        [_lesson("LES-1", "TCH-0001", "2026-05-10", s1="STU-A")],
+        [_teacher()], [],
+    )
+    assert _run(svc.compute_debt_map(since_period=None)) == {"STU-A": {"2026-05": 1000}}

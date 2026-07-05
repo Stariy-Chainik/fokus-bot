@@ -19,6 +19,7 @@ from bot.repositories import StudentRepository
 from bot.services import PaymentService
 from bot.utils.dates import display_period
 from bot.utils.locks import InProgressGuard
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_debtors")
@@ -40,8 +41,11 @@ async def _collect_debtors(
 
     Элемент: {student, periods: {period → ₽}, total, closed_total, has_parent}.
     closed_total — долг только за закрытые (прошедшие) месяцы.
+    Учёт ведётся с DEBTORS_SINCE_PERIOD (если задан) — ранние месяцы не долг.
     """
-    debt_map = await payment_service.compute_debt_map()
+    debt_map = await payment_service.compute_debt_map(
+        since_period=settings.debtors_since_period or None,
+    )
     if not debt_map:
         return []
     students = {s.student_id: s for s in await student_repo.get_all()}
@@ -118,8 +122,9 @@ async def _render_debtors(
     closed_grand = sum(d["closed_total"] for d in debtors)
     remind_targets = sum(1 for d in debtors if d["closed_total"] > 0 and d["has_parent"])
 
+    since = settings.debtors_since_period
     lines = [
-        "⚠️ <b>Должники</b>",
+        "⚠️ <b>Должники</b>" + (f" · учёт с {display_period(since)}" if since else ""),
         "",
         f"Всего: {len(debtors)} · Долг: <b>{grand_total} ₽</b> "
         f"(закрытые месяцы: {closed_grand} ₽)",
