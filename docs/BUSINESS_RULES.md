@@ -46,6 +46,11 @@
   платёж перепроверяется через API ЮКассы; подтверждение только при реальном `succeeded` —
   [bot/handlers/client/payments.py](../bot/handlers/client/payments.py) (`process_yookassa_event`).
   `PAID` ставится ровно двумя путями: верифицированный webhook или подтверждение админа.
+- **Долг ученика** (экран «⚠️ Должники») = начисления по всем занятиям минус PAID-оплаты по
+  `(student, teacher, period)`; выставлялся ли счёт — не важно; `amount=0` (абонемент) в долг
+  не входит — [payment_service.py](../bot/services/payment_service.py) (`compute_debt_map`).
+  Текущий (незакрытый) месяц показывается админу с пометкой, но в напоминания родителям
+  **не включается** — напоминаем только за закрытые месяцы (правило месячного закрытия).
 
 ## Видимость педагог ↔ ученик
 - Педагог видит ученика ⇔ пересечение `teacher_groups ∩ student_groups` непусто — [bot/services/visibility.py:9-15](../bot/services/visibility.py#L9). Таблицы `teacher_students` **нет**.

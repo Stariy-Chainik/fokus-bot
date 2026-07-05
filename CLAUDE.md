@@ -65,6 +65,7 @@ bot/handlers/
     salaries.py          # teacher earnings by period (salary_teacher/period)
     bills.py             # student invoices: view → send to parent; multi-recipient
     profit.py            # «Выручка»: school revenue vs salary summary
+    debtors.py           # «⚠️ Должники»: сводный контроль оплат + массовое напоминание
     branches.py          # branches/groups CRUD, teacher↔group, group billing, bulk send
     edit_lesson.py       # admin-only lesson view/delete (bypasses period lock)
     diagnostics.py       # consistency check (orphan lessons etc.)
@@ -273,6 +274,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Approve child request | `admin_child_ok:{tg_id}:{student_id}` | Sent by a parent via `client:add_child` |
 | Salaries | `admin:salaries` | Earnings per teacher per period |
 | Bills | `admin:bills` | Invoices per student per period; multi-recipient send to parent (no submission check) |
+| **Debtors** | `admin:debtors` | Сводный долг по всем ученикам/периодам (on-demand: начисления − PAID). Текущий месяц помечен `*` и в напоминание не входит. «📤 Напомнить всем» — рассылка родителям должников за закрытые месяцы (с подтверждением) |
 | Выручка | `admin:profit` | School revenue vs salary summary; by day or by period |
 | Branches/Groups | `admin:branches` | CRUD branches, groups, billing modes, prices; bulk bill send per group |
 | Edit lessons | `admin:edit_lesson` | Pick teacher → date/month/all → view+delete (bypasses period lock) |

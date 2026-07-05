@@ -9,6 +9,7 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Заявки", callback_data="admin:requests")],
         [InlineKeyboardButton(text="🏢 Филиалы и группы", callback_data="admin:branches")],
         [InlineKeyboardButton(text="🧾 Счёт ученика за период", callback_data="bills:view")],
+        [InlineKeyboardButton(text="⚠️ Должники", callback_data="admin:debtors")],
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="📝 Отметить занятие", callback_data="admin:record_lesson")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],

@@ -102,6 +102,42 @@ class PaymentService:
             invoices.append(payment)
         return invoices
 
+    async def compute_debt_map(self) -> dict[str, dict[str, int]]:
+        """Карта долгов по всем ученикам и периодам: student_id → {period_month → долг ₽}.
+
+        Долг считается on-demand так же, как «К оплате» у родителя: начисления
+        (build_billing_rows по всем занятиям) минус оплаченные (student, teacher,
+        period) со статусом PAID. Наличие/отсутствие выставленного счёта роли
+        не играет. amount=0 (абонемент) в долг не входит.
+        """
+        lessons = await self._lesson_repo.get_all()
+        teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
+
+        accrued: dict[tuple[str, str, str], int] = {}  # (student, teacher, period) → ₽
+        for ls in lessons:
+            teacher = teachers.get(ls.teacher_id)
+            if teacher is None:
+                logger.warning("compute_debt_map: педагог %s не найден (занятие %s)",
+                               ls.teacher_id, ls.lesson_id)
+                continue
+            for b in build_billing_rows(ls, teacher):
+                key = (b.student_id, b.teacher_id, b.period_month)
+                accrued[key] = accrued.get(key, 0) + b.amount
+
+        paid = {
+            (p.student_id, p.teacher_id, p.period_month)
+            for p in await self._payment_repo.get_all()
+            if p.status == PaymentStatus.PAID
+        }
+
+        debts: dict[str, dict[str, int]] = {}
+        for (sid, tid, period), amount in accrued.items():
+            if amount <= 0 or (sid, tid, period) in paid:
+                continue
+            per_student = debts.setdefault(sid, {})
+            per_student[period] = per_student.get(period, 0) + amount
+        return debts
+
     async def confirm_payment(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
         payment = next(
             (p for p in await self._payment_repo.get_all() if p.payment_id == payment_id),
