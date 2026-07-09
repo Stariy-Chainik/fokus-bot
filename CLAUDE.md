@@ -42,7 +42,7 @@ Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-se
 
 1. Build **`SheetsClient`** from settings (one shared gspread client, caches Worksheet handles).
 2. Construct **13 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
-3. Construct **6 services**: `LessonService`, `PaymentService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `CloudKassirService`.
+3. Construct **7 services**: `LessonService`, `PaymentService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
 4. Pick **FSM storage**: `RedisStorage` if `REDIS_URL` is set, else `MemoryStorage`.
 5. Register two middlewares (in this order):
    - **`DedupUpdateMiddleware`** (outer) — drops re-delivered Telegram updates by `m:{chat_id}:{message_id}` / `c:{callback_query.id}` key with 60 s TTL, GC after 256 entries.
@@ -60,18 +60,21 @@ bot/handlers/
   common.py              # /start, /menu, mode:admin/teacher, go:home, noop
   admin/
     teachers.py          # teacher CRUD, rates, groups, submission status icons
-    students.py          # student CRUD, partnerships, client linking, search
+    students/            # ПАКЕТ (P5-разбивка god-файла): _base (router+_render_student_card),
+                         #   overview, listing, add, delete, partners, groups, requests, client
     client_requests.py   # approve/reject parent→student link requests (admin_child_ok/no)
     salaries.py          # teacher earnings by period (salary_teacher/period)
     bills.py             # student invoices: view → send to parent; multi-recipient
     profit.py            # «Выручка»: school revenue vs salary summary
     debtors.py           # «⚠️ Должники»: сводный контроль оплат + массовое напоминание
-    branches.py          # branches/groups CRUD, teacher↔group, group billing, bulk send
+    branches/            # ПАКЕТ (P5): _base (router+_render_group_card), crud_branches,
+                         #   groups, bulk, billing, members
     edit_lesson.py       # admin-only lesson view/delete (bypasses period lock)
     diagnostics.py       # consistency check (orphan lessons etc.)
     record_lesson.py     # proxy: admin records lessons on behalf of a teacher
   teacher/
-    record_lesson.py     # FSM RecordLessonStates: type → students/group → date → duration
+    record_lesson/       # ПАКЕТ (P5): _base, flows, finalize (LessonService),
+                         #   entry, schedule, group, soloist, pair, shared. FSM RecordLessonStates
     my_lessons.py        # view/delete own lessons; lesson_detail shared with admin
     submit_period.py     # lock period for billing (allowed from 25th of month)
     my_groups.py         # group roster; add student via search/create
@@ -84,6 +87,10 @@ bot/handlers/
     my_bills.py          # invoices by month + payment methods + receipt upload
     payments.py          # YooKassa webhook (verified via API re-fetch) + Telegram Payments pre_checkout
 ```
+
+> **P5-декомпозиция:** `admin/students`, `admin/branches`, `teacher/record_lesson` — теперь **пакеты**
+> (каждый под-модуль экспортирует свой набор хендлеров на общий `router` из `_base`; порядок регистрации =
+> порядок импорта в `__init__.py`). Публичный `router` пакета — как у обычного модуля.
 
 Each handler file exports one `Router`. Aggregated in `bot/handlers/{admin,teacher,client}/__init__.py`, then in `bot/handlers/__init__.py`, registered in `bot/__main__.py`.
 
@@ -118,7 +125,9 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 |---|---|
 | `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). |
 | `BillingService` ([billing_service.py](bot/services/billing_service.py)) | Pure functions only: `calc_earned()` (teacher salary) and `build_billing_rows()` (virtual per-student Billing rows, computed on demand from a Lesson + Teacher). |
-| `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL). Does **not** check submission status — admins/billing teachers can issue bills anytime. |
+| `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins/billing teachers can issue bills anytime. |
+| `StudentService` | Бизнес-логика ученика поверх нескольких репо: `create_with_group()`, `delete_student()`, `toggle_tier()`, `pairs_in_group()` / `soloists_in_group()`, `partner_candidates()`, `get_student_card()` → `StudentCard` DTO (собирает карточку из 7 репо, чтобы хендлер только рисовал). |
+| `StudentRequestService` | Обработка заявок педагогов на новых учеников: `approve_create()`, `approve_link_existing()` (→ `LinkExistingOutcome`). |
 | `TeacherVisibilityService` | Who can see whom: `students_for_teacher()`, `students_in_group_for_teacher()`, `teachers_for_student()`, `is_visible()`. Pure intersection of `teacher_groups` and `student_groups`. |
 | `DiagnosticsService` | `run_consistency_check()` → `DiagnosticsReport` (orphan lessons referencing missing teachers/students). |
 | `CloudKassirService` | `send_income_receipt(phone, student_name, period_month, amount)` — fires a fiscal receipt; phone is normalized to `+7…`. No-op if `CLOUDKASSIR_PUBLIC_ID` is empty. |
@@ -147,9 +156,9 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
 
 ### Keyboards
 
-Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. Two important module-level constants live in [bot/keyboards/teacher.py](bot/keyboards/teacher.py):
+Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. Two important staff-config constants live in [bot/staff.py](bot/staff.py) (single source after P3; [bot/keyboards/teacher.py](bot/keyboards/teacher.py) re-imports them):
 
-- `_PROXY_BUTTONS: dict[teacher_id → list[(label, callback)]]` — extra buttons in the teacher menu. Used for Клецова (TCH-0002 → record for TCH-0005/0008).
+- `PROXY_BUTTONS: dict[teacher_id → list[(label, callback)]]` — extra buttons in the teacher menu. Used for Клецова (TCH-0002 → record for TCH-0005/0008).
 - `BILLING_TEACHERS: set[str]` — teachers with access to the billing UI. Currently `{"TCH-0009"}` (Контарева).
 
 `kb_lesson_detail()` takes an `is_admin: bool` flag — when `True`, admins see the delete button even for locked lessons (with `(🔒 период сдан)` suffix).
@@ -158,7 +167,7 @@ Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `comm
 
 In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlights:
 
-- `RecordLessonStates` (~17 states) — the lesson-recording wizard. Lives in [bot/handlers/teacher/record_lesson.py](bot/handlers/teacher/record_lesson.py).
+- `RecordLessonStates` (~17 states) — the lesson-recording wizard. Handlers live in the [bot/handlers/teacher/record_lesson/](bot/handlers/teacher/record_lesson/) package (P5-split by stage).
 - `SubmitPeriodStates` — month picker → confirmation.
 - `AddTeacherStates`, `EditTeacherRatesStates`, `AddStudentStates`, `PartnerAssignStates`, `ConfirmPaymentStates`, `StudentListStates` — admin flows.
 - `AddBranchStates`, `EditBranchNameStates`, `AddGroupStates`, `EditGroupNameStates`, `GroupBillingStates`, `GroupAddStudentStates` — branch/group flows.
@@ -166,18 +175,20 @@ In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlight
 - `ClientCreateStates`, `ClientRegStates` — client side.
 - `ReceiptStates` — uploading a payment receipt (client → admin).
 
-**Admin proxy pattern**: `proxy_teacher_id` in FSM state lets an admin (or Клецова) record lessons on behalf of another teacher. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id`. Proxy by Клецова requires admin approval (`proxy_approve` / `proxy_deny` / `proxy_record_go` in `teacher/record_lesson.py`); admins bypass approval entirely.
+**Admin proxy pattern**: `proxy_teacher_id` in FSM state lets an admin (or Клецова) record lessons on behalf of another teacher. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id` (in `record_lesson/_base.py`). Proxy by Клецова requires admin approval (`proxy_approve` / `proxy_deny` / `proxy_record_go` in `teacher/record_lesson/entry.py`); admins bypass approval entirely.
 
 **Lesson-history back-nav**: FSM key `t_stu_les_back` stores the return callback when a teacher opens a lesson detail from a student/pair card. `cb_lesson_detail` in `my_lessons.py` honors it before falling back to the default.
 
 ### Race-condition guards
 
-Module-level `set` lockers are sprinkled where double-clicks would corrupt data:
-- `_confirming_lesson_ids` in `teacher/record_lesson.py` (per tg_id)
+Module-level `InProgressGuard` lockers (unified in P2, see [bot/utils/locks.py](bot/utils/locks.py) — `key in guard` / `guard.add()` / `guard.discard()`, always released in `finally`) where double-clicks would corrupt data:
+- `_confirming_lesson_ids` in `teacher/record_lesson/finalize.py` (per tg_id)
 - `_submitting` in `teacher/submit_period.py`
 - `_sending_in_progress`, `_confirming_in_progress` in `admin/bills.py`
 - `_sending`, `_group_sending` in `teacher/billing.py`
-- `_seen` in `DedupUpdateMiddleware`
+- `_group_send_in_progress` in `admin/branches/bulk.py`
+- `_reminding` in `admin/debtors.py`
+- `_seen` in `DedupUpdateMiddleware` (raw set + TTL GC)
 
 ### ID format
 
@@ -325,7 +336,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 
 ## Special roles & configuration
 
-**Клецова Ангелина (TCH-0002)** — assistant. Her menu has extra proxy buttons for Никишин (TCH-0005) and Криворчук (TCH-0008). Configured in `_PROXY_BUTTONS` in [bot/keyboards/teacher.py](bot/keyboards/teacher.py). Proxy requests require admin approval (see "FSM states" → admin proxy pattern).
+**Клецова Ангелина (TCH-0002)** — assistant. Her menu has extra proxy buttons for Никишин (TCH-0005) and Криворчук (TCH-0008). Configured in `PROXY_BUTTONS` in [bot/staff.py](bot/staff.py) (the single staff-config module; `keyboards/teacher.py` re-imports it as `_PROXY_BUTTONS`). Proxy requests require admin approval (see "FSM states" → admin proxy pattern).
 
 **Контарева Елизавета (TCH-0009)** — teacher with billing access. Her menu has an extra «💰 Счета учеников» button (handlers in [bot/handlers/teacher/billing.py](bot/handlers/teacher/billing.py)). Scope is strictly her own groups: every callback re-validates `_can_bill(user)`, `_is_my_group(...)`, and `_is_student_in_group(...)`. Bill content is the same as the admin one (combines lessons of all teachers for that student) — she sees the «full» bill, not just her own lessons. Whitelist defined as `BILLING_TEACHERS = {"TCH-0009"}`. Add a teacher_id to that set to grant the same access.
 
