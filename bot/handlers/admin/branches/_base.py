@@ -43,7 +43,6 @@ def _kb_group_card(group_id: str, branch_id: str, students: list) -> InlineKeybo
     rows += [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
         [InlineKeyboardButton(text="💰 Биллинг ученикам", callback_data=f"group_billing:{group_id}")],
-        [InlineKeyboardButton(text="📤 Разослать счета группе", callback_data=f"group_send_bills:{group_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

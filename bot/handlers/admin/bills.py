@@ -23,9 +23,55 @@ router = Router(name="admin_bills")
 
 _confirming_in_progress = InProgressGuard()
 _sending_in_progress = InProgressGuard()
+_group_sending = InProgressGuard()
 
 
 from bot.handlers.access import is_admin as _is_admin
+
+
+async def _send_bill_to_parents(
+    callback: CallbackQuery, student, period: str, bills: dict,
+    group_names: list[str],
+    payment_service: PaymentService, client_repo: ClientRepository,
+) -> tuple[int, int, int]:
+    """Отправить счёт родителям ученика. Возвращает (recipients_total, sent_to, sent_invoices)."""
+    invoices = await payment_service.get_or_create_invoices_for_student_period(student, period)
+    bill_text, _ = build_bill_text(student.name, group_names, period, bills)
+
+    client = await client_repo.get_by_id(student.client_id) if student.client_id else None
+    recipients: list[int] = []
+    if client and client.tg_id:
+        recipients.append(client.tg_id)
+    for pid in (student.parent_tg_ids or []):
+        if pid not in recipients:
+            recipients.append(pid)
+
+    sent_to = 0
+    sent_invoices = 0
+    for tg_id in recipients:
+        try:
+            await callback.bot.send_message(tg_id, bill_text)
+            sent_to += 1
+        except Exception as exc:
+            logger.error("Ошибка отправки родителю tg_id=%s: %s", tg_id, exc)
+            continue
+        if settings.payment_provider_token:
+            for p in invoices:
+                if p.status.value != "paid":
+                    try:
+                        await callback.bot.send_invoice(
+                            chat_id=tg_id,
+                            title=f"Занятия {display_period(period)}",
+                            description=f"Педагог: {p.teacher_name or '—'}",
+                            payload=p.payment_id,
+                            provider_token=settings.payment_provider_token,
+                            currency="RUB",
+                            prices=[LabeledPrice(label="Обучение", amount=p.total_amount * 100)],
+                        )
+                        sent_invoices += 1
+                    except Exception as exc:
+                        logger.error("Ошибка инвойса %s: %s", p.payment_id, exc)
+    return len(recipients), sent_to, sent_invoices
 
 
 def _period_buttons(student_id: str, action_prefix: str) -> InlineKeyboardMarkup:
@@ -183,16 +229,97 @@ async def cb_bills_choose_student(
         )
         await callback.answer()
         return
-    rows = [
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
+            text="📨 Отправить счета всей группе",
+            callback_data=f"bill_group_send:{period}:{group_id}",
+        )],
+    ]
+    rows += [
         [InlineKeyboardButton(text=s.name, callback_data=f"bvs:{period}:{group_id}:{s.student_id}")]
         for s in students
     ]
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"bvb:{period}:{group.branch_id}")])
     await callback.message.edit_text(
-        f"<b>{display_period(period)} — {group.name} — выберите ученика:</b>",
+        f"<b>{display_period(period)} — {group.name}</b>\n"
+        "Отправить счета всей группе или выберите ученика:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("bill_group_send:"))
+async def cb_bill_group_send(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository,
+    student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
+    payment_service: PaymentService, client_repo: ClientRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, period, gid = callback.data.split(":", 2)
+    group = await group_repo.get_by_id(gid)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+
+    lock_key = f"{gid}:{period}"
+    if lock_key in _group_sending:
+        await callback.answer("Рассылка уже выполняется", show_alert=True)
+        return
+    _group_sending.add(lock_key)
+    try:
+        member_ids = set(await student_group_repo.get_students_for_group(gid))
+        students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
+
+        sent_students = 0
+        no_parent_students = 0
+        failed_students = 0
+        total_sent_to = 0
+        for s in students:
+            bills = await payment_service.compute_bills_for_student_period(s.student_id, period)
+            if not bills:
+                continue
+            gids = await student_group_repo.get_groups_for_student(s.student_id)
+            group_names: list[str] = []
+            for g_id in gids:
+                g = await group_repo.get_by_id(g_id)
+                if g:
+                    group_names.append(g.name)
+            total_rec, sent_to, _ = await _send_bill_to_parents(
+                callback, s, period, bills, group_names, payment_service, client_repo,
+            )
+            if total_rec == 0:
+                no_parent_students += 1
+            elif sent_to == 0:
+                failed_students += 1
+            else:
+                sent_students += 1
+                total_sent_to += sent_to
+
+        back_cb = f"bvg:{period}:{gid}"
+        lines = [
+            f"<b>📨 Рассылка по группе «{group.name}»</b>",
+            f"Период: {display_period(period)}",
+            "",
+            f"✅ Отправлено родителям: {sent_students} учеников ({total_sent_to} сообщений)",
+        ]
+        if no_parent_students:
+            lines.append(f"⚠️ Без привязанного родителя: {no_parent_students}")
+        if failed_students:
+            lines.append(f"❌ Не доставлено (бот заблокирован): {failed_students}")
+        logger.info("Admin group bill sent group=%s period=%s sent=%s", gid, period, sent_students)
+        await callback.message.edit_text(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« К ученикам", callback_data=back_cb)],
+                [InlineKeyboardButton(text="🏠 В меню", callback_data="admin:menu")],
+            ]),
+        )
+        await callback.answer()
+    finally:
+        _group_sending.discard(lock_key)
 
 
 @router.callback_query(F.data.startswith("bvs:"))
