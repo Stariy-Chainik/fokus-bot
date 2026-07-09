@@ -3,7 +3,7 @@ import logging
 import uuid
 
 from bot.models import StudentPeriodPayment, Student
-from bot.models.enums import PaymentStatus
+from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
 from bot.utils import generate_payment_id, now_str
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
@@ -12,6 +12,11 @@ from .billing_service import build_billing_rows
 
 logger = logging.getLogger(__name__)
 
+# Ключ «педагога» для абонементного начисления в счетах/долгах: SUB:{group_id}.
+# Абонемент — продукт группы, а не педагога, но модель инвойса требует teacher_id;
+# синтетический ключ хранится в той же строковой колонке.
+SUBSCRIPTION_KEY_PREFIX = "SUB:"
+
 
 class PaymentService:
     def __init__(
@@ -19,10 +24,55 @@ class PaymentService:
         payment_repo: PaymentRepository,
         lesson_repo: LessonRepository,
         teacher_repo: TeacherRepository,
+        group_repo=None,
+        student_group_repo=None,
     ) -> None:
         self._payment_repo = payment_repo
         self._lesson_repo = lesson_repo
         self._teacher_repo = teacher_repo
+        # Опциональны (для абонементных начислений); без них подписки не считаются.
+        self._group_repo = group_repo
+        self._student_group_repo = student_group_repo
+
+    async def _subscription_bills_for_student(
+        self, student_id: str, period_month: str,
+    ) -> dict[str, dict]:
+        """Абонементные начисления ученика за период: {SUB:gid → agg}.
+
+        Правило: группа с billing_mode=SUBSCRIPTION → фиксированная price_full
+        ₽/месяц с ученика, НЕЗАВИСИМО от числа занятий; начисляется, только если
+        в этом месяце у группы было хотя бы одно занятие (каникулы — не платят).
+        """
+        if self._group_repo is None or self._student_group_repo is None:
+            return {}
+        gids = await self._student_group_repo.get_groups_for_student(student_id)
+        if not gids:
+            return {}
+        sub_groups = []
+        for gid in gids:
+            group = await self._group_repo.get_by_id(gid)
+            if group and group.billing_mode == GroupBillingMode.SUBSCRIPTION and group.price_full > 0:
+                sub_groups.append(group)
+        if not sub_groups:
+            return {}
+        # Месяцы активности групп — одним проходом по занятиям.
+        active: set[str] = set()
+        sub_ids = {g.group_id for g in sub_groups}
+        for ls in await self._lesson_repo.get_all():
+            if (ls.type == LessonType.GROUP and ls.group_id in sub_ids
+                    and ls.date[:7] == period_month):
+                active.add(ls.group_id)
+        result: dict[str, dict] = {}
+        for group in sub_groups:
+            if group.group_id not in active:
+                continue
+            result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = {
+                "name": f"Абонемент «{group.name}»",
+                "total": group.price_full,
+                "items": [],
+                "subscription": True,
+            }
+        return result
 
     async def compute_bills_for_student_period(
         self, student_id: str, period_month: str,
@@ -50,6 +100,7 @@ class PaymentService:
                 })
                 agg["total"] += b.amount
                 agg["items"].append(b)
+        result.update(await self._subscription_bills_for_student(student_id, period_month))
         return result
 
     async def get_or_create_invoices_for_student_period(
@@ -126,6 +177,25 @@ class PaymentService:
             for b in build_billing_rows(ls, teacher):
                 key = (b.student_id, b.teacher_id, b.period_month)
                 accrued[key] = accrued.get(key, 0) + b.amount
+
+        # Абонементные начисления: price_full ₽/мес каждому участнику SUBSCRIPTION-группы
+        # за каждый месяц, где у группы было хотя бы одно занятие.
+        if self._group_repo is not None and self._student_group_repo is not None:
+            sub_groups = [
+                g for g in await self._group_repo.get_all()
+                if g.billing_mode == GroupBillingMode.SUBSCRIPTION and g.price_full > 0
+            ]
+            if sub_groups:
+                months_by_group: dict[str, set[str]] = {}
+                for ls in lessons:
+                    if ls.type == LessonType.GROUP and ls.group_id:
+                        months_by_group.setdefault(ls.group_id, set()).add(ls.date[:7])
+                for g in sub_groups:
+                    members = await self._student_group_repo.get_students_for_group(g.group_id)
+                    for period in months_by_group.get(g.group_id, ()):
+                        for sid in members:
+                            key = (sid, f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}", period)
+                            accrued[key] = accrued.get(key, 0) + g.price_full
 
         paid = {
             (p.student_id, p.teacher_id, p.period_month)

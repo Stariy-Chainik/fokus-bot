@@ -65,7 +65,7 @@ CRM для танцевальной школы: учёт **занятий**, р�
 - `LessonType`: `group` | `individual`
 - `PaymentStatus`: `pending` | `paid`
 - `RequestStatus`: `pending` | `approved` | `rejected`
-- `GroupBillingMode`: `none` | `per_visit` | `subscription` *(последний — зарезервирован, не реализован)*
+- `GroupBillingMode`: `none` | `per_visit` | `subscription` *(абонемент: фикс `price_full` ₽/мес)*
 - `StudentGroupTier`: `full` | `short`
 
 ### User
@@ -195,7 +195,10 @@ CRM для танцевальной школы: учёт **занятий**, р�
   сразу с `attendees=null` (без экрана отметки присутствующих).
 - `per_visit` — каждое посещение по цене группы (`price_full`/`price_short`); в момент записи в
   `attendees` кладётся **снапшот** тарифа на каждого присутствующего.
-- `subscription` — **не реализовано**.
+- `subscription` — **абонемент**: фиксированная `price_full` ₽/месяц с каждого ученика группы,
+  количество занятий не влияет; начисляется за месяц, в котором у группы было **хотя бы одно
+  занятие** (каникулы — не платят); посещаемость не отмечается (`attendees=null`); в счетах/долгах
+  начисление под синтетическим ключом `SUB:{group_id}` (в поле `teacher_id` инвойса).
 - Текущие `per_visit`-группы: `GRP-0007, GRP-0008, GRP-0010, GRP-0015, GRP-0017, GRP-0018`; остальные `none`.
 
 ### Тарифы SHORT/FULL

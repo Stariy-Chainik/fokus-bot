@@ -190,7 +190,12 @@ async def cb_bill_detail(
 
             teacher_name = agg["name"] or teacher_id
             paid_mark = " ✅" if teacher_paid else ""
-            lines.append(f"<b>Педагог: {teacher_name}{paid_mark}</b>")
+            if agg.get("subscription"):
+                # Абонемент — продукт группы: без префикса «Педагог», фикс за месяц.
+                lines.append(f"<b>💳 {teacher_name}{paid_mark}</b>")
+                lines.append("  фиксированная сумма за месяц")
+            else:
+                lines.append(f"<b>Педагог: {teacher_name}{paid_mark}</b>")
 
             for item in sorted(agg["items"], key=lambda b: b.date):
                 lines.append(

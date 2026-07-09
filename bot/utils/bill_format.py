@@ -19,6 +19,13 @@ def build_bill_text(
     grand_total = 0
     for agg in bills.values():
         grand_total += agg["total"]
+        if agg.get("subscription"):
+            # Абонемент: фикс-сумма за месяц, без разбивки по датам.
+            lines.append(f"💳 <b>{agg['name']}</b>")
+            lines.append("    · фиксированная сумма за месяц")
+            lines.append(f"  <b>Сумма: {agg['total']} ₽</b>")
+            lines.append("")
+            continue
         lines.append(f"👨‍🏫 <b>{agg['name']}</b>")
         cur_date: str | None = None
         for b in sorted(agg["items"], key=lambda x: x.date):

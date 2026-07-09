@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 # ─── Биллинг ученикам (per-visit) ────────────────────────────────────────────
 
 _MODE_TITLES = {
-    GroupBillingMode.NONE: "не выставляется (группа бесплатная или абонемент)",
+    GroupBillingMode.NONE: "не выставляется (группа бесплатная)",
     GroupBillingMode.PER_VISIT: "по посещениям (per-visit)",
-    GroupBillingMode.SUBSCRIPTION: "абонемент (зарезервировано)",
+    GroupBillingMode.SUBSCRIPTION: "абонемент (фиксированная сумма в месяц)",
 }
 
 
@@ -45,12 +45,29 @@ def _kb_group_billing(group_id: str, mode: GroupBillingMode) -> InlineKeyboardMa
             text="✏️ Изменить тарифы", callback_data=f"group_billing_edit:{group_id}",
         )])
         rows.append([InlineKeyboardButton(
+            text="💳 Переключить на абонемент", callback_data=f"group_billing_sub:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="🚫 Отключить биллинг", callback_data=f"group_billing_off:{group_id}",
+        )])
+    elif mode == GroupBillingMode.SUBSCRIPTION:
+        rows.append([InlineKeyboardButton(
+            text="✏️ Изменить цену абонемента", callback_data=f"group_billing_sub:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="💰 Переключить на посещения", callback_data=f"group_billing_edit:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
             text="🚫 Отключить биллинг", callback_data=f"group_billing_off:{group_id}",
         )])
     else:
         rows.append([InlineKeyboardButton(
             text="💰 Включить биллинг по посещениям",
             callback_data=f"group_billing_edit:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="💳 Включить абонемент (₽/мес)",
+            callback_data=f"group_billing_sub:{group_id}",
         )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_card:{group_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -72,6 +89,16 @@ def _billing_text(group_name: str, mode: GroupBillingMode,
             "",
             "Тариф ученика выбирается в его карточке.",
             "На занятии у педагога появятся отметки длительности.",
+        ]
+    elif mode == GroupBillingMode.SUBSCRIPTION:
+        lines += [
+            "",
+            f"💳 Абонемент: <b>{price_full} ₽ в месяц</b> с ученика",
+            "",
+            "Сумма фиксированная — количество занятий не влияет.",
+            "Начисляется всем ученикам группы за месяц, в котором",
+            "у группы было хотя бы одно занятие (каникулы — не платят).",
+            "Присутствующих на занятии отмечать не нужно.",
         ]
     return "\n".join(lines)
 
@@ -232,6 +259,67 @@ async def group_billing_price_full(
             price_short, duration_short, price_full, duration_full,
         ),
         reply_markup=_kb_group_billing(group_id, GroupBillingMode.PER_VISIT),
+    )
+
+
+# ─── Абонемент (SUBSCRIPTION): фикс-сумма в месяц ────────────────────────────
+
+@router.callback_query(F.data.startswith("group_billing_sub:"))
+async def cb_group_billing_sub(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    await state.set_state(GroupBillingStates.entering_sub_price)
+    await state.update_data(group_id=group_id)
+    current = (
+        f"Текущая цена: {group.price_full} ₽/мес.\n"
+        if group.billing_mode == GroupBillingMode.SUBSCRIPTION else ""
+    )
+    await callback.message.edit_text(
+        "<b>💳 Абонемент группы</b>\n\n"
+        f"{current}"
+        "Введите цену абонемента в рублях за месяц (например, 3000).\n"
+        "Сумма фиксированная — количество занятий в месяце не влияет.",
+        reply_markup=kb_back(f"group_billing:{group_id}"),
+    )
+    await callback.answer()
+
+
+@router.message(GroupBillingStates.entering_sub_price)
+async def group_billing_sub_price(
+    message: Message, state: FSMContext, group_repo: GroupRepository,
+) -> None:
+    v = _parse_positive_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число рублей больше 0. Введите ещё раз:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    group_id = data["group_id"]
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await message.answer("Группа не найдена.", reply_markup=kb_back("admin:branches"))
+        return
+    # Цена абонемента хранится в price_full; short-поля не используются этим режимом.
+    await group_repo.update_billing(
+        group_id, GroupBillingMode.SUBSCRIPTION,
+        group.price_short, group.duration_short, v, group.duration_full,
+    )
+    logger.info("Группа %s переведена на абонемент: %d ₽/мес", group_id, v)
+    await message.answer(
+        _billing_text(
+            group.name, GroupBillingMode.SUBSCRIPTION,
+            group.price_short, group.duration_short, v, group.duration_full,
+        ),
+        reply_markup=_kb_group_billing(group_id, GroupBillingMode.SUBSCRIPTION),
     )
 
 

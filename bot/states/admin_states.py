@@ -58,6 +58,7 @@ class GroupBillingStates(StatesGroup):
     entering_price_short = State()
     entering_duration_full = State()
     entering_price_full = State()
+    entering_sub_price = State()  # цена абонемента, ₽/месяц (режим SUBSCRIPTION)
 
 
 class GroupAddStudentStates(StatesGroup):

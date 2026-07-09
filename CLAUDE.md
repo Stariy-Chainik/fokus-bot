@@ -139,7 +139,7 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
 - `LessonType`: `GROUP` | `INDIVIDUAL`
 - `PaymentStatus`: `PENDING` | `PAID`
 - `RequestStatus`: `PENDING` | `APPROVED` | `REJECTED`
-- `GroupBillingMode`: `NONE` | `PER_VISIT` | `SUBSCRIPTION` (last one not implemented)
+- `GroupBillingMode`: `NONE` | `PER_VISIT` | `SUBSCRIPTION` (абонемент: фикс `price_full` ₽/мес)
 - `StudentGroupTier`: `FULL` | `SHORT` (used only by kindergarten groups ЮБ/БП)
 
 ### Utils
@@ -245,8 +245,8 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 - **Teacher visibility**: derived from `teacher_groups` ∩ `student_groups`. There is **no** `teacher_students` table.
 - **Multi-group students**: a student can belong to multiple groups; billing aggregates across all per period.
 - **SHORT/FULL tiers** (`StudentGroupTier`): only for kindergarten groups (ЮБ/БП); all others have one price.
-- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (not implemented).
-- **NONE groups auto-save**: recording a group lesson for a NONE-mode group skips attendance and saves immediately with `attendees=None`.
+- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (абонемент: фиксированная `price_full` ₽/мес с каждого ученика группы, **независимо от числа занятий**; начисляется за месяц, где у группы было ≥1 занятие; ключ начисления в счетах/долгах — `SUB:{group_id}`; см. `PaymentService._subscription_bills_for_student`).
+- **NONE/SUBSCRIPTION groups auto-save**: recording a group lesson for these modes skips attendance and saves immediately with `attendees=None` (roster shown only for PER_VISIT).
 - **Duplicate guard**:
   - Group lessons: **not** blocked — a group can be recorded twice in one day (different shifts/streams).
   - Solo lessons (exactly 1 student): blocked by `teacher + student + date` via `individual_lesson_exists`. Pairs are intentionally not blocked (a student can be in a pair and a solo on the same day).

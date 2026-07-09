@@ -30,7 +30,7 @@ async def main():
     lrepo = LessonRepository(sc, settings.sheet_lessons)
     trepo = TeacherRepository(sc, settings.sheet_teachers)
     prepo = PaymentRepository(sc, settings.sheet_payments)
-    ps = PaymentService(prepo, lrepo, trepo)
+    ps = PaymentService(prepo, lrepo, trepo, group_repo=grepo, student_group_repo=sgrepo)
 
     bot = Bot(
         token=settings.bot_token,
