@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class AttendeeEntry:
     student_id: str
     duration_min: int
-    amount: int  # рубли; 0 для пробных или неоплачиваемых групп
+    amount: int  # рубли; 0 = абонемент / неоплачиваемая группа (в счёт не входит)
 
 
 def parse_attendees(raw: str | None, default_duration: int = 60) -> list[AttendeeEntry]:
