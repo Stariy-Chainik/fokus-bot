@@ -28,7 +28,6 @@ from bot.keyboards.teacher import (
     kb_multi_select, kb_group_roster_per_visit,
     kb_other_groups_picker, kb_other_group_students,
     kb_group_branch_picker, kb_group_picker, kb_shared_group_picker,
-    _PROXY_BUTTONS,
 )
 from bot.keyboards.admin import kb_admin_menu
 from bot.utils import build_group_attendees_csv

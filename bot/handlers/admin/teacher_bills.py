@@ -1,11 +1,11 @@
-"""Раздел «💰 Счета учеников» для педагогов из BILLING_TEACHERS.
+"""Админ: «🧾 Счета по педагогу» — выставление счетов ученикам групп педагога.
 
-Скоуп: только группы педагога. Можно:
-  • открыть карточку счёта одного ученика и отправить родителю
-  • разослать счета всем родителям группы одной кнопкой
+Флоу: выбрать педагога → его группы (за период) → ученик → отправить родителю,
+либо разослать счета всем родителям группы одной кнопкой.
 
-Логика подсчёта счёта и реальной отправки — переиспользуется из payment_service
-и bot.utils.bill_format (тот же текст счёта, что у админа).
+Счёт считается как у обычного счёта ученика (все педагоги ученика, не только
+выбранный) — тот же текст, что в admin/bills. Выбор педагога здесь — лишь способ
+навигации по его группам. Заменяет прежний спец-раздел Контаревой (спецроли убраны).
 """
 from __future__ import annotations
 
@@ -15,11 +15,10 @@ from datetime import date
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
-from bot.keyboards.teacher import BILLING_TEACHERS
 from bot.models import User
 from bot.repositories import (
     ClientRepository, GroupRepository, StudentGroupRepository,
-    StudentRepository, TeacherGroupRepository,
+    StudentRepository, TeacherGroupRepository, TeacherRepository,
 )
 from bot.services import PaymentService
 from bot.utils.bill_format import build_bill_text
@@ -28,14 +27,12 @@ from bot.utils.locks import InProgressGuard
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
-router = Router(name="teacher_billing")
+router = Router(name="admin_teacher_bills")
+
+from bot.handlers.access import is_admin as _is_admin
 
 _sending = InProgressGuard()
 _group_sending = InProgressGuard()
-
-
-def _can_bill(user: User | None) -> bool:
-    return bool(user and user.teacher_id and user.teacher_id in BILLING_TEACHERS)
 
 
 def _current_period() -> str:
@@ -48,127 +45,137 @@ def _periods(n: int = 3) -> list[str]:
     return [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(n)]
 
 
-async def _scope_groups(
-    user: User, teacher_group_repo: TeacherGroupRepository,
-    group_repo: GroupRepository,
+async def _teacher_groups(
+    teacher_id: str, teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> list:
-    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
     return sorted(
         [g for g in await group_repo.get_all() if g.group_id in gids],
         key=lambda g: g.name,
     )
 
 
-async def _is_my_group(
-    user: User, group_id: str, teacher_group_repo: TeacherGroupRepository,
-) -> bool:
-    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
-    return group_id in gids
+# ─── Вход: выбор педагога ────────────────────────────────────────────────────
 
-
-async def _is_student_in_group(
-    student_id: str, group_id: str, student_group_repo: StudentGroupRepository,
-) -> bool:
-    members = await student_group_repo.get_students_for_group(group_id)
-    return student_id in set(members)
-
-
-def _kb_period_picker(active: str) -> InlineKeyboardMarkup:
-    rows = []
-    for p in _periods(3):
-        mark = "✅ " if p == active else ""
-        rows.append([InlineKeyboardButton(
-            text=f"{mark}{display_period(p)}", callback_data=f"tb:p:{p}",
-        )])
-    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="teacher:menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-# ─── Вход: список групп за текущий период ────────────────────────────────────
-
-@router.callback_query(F.data == "teacher:bills")
-async def cb_bills_menu(
-    callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+@router.callback_query(F.data == "admin:teacher_bills")
+async def cb_tbills_pick_teacher(
+    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    await _show_groups(callback, user, _current_period(), teacher_group_repo, group_repo)
+    teachers = sorted(await teacher_repo.get_all(), key=lambda t: t.name)
+    rows = [
+        [InlineKeyboardButton(text=f"👨‍🏫 {t.name}", callback_data=f"atb:t:{t.teacher_id}")]
+        for t in teachers
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
+    await callback.message.edit_text(
+        "<b>🧾 Счета по педагогу</b>\n\nВыберите педагога:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tb:p:"))
-async def cb_bills_pick_period(
-    callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
-) -> None:
-    if not _can_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    period = callback.data.split(":", 2)[2]
-    await _show_groups(callback, user, period, teacher_group_repo, group_repo)
-
+# ─── Группы педагога за период ───────────────────────────────────────────────
 
 async def _show_groups(
-    callback: CallbackQuery, user: User, period: str,
+    callback: CallbackQuery, teacher_id: str, period: str,
+    teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    groups = await _scope_groups(user, teacher_group_repo, group_repo)
+    teacher = await teacher_repo.get_by_id(teacher_id)
+    if not teacher:
+        await callback.answer("Педагог не найден", show_alert=True)
+        return
+    groups = await _teacher_groups(teacher_id, teacher_group_repo, group_repo)
     if not groups:
         await callback.message.edit_text(
-            "У вас нет прикреплённых групп.",
+            f"У педагога <b>{teacher.name}</b> нет прикреплённых групп.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="« Назад", callback_data="teacher:menu")],
+                [InlineKeyboardButton(text="« К педагогам", callback_data="admin:teacher_bills")],
             ]),
         )
         await callback.answer()
         return
     rows = [
         [InlineKeyboardButton(
-            text=f"💃 {g.name}", callback_data=f"tb:g:{period}:{g.group_id}",
+            text=f"💃 {g.name}", callback_data=f"atb:g:{teacher_id}:{period}:{g.group_id}",
         )]
         for g in groups
     ]
-    rows.append([InlineKeyboardButton(text="🗓 Сменить период", callback_data=f"tb:pp:{period}")])
-    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="teacher:menu")])
+    rows.append([InlineKeyboardButton(
+        text="🗓 Сменить период", callback_data=f"atb:pp:{teacher_id}:{period}",
+    )])
+    rows.append([InlineKeyboardButton(text="« К педагогам", callback_data="admin:teacher_bills")])
     await callback.message.edit_text(
-        f"<b>💰 Счета — {display_period(period)}</b>\n\nВыберите группу:",
+        f"<b>🧾 {teacher.name} — {display_period(period)}</b>\n\nВыберите группу:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tb:pp:"))
-async def cb_bills_period_picker(
+@router.callback_query(F.data.startswith("atb:t:"))
+async def cb_tbills_teacher(
     callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    period = callback.data.split(":", 2)[2]
+    teacher_id = callback.data.split(":", 2)[2]
+    await _show_groups(callback, teacher_id, _current_period(), teacher_repo, teacher_group_repo, group_repo)
+
+
+@router.callback_query(F.data.startswith("atb:p:"))
+async def cb_tbills_period(
+    callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, teacher_id, period = callback.data.split(":", 3)
+    await _show_groups(callback, teacher_id, period, teacher_repo, teacher_group_repo, group_repo)
+
+
+@router.callback_query(F.data.startswith("atb:pp:"))
+async def cb_tbills_period_picker(
+    callback: CallbackQuery, user: User | None,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, teacher_id, active = callback.data.split(":", 3)
+    rows = []
+    for p in _periods(3):
+        mark = "✅ " if p == active else ""
+        rows.append([InlineKeyboardButton(
+            text=f"{mark}{display_period(p)}", callback_data=f"atb:p:{teacher_id}:{p}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"atb:p:{teacher_id}:{active}")])
     await callback.message.edit_text(
         "<b>Выберите период:</b>",
-        reply_markup=_kb_period_picker(period),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
 
 
-# ─── Карточка группы: ученики + «отправить всем» ─────────────────────────────
+# ─── Ученики группы + «отправить всем» ───────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tb:g:"))
-async def cb_bills_group(
+@router.callback_query(F.data.startswith("atb:g:"))
+async def cb_tbills_group(
     callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     payment_service: PaymentService,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, _, period, gid = callback.data.split(":", 3)
-    if not await _is_my_group(user, gid, teacher_group_repo):
-        await callback.answer("Группа не ваша", show_alert=True)
-        return
+    _, _, teacher_id, period, gid = callback.data.split(":", 4)
     group = await group_repo.get_by_id(gid)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -183,7 +190,7 @@ async def cb_bills_group(
         await callback.message.edit_text(
             f"В группе «{group.name}» нет учеников.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="« Назад", callback_data=f"tb:p:{period}")],
+                [InlineKeyboardButton(text="« Назад", callback_data=f"atb:p:{teacher_id}:{period}")],
             ]),
         )
         await callback.answer()
@@ -200,18 +207,18 @@ async def cb_bills_group(
         else:
             label = f"{s.name} — нет занятий"
         rows.append([InlineKeyboardButton(
-            text=label, callback_data=f"tb:s:{period}:{gid}:{s.student_id}",
+            text=label, callback_data=f"atb:s:{teacher_id}:{period}:{gid}:{s.student_id}",
         )])
 
     if has_any_bills:
         rows.append([InlineKeyboardButton(
             text="📨 Отправить счета всем родителям",
-            callback_data=f"tb:all:{period}:{gid}",
+            callback_data=f"atb:all:{teacher_id}:{period}:{gid}",
         )])
-    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"tb:p:{period}")])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"atb:p:{teacher_id}:{period}")])
 
     await callback.message.edit_text(
-        f"<b>💰 {group.name} — {display_period(period)}</b>\n\nВыберите ученика:",
+        f"<b>🧾 {group.name} — {display_period(period)}</b>\n\nВыберите ученика:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
@@ -219,24 +226,16 @@ async def cb_bills_group(
 
 # ─── Карточка счёта ученика ──────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tb:s:"))
-async def cb_bills_student(
+@router.callback_query(F.data.startswith("atb:s:"))
+async def cb_tbills_student(
     callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
-    group_repo: GroupRepository,
-    payment_service: PaymentService,
+    group_repo: GroupRepository, payment_service: PaymentService,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, _, period, gid, sid = callback.data.split(":", 4)
-    if not await _is_my_group(user, gid, teacher_group_repo):
-        await callback.answer("Группа не ваша", show_alert=True)
-        return
-    if not await _is_student_in_group(sid, gid, student_group_repo):
-        await callback.answer("Ученик не в этой группе", show_alert=True)
-        return
+    _, _, teacher_id, period, gid, sid = callback.data.split(":", 5)
     student = await student_repo.get_by_id(sid)
     if not student:
         await callback.answer("Ученик не найден", show_alert=True)
@@ -247,7 +246,7 @@ async def cb_bills_student(
         await callback.message.edit_text(
             f"У {student.name} за {display_period(period)} нет занятий к оплате.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="« Назад", callback_data=f"tb:g:{period}:{gid}")],
+                [InlineKeyboardButton(text="« Назад", callback_data=f"atb:g:{teacher_id}:{period}:{gid}")],
             ]),
         )
         await callback.answer()
@@ -260,14 +259,14 @@ async def cb_bills_student(
         if g:
             group_names.append(g.name)
 
-    bill_text, grand_total = build_bill_text(student.name, group_names, period, bills)
+    bill_text, _grand_total = build_bill_text(student.name, group_names, period, bills)
 
     rows = [
         [InlineKeyboardButton(
             text="📤 Отправить родителю",
-            callback_data=f"tb:snd:{period}:{gid}:{sid}",
+            callback_data=f"atb:snd:{teacher_id}:{period}:{gid}:{sid}",
         )],
-        [InlineKeyboardButton(text="« Назад", callback_data=f"tb:g:{period}:{gid}")],
+        [InlineKeyboardButton(text="« Назад", callback_data=f"atb:g:{teacher_id}:{period}:{gid}")],
     ]
     await callback.message.edit_text(
         bill_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -275,13 +274,12 @@ async def cb_bills_student(
     await callback.answer()
 
 
-# ─── Отправка одному ─────────────────────────────────────────────────────────
+# ─── Отправка родителям (общий helper) ───────────────────────────────────────
 
 async def _send_bill_to_parents(
     callback: CallbackQuery, student, period: str, bills: dict,
     group_names: list[str],
-    payment_service: PaymentService,
-    client_repo: ClientRepository,
+    payment_service: PaymentService, client_repo: ClientRepository,
 ) -> tuple[int, int, int]:
     """Возвращает (recipients_total, sent_to, sent_invoices)."""
     invoices = await payment_service.get_or_create_invoices_for_student_period(student, period)
@@ -315,9 +313,7 @@ async def _send_bill_to_parents(
                             payload=p.payment_id,
                             provider_token=settings.payment_provider_token,
                             currency="RUB",
-                            prices=[LabeledPrice(
-                                label="Обучение", amount=p.total_amount * 100,
-                            )],
+                            prices=[LabeledPrice(label="Обучение", amount=p.total_amount * 100)],
                         )
                         sent_invoices += 1
                     except Exception as exc:
@@ -325,24 +321,18 @@ async def _send_bill_to_parents(
     return len(recipients), sent_to, sent_invoices
 
 
-@router.callback_query(F.data.startswith("tb:snd:"))
-async def cb_bill_send_one(
+@router.callback_query(F.data.startswith("atb:snd:"))
+async def cb_tbills_send_one(
     callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository,
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, _, period, gid, sid = callback.data.split(":", 4)
-    if not await _is_my_group(user, gid, teacher_group_repo):
-        await callback.answer("Группа не ваша", show_alert=True)
-        return
-    if not await _is_student_in_group(sid, gid, student_group_repo):
-        await callback.answer("Ученик не в этой группе", show_alert=True)
-        return
+    _, _, teacher_id, period, gid, sid = callback.data.split(":", 5)
+    back_cb = f"atb:g:{teacher_id}:{period}:{gid}"
 
     lock_key = f"{sid}:{period}"
     if lock_key in _sending:
@@ -370,7 +360,6 @@ async def cb_bill_send_one(
             callback, student, period, bills, group_names, payment_service, client_repo,
         )
 
-        back_cb = f"tb:g:{period}:{gid}"
         if total_rec == 0:
             await callback.message.edit_text(
                 "❌ У ученика не привязан родитель (нет Telegram).",
@@ -390,15 +379,13 @@ async def cb_bill_send_one(
         status = f"✅ Счёт отправлен ({sent_to} из {total_rec})"
         if sent_invoices:
             status += f" + {sent_invoices} кнопок оплаты"
-        logger.info(
-            "Teacher bill sent teacher=%s student=%s period=%s sent=%s",
-            user.teacher_id, sid, period, sent_to,
-        )
+        logger.info("Admin teacher-bill sent teacher=%s student=%s period=%s sent=%s",
+                    teacher_id, sid, period, sent_to)
         await callback.message.edit_text(
             status,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="« К ученикам", callback_data=back_cb)],
-                [InlineKeyboardButton(text="🏠 В меню", callback_data="teacher:menu")],
+                [InlineKeyboardButton(text="🏠 В меню", callback_data="admin:menu")],
             ]),
         )
         await callback.answer()
@@ -408,21 +395,17 @@ async def cb_bill_send_one(
 
 # ─── Массовая рассылка по группе ─────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tb:all:"))
-async def cb_bill_send_all(
+@router.callback_query(F.data.startswith("atb:all:"))
+async def cb_tbills_send_all(
     callback: CallbackQuery, user: User | None,
-    teacher_group_repo: TeacherGroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository,
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> None:
-    if not _can_bill(user):
+    if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, _, period, gid = callback.data.split(":", 3)
-    if not await _is_my_group(user, gid, teacher_group_repo):
-        await callback.answer("Группа не ваша", show_alert=True)
-        return
+    _, _, teacher_id, period, gid = callback.data.split(":", 4)
     group = await group_repo.get_by_id(gid)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -462,7 +445,7 @@ async def cb_bill_send_all(
                 sent_students += 1
                 total_sent_to += sent_to
 
-        back_cb = f"tb:g:{period}:{gid}"
+        back_cb = f"atb:g:{teacher_id}:{period}:{gid}"
         lines = [
             f"<b>📨 Рассылка по группе «{group.name}»</b>",
             f"Период: {display_period(period)}",
@@ -473,15 +456,13 @@ async def cb_bill_send_all(
             lines.append(f"⚠️ Без привязанного родителя: {no_parent_students}")
         if failed_students:
             lines.append(f"❌ Не доставлено (бот заблокирован): {failed_students}")
-        logger.info(
-            "Teacher group bill sent teacher=%s group=%s period=%s sent=%s",
-            user.teacher_id, gid, period, sent_students,
-        )
+        logger.info("Admin teacher-group bill sent teacher=%s group=%s period=%s sent=%s",
+                    teacher_id, gid, period, sent_students)
         await callback.message.edit_text(
             "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="« К ученикам", callback_data=back_cb)],
-                [InlineKeyboardButton(text="🏠 В меню", callback_data="teacher:menu")],
+                [InlineKeyboardButton(text="🏠 В меню", callback_data="admin:menu")],
             ]),
         )
         await callback.answer()

@@ -1,12 +1,11 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Спецроли персонала вынесены в bot/staff.py — там правятся кадровые изменения.
-# Имена сохранены для существующих импортёров (record_lesson, teacher/billing).
-from bot.staff import PROXY_BUTTONS as _PROXY_BUTTONS, BILLING_TEACHERS  # noqa: F401
-
 
 def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None) -> InlineKeyboardMarkup:
+    # teacher_id оставлен в сигнатуре для совместимости вызовов; все педагоги
+    # имеют одинаковое меню (спецроли убраны).
+    _ = teacher_id
     rows = [
         [InlineKeyboardButton(text="✏️ Отметить занятие", callback_data="teacher:record_lesson")],
         [InlineKeyboardButton(text="💃 Пары", callback_data="teacher:my_pairs")],
@@ -16,11 +15,6 @@ def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="teacher:my_stats")],
         [InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")],
     ]
-    if teacher_id and teacher_id in BILLING_TEACHERS:
-        rows.append([InlineKeyboardButton(text="💰 Счета учеников", callback_data="teacher:bills")])
-    if teacher_id and teacher_id in _PROXY_BUTTONS:
-        for label, cb in _PROXY_BUTTONS[teacher_id]:
-            rows.append([InlineKeyboardButton(text=label, callback_data=cb)])
     if can_switch_role:
         rows.append([InlineKeyboardButton(text="🔄 Режим администратора", callback_data="mode:admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

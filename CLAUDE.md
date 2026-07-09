@@ -67,6 +67,7 @@ bot/handlers/
     bills.py             # student invoices: view → send to parent; multi-recipient
     profit.py            # «Выручка»: school revenue vs salary summary
     debtors.py           # «⚠️ Должники»: сводный контроль оплат + массовое напоминание
+    teacher_bills.py     # «🧾 Счета по педагогу»: педагог → его группы → ученик → отправка
     branches/            # ПАКЕТ (P5): _base (router+_render_group_card), crud_branches,
                          #   groups, bulk, billing, members
     edit_lesson.py       # admin-only lesson view/delete (bypasses period lock)
@@ -80,7 +81,6 @@ bot/handlers/
     my_groups.py         # group roster; add student via search/create
     partners.py          # pairs/soloists; student card; lesson history by student/pair
     my_stats.py          # personal earnings summary
-    billing.py           # 💰 «Счета учеников» for teachers in BILLING_TEACHERS (Контарева)
   client/
     start.py             # client registration FSM (search → confirm) + admin approval
     my_lessons.py        # lesson history; ✅ on paid; per-child or "all"
@@ -149,17 +149,14 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
   - Old: `STU-001,STU-002` (no per-student amount → `amount=0` → not billed, shown as «абонемент»)
   - New: `STU-001:60:700,STU-002:60:700` (with `duration_min:amount` snapshot → billed)
   - `parse_attendees()`, `serialize_attendees()`, `attendee_ids()`, `AttendeeEntry` dataclass.
-- [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by both `admin/bills.py` and `teacher/billing.py`.
+- [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by both `admin/bills.py` and `admin/teacher_bills.py`.
 - [bot/utils/dates.py](bot/utils/dates.py) — date helpers (`now_str`, `format_date_display`, `period_month_from_date`, `display_period`, `format_date_short_with_wd`). Formats: storage `YYYY-MM-DD` / `YYYY-MM`, display `ДД.ММ.ГГГГ` / `ММ.ГГГГ`.
 - [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `INV-XXXXXX`. Each scans existing rows for the current max.
 - [bot/utils/lesson_stats.py](bot/utils/lesson_stats.py) — `format_lesson_breakdown(lessons) → (group_count, ind_count, group_line, ind_line)` for stats screens.
 
 ### Keyboards
 
-Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. Two important staff-config constants live in [bot/staff.py](bot/staff.py) (single source after P3; [bot/keyboards/teacher.py](bot/keyboards/teacher.py) re-imports them):
-
-- `PROXY_BUTTONS: dict[teacher_id → list[(label, callback)]]` — extra buttons in the teacher menu. Used for Клецова (TCH-0002 → record for TCH-0005/0008).
-- `BILLING_TEACHERS: set[str]` — teachers with access to the billing UI. Currently `{"TCH-0009"}` (Контарева).
+Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. **Спецроли убраны** — все педагоги имеют одинаковое меню (`bot/staff.py` удалён; ранее там жили `PROXY_BUTTONS`/`BILLING_TEACHERS`).
 
 `kb_lesson_detail()` takes an `is_admin: bool` flag — when `True`, admins see the delete button even for locked lessons (with `(🔒 период сдан)` suffix).
 
@@ -185,7 +182,7 @@ Module-level `InProgressGuard` lockers (unified in P2, see [bot/utils/locks.py](
 - `_confirming_lesson_ids` in `teacher/record_lesson/finalize.py` (per tg_id)
 - `_submitting` in `teacher/submit_period.py`
 - `_sending_in_progress`, `_confirming_in_progress` in `admin/bills.py`
-- `_sending`, `_group_sending` in `teacher/billing.py`
+- `_sending`, `_group_sending` in `admin/teacher_bills.py`
 - `_group_send_in_progress` in `admin/branches/bulk.py`
 - `_reminding` in `admin/debtors.py`
 - `_seen` in `DedupUpdateMiddleware` (raw set + TTL GC)
@@ -246,7 +243,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
   - `kb_lesson_detail` renders «🗑 Удалить занятие» for admins even when locked (via `is_admin=True`).
   - Teachers can submit a period only from the **25th of the month**.
   - Admins reopen a whole period via teacher card → «🔓 Открыть период» (deletes the submission row entirely).
-- **Admin bills bypass submission**: admins (and teachers in `BILLING_TEACHERS`) can issue/send a bill to a parent at any moment — no «period not submitted» blocker. Bill amounts are recomputed from current lessons on each open.
+- **Admin bills bypass submission**: admins can issue/send a bill to a parent at any moment — no «period not submitted» blocker. Bill amounts are recomputed from current lessons on each open.
 - **Lesson names are denormalized**: `lesson.teacher_name`, `student_N_name` are creation-time snapshots. Renames don't rewrite history.
 - **Teacher visibility**: derived from `teacher_groups` ∩ `student_groups`. There is **no** `teacher_students` table.
 - **Multi-group students**: a student can belong to multiple groups; billing aggregates across all per period.
@@ -285,6 +282,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Approve child request | `admin_child_ok:{tg_id}:{student_id}` | Sent by a parent via `client:add_child` |
 | Salaries | `admin:salaries` | Earnings per teacher per period |
 | Bills | `admin:bills` | Invoices per student per period; multi-recipient send to parent (no submission check) |
+| **Bills by teacher** | `admin:teacher_bills` | Выставление счетов по группам педагога: педагог → его группы → ученик → отправка родителю / массовая рассылка. Заменяет прежний спец-раздел Контаревой |
 | **Debtors** | `admin:debtors` | Сводный долг по всем ученикам/периодам (on-demand: начисления − PAID). Текущий месяц помечен `*` и в напоминание не входит. «📤 Напомнить всем» — рассылка родителям должников за закрытые месяцы (с подтверждением) |
 | Выручка | `admin:profit` | School revenue vs salary summary; by day or by period |
 | Branches/Groups | `admin:branches` | CRUD branches, groups, billing modes, prices; bulk bill send per group |
@@ -312,7 +310,6 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Rename student | `t_rename_student:{id}` | FSM: enter name |
 | My stats | `teacher:my_stats` | Personal earnings summary |
 | Proxy record (Клецова) | `proxy_record:TCH-0005/0008` | Requires admin approval; then same FSM as own record |
-| **💰 Bills for own groups** | `teacher:bills` | Only for teachers in `BILLING_TEACHERS` (Контарева TCH-0009). Period → group → student card / bulk send. Scope strictly limited to teacher's own groups (`tb:p / tb:g / tb:s / tb:snd / tb:all` callbacks) |
 
 ### Client (parent)
 
@@ -336,9 +333,9 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 
 ## Special roles & configuration
 
-**Клецова Ангелина (TCH-0002)** — assistant. Her menu has extra proxy buttons for Никишин (TCH-0005) and Криворчук (TCH-0008). Configured in `PROXY_BUTTONS` in [bot/staff.py](bot/staff.py) (the single staff-config module; `keyboards/teacher.py` re-imports it as `_PROXY_BUTTONS`). Proxy requests require admin approval (see "FSM states" → admin proxy pattern).
-
-**Контарева Елизавета (TCH-0009)** — teacher with billing access. Her menu has an extra «💰 Счета учеников» button (handlers in [bot/handlers/teacher/billing.py](bot/handlers/teacher/billing.py)). Scope is strictly her own groups: every callback re-validates `_can_bill(user)`, `_is_my_group(...)`, and `_is_student_in_group(...)`. Bill content is the same as the admin one (combines lessons of all teachers for that student) — she sees the «full» bill, not just her own lessons. Whitelist defined as `BILLING_TEACHERS = {"TCH-0009"}`. Add a teacher_id to that set to grant the same access.
+**Спецроли убраны — все педагоги имеют одинаковые права.** Ранее было две спецроли (конфиг в `bot/staff.py`, ныне удалён):
+- **Клецова (TCH-0002)** — прокси-запись за Никишина/Криворчук. Удалено (прокси-хендлеры `proxy_*` вырезаны из `record_lesson/entry.py`; попутно закрыт баг B1). Запись за педагога осталась **только у админа** — «📝 Отметить занятие» → выбор педагога (`admin:record_lesson` → `admin_rl_tch:`, независимый флоу).
+- **Контарева (TCH-0009)** — личный биллинг по своим группам. Заменён общей админской фичей **«🧾 Счета по педагогу»** ([admin/teacher_bills.py](bot/handlers/admin/teacher_bills.py)): админ выбирает любого педагога → его группы → ученик → отправка родителю / массовая рассылка по группе (`atb:t / atb:p / atb:g / atb:s / atb:snd / atb:all`).
 
 **PER_VISIT groups** (each attended lesson billed):
 - GRP-0007, GRP-0008, GRP-0010, GRP-0015 — various groups
