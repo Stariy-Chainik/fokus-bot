@@ -1,13 +1,11 @@
 from __future__ import annotations
 import logging
-from datetime import date
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 
-from dateutil.relativedelta import relativedelta  # type: ignore
 
 from bot.models import User
 from bot.models.enums import PaymentStatus
@@ -16,7 +14,7 @@ from bot.repositories.client_repo import ClientRepository
 from bot.services import PaymentService
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
-from bot.utils.dates import format_date_display, month_name_ru
+from bot.utils.dates import format_date_display, month_name_ru, last_periods
 from bot.keyboards.client import (
     kb_client_menu, kb_client_student_select, kb_bills_list,
     kb_bill_detail, kb_bill_back,
@@ -46,8 +44,7 @@ async def _show_bills(
     else:
         students = students_all
 
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
 
     period_rows: list[tuple[str, str, str]] = []
     for period_month in periods:

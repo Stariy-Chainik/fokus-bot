@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.utils.dates import display_period
+from bot.utils.dates import display_period, last_periods
 
 
 def kb_client_menu() -> InlineKeyboardMarkup:
@@ -50,12 +50,8 @@ def kb_lessons_period_select(student_id: str = "all") -> InlineKeyboardMarkup:
 
 
 def kb_lessons_month_list(student_id: str = "all") -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta
-    today = date.today()
     buttons = []
-    for i in range(6):
-        d = today - relativedelta(months=i)
-        period = d.strftime("%Y-%m")
+    for period in last_periods(6):
         buttons.append([InlineKeyboardButton(
             text=display_period(period), callback_data=f"cl_month:{student_id}:{period}",
         )])

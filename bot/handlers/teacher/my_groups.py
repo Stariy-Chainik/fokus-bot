@@ -3,13 +3,11 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import defaultdict
-from datetime import date
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramAPIError
-from dateutil.relativedelta import relativedelta  # type: ignore
 
 from bot.models import User
 from bot.models.enums import GroupBillingMode, LessonType
@@ -21,7 +19,7 @@ from bot.repositories import (
 from bot.states import TeacherGroupAddStudentStates
 from bot.handlers.common import show_card
 from bot.utils.attendees import attendee_ids
-from bot.utils.dates import month_name_ru
+from bot.utils.dates import month_name_ru, last_periods
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_groups")
@@ -469,8 +467,7 @@ async def cb_t_grp_attendance(
         await callback.answer("Группа не найдена", show_alert=True)
         return
 
-    today = date.today()
-    months = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(3)]
+    months = last_periods(3)
     rows = []
     for ym in months:
         y, m = ym.split("-")

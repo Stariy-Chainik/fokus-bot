@@ -13,7 +13,7 @@ from bot.repositories import (
 from bot.services import calc_earned
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.calendar import kb_calendar
-from bot.utils.dates import display_period, format_date_short_with_wd
+from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
 
 logger = logging.getLogger(__name__)
@@ -24,9 +24,7 @@ from bot.handlers.access import is_admin as _is_admin
 
 
 def _period_buttons(teacher_id: str, back_cb: str) -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta  # type: ignore
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
     buttons = [
         [InlineKeyboardButton(text=display_period(p), callback_data=f"salary_period:{teacher_id}:{p}")]
         for p in periods

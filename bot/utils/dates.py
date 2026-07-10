@@ -49,3 +49,14 @@ def format_date_short_with_wd(value: str) -> str:
     """Переводит YYYY-MM-DD → «23 апр, чт» — для заголовков группировки по дате."""
     dt = datetime.strptime(value, DATE_FMT)
     return f"{dt.day} {_MONTHS_RU_SHORT[dt.month - 1]}, {_WEEKDAYS_RU_SHORT[dt.weekday()]}"
+
+
+def last_periods(n: int) -> list[str]:
+    """Последние n периодов (YYYY-MM), от текущего месяца назад.
+
+    Единый генератор для пикеров периодов (счета, зарплаты, статистика и т.п.).
+    """
+    from dateutil.relativedelta import relativedelta  # локально: dateutil тяжёлый на импорт
+    from datetime import date as _date
+    today = _date.today()
+    return [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(n)]

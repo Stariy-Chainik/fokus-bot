@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from datetime import date
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
@@ -14,7 +13,7 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.bill_format import build_bill_text
-from bot.utils.dates import display_period, format_date_short_with_wd
+from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
 
@@ -75,9 +74,7 @@ async def _send_bill_to_parents(
 
 
 def _period_buttons(student_id: str, action_prefix: str) -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta  # type: ignore
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
     buttons = [
         [InlineKeyboardButton(text=display_period(p), callback_data=f"{action_prefix}:{student_id}:{p}")]
         for p in periods
@@ -87,9 +84,7 @@ def _period_buttons(student_id: str, action_prefix: str) -> InlineKeyboardMarkup
 
 
 def _periods_only_buttons(action_prefix: str, back_cb: str) -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta  # type: ignore
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
     buttons = [
         [InlineKeyboardButton(text=display_period(p), callback_data=f"{action_prefix}:{p}")]
         for p in periods

@@ -1,13 +1,12 @@
 from __future__ import annotations
 import logging
-from datetime import date
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
-from bot.utils.dates import display_period
+from bot.utils.dates import display_period, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
 
 logger = logging.getLogger(__name__)
@@ -18,9 +17,7 @@ from bot.handlers.access import is_teacher as _is_teacher
 
 
 def _period_buttons() -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta  # type: ignore
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
     buttons = [
         [InlineKeyboardButton(text=display_period(p), callback_data=f"stats_period:{p}")]
         for p in periods

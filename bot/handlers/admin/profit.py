@@ -11,7 +11,7 @@ from bot.models.enums import LessonType
 from bot.repositories import TeacherRepository, LessonRepository
 from bot.services import calc_earned, build_billing_rows
 from bot.keyboards.calendar import kb_calendar
-from bot.utils.dates import display_period, format_date_short_with_wd
+from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_profit")
@@ -21,9 +21,7 @@ from bot.handlers.access import is_admin as _is_admin
 
 
 def _period_buttons() -> InlineKeyboardMarkup:
-    from dateutil.relativedelta import relativedelta  # type: ignore
-    today = date.today()
-    periods = [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(6)]
+    periods = last_periods(6)
     buttons = [
         [InlineKeyboardButton(text=display_period(p), callback_data=f"profit_period:{p}")]
         for p in periods
