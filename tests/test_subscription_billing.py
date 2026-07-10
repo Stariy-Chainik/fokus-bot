@@ -115,10 +115,23 @@ def _payment(sid, tid, period, status):
 
 class _FakeOverrideRepo:
     def __init__(self, overrides):
-        self._overrides = overrides
+        self._overrides = list(overrides)
 
     async def get_all(self):
         return self._overrides
+
+    async def get_for_group(self, group_id):
+        return [o for o in self._overrides if o.group_id == group_id]
+
+    async def upsert(self, group_id, period_month, student_id, amount):
+        sid = student_id or None
+        for i, o in enumerate(self._overrides):
+            if (o.group_id, o.period_month, o.student_id) == (group_id, period_month, sid):
+                self._overrides[i] = _override(group_id, period_month, sid, amount)
+                return self._overrides[i]
+        o = _override(group_id, period_month, sid, amount)
+        self._overrides.append(o)
+        return o
 
 
 def _override(gid, period, sid, amount):
@@ -276,6 +289,49 @@ def test_override_applies_only_to_its_month():
     assert _run(svc.compute_debt_map()) == {
         "STU-A": {"2026-06": 3000, "2026-07": 2000},
     }
+
+
+def test_pin_history_fixes_past_active_months_with_old_price():
+    """Смена цены «с июля»: июнь/май (были занятия) фиксируются старой ценой."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-05-10"),
+         _group_lesson("LES-2", "GRP-0001", "2026-06-15"),
+         _group_lesson("LES-3", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001")],
+        overrides=[],
+    )
+    pinned = _run(svc.pin_subscription_history("GRP-0001", "2026-07", 3000))
+    assert pinned == 2  # май и июнь; июль (effective) не фиксируется
+    # теперь «поднимаем цену»: группа стала 3500 — прошлые месяцы остались по 3000
+    svc2 = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-05-10"),
+         _group_lesson("LES-2", "GRP-0001", "2026-06-15"),
+         _group_lesson("LES-3", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3500)],
+        [("STU-A", "GRP-0001")],
+        overrides=[_override("GRP-0001", "2026-05", None, 3000),
+                   _override("GRP-0001", "2026-06", None, 3000)],
+    )
+    assert _run(svc2.compute_debt_map()) == {
+        "STU-A": {"2026-05": 3000, "2026-06": 3000, "2026-07": 3500},
+    }
+
+
+def test_pin_history_respects_existing_override_and_zero():
+    """Существующее переопределение месяца не трогается; pin_amount=0 освобождает прошлое."""
+    overrides = [_override("GRP-0001", "2026-05", None, 1000)]  # ручное, сохранить
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-05-10"),
+         _group_lesson("LES-2", "GRP-0001", "2026-06-15")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001")],
+        overrides=overrides,
+    )
+    pinned = _run(svc.pin_subscription_history("GRP-0001", "2026-07", 0))
+    assert pinned == 1  # только июнь; май уже переопределён вручную
+    amounts = {(o.period_month, o.amount) for o in _run(svc._sub_override_repo.get_all())}
+    assert ("2026-05", 1000) in amounts and ("2026-06", 0) in amounts
 
 
 def test_without_group_repos_subscriptions_skipped():

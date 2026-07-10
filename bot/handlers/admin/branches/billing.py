@@ -345,19 +345,67 @@ async def group_billing_sub_price(
     if not group:
         await message.answer("Группа не найдена.", reply_markup=kb_back("admin:branches"))
         return
-    # Цена абонемента хранится в price_full; short-поля не используются этим режимом.
+    # Цена действует ТОЛЬКО ВПЕРЁД: спрашиваем месяц; прошлые активные месяцы
+    # будут зафиксированы старой ценой (или 0 при первом включении).
+    rows = [
+        [InlineKeyboardButton(
+            text=display_period(p), callback_data=f"subeff:{group_id}:{p}:{v}",
+        )]
+        for p in _override_periods()
+    ]
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data=f"group_billing:{group_id}")])
+    await message.answer(
+        f"<b>💳 Абонемент: {v} ₽/мес</b>\n\n"
+        "С какого месяца действует новая цена?\n"
+        "<i>Прошлые месяцы с занятиями будут автоматически зафиксированы "
+        "по прежним условиям — цена меняется только вперёд.</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith("subeff:"))
+async def cb_sub_effective(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository,
+    payment_service: PaymentService,
+    subscription_override_repo: SubscriptionOverrideRepository,
+    student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, group_id, period, price_str = callback.data.split(":", 3)
+    new_price = int(price_str)
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+
+    # Прошлое фиксируем: старой ценой при смене, нулём при первом включении.
+    was_subscription = group.billing_mode == GroupBillingMode.SUBSCRIPTION
+    pin_amount = group.price_full if was_subscription else 0
+    pinned = await payment_service.pin_subscription_history(group_id, period, pin_amount)
+
     await group_repo.update_billing(
         group_id, GroupBillingMode.SUBSCRIPTION,
-        group.price_short, group.duration_short, v, group.duration_full,
+        group.price_short, group.duration_short, new_price, group.duration_full,
     )
-    logger.info("Группа %s переведена на абонемент: %d ₽/мес", group_id, v)
-    await message.answer(
-        _billing_text(
-            group.name, GroupBillingMode.SUBSCRIPTION,
-            group.price_short, group.duration_short, v, group.duration_full,
-        ),
-        reply_markup=_kb_group_billing(group_id, GroupBillingMode.SUBSCRIPTION),
+    logger.info("Группа %s: абонемент %d ₽/мес с %s (зафиксировано мес.: %d)",
+                group_id, new_price, period, pinned)
+
+    group = await group_repo.get_by_id(group_id)  # перечитать с новой ценой
+    note = f"\n\n✅ Новая цена действует с {display_period(period)}."
+    if pinned:
+        note += f"\nПрошлых месяцев зафиксировано: {pinned}."
+    text = _billing_text(
+        group.name, GroupBillingMode.SUBSCRIPTION,
+        group.price_short, group.duration_short,
+        group.price_full, group.duration_full,
+    ) + await _overrides_block(group, subscription_override_repo, student_repo) + note
+    await callback.message.edit_text(
+        text, reply_markup=_kb_group_billing(group_id, GroupBillingMode.SUBSCRIPTION),
     )
+    await callback.answer()
 
 
 # ─── Переопределение цены абонемента на месяц (ученик / вся группа) ──────────

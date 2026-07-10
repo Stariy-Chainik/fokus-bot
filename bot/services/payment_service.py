@@ -45,6 +45,40 @@ class PaymentService:
             for o in await self._sub_override_repo.get_all()
         }
 
+    async def pin_subscription_history(
+        self, group_id: str, effective_period: str, pin_amount: int,
+    ) -> int:
+        """Зафиксировать прошлые месяцы абонемента перед сменой цены («только вперёд»).
+
+        Для каждого месяца строго раньше effective_period, где у группы было хотя бы
+        одно занятие и нет group-wide переопределения, создаётся переопределение
+        pin_amount (старая цена при смене; 0 при первом включении абонемента).
+        Возвращает число зафиксированных месяцев.
+        """
+        if self._sub_override_repo is None:
+            return 0
+        months = {
+            ls.date[:7]
+            for ls in await self._lesson_repo.get_all()
+            if ls.type == LessonType.GROUP and ls.group_id == group_id
+            and ls.date[:7] < effective_period
+        }
+        if not months:
+            return 0
+        existing = {
+            o.period_month
+            for o in await self._sub_override_repo.get_for_group(group_id)
+            if o.student_id is None
+        }
+        pinned = 0
+        for month in sorted(months - existing):
+            await self._sub_override_repo.upsert(group_id, month, None, pin_amount)
+            pinned += 1
+        if pinned:
+            logger.info("Абонемент %s: зафиксировано %d прошлых мес. по %d ₽ (новая цена с %s)",
+                        group_id, pinned, pin_amount, effective_period)
+        return pinned
+
     @staticmethod
     def _sub_amount(
         overrides: dict[tuple[str, str, str], int],
