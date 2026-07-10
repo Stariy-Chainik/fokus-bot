@@ -41,7 +41,7 @@ Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-se
 `bot/__main__.py` is the single DI container. Order matters:
 
 1. Build **`SheetsClient`** from settings (one shared gspread client, caches Worksheet handles).
-2. Construct **13 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
+2. Construct **14 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
 3. Construct **7 services**: `LessonService`, `PaymentService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
 4. Pick **FSM storage**: `RedisStorage` if `REDIS_URL` is set, else `MemoryStorage`.
 5. Register two middlewares (in this order):
@@ -59,13 +59,15 @@ Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-se
 bot/handlers/
   common.py              # /start, /menu, mode:admin/teacher, go:home, noop
   admin/
-    teachers.py          # teacher CRUD, rates, groups, submission status icons
+    teachers/            # ПАКЕТ: _base, listing (список+карточка), groups (teg_*),
+                         #   manage (add/del), periods (открытие), rates (ставки FSM)
     students/            # ПАКЕТ (P5-разбивка god-файла): _base (router+_render_student_card),
                          #   overview, listing, add, delete, partners, groups, requests, client
     client_requests.py   # approve/reject parent→student link requests (admin_child_ok/no)
     salaries.py          # teacher earnings by period (salary_teacher/period)
-    bills.py             # student invoices: view → send to parent; multi-recipient
-    profit.py            # «Выручка»: school revenue vs salary summary
+    bills/               # ПАКЕТ: _base (router+гарды), helpers (_send_bill_to_parents),
+                         #   view (просмотр+рассылка группе), send, confirm (оплаты)
+    profit.py            # «Прибыль»: занятия + абонементы + ручные доходы/расходы (fin:*)
     debtors.py           # «⚠️ Должники»: сводный контроль оплат + массовое напоминание
     branches/            # ПАКЕТ (P5): _base (router+_render_group_card), crud_branches,
                          #   groups, billing, members
@@ -77,13 +79,14 @@ bot/handlers/
                          #   entry, schedule, group, soloist, pair, shared. FSM RecordLessonStates
     my_lessons.py        # view/delete own lessons; lesson_detail shared with admin
     submit_period.py     # lock period for billing (allowed from 25th of month)
-    my_groups.py         # group roster; add student via search/create
-    partners.py          # pairs/soloists; student card; lesson history by student/pair
+    my_groups/           # ПАКЕТ: _base (рендер карточки), roster, members, attendance
+    partners/            # ПАКЕТ: _base, lists (пары/солисты), cards, partner_manage,
+                         #   lessons_history
     my_stats.py          # personal earnings summary
   client/
     start.py             # client registration FSM (search → confirm) + admin approval
     my_lessons.py        # lesson history; ✅ on paid; per-child or "all"
-    my_bills.py          # invoices by month + payment methods + receipt upload
+    my_bills/            # ПАКЕТ: _base, viewing (счета), payment (методы/чек/подтверждение)
     payments.py          # YooKassa webhook (verified via API re-fetch) + Telegram Payments pre_checkout
 ```
 
@@ -150,7 +153,7 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
   - Old: `STU-001,STU-002` (no per-student amount → `amount=0` → not billed, shown as «абонемент»)
   - New: `STU-001:60:700,STU-002:60:700` (with `duration_min:amount` snapshot → billed)
   - `parse_attendees()`, `serialize_attendees()`, `attendee_ids()`, `AttendeeEntry` dataclass.
-- [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by `admin/bills.py`.
+- [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by the `admin/bills/` package.
 - [bot/utils/dates.py](bot/utils/dates.py) — date helpers (`now_str`, `format_date_display`, `period_month_from_date`, `display_period`, `format_date_short_with_wd`). Formats: storage `YYYY-MM-DD` / `YYYY-MM`, display `ДД.ММ.ГГГГ` / `ММ.ГГГГ`.
 - [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `INV-XXXXXX`. Each scans existing rows for the current max.
 - [bot/utils/lesson_stats.py](bot/utils/lesson_stats.py) — `format_lesson_breakdown(lessons) → (group_count, ind_count, group_line, ind_line)` for stats screens.
@@ -182,7 +185,7 @@ In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlight
 Module-level `InProgressGuard` lockers (unified in P2, see [bot/utils/locks.py](bot/utils/locks.py) — `key in guard` / `guard.add()` / `guard.discard()`, always released in `finally`) where double-clicks would corrupt data:
 - `_confirming_lesson_ids` in `teacher/record_lesson/finalize.py` (per tg_id)
 - `_submitting` in `teacher/submit_period.py`
-- `_sending_in_progress`, `_confirming_in_progress`, `_group_sending` in `admin/bills.py`
+- `_sending_in_progress`, `_confirming_in_progress`, `_group_sending` in `admin/bills/_base.py`
 - `_reminding` in `admin/debtors.py`
 - `_seen` in `DedupUpdateMiddleware` (raw set + TTL GC)
 
@@ -283,7 +286,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Salaries | `admin:salaries` | Earnings per teacher per period |
 | Bills | `admin:bills` | Период → филиал → группа → **[📨 вся группа]** или ученик → отправка родителю (multi-recipient, no submission check). Рассылка по группе — `bill_group_send:{period}:{gid}` |
 | **Debtors** | `admin:debtors` | Сводный долг по всем ученикам/периодам (on-demand: начисления − PAID). Текущий месяц помечен `*` и в напоминание не входит. «📤 Напомнить всем» — рассылка родителям должников за закрытые месяцы (с подтверждением) |
-| Выручка | `admin:profit` | School revenue vs salary summary; by day or by period |
+| Прибыль | `admin:profit` | Месяц: занятия + абонементы + ручные доходы (турниры) − зарплата − расходы (аренда); ввод/удаление записей кнопками ➕/🗑 (fin:*). День: только занятия |
 | Branches/Groups | `admin:branches` | CRUD branches, groups, billing modes, prices; bulk bill send per group |
 | Edit lessons | `admin:edit_lesson` | Pick teacher → date/month/all → view+delete (bypasses period lock) |
 | Diagnostics | `admin:diagnostics` | Cache and data health checks |
@@ -334,7 +337,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 
 **Спецроли убраны — все педагоги имеют одинаковые права.** Ранее было две спецроли (конфиг в `bot/staff.py`, ныне удалён):
 - **Клецова (TCH-0002)** — прокси-запись за Никишина/Криворчук. Удалено (прокси-хендлеры `proxy_*` вырезаны из `record_lesson/entry.py`; попутно закрыт баг B1). Запись за педагога осталась **только у админа** — «📝 Отметить занятие» → выбор педагога (`admin:record_lesson` → `admin_rl_tch:`, независимый флоу).
-- **Контарева (TCH-0009)** — личный биллинг по своим группам. Убран; выставление счетов — общая админская фича «🧾 Счёт ученика за период» ([admin/bills.py](bot/handlers/admin/bills.py)): на экране группы кнопка «📨 Отправить счета всей группе» (`bill_group_send:`) либо выбор конкретного ученика.
+- **Контарева (TCH-0009)** — личный биллинг по своим группам. Убран; выставление счетов — общая админская фича «🧾 Счёт ученика за период» ([admin/bills/](bot/handlers/admin/bills/)): на экране группы кнопка «📨 Отправить счета всей группе» (`bill_group_send:`) либо выбор конкретного ученика.
 
 **PER_VISIT groups** (each attended lesson billed):
 - GRP-0007, GRP-0008, GRP-0010, GRP-0015 — various groups
@@ -366,7 +369,7 @@ Required:
 - `GOOGLE_CREDENTIALS_JSON` — service account JSON (inline, single-line)
 - `SPREADSHEET_ID` — main Google Spreadsheet ID
 
-Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`, `SHEET_SUBSCRIPTION_OVERRIDES`.
+Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`, `SHEET_SUBSCRIPTION_OVERRIDES`, `SHEET_FINANCE_ENTRIES`.
 
 Optional — payments:
 - `DEBTORS_SINCE_PERIOD` — долги на экране «⚠️ Должники» считаются с этого периода (`YYYY-MM`); пусто — за всё время. Отсекает месяцы до внедрения учёта оплат (на проде: `2026-07`).

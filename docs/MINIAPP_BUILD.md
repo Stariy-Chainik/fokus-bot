@@ -60,7 +60,7 @@ datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 enum LessonType        { GROUP INDIVIDUAL }
 enum PaymentStatus     { PENDING PAID }
 enum RequestStatus     { PENDING APPROVED REJECTED }
-enum GroupBillingMode  { NONE PER_VISIT SUBSCRIPTION }   // SUBSCRIPTION зарезервирован
+enum GroupBillingMode  { NONE PER_VISIT SUBSCRIPTION }   // SUBSCRIPTION = абонемент, фикс ₽/мес
 enum StudentGroupTier  { FULL SHORT }
 
 model User {
@@ -78,8 +78,6 @@ model Teacher {
   rateGroup      Int               // ₽ за 45 мин, групповое
   rateForTeacher Int               // ₽ за 45 мин, индивидуальное (в зарплату)
   rateForStudent Int               // ₽ за 45 мин, в счёт ученика
-  canProxyFor    String[] @default([])  // вместо хардкода PROXY_BUTTONS (§10 спеки)
-  canBill        Boolean  @default(false) // вместо BILLING_TEACHERS
   users          User[]
   groups         TeacherGroup[]
   lessons        Lesson[]
@@ -231,6 +229,28 @@ model Receipt {
   @@index([studentId, periodMonth])
 }
 
+// Цена абонемента на конкретный месяц: ученик → группа → group.priceFull; 0 = не начислять.
+model SubscriptionOverride {
+  id          String  @id @default(cuid())
+  groupId     String
+  periodMonth String              // "YYYY-MM"
+  studentId   String?             // null = вся группа
+  amount      Int
+  createdAt   DateTime @default(now())
+  @@unique([groupId, periodMonth, studentId])
+}
+
+// Ручной доход/расход месяца (экран «Прибыль»): турниры, аренда и т.п.
+model FinanceEntry {
+  entryId     String   @id        // FIN-XXXXXX
+  periodMonth String               // "YYYY-MM"
+  kind        String               // income | expense
+  title       String
+  amount      Int
+  createdAt   DateTime @default(now())
+  @@index([periodMonth])
+}
+
 model TeacherPeriodSubmission {
   submissionId String   @id         // SUB-xxxxxx
   teacherId    String
@@ -359,7 +379,7 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
 4. иначе — гость (экран регистрации клиента).
 
 Сессия: подписанный JWT-cookie с `{tgId, role, teacherId?}`; `middleware.ts` защищает `/api/*` и страницы.
-Каждый чувствительный эндпоинт **дополнительно** перепроверяет право (видимость группы, `canBill` и т.д.).
+Каждый чувствительный эндпоинт **дополнительно** перепроверяет право (роль, видимость группы, принадлежность ученика).
 
 ---
 
