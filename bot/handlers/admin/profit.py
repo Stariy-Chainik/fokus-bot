@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import TeacherRepository, LessonRepository
-from bot.services import calc_earned, build_billing_rows
+from bot.services import calc_earned, build_billing_rows, PaymentService
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 
@@ -68,9 +68,16 @@ async def _calc_profit(
     return rows, total_income, total_salary
 
 
-def _format_profit(title: str, rows: list[tuple[str, str, int, int, int, int]], total_income: int, total_salary: int) -> str:
+def _format_profit(
+    title: str, rows: list[tuple[str, str, int, int, int, int]],
+    total_income: int, total_salary: int,
+    sub_rows: list[tuple[str, int, int]] | None = None,
+) -> str:
+    """sub_rows — абонементная выручка по группам (имя, учеников, сумма ₽);
+    передаётся только в месячном виде и включается в итоговую выручку."""
+    sub_total = sum(t for _, _, t in (sub_rows or []))
     lines = [f"<b>📊 {title}</b>", ""]
-    if not rows:
+    if not rows and not sub_total:
         lines.append("Занятий нет.")
         return "\n".join(lines)
     for _tid, name, income, salary, grp, ind in rows:
@@ -86,11 +93,18 @@ def _format_profit(title: str, rows: list[tuple[str, str, int, int, int, int]], 
         lines.append(f"  Выручка: {income} ₽  Зарплата: {salary} ₽")
         lines.append(f"  Прибыль: <b>{profit} ₽</b> ({margin}%)")
         lines.append("")
+    if sub_rows:
+        lines.append("💳 <b>Абонементы</b>")
+        for gname, billed, total in sub_rows:
+            lines.append(f"  {gname}: {total} ₽ ({billed} уч.)")
+        lines.append(f"  <b>Итого абонементы: {sub_total} ₽</b>")
+        lines.append("")
+    grand_income = total_income + sub_total
     lines += [
         "──────────────",
-        f"Выручка:    {total_income} ₽",
+        f"Выручка:    {grand_income} ₽",
         f"Зарплата: {total_salary} ₽",
-        f"<b>Прибыль:  {total_income - total_salary} ₽</b>",
+        f"<b>Прибыль:  {grand_income - total_salary} ₽</b>",
     ]
     return "\n".join(lines)
 
@@ -138,13 +152,19 @@ async def cb_profit_view(callback: CallbackQuery, user: User | None) -> None:
 async def cb_profit_period(
     callback: CallbackQuery, user: User | None,
     teacher_repo: TeacherRepository, lesson_repo: LessonRepository,
+    payment_service: PaymentService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     period = callback.data.split(":", 1)[1]
     rows, total_income, total_salary = await _calc_profit(period, teacher_repo, lesson_repo)
-    text = _format_profit(f"Прибыль за {display_period(period)}", rows, total_income, total_salary)
+    # Абонементы — только в месячном виде (фикс-сумма месяца дню не атрибутируется).
+    sub_rows = await payment_service.subscription_revenue_breakdown(period)
+    text = _format_profit(
+        f"Прибыль за {display_period(period)}", rows, total_income, total_salary,
+        sub_rows=sub_rows,
+    )
     await callback.message.edit_text(text, reply_markup=_profit_keyboard(rows, period, "profit:view"))
     await callback.answer()
 

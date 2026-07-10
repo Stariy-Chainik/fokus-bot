@@ -45,6 +45,48 @@ class PaymentService:
             for o in await self._sub_override_repo.get_all()
         }
 
+    async def subscription_revenue_breakdown(
+        self, period_month: str,
+    ) -> list[tuple[str, int, int]]:
+        """Абонементная выручка периода по группам: [(имя группы, учеников, сумма ₽)].
+
+        Та же логика, что в счетах/долгах: группа активна (≥1 занятие в месяце),
+        каждому участнику — цена месяца (override ученика → группы → price_full),
+        0 = освобождён (не считается). Сортировка по имени группы.
+        """
+        if self._group_repo is None or self._student_group_repo is None:
+            return []
+        sub_groups = [
+            g for g in await self._group_repo.get_all()
+            if g.billing_mode == GroupBillingMode.SUBSCRIPTION
+        ]
+        if not sub_groups:
+            return []
+        active: set[str] = set()
+        sub_ids = {g.group_id for g in sub_groups}
+        for ls in await self._lesson_repo.get_all():
+            if (ls.type == LessonType.GROUP and ls.group_id in sub_ids
+                    and ls.date[:7] == period_month):
+                active.add(ls.group_id)
+        if not active:
+            return []
+        overrides = await self._sub_override_map()
+        result: list[tuple[str, int, int]] = []
+        for g in sorted(sub_groups, key=lambda x: x.name):
+            if g.group_id not in active:
+                continue
+            members = await self._student_group_repo.get_students_for_group(g.group_id)
+            billed = 0
+            total = 0
+            for sid in members:
+                amount = self._sub_amount(overrides, g.group_id, period_month, sid, g.price_full)
+                if amount > 0:
+                    billed += 1
+                    total += amount
+            if total > 0:
+                result.append((g.name, billed, total))
+        return result
+
     async def pin_subscription_history(
         self, group_id: str, effective_period: str, pin_amount: int,
     ) -> int:

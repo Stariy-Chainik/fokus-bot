@@ -343,3 +343,21 @@ def test_without_group_repos_subscriptions_skipped():
     )
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07")) == {}
     assert _run(svc.compute_debt_map()) == {}
+
+
+def test_subscription_revenue_breakdown_by_group():
+    """«Прибыль»: абонементная выручка по группам с учётом переопределений."""
+    g2 = Group(group_id="GRP-0002", branch_id="BRN-0001", name="Азбука",
+               billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=2000)
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-07-03"),
+         _group_lesson("LES-2", "GRP-0002", "2026-07-04")],
+        [_sub_group(price=3000), g2],
+        [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001"), ("STU-C", "GRP-0002")],
+        overrides=[_override("GRP-0001", "2026-07", "STU-B", 0)],  # освобождён
+    )
+    rows = _run(svc.subscription_revenue_breakdown("2026-07"))
+    # сортировка по имени: «Азбука» < «Хип-хоп дети»
+    assert rows == [("Азбука", 1, 2000), ("Хип-хоп дети", 1, 3000)]
+    # месяц без занятий — пусто
+    assert _run(svc.subscription_revenue_breakdown("2026-06")) == []
