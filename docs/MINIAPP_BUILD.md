@@ -236,9 +236,10 @@ model SubscriptionOverride {
   groupId     String
   periodMonth String              // "YYYY-MM"
   studentId   String?             // null = вся группа
+  scopeKey    String              // studentId или "*" для всей группы
   amount      Int
   createdAt   DateTime @default(now())
-  @@unique([groupId, periodMonth, studentId])
+  @@unique([groupId, periodMonth, scopeKey])
 }
 
 // Ручной доход/расход месяца (экран «Прибыль»): турниры, аренда и т.п.
@@ -263,7 +264,7 @@ model TeacherPeriodSubmission {
 }
 
 model StudentRequest {
-  requestId      String   @id       // (req-...)
+  requestId      String   @id       // текущий бот: 8 hex-символов
   teacherId      String
   teacherTgId    BigInt
   teacherName    String
@@ -278,7 +279,12 @@ model StudentRequest {
 ```
 
 > **Billing НЕ таблица** — счёт ученика и зарплата вычисляются на лету (§4). ID вида `PAY-000042`
-> генерируются функцией «max+1» в транзакции (см. `lib/db/ids.ts`).
+> генерируются функцией «max+1» под advisory lock или в SERIALIZABLE-транзакции
+> (обычная read-committed транзакция не защищает два параллельных `max+1`).
+>
+> `SubscriptionOverride.scopeKey` нужен из-за семантики PostgreSQL: составной `UNIQUE` допускает
+> несколько строк с `studentId = NULL`. Приложение пишет `scopeKey = studentId` для ученика и `"*"`
+> для всей группы, сохраняя ровно одно переопределение на область.
 
 ### 3.1 Объём данных: решение по `lessons`
 
@@ -287,9 +293,9 @@ model StudentRequest {
 **Решение для Postgres: одна таблица `lessons`, навсегда, без архивирования и партиционирования.**
 - 5 000 строк/год → 50 000 за 10 лет — для Postgres с индексами это пренебрежимо мало
   (партиционирование имеет смысл от десятков миллионов строк).
-- Индексы под реальные запросы: `@@index([teacherId, date])` (занятия педагога/период),
-  добавить `@@index([student1Id, date])` и индекс по `LessonAttendee.studentId`
-  (счёт ученика за период). Выборка по периоду — префикс `date LIKE 'YYYY-MM%'`, btree работает.
+- Индексы под реальные запросы: `@@index([teacherId, date])` (занятия педагога/период) и
+  `LessonAttendee.studentId` (групповые занятия ученика). При текущем объёме OR-поиск по четырём
+  student-слотам допустим без отдельных индексов; добавить их после замера query plan, если объём вырастет.
 - **Историю не удалять и не «сворачивать»**: снапшоты имён делают старые строки самодостаточными,
   а счета/зарплаты вычисляются on-demand из занятий — усечение истории сломало бы пересчёт.
 - UI всегда фильтрует по периоду/педагогу/ученику — экрана «все занятия за всё время» нет,
@@ -306,8 +312,8 @@ model StudentRequest {
 
 ## 4. Доменный слой (порт чистых функций + тесты)
 
-`lib/domain/` — перенос [billing_service.py](../bot/services/billing_service.py),
-[profit_service.py](../bot/services/profit_service.py) и
+`lib/domain/` — перенос [billing_service.py](../bot/services/billing_service.py), чистых DTO/функций из
+[profit_service.py](../bot/services/profit_service.py) (не repository-orchestration класса) и
 [visibility.py](../bot/services/visibility.py). **Перенести и тесты** (Vitest) из `tests/` — они эталон.
 `ProfitSummary` / `TeacherProfitDetail` из Python-сервиса задают готовую форму данных для
 `GET /profit?period=`; HTML-разметку из Telegram-хендлера в домен не переносить.
@@ -360,7 +366,7 @@ export function isVisible(teacherGroupIds: Set<string>, studentGroupIds: string[
 
 ```ts
 // lib/auth/verifyInitData.ts
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 export function verifyInitData(initData: string, botToken: string, maxAgeSec = 86400) {
   const params = new URLSearchParams(initData);
@@ -369,7 +375,12 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
     .map(([k, v]) => `${k}=${v}`).sort().join("\n");
   const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
   const computed = createHmac("sha256", secret).update(dataCheckString).digest("hex");
-  if (computed !== hash) throw new Error("bad initData signature");
+  if (!hash) throw new Error("missing initData signature");
+  const actual = Buffer.from(hash, "hex");
+  const expected = Buffer.from(computed, "hex");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error("bad initData signature");
+  }
   const authDate = Number(params.get("auth_date"));
   if (Date.now() / 1000 - authDate > maxAgeSec) throw new Error("initData expired");
   return JSON.parse(params.get("user")!) as { id: number; first_name: string; username?: string };
@@ -494,7 +505,8 @@ fileId, uploadedAt) и показывать промежуточное сост�
 web/
   prisma/schema.prisma
   lib/
-    domain/   billing.ts  visibility.ts  attendees.ts  periods.ts   # чистые функции + *.test.ts
+    domain/   billing.ts  profit.ts  subscriptions.ts  debt.ts
+              visibility.ts  attendees.ts  periods.ts               # чистые функции + *.test.ts
     db/       client.ts  ids.ts  lessons.ts  payments.ts  students.ts …
     auth/     verifyInitData.ts  session.ts  requireRole.ts
   app/
@@ -516,7 +528,8 @@ web/
   `@telegram-apps/sdk`. Критерий: пустое приложение открывается в Telegram, `initData` доходит до сервера.
 - **Фаза 1 — БД.** Внести `schema.prisma` из §3, `prisma migrate`. Критерий: миграция применяется, типы генерятся.
 - **Фаза 2 — домен + тесты.** Портировать `lib/domain/*` (§4) и **перенести характеризующие тесты** из
-  `tests/test_billing_service.py`, `test_profit_service.py`, `test_attendees.py`, `test_visibility.py`.
+  `tests/test_billing_service.py`, `test_profit_service.py`, `test_subscription_billing.py`,
+  `test_debt_map.py`, `test_attendees.py`, `test_visibility.py`.
   Критерий: Vitest зелёный; суммы `ProfitSummary` совпадают с Python на одинаковых входных данных.
 - **Фаза 3 — auth.** `verifyInitData` + сессия + резолв роли (§5) + `middleware.ts`. Критерий: три роли
   корректно определяются; чужие эндпоинты закрыты.

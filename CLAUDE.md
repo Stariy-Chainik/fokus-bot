@@ -28,9 +28,9 @@ async def main():
 asyncio.run(main())"
 ```
 
-No test suite or linter is configured. Manual verification only — run the app, exercise the flow in Telegram, check production logs.
+Tests are run with `.venv/bin/python -m pytest -q` (characterization/unit tests, including callback wiring). No linter is configured. After automated checks, manually exercise the affected Telegram flow; for production changes, inspect service logs.
 
-Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-settings`, `python-dotenv`, `redis`, `yookassa`, `qrcode[pil]`. Full list in [requirements.txt](requirements.txt).
+Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-settings`, `python-dotenv`, `redis`, `yookassa`, `qrcode[pil]`. Runtime list is in [requirements.txt](requirements.txt); test tooling is in [requirements-dev.txt](requirements-dev.txt).
 
 ---
 
@@ -131,7 +131,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 |---|---|
 | `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). |
 | `BillingService` ([billing_service.py](bot/services/billing_service.py)) | Pure functions only: `calc_earned()` (teacher salary) and `build_billing_rows()` (virtual per-student Billing rows, computed on demand from a Lesson + Teacher). |
-| `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins/billing teachers can issue bills anytime. |
+| `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins can issue bills anytime. |
 | `ProfitService` | Хранилище-независимые DTO и расчёт экрана/API «Прибыль»: строки педагогов и занятий, выручка, зарплата, маржа, абонементы, ручные доходы/расходы. `get_lesson_summary()`, `get_month_summary()`, `get_teacher_detail()`. Telegram-хендлер только форматирует результат. |
 | `StudentService` | Бизнес-логика ученика поверх нескольких репо: `create_with_group()`, `delete_student()`, `toggle_tier()`, `pairs_in_group()` / `soloists_in_group()`, `partner_candidates()`, `get_student_card()` → `StudentCard` DTO (собирает карточку из 7 репо, чтобы хендлер только рисовал). |
 | `StudentRequestService` | Обработка заявок педагогов на новых учеников: `approve_create()`, `approve_link_existing()` (→ `LinkExistingOutcome`). |
@@ -158,7 +158,7 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
   - `parse_attendees()`, `serialize_attendees()`, `attendee_ids()`, `AttendeeEntry` dataclass.
 - [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by the `admin/bills/` package.
 - [bot/utils/dates.py](bot/utils/dates.py) — date helpers (`now_str`, `format_date_display`, `period_month_from_date`, `display_period`, `format_date_short_with_wd`). Formats: storage `YYYY-MM-DD` / `YYYY-MM`, display `ДД.ММ.ГГГГ` / `ММ.ГГГГ`.
-- [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `INV-XXXXXX`. Each scans existing rows for the current max.
+- [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `CLT-XXXX`, `FIN-XXXXXX`. Each scans existing rows for the current max.
 - [bot/utils/lesson_stats.py](bot/utils/lesson_stats.py) — `format_lesson_breakdown(lessons) → (group_count, ind_count, group_line, ind_line)` for stats screens.
 
 ### Keyboards
@@ -179,7 +179,7 @@ In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlight
 - `ClientCreateStates`, `ClientRegStates` — client side.
 - `ReceiptStates` — uploading a payment receipt (client → admin).
 
-**Admin proxy pattern**: `proxy_teacher_id` in FSM state lets an admin (or Клецова) record lessons on behalf of another teacher. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id` (in `record_lesson/_base.py`). Proxy by Клецова requires admin approval (`proxy_approve` / `proxy_deny` / `proxy_record_go` in `teacher/record_lesson/entry.py`); admins bypass approval entirely.
+**Admin record-for-teacher pattern**: `proxy_teacher_id` is an internal FSM key set only by the admin handler `admin_rl_tch:*`. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id` (in `record_lesson/_base.py`). The former teacher-to-teacher proxy flow was removed; ordinary teachers cannot set this mode through a registered entry point.
 
 **Lesson-history back-nav**: FSM key `t_stu_les_back` stores the return callback when a teacher opens a lesson detail from a student/pair card. `cb_lesson_detail` in `teacher/my_lessons/detail.py` honors it before falling back to the default.
 
@@ -212,7 +212,7 @@ amount (PER_VISIT group) = group.price_full or group.price_short
   stored as snapshot in lesson.attendees at creation time: STU-001:60:700
 ```
 
-`Billing` rows are virtual — they are computed on demand by `build_billing_rows(lesson, teacher)` from a Lesson + Teacher. Nothing is stored in a `billings` sheet (the model exists for shape).
+`Billing` rows are virtual — they are computed on demand by `build_billing_rows(lesson, teacher)` from a Lesson + Teacher. No billing repository/sheet is used (the model exists only for shape; `SHEET_BILLING` is legacy configuration).
 
 ---
 
@@ -222,7 +222,7 @@ Invoices stored as `StudentPeriodPayment` — one per `(student, teacher, period
 
 **Lessons have no payment status field.** The ✅ in the «Занятия» screen is computed on the fly: for each lesson, check whether `(date[:7], teacher_id)` exists in `StudentPeriodPayment` with `status=PAID`.
 
-**Bill detail** ([my_bills.py: cb_bill_detail](bot/handlers/client/my_bills.py)):
+**Bill detail** ([my_bills/viewing.py: cb_bill_detail](bot/handlers/client/my_bills/viewing.py)):
 - Paid teachers shown with ✅ and «оплачено» label; their amount excluded from "К оплате".
 - "К оплате" = sum of only unpaid teachers' invoices.
 - "Оплатить" button hidden when nothing is left to pay.
@@ -237,7 +237,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 
 **YooKassa webhook is verified** ([payments.py: process_yookassa_event](bot/handlers/client/payments.py)): the request body is **not trusted** — only `object.id` is taken from it, then the payment is re-fetched from the YooKassa API (`Payment.find_one`); status/metadata/amount come from the API response. Period is confirmed only on real `succeeded`. Network error during verification → HTTP 500 (YooKassa retries). Tests: [tests/test_yookassa_webhook.py](tests/test_yookassa_webhook.py).
 
-**Important**: if a lesson is added to a period after its invoice was marked PAID, the new amount will **not** be auto-billed — `confirm_period` skips PAID records. Either reopen the period (admin via «🔓 Открыть период») or create a second invoice manually.
+**Important**: if a lesson is added to a period after its invoice was marked PAID, the new amount will **not** be auto-billed — PAID records are not recalculated. The bot currently has no automatic additional-invoice flow; correction requires an explicit manual data/operational decision. Reopening only the teacher submission does not reopen the payment.
 
 ---
 
@@ -314,7 +314,6 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Remove partner | `t_partner_clear:{id}` | Confirmation screen |
 | Rename student | `t_rename_student:{id}` | FSM: enter name |
 | My stats | `teacher:my_stats` | Personal earnings summary |
-| Proxy record (Клецова) | `proxy_record:TCH-0005/0008` | Requires admin approval; then same FSM as own record |
 
 ### Client (parent)
 

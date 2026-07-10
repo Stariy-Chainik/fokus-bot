@@ -12,6 +12,7 @@
 **2. Эталон поведения — доменный код (портировать 1-в-1):**
 - `bot/models/entities.py`, `bot/models/enums.py` — модель данных и энумы
 - `bot/services/billing_service.py` — формулы зарплаты и счёта (`calc_earned`, `build_billing_rows`)
+- `bot/services/profit_service.py` — DTO и чистые расчёты прибыли (портировать без repository-orchestration)
 - `bot/services/payment_service.py` — инвойсы, `compute_debt_map` (долги), подтверждение
 - `bot/services/visibility.py` — видимость педагог↔ученик
 - `bot/utils/attendees.py` — оба формата `attendees` (`amount=0` = абонемент)
@@ -19,11 +20,12 @@
 - `bot/handlers/client/payments.py` — **правильный** (верифицированный) webhook ЮКассы
 
 **3. Тесты-эталон (портировать в Vitest, держать зелёными):**
-- `tests/test_billing_service.py`, `tests/test_attendees.py`, `tests/test_visibility.py`
-- `tests/test_debt_map.py`, `tests/test_yookassa_webhook.py`, `tests/test_lesson_service.py`
+- `tests/test_billing_service.py`, `tests/test_profit_service.py`, `tests/test_attendees.py`, `tests/test_visibility.py`
+- `tests/test_subscription_billing.py`, `tests/test_debt_map.py`, `tests/test_yookassa_webhook.py`,
+  `tests/test_lesson_service.py`
 
 **4. Guardrails:**
-- `docs/FOUND_BUGS.md` — что НЕ воспроизводить (B1 прокси, B4 webhook)
+- `docs/FOUND_BUGS.md` — открытые дефекты не воспроизводить; устранённые B1/B4 использовать как guardrails
 - `docs/BUSINESS_RULES.md` — сжатый каталог правил (быстрая сверка)
 
 > **Не загружай** остальной код бота (handlers/repositories/keyboards/aiogram) — это специфика
@@ -55,6 +57,8 @@ Next.js 14 (App Router) + TypeScript + PostgreSQL + Prisma + Tailwind + `@telegr
 - Счёт-инвойс: **один на `(student, teacher, period)`**; при пересчёте обновляется **только не-PAID**.
 - **«Оплачено» вычисляется**, а не хранится на занятии: по наличию PAID за `(period, teacher)`.
 - **Долг** = начислено − PAID (`compute_debt_map`); учёт с `DEBTORS_SINCE_PERIOD` (стартовый период).
+- **Прибыль** = занятия + абонементы + ручные доходы − зарплата − расходы; эталонные DTO/итоги —
+  `profit_service.py` и `test_profit_service.py`.
 - **Блокировка периода**: сдаётся с 25-го числа; после сдачи педагог не редактирует; админ обходит.
 - **Видимость** педагог↔ученик = пересечение групп (нет таблицы `teacher_students`).
 - Гард дублей: **соло** (1 ученик) блокируется; пары/группы — нет. Дата в будущем запрещена.
@@ -76,7 +80,8 @@ Next.js 14 (App Router) + TypeScript + PostgreSQL + Prisma + Tailwind + `@telegr
 ### Метод работы — строго по фазам (BUILD §8), каждую проверять
 0. Каркас (`create-next-app`, Prisma, Postgres, Telegram SDK) → initData доходит до сервера.
 1. БД: внести `schema.prisma` из BUILD §3, `prisma migrate`.
-2. **Домен + тесты СНАЧАЛА**: портируй `lib/domain/*` (billing, visibility, attendees, debt) и **перенеси
+2. **Домен + тесты СНАЧАЛА**: портируй `lib/domain/*` (billing, profit, subscriptions, visibility,
+   attendees, debt) и **перенеси
    характеризующие тесты в Vitest** — они должны стать зелёными до перехода дальше.
 3. Auth: `verifyInitData` + сессия + резолв роли + `middleware.ts`.
 4. API (чтение): списки/карточки, расчёт счёта — цифры должны совпасть с эталонными тестами.

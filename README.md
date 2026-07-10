@@ -1,190 +1,149 @@
-# Бот учёта занятий — Школа «Фокус»
+# fokus-bot
 
-Telegram-бот для ведения учёта занятий, расчёта зарплат педагогов и счетов учеников.
+Telegram-CRM танцевальной школы «Фокус»: учёт занятий, группы и ученики,
+зарплаты педагогов, счета родителям, оплаты и финансовая сводка.
 
----
+Текущая версия — Python-бот на `aiogram 3` с Google Sheets в роли базы данных.
+Проект параллельно подготавливается к переносу домена в Telegram Mini App и
+веб-приложение на Next.js + PostgreSQL.
+
+## Возможности
+
+- Администратор: педагоги, ученики, филиалы и группы, счета, должники,
+  зарплаты, прибыль, диагностика и запись занятий за педагога.
+- Педагог: запись и просмотр занятий, группы, пары/солисты, статистика и
+  сдача периода.
+- Родитель: регистрация детей, занятия, счета и оплата.
+- Биллинг групп: `NONE`, `PER_VISIT`, `SUBSCRIPTION` с помесячными
+  переопределениями цены.
+- Оплата: наличные, реквизиты, СБП, ЮКасса; опциональная фискализация через
+  CloudKassir.
 
 ## Стек
 
-| Компонент | Версия |
-|-----------|--------|
-| Python | 3.12+ |
-| aiogram | 3.13 |
-| gspread | 6.1 |
-| pydantic-settings | 2.5 |
-| Railway | деплой |
-
----
+| Слой | Технология |
+|---|---|
+| Бот | Python 3.12+, aiogram 3.13 |
+| Данные | Google Sheets, gspread 6 |
+| Настройки | pydantic-settings 2 |
+| FSM | Redis в production или MemoryStorage без `REDIS_URL` |
+| Платежи | ЮКасса, CloudKassir |
+| Production | Hetzner VPS, systemd, polling |
 
 ## Быстрый старт
 
 ```bash
-# 1. Клонировать репо и создать venv
-python3 -m venv .venv && source .venv/bin/activate
-
-# 2. Установить зависимости
-pip install -r requirements.txt
-
-# 3. Создать .env (см. .env.example)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
 cp .env.example .env
-# отредактировать .env
-
-# 4. Запустить
 python -m bot
 ```
 
----
+Обязательные переменные:
 
-## ENV-переменные
+- `BOT_TOKEN`;
+- `GOOGLE_CREDENTIALS_JSON` — JSON сервисного аккаунта одной строкой;
+- `SPREADSHEET_ID`.
 
-| Переменная | Обязательная | Описание |
-|---|---|---|
-| `BOT_TOKEN` | ✅ | Токен Telegram-бота (от @BotFather) |
-| `GOOGLE_CREDENTIALS_JSON` | ✅ | JSON сервисного аккаунта Google (вся строка) |
-| `SPREADSHEET_ID` | ✅ | ID Google Spreadsheet |
-| `SHEET_USERS` | — | Имя листа users (по умолчанию: `users`) |
-| `SHEET_TEACHERS` | — | Имя листа teachers (по умолчанию: `teachers`) |
-| `SHEET_STUDENTS` | — | Имя листа students (по умолчанию: `students`) |
-| `SHEET_LESSONS` | — | Имя листа lessons |
-| `SHEET_BILLING` | — | Имя листа billing |
-| `SHEET_PAYMENTS` | — | Имя листа student_period_payments |
-| `SHEET_BRANCHES` | — | Имя листа branches |
-| `SHEET_GROUPS` | — | Имя листа groups |
-| `SHEET_TEACHER_GROUPS` | — | Имя листа teacher_groups |
-| `SHEET_STUDENT_GROUPS` | — | Имя листа student_groups (M:N ученик↔группа) |
-| `SHEET_STUDENT_REQUESTS` | — | Имя листа student_requests |
-| `SHEET_TEACHER_PERIOD_SUBMISSIONS` | — | Имя листа teacher_period_submissions |
+Остальные параметры, включая имена листов, способы оплаты, Redis и webhook,
+описаны в [.env.example](.env.example) и [config/settings.py](config/settings.py).
 
----
+## Проверка
 
-## Настройка Google Sheets
-
-1. Создать Google Spreadsheet.
-2. Создать сервисный аккаунт в Google Cloud Console → скачать JSON.
-3. Дать сервисному аккаунту доступ к таблице (Editor).
-4. Содержимое JSON вставить в `GOOGLE_CREDENTIALS_JSON` как одну строку.
-
-### Структура листов
-
-#### users
-| user_id | tg_id | is_admin | teacher_id |
-|---------|-------|----------|------------|
-| USR-0001 | 123456789 | true | TCH-0001 |
-
-#### teachers
-| teacher_id | tg_id | name | rate_group | rate_for_teacher | rate_for_student |
-|---|---|---|---|---|---|
-| TCH-0001 | 123456789 | Иванова А.П. | 500 | 800 | 1000 |
-
-#### students
-| student_id | name |
-|---|---|
-| STU-0001 | Петров Иван |
-
-#### student_groups
-| student_id | group_id |
-|---|---|
-| STU-0001 | GRP-0001 |
-| STU-0001 | GRP-0008 |
-
-Одна строка на пару (ученик, группа). Ученик может состоять в нескольких группах.
-
-#### lessons
-| lesson_id | teacher_id | teacher_name | type | student_1_id | student_1_name | student_2_id | student_2_name | date | duration_min | earned | recorded_at | updated_at |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| LES-000001 | TCH-0001 | Иванова | individual | STU-0001 | Петров | | | 2024-03-01 | 60 | 1067 | 2024-03-01 12:00:00 | 2024-03-01 12:00:00 |
-
-#### billing
-| billing_id | lesson_id | student_id | student_name | teacher_id | teacher_name | date | duration_min | amount | period_month | payment_id | created_at | updated_at |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-
-#### student_period_payments
-| payment_id | student_id | student_name | period_month | total_amount | status | paid_at | confirmed_by_tg_id | comment | created_at | updated_at |
-|---|---|---|---|---|---|---|---|---|---|---|
-
----
-
-## Структура проекта
-
-```
-fokus-bot/
-├── bot/
-│   ├── __main__.py          # точка входа, DI-контейнер
-│   ├── handlers/
-│   │   ├── common.py        # /start, выбор режима
-│   │   ├── admin/           # педагоги, ученики, зарплаты, счета, диагностика
-│   │   └── teacher/         # отметить занятие, мои занятия, статистика
-│   ├── services/
-│   │   ├── lesson_service.py    # создание и удаление занятий
-│   │   ├── billing_service.py   # расчёт и создание billing
-│   │   ├── payment_service.py   # оплата периода
-│   │   └── diagnostics_service.py  # диагностика и пересборка
-│   ├── repositories/        # CRUD-обёртки над Google Sheets листами
-│   ├── keyboards/           # inline-клавиатуры
-│   ├── states/              # FSM-состояния
-│   ├── models/              # dataclass-модели и enum
-│   ├── middlewares/         # AuthMiddleware
-│   └── utils/               # генераторы ID, форматирование дат
-├── config/
-│   └── settings.py          # pydantic-settings конфиг из .env
-├── tests/
-├── .env.example
-├── requirements.txt
-└── Procfile                 # для Railway
+```bash
+.venv/bin/python -m pytest -q
 ```
 
----
+Для production достаточно `requirements.txt`; `requirements-dev.txt` дополнительно
+устанавливает только инструменты проверки.
 
-## Формулы расчёта
+Тесты фиксируют формулы биллинга и прибыли, правила сервисов, webhook ЮКассы,
+работу локеров и связность callback-кнопок. После изменения пользовательского
+сценария дополнительно проверьте его вручную в Telegram.
 
-### Начисление педагогу
+## Архитектура
+
+```text
+bot/
+  __main__.py       DI-контейнер и запуск polling/webhook
+  handlers/         Telegram-представление и FSM по ролям
+  services/         бизнес-правила и прикладные сценарии
+  repositories/     доступ к листам Google Sheets
+  models/           dataclass-сущности и enum
+  keyboards/        inline-клавиатуры
+  states/           FSM-состояния
+  middlewares/      авторизация и дедупликация update
+  utils/            даты, ID, attendees, локеры
+config/
+  settings.py       ENV-конфигурация
+tests/              характеризующие и модульные тесты
+scripts/            deploy и служебные миграции/аудиты
+docs/               правила домена и план Mini App
 ```
-earned = ставка × (duration_min / 45)
 
-group     → rate_group
-individual → rate_for_teacher
+Главный принцип слоёв: хендлеры не должны дублировать денежные и доменные
+расчёты. Telegram, будущий API и веб-интерфейс должны использовать одни и те же
+сервисы/правила.
+
+Виртуальные строки `Billing` не хранятся в отдельном листе: счёт и зарплата
+вычисляются из `Lesson` и `Teacher`. Настройка `SHEET_BILLING` осталась только
+для обратной совместимости и текущим DI не используется.
+
+## Google Sheets
+
+Используемые репозиториями листы:
+
+- `users`, `teachers`, `students`, `lessons`;
+- `student_period_payments`, `teacher_period_submissions`;
+- `branches`, `groups`, `teacher_groups`, `student_groups`;
+- `clients`, `student_requests`;
+- `subscription_overrides`, `finance_entries`.
+
+Первая строка каждого листа — заголовки. Репозитории кэшируют чтение на 300
+секунд и сбрасывают кэш при записи.
+
+Важно: `student.parent_tg_ids` записывается через `|`, а не через запятую —
+русская локаль Google Sheets может преобразовать строку Telegram ID в число.
+
+## Формулы
+
+```text
+зарплата = ставка × duration_min / 45
+
+индивидуальный счёт = rate_for_student × duration_min / 45
 ```
-Количество учеников не влияет на earned.
 
-### Счёт ученика
+Стоимость индивидуального занятия делится между 1–4 участниками поровну;
+целый остаток получает первый. Для `PER_VISIT` стоимость хранится снапшотом в
+`lesson.attendees`. Полные правила находятся в
+[docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md).
+
+## Production
+
+Текущий production работает в polling-режиме под systemd на Hetzner VPS.
+
+```bash
+./scripts/deploy.sh
+ssh root@178.104.240.252 journalctl -u fokus-bot -f
 ```
-# Один ученик:
-amount = rate_for_student × (duration_min / 45)
 
-# Пара:
-total = rate_for_student × (duration_min / 45)
-amount_1 = ceil(total / 2)   # первый получает лишний рубль при нечётной сумме
-amount_2 = total - amount_1  # сумма amount_1 + amount_2 == total точно
-```
+`Procfile` и `WEBHOOK_URL` сохранены как альтернативный режим, но Railway сейчас
+не используется.
 
----
+## Документация
 
-## Роли
+- [CLAUDE.md](CLAUDE.md) — подробная архитектура и инвентарь функций.
+- [AGENTS.md](AGENTS.md) — инструкции для Codex и других AI-агентов.
+- [BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — краткий источник бизнес-правил.
+- [MINIAPP_SPEC.md](docs/MINIAPP_SPEC.md) — фронт-независимая спецификация домена.
+- [MINIAPP_BUILD.md](docs/MINIAPP_BUILD.md) — технический план Mini App/web.
+- [MINIAPP_AGENT_PROMPT.md](docs/MINIAPP_AGENT_PROMPT.md) — комплект передачи задачи агенту.
+- [FOUND_BUGS.md](docs/FOUND_BUGS.md) — найденные дефекты и их статус.
+- [IMPROVEMENTS.md](docs/IMPROVEMENTS.md) — согласованные кандидаты улучшений.
 
-| Условие | Поведение /start |
-|---|---|
-| is_admin=true + teacher_id | Выбор режима: Администратор / Педагог |
-| is_admin=true, нет teacher_id | Сразу меню администратора |
-| is_admin=false + teacher_id | Сразу меню педагога |
-| Нет записи в users | «Вы не зарегистрированы» |
+## ID
 
----
-
-## Деплой на Railway
-
-1. Создать новый проект на railway.app.
-2. Подключить репозиторий.
-3. Добавить все env-переменные в настройки сервиса.
-4. Railway подхватит `Procfile` и запустит `python -m bot`.
-
----
-
-## ID-форматы
-
-| Сущность | Формат | Пример |
-|---|---|---|
-| Педагог | TCH-XXXX | TCH-0001 |
-| Ученик | STU-XXXX | STU-0042 |
-| Занятие | LES-XXXXXX | LES-000123 |
-| Billing | BIL-XXXXXX | BIL-000456 |
-| Оплата | PAY-XXXXXX | PAY-000001 |
+Читаемые последовательные ID сохраняются для совместимости данных:
+`TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `PAY-XXXXXX`, `SUB-XXXXXX`,
+`BRN-XXXX`, `GRP-XXXX`, `USR-XXXX`, `CLT-XXXX`, `FIN-XXXXXX`.
