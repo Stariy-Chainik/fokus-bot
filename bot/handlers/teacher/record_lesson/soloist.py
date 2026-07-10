@@ -25,11 +25,6 @@ from bot.handlers.access import is_teacher_or_admin as _is_teacher
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data == "noop")
-async def cb_noop(callback: CallbackQuery) -> None:
-    await callback.answer()
-
-
 @router.callback_query(F.data.startswith("ms_toggle:"))
 async def cb_ms_toggle(
     callback: CallbackQuery, state: FSMContext, user: User | None,

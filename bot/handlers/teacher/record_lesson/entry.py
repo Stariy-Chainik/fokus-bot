@@ -109,7 +109,7 @@ async def cb_lesson_back(
     elif target == "pair":
         await state.update_data(
             selected_group_id=None, selected_branch_id=None,
-            selected_ids=[], group_auto=False, pair_from_soloists=False,
+            selected_ids=[], group_auto=False,
         )
         await _show_pair_list(callback, state, user, visibility)
 
@@ -118,7 +118,7 @@ async def cb_lesson_back(
         if data.get("group_auto"):
             await state.update_data(
                 selected_group_id=None, selected_ids=[],
-                group_auto=False, pair_from_soloists=False,
+                group_auto=False,
             )
             await state.set_state(RecordLessonStates.choosing_duration)
             await callback.message.edit_text(

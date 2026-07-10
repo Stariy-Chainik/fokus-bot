@@ -16,11 +16,13 @@
 - **Почему баг:** `_KIND_LABEL.get(kind, kind)`-семантика подставляет сам ключ, словарь не пополнили при добавлении типа shared.
 - **Репро:** запись занятия → тип «Разовое совместное» → на экране длительности/выбора в шапке виден англ. «shared».
 
-## B3. Мёртвая ветка pair_from_soloists и перекрытый cb_noop
-- **Где:** [bot/handlers/teacher/record_lesson.py](../bot/handlers/teacher/record_lesson.py) — флаг `pair_from_soloists` (ставится только в `False`), `_show_pair_soloists_in_group`, состояние `picking_pair_soloists`, хендлеры `pso_toggle`/`pso_confirm` для него; дубль `cb_noop` (перехватывается более ранним `common_router`).
-- **Симптом:** пользователю не виден — код недостижим.
-- **Почему баг:** скорее незавершённая фича «пара из солистов», чем осознанный код; мёртвые ветки затрудняют декомпозицию P5.
-- **Репро:** нет (недостижимо). Кандидат на удаление отдельным коммитом «Remove dead code» после подтверждения, что фича не планируется.
+## B3. Мёртвая ветка pair_from_soloists и перекрытый cb_noop — ✅ УДАЛЕНА (2026-07)
+- **Была:** недостижимая цепочка «пара из солистов» (флаг ставился только в `False`) —
+  `_show_pair_soloists_in_group`, состояние `picking_pair_soloists`, пара хендлеров
+  `pso_toggle`/`pso_confirm` в `record_lesson/pair.py`; плюс дубль `cb_noop` в `soloist.py`,
+  перекрытый ранним `common_router`.
+- **Удалена** с подтверждением пользователя (фича не планируется): −3 недостижимых хендлера
+  (273 → 270), состояние и флаг вычищены. `kb_pair_from_soloists` жив — используется shared-флоу.
 
 ## B4. Webhook ЮКассы не верифицирует запрос (безопасность) — ✅ ИСПРАВЛЕНО
 - **Где:** [bot/handlers/client/payments.py](../bot/handlers/client/payments.py) — `make_yookassa_webhook_handler`.

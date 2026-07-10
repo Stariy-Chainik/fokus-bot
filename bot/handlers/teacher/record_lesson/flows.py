@@ -13,9 +13,9 @@ from bot.repositories import (
 from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
-    kb_lesson_type, kb_attendance_yes_no, kb_pair_multi_select, kb_pair_from_soloists,
-    kb_multi_select, kb_group_roster_per_visit, kb_group_branch_picker,
-    kb_group_picker, kb_shared_group_picker,
+    kb_lesson_type, kb_attendance_yes_no, kb_pair_multi_select, kb_multi_select,
+    kb_group_roster_per_visit, kb_group_branch_picker, kb_group_picker,
+    kb_shared_group_picker,
 )
 
 from ._base import _tid, _menu_kb, _all_students_in_group, _header
@@ -103,14 +103,9 @@ async def _after_group_pick(
     lesson_service: LessonService | None = None,
 ) -> None:
     """Ветвление после выбора группы:
-    pair_from_soloists → чекбоксы солистов этой группы;
     соло → ростер учеников; группа → вопрос attendance (или автосохранение)."""
     data = await state.get_data()
-    if data.get("pair_from_soloists"):
-        await _show_pair_soloists_in_group(
-            callback, state, group_id, user, visibility, group_repo,
-        )
-    elif data.get("kind") == "soloist":
+    if data.get("kind") == "soloist":
         await _show_soloist_in_group(
             callback, state, group_id, user, visibility, group_repo,
         )
@@ -262,7 +257,7 @@ async def _show_pair_list(
         )
         await state.clear()
         return
-    await state.update_data(selected_ids=[], pair_from_soloists=False)
+    await state.update_data(selected_ids=[])
     await state.set_state(RecordLessonStates.choosing_pair)
     text = f"{_header(data)}Отметьте пары ({len(pairs)} доступно), затем Подтвердить."
     await callback.message.edit_text(
@@ -271,36 +266,6 @@ async def _show_pair_list(
             pairs, set(),
             back_cb="lesson_back:duration",
         ),
-    )
-
-
-async def _show_pair_soloists_in_group(
-    callback: CallbackQuery, state: FSMContext, group_id: str,
-    user: User, visibility: TeacherVisibilityService,
-    group_repo: GroupRepository,
-) -> None:
-    """Чекбоксы учеников выбранной группы — для одного занятия с 2-4 участниками."""
-    data = await state.get_data()
-    group = await group_repo.get_by_id(group_id)
-    if not group:
-        await callback.answer("Группа не найдена", show_alert=True)
-        return
-    members = await visibility.students_in_group_for_teacher(_tid(user, data), group_id)
-    soloists = sorted(members, key=lambda s: s.name)
-    if len(soloists) < 1:
-        await state.update_data(selected_group_id=None)
-        await callback.answer(
-            f"В группе «{group.name}» нет учеников", show_alert=True,
-        )
-        return
-    await state.update_data(selected_group_id=group_id, selected_ids=[])
-    await state.set_state(RecordLessonStates.picking_pair_soloists)
-    data = await state.get_data()
-    await callback.message.edit_text(
-        f"{_header(data)}Группа: <b>{group.name}</b>\n"
-        f"Выберите от 2 до 4 солистов, которые занимались вместе.\n"
-        f"Сумма за занятие разделится поровну между ними.",
-        reply_markup=kb_pair_from_soloists(soloists, set(), back_cb="lesson_back:group"),
     )
 
 
