@@ -73,6 +73,19 @@ async def _send_bill_to_parents(
     return len(recipients), sent_to, sent_invoices
 
 
+async def _student_group_names(
+    student_id: str,
+    student_group_repo: StudentGroupRepository, group_repo: GroupRepository,
+) -> list[str]:
+    """Названия всех групп ученика — для шапки счёта."""
+    names: list[str] = []
+    for gid in await student_group_repo.get_groups_for_student(student_id):
+        g = await group_repo.get_by_id(gid)
+        if g:
+            names.append(g.name)
+    return names
+
+
 def _period_buttons(student_id: str, action_prefix: str) -> InlineKeyboardMarkup:
     periods = last_periods(6)
     buttons = [
@@ -276,12 +289,7 @@ async def cb_bill_group_send(
             bills = await payment_service.compute_bills_for_student_period(s.student_id, period)
             if not bills:
                 continue
-            gids = await student_group_repo.get_groups_for_student(s.student_id)
-            group_names: list[str] = []
-            for g_id in gids:
-                g = await group_repo.get_by_id(g_id)
-                if g:
-                    group_names.append(g.name)
+            group_names = await _student_group_names(s.student_id, student_group_repo, group_repo)
             total_rec, sent_to, _ = await _send_bill_to_parents(
                 callback, s, period, bills, group_names, payment_service, client_repo,
             )
@@ -433,90 +441,20 @@ async def cb_bill_send(
             await callback.answer("В счёте нет занятий", show_alert=True)
             return
 
-        invoices = await payment_service.get_or_create_invoices_for_student_period(
-            student, period_month,
-        )
-
-        gids = await student_group_repo.get_groups_for_student(student_id)
-        group_names: list[str] = []
-        for gid in gids:
-            g = await group_repo.get_by_id(gid)
-            if g:
-                group_names.append(g.name)
-
-        bill_text, grand_total = build_bill_text(student.name, group_names, period_month, bills)
-
+        group_names = await _student_group_names(student_id, student_group_repo, group_repo)
         back_cb = (
             f"bvb:{period_month}:none" if group_id == "none"
             else f"bvg:{period_month}:{group_id}"
         )
 
-        # Собираем получателей: привязанный клиент + все родители ученика
-        client = await client_repo.get_by_id(student.client_id) if student.client_id else None
-        recipients: list[int] = []
-        if client and client.tg_id:
-            recipients.append(client.tg_id)
-        for pid in (student.parent_tg_ids or []):
-            if pid not in recipients:
-                recipients.append(pid)
+        total_rec, sent_to, sent_invoices = await _send_bill_to_parents(
+            callback, student, period_month, bills, group_names,
+            payment_service, client_repo,
+        )
 
-        if recipients:
-            # Реальная отправка родителям
-            sent_to = 0
-            sent_invoices = 0
-            for tg_id in recipients:
-                try:
-                    await callback.bot.send_message(tg_id, bill_text)
-                    sent_to += 1
-                except Exception as exc:
-                    logger.error("Ошибка отправки сообщения родителю tg_id=%s: %s", tg_id, exc)
-                    continue
-                if settings.payment_provider_token:
-                    for p in invoices:
-                        if p.status.value != "paid":
-                            try:
-                                await callback.bot.send_invoice(
-                                    chat_id=tg_id,
-                                    title=f"Занятия {display_period(period_month)}",
-                                    description=f"Педагог: {p.teacher_name or '—'}",
-                                    payload=p.payment_id,
-                                    provider_token=settings.payment_provider_token,
-                                    currency="RUB",
-                                    prices=[LabeledPrice(
-                                        label="Обучение",
-                                        amount=p.total_amount * 100,
-                                    )],
-                                )
-                                sent_invoices += 1
-                            except Exception as exc:
-                                logger.error("Ошибка отправки инвойса %s: %s", p.payment_id, exc)
-
-            if sent_to == 0:
-                await callback.message.edit_text(
-                    "❌ Не удалось отправить — родитель заблокировал бота или не запускал /start.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
-                    ]),
-                )
-                await callback.answer()
-                return
-
-            status_line = f"✅ Счёт отправлен родителю ({sent_to} из {len(recipients)})"
-            if sent_invoices:
-                status_line += f" + {sent_invoices} кнопок оплаты"
-            logger.info(
-                "Счёт отправлен student=%s period=%s recipients=%s sent=%s",
-                student_id, period_month, recipients, sent_to,
-            )
-            await callback.message.edit_text(
-                status_line,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
-                    [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
-                ]),
-            )
-        else:
+        if total_rec == 0:
             # Нет ни клиента, ни родителей с доступом — показать шаблон для ручной отправки
+            client = await client_repo.get_by_id(student.client_id) if student.client_id else None
             if client:
                 header = (
                     "⚠️ <i>Клиент ещё не заходил в бот (нет Telegram). "
@@ -527,6 +465,7 @@ async def cb_bill_send(
                     "📤 <i>Родитель не привязан. "
                     "Скопируй и отправь вручную:</i>\n\n"
                 )
+            bill_text, _ = build_bill_text(student.name, group_names, period_month, bills)
             await callback.message.edit_text(
                 header + bill_text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -534,6 +473,33 @@ async def cb_bill_send(
                     [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
                 ]),
             )
+            await callback.answer()
+            return
+
+        if sent_to == 0:
+            await callback.message.edit_text(
+                "❌ Не удалось отправить — родитель заблокировал бота или не запускал /start.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="« Назад", callback_data=back_cb)],
+                ]),
+            )
+            await callback.answer()
+            return
+
+        status_line = f"✅ Счёт отправлен родителю ({sent_to} из {total_rec})"
+        if sent_invoices:
+            status_line += f" + {sent_invoices} кнопок оплаты"
+        logger.info(
+            "Счёт отправлен student=%s period=%s recipients=%s sent=%s",
+            student_id, period_month, total_rec, sent_to,
+        )
+        await callback.message.edit_text(
+            status_line,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="« Назад к ученикам", callback_data=back_cb)],
+                [InlineKeyboardButton(text="« В меню", callback_data="admin:menu")],
+            ]),
+        )
         await callback.answer()
     finally:
         _sending_in_progress.discard(lock_key)
