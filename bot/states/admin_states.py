@@ -22,12 +22,6 @@ class AddStudentStates(StatesGroup):
     confirming = State()
 
 
-class ConfirmPaymentStates(StatesGroup):
-    choosing_student = State()
-    choosing_period = State()
-    confirming = State()
-
-
 class StudentListStates(StatesGroup):
     searching = State()
 
