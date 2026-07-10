@@ -115,6 +115,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `StudentGroupRepository` | `student_groups` | Many-to-many student ↔ group (join table) |
 | `ClientRepository` | `clients` | Parent entities; phone (normalized) + optional tg_id |
 | `StudentRequestRepository` | `student_requests` | Teacher-submitted requests to add a new student (admin approves) |
+| `SubscriptionOverrideRepository` | `subscription_overrides` | Переопределение цены абонемента на месяц: `(group_id, period, student_id?)` → amount; пустой student_id = вся группа |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).
 
@@ -246,7 +247,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 - **Teacher visibility**: derived from `teacher_groups` ∩ `student_groups`. There is **no** `teacher_students` table.
 - **Multi-group students**: a student can belong to multiple groups; billing aggregates across all per period.
 - **SHORT/FULL tiers** (`StudentGroupTier`): only for kindergarten groups (ЮБ/БП); all others have one price.
-- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (абонемент: фиксированная `price_full` ₽/мес с каждого ученика группы, **независимо от числа занятий**; начисляется за месяц, где у группы было ≥1 занятие; ключ начисления в счетах/долгах — `SUB:{group_id}`; см. `PaymentService._subscription_bills_for_student`).
+- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (абонемент: фиксированная `price_full` ₽/мес с каждого ученика группы, **независимо от числа занятий**; начисляется за месяц, где у группы было ≥1 занятие; ключ начисления в счетах/долгах — `SUB:{group_id}`; см. `PaymentService._subscription_bills_for_student`). Цена переопределяется на конкретный месяц для ученика или всей группы (лист `subscription_overrides`, приоритет ученик → группа → `price_full`, `0` = не начислять; UI — «Биллинг ученикам» группы, callbacks `subovr:*`).
 - **NONE/SUBSCRIPTION groups auto-save**: recording a group lesson for these modes skips attendance and saves immediately with `attendees=None` (roster shown only for PER_VISIT).
 - **Duplicate guard**:
   - Group lessons: **not** blocked — a group can be recorded twice in one day (different shifts/streams).
@@ -364,7 +365,7 @@ Required:
 - `GOOGLE_CREDENTIALS_JSON` — service account JSON (inline, single-line)
 - `SPREADSHEET_ID` — main Google Spreadsheet ID
 
-Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`.
+Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`, `SHEET_SUBSCRIPTION_OVERRIDES`.
 
 Optional — payments:
 - `DEBTORS_SINCE_PERIOD` — долги на экране «⚠️ Должники» считаются с этого периода (`YYYY-MM`); пусто — за всё время. Отсекает месяцы до внедрения учёта оплат (на проде: `2026-07`).

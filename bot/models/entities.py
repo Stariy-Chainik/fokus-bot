@@ -71,6 +71,21 @@ class TeacherGroup:
 
 
 @dataclass
+class SubscriptionOverride:
+    """Переопределение цены абонемента на конкретный месяц.
+
+    student_id пуст (None) — для всей группы; задан — для одного ученика.
+    Приоритет при начислении: ученик → группа → group.price_full.
+    amount = 0 — в этом месяце не начислять (освобождение).
+    """
+    group_id: str
+    period_month: str          # YYYY-MM
+    student_id: Optional[str]
+    amount: int                # рублей
+    created_at: str = ""
+
+
+@dataclass
 class StudentGroup:
     student_id: str
     group_id: str

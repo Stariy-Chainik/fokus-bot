@@ -26,7 +26,7 @@ from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
     StudentGroupRepository,
     StudentRequestRepository,
-    ClientRepository,
+    ClientRepository, SubscriptionOverrideRepository,
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
@@ -77,12 +77,16 @@ def _build_dispatcher(storage) -> Dispatcher:
     student_group_repo = StudentGroupRepository(sheets_client, settings.sheet_student_groups)
     student_request_repo = StudentRequestRepository(sheets_client, settings.sheet_student_requests)
     client_repo = ClientRepository(sheets_client, settings.sheet_clients)
+    subscription_override_repo = SubscriptionOverrideRepository(
+        sheets_client, settings.sheet_subscription_overrides,
+    )
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
     payment_service = PaymentService(
         payment_repo, lesson_repo, teacher_repo,
         group_repo=group_repo, student_group_repo=student_group_repo,
+        subscription_override_repo=subscription_override_repo,
     )
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
     visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
@@ -111,6 +115,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["student_group_repo"] = student_group_repo
     dp["student_request_repo"] = student_request_repo
     dp["client_repo"] = client_repo
+    dp["subscription_override_repo"] = subscription_override_repo
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
     dp["diagnostics_service"] = diagnostics_service

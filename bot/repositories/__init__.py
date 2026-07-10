@@ -11,6 +11,7 @@ from .teacher_group_repo import TeacherGroupRepository
 from .student_group_repo import StudentGroupRepository
 from .student_request_repo import StudentRequestRepository
 from .client_repo import ClientRepository
+from .subscription_override_repo import SubscriptionOverrideRepository
 
 __all__ = [
     "SheetsClient",
@@ -26,4 +27,5 @@ __all__ = [
     "StudentGroupRepository",
     "StudentRequestRepository",
     "ClientRepository",
+    "SubscriptionOverrideRepository",
 ]

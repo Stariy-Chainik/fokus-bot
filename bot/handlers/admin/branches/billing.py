@@ -11,6 +11,7 @@ from datetime import date
 from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
     TeacherRepository, StudentRepository, StudentGroupRepository,
+    SubscriptionOverrideRepository,
 )
 from bot.services import PaymentService
 from bot.states import (
@@ -53,6 +54,15 @@ def _kb_group_billing(group_id: str, mode: GroupBillingMode) -> InlineKeyboardMa
     elif mode == GroupBillingMode.SUBSCRIPTION:
         rows.append([InlineKeyboardButton(
             text="✏️ Изменить цену абонемента", callback_data=f"group_billing_sub:{group_id}",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="📅 Цена на месяц (вся группа)", callback_data=f"subovr:m:{group_id}:g",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="👤 Цена на месяц (ученик)", callback_data=f"subovr:m:{group_id}:s",
+        )])
+        rows.append([InlineKeyboardButton(
+            text="🗑 Сбросить переопределение", callback_data=f"subovr:list:{group_id}",
         )])
         rows.append([InlineKeyboardButton(
             text="💰 Переключить на посещения", callback_data=f"group_billing_edit:{group_id}",
@@ -103,9 +113,35 @@ def _billing_text(group_name: str, mode: GroupBillingMode,
     return "\n".join(lines)
 
 
+async def _overrides_block(
+    group, override_repo: SubscriptionOverrideRepository, student_repo: StudentRepository,
+) -> str:
+    """Блок активных переопределений цены (для SUBSCRIPTION-группы), либо ''."""
+    if group.billing_mode != GroupBillingMode.SUBSCRIPTION:
+        return ""
+    overrides = sorted(
+        await override_repo.get_for_group(group.group_id),
+        key=lambda o: (o.period_month, o.student_id or ""),
+    )
+    if not overrides:
+        return ""
+    lines = ["", "📌 <b>Переопределения цены:</b>"]
+    for o in overrides:
+        if o.student_id:
+            student = await student_repo.get_by_id(o.student_id)
+            who = student.name if student else o.student_id
+        else:
+            who = "вся группа"
+        amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
+        lines.append(f"  • {display_period(o.period_month)} · {who} — {amount}")
+    return "\n".join(lines)
+
+
 @router.callback_query(F.data.startswith("group_billing:"))
 async def cb_group_billing(
     callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    subscription_override_repo: SubscriptionOverrideRepository,
+    student_repo: StudentRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -115,12 +151,13 @@ async def cb_group_billing(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
+    text = _billing_text(
+        group.name, group.billing_mode,
+        group.price_short, group.duration_short,
+        group.price_full, group.duration_full,
+    ) + await _overrides_block(group, subscription_override_repo, student_repo)
     await callback.message.edit_text(
-        _billing_text(
-            group.name, group.billing_mode,
-            group.price_short, group.duration_short,
-            group.price_full, group.duration_full,
-        ),
+        text,
         reply_markup=_kb_group_billing(group_id, group.billing_mode),
     )
     await callback.answer()
@@ -321,5 +358,207 @@ async def group_billing_sub_price(
         ),
         reply_markup=_kb_group_billing(group_id, GroupBillingMode.SUBSCRIPTION),
     )
+
+
+# ─── Переопределение цены абонемента на месяц (ученик / вся группа) ──────────
+
+def _override_periods() -> list[str]:
+    """Прошлый, текущий и следующий месяцы."""
+    from dateutil.relativedelta import relativedelta  # type: ignore
+    today = date.today()
+    return [(today + relativedelta(months=i)).strftime("%Y-%m") for i in (-1, 0, 1)]
+
+
+def _parse_non_negative_int(raw: str) -> int | None:
+    raw = (raw or "").strip().replace(" ", "")
+    return int(raw) if raw.isdigit() else None
+
+
+@router.callback_query(F.data.startswith("subovr:m:"))
+async def cb_subovr_pick_month(callback: CallbackQuery, user: User | None) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, group_id, scope = callback.data.split(":", 3)
+    label = "всей группы" if scope == "g" else "ученика"
+    rows = [
+        [InlineKeyboardButton(
+            text=display_period(p), callback_data=f"subovr:p:{group_id}:{scope}:{p}",
+        )]
+        for p in _override_periods()
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_billing:{group_id}")])
+    await callback.message.edit_text(
+        f"<b>📅 Цена абонемента на месяц ({label})</b>\n\nВыберите месяц:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("subovr:p:"))
+async def cb_subovr_pick_target(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, group_id, scope, period = callback.data.split(":", 4)
+
+    if scope == "g":
+        await state.set_state(GroupBillingStates.entering_override_amount)
+        await state.update_data(ovr_group_id=group_id, ovr_period=period, ovr_student_id=None)
+        await callback.message.edit_text(
+            f"<b>📅 {display_period(period)} — вся группа</b>\n\n"
+            "Введите цену абонемента на этот месяц в рублях.\n"
+            "<b>0</b> — в этом месяце не начислять никому.",
+            reply_markup=kb_back(f"group_billing:{group_id}"),
+        )
+        await callback.answer()
+        return
+
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
+    students = sorted(
+        [s for s in await student_repo.get_all() if s.student_id in member_ids],
+        key=lambda s: s.name,
+    )
+    if not students:
+        await callback.answer("В группе нет учеников", show_alert=True)
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=s.name, callback_data=f"subovr:st:{group_id}:{period}:{s.student_id}",
+        )]
+        for s in students
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_billing:{group_id}")])
+    await callback.message.edit_text(
+        f"<b>👤 {display_period(period)} — выберите ученика:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("subovr:st:"))
+async def cb_subovr_pick_student(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, group_id, period, student_id = callback.data.split(":", 4)
+    student = await student_repo.get_by_id(student_id)
+    if not student:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    await state.set_state(GroupBillingStates.entering_override_amount)
+    await state.update_data(ovr_group_id=group_id, ovr_period=period, ovr_student_id=student_id)
+    await callback.message.edit_text(
+        f"<b>👤 {display_period(period)} — {student.name}</b>\n\n"
+        "Введите цену абонемента на этот месяц в рублях.\n"
+        "<b>0</b> — в этом месяце ученику не начислять.",
+        reply_markup=kb_back(f"group_billing:{group_id}"),
+    )
+    await callback.answer()
+
+
+@router.message(GroupBillingStates.entering_override_amount)
+async def subovr_amount_entered(
+    message: Message, state: FSMContext,
+    group_repo: GroupRepository,
+    subscription_override_repo: SubscriptionOverrideRepository,
+    student_repo: StudentRepository,
+) -> None:
+    v = _parse_non_negative_int(message.text or "")
+    if v is None:
+        await message.answer("Нужно целое число рублей (0 — не начислять). Введите ещё раз:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    group_id = data["ovr_group_id"]
+    period = data["ovr_period"]
+    student_id = data.get("ovr_student_id")
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await message.answer("Группа не найдена.", reply_markup=kb_back("admin:branches"))
+        return
+    await subscription_override_repo.upsert(group_id, period, student_id, v)
+    logger.info("Переопределение абонемента %s %s student=%s → %d ₽",
+                group_id, period, student_id or "вся группа", v)
+    text = _billing_text(
+        group.name, group.billing_mode,
+        group.price_short, group.duration_short,
+        group.price_full, group.duration_full,
+    ) + await _overrides_block(group, subscription_override_repo, student_repo)
+    await message.answer(text, reply_markup=_kb_group_billing(group_id, group.billing_mode))
+
+
+@router.callback_query(F.data.startswith("subovr:list:"))
+async def cb_subovr_list(
+    callback: CallbackQuery, user: User | None,
+    subscription_override_repo: SubscriptionOverrideRepository,
+    student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 2)[2]
+    overrides = sorted(
+        await subscription_override_repo.get_for_group(group_id),
+        key=lambda o: (o.period_month, o.student_id or ""),
+    )
+    if not overrides:
+        await callback.answer("Переопределений нет", show_alert=True)
+        return
+    rows = []
+    for o in overrides:
+        if o.student_id:
+            student = await student_repo.get_by_id(o.student_id)
+            who = student.name if student else o.student_id
+        else:
+            who = "вся группа"
+        amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
+        sid_part = o.student_id or "-"
+        rows.append([InlineKeyboardButton(
+            text=f"✖ {display_period(o.period_month)} · {who} — {amount}",
+            callback_data=f"subovr:del:{group_id}:{o.period_month}:{sid_part}",
+        )])
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_billing:{group_id}")])
+    await callback.message.edit_text(
+        "<b>🗑 Сбросить переопределение</b>\n\nНажмите на строку, чтобы удалить её:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("subovr:del:"))
+async def cb_subovr_delete(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository,
+    subscription_override_repo: SubscriptionOverrideRepository,
+    student_repo: StudentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, group_id, period, sid_part = callback.data.split(":", 4)
+    student_id = None if sid_part == "-" else sid_part
+    ok = await subscription_override_repo.delete(group_id, period, student_id)
+    if not ok:
+        await callback.answer("Уже удалено", show_alert=True)
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    text = _billing_text(
+        group.name, group.billing_mode,
+        group.price_short, group.duration_short,
+        group.price_full, group.duration_full,
+    ) + await _overrides_block(group, subscription_override_repo, student_repo)
+    await callback.message.edit_text(
+        text, reply_markup=_kb_group_billing(group_id, group.billing_mode),
+    )
+    await callback.answer("Сброшено")
 
 

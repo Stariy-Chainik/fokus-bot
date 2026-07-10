@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     sheet_student_groups: str = Field(default="student_groups", alias="SHEET_STUDENT_GROUPS")
     sheet_student_requests: str = Field(default="student_requests", alias="SHEET_STUDENT_REQUESTS")
     sheet_clients: str = Field(default="clients", alias="SHEET_CLIENTS")
+    sheet_subscription_overrides: str = Field(
+        default="subscription_overrides", alias="SHEET_SUBSCRIPTION_OVERRIDES",
+    )
 
     # Payments — Telegram Payments (legacy)
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")

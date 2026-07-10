@@ -6,7 +6,7 @@
 """
 import asyncio
 
-from bot.models import Teacher, Lesson, Group, StudentPeriodPayment
+from bot.models import Teacher, Lesson, Group, StudentPeriodPayment, SubscriptionOverride
 from bot.models.enums import LessonType, PaymentStatus, GroupBillingMode
 from bot.services.payment_service import PaymentService
 
@@ -113,13 +113,29 @@ def _payment(sid, tid, period, status):
     )
 
 
-def _service(lessons, groups, pairs, payments=()):
+class _FakeOverrideRepo:
+    def __init__(self, overrides):
+        self._overrides = overrides
+
+    async def get_all(self):
+        return self._overrides
+
+
+def _override(gid, period, sid, amount):
+    return SubscriptionOverride(group_id=gid, period_month=period,
+                                student_id=sid, amount=amount)
+
+
+def _service(lessons, groups, pairs, payments=(), overrides=None):
     return PaymentService(
         payment_repo=_FakePaymentRepo(list(payments)),
         lesson_repo=_FakeLessonRepo(lessons),
         teacher_repo=_FakeTeacherRepo([_teacher()]),
         group_repo=_FakeGroupRepo(groups),
         student_group_repo=_FakeStudentGroupRepo(pairs),
+        subscription_override_repo=(
+            _FakeOverrideRepo(overrides) if overrides is not None else None
+        ),
     )
 
 
@@ -203,6 +219,63 @@ def test_none_and_per_visit_groups_not_affected():
     )
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07")) == {}
     assert _run(svc.compute_debt_map()) == {}
+
+
+def test_override_for_whole_group():
+    """Цена группы на месяц перекрывает price_full для всех участников."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+        overrides=[_override("GRP-0001", "2026-07", None, 2000)],
+    )
+    bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))
+    assert bills["SUB:GRP-0001"]["total"] == 2000
+    assert _run(svc.compute_debt_map()) == {
+        "STU-A": {"2026-07": 2000}, "STU-B": {"2026-07": 2000},
+    }
+
+
+def test_override_for_single_student_beats_group_override():
+    """Приоритет: цена ученика → цена группы → price_full."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+        overrides=[
+            _override("GRP-0001", "2026-07", None, 2000),
+            _override("GRP-0001", "2026-07", "STU-A", 1500),
+        ],
+    )
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))["SUB:GRP-0001"]["total"] == 1500
+    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"]["total"] == 2000
+
+
+def test_override_zero_exempts_student():
+    """0 = освобождение: ученику не начисляется, остальным — как обычно."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+        overrides=[_override("GRP-0001", "2026-07", "STU-A", 0)],
+    )
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07")) == {}
+    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_debt_map()) == {"STU-B": {"2026-07": 3000}}
+
+
+def test_override_applies_only_to_its_month():
+    """Переопределение на июль не влияет на июнь."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-06-15"),
+         _group_lesson("LES-2", "GRP-0001", "2026-07-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001")],
+        overrides=[_override("GRP-0001", "2026-07", None, 2000)],
+    )
+    assert _run(svc.compute_debt_map()) == {
+        "STU-A": {"2026-06": 3000, "2026-07": 2000},
+    }
 
 
 def test_without_group_repos_subscriptions_skipped():

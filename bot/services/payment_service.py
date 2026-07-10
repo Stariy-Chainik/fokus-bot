@@ -26,6 +26,7 @@ class PaymentService:
         teacher_repo: TeacherRepository,
         group_repo=None,
         student_group_repo=None,
+        subscription_override_repo=None,
     ) -> None:
         self._payment_repo = payment_repo
         self._lesson_repo = lesson_repo
@@ -33,6 +34,30 @@ class PaymentService:
         # Опциональны (для абонементных начислений); без них подписки не считаются.
         self._group_repo = group_repo
         self._student_group_repo = student_group_repo
+        self._sub_override_repo = subscription_override_repo
+
+    async def _sub_override_map(self) -> dict[tuple[str, str, str], int]:
+        """(group_id, period, student_id|'') → amount. Пустой student_id = вся группа."""
+        if self._sub_override_repo is None:
+            return {}
+        return {
+            (o.group_id, o.period_month, o.student_id or ""): o.amount
+            for o in await self._sub_override_repo.get_all()
+        }
+
+    @staticmethod
+    def _sub_amount(
+        overrides: dict[tuple[str, str, str], int],
+        group_id: str, period: str, student_id: str, default: int,
+    ) -> int:
+        """Цена абонемента месяца: override ученика → override группы → price_full."""
+        key_student = (group_id, period, student_id)
+        if key_student in overrides:
+            return overrides[key_student]
+        key_group = (group_id, period, "")
+        if key_group in overrides:
+            return overrides[key_group]
+        return default
 
     async def _subscription_bills_for_student(
         self, student_id: str, period_month: str,
@@ -51,7 +76,7 @@ class PaymentService:
         sub_groups = []
         for gid in gids:
             group = await self._group_repo.get_by_id(gid)
-            if group and group.billing_mode == GroupBillingMode.SUBSCRIPTION and group.price_full > 0:
+            if group and group.billing_mode == GroupBillingMode.SUBSCRIPTION:
                 sub_groups.append(group)
         if not sub_groups:
             return {}
@@ -62,13 +87,19 @@ class PaymentService:
             if (ls.type == LessonType.GROUP and ls.group_id in sub_ids
                     and ls.date[:7] == period_month):
                 active.add(ls.group_id)
+        overrides = await self._sub_override_map()
         result: dict[str, dict] = {}
         for group in sub_groups:
             if group.group_id not in active:
                 continue
+            amount = self._sub_amount(
+                overrides, group.group_id, period_month, student_id, group.price_full,
+            )
+            if amount <= 0:  # 0 = освобождение в этом месяце
+                continue
             result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = {
                 "name": f"Абонемент «{group.name}»",
-                "total": group.price_full,
+                "total": amount,
                 "items": [],
                 "subscription": True,
             }
@@ -178,14 +209,15 @@ class PaymentService:
                 key = (b.student_id, b.teacher_id, b.period_month)
                 accrued[key] = accrued.get(key, 0) + b.amount
 
-        # Абонементные начисления: price_full ₽/мес каждому участнику SUBSCRIPTION-группы
-        # за каждый месяц, где у группы было хотя бы одно занятие.
+        # Абонементные начисления: цена месяца (учитывая переопределения ученик → группа →
+        # price_full) каждому участнику SUBSCRIPTION-группы за каждый месяц с ≥1 занятием.
         if self._group_repo is not None and self._student_group_repo is not None:
             sub_groups = [
                 g for g in await self._group_repo.get_all()
-                if g.billing_mode == GroupBillingMode.SUBSCRIPTION and g.price_full > 0
+                if g.billing_mode == GroupBillingMode.SUBSCRIPTION
             ]
             if sub_groups:
+                overrides = await self._sub_override_map()
                 months_by_group: dict[str, set[str]] = {}
                 for ls in lessons:
                     if ls.type == LessonType.GROUP and ls.group_id:
@@ -194,8 +226,13 @@ class PaymentService:
                     members = await self._student_group_repo.get_students_for_group(g.group_id)
                     for period in months_by_group.get(g.group_id, ()):
                         for sid in members:
+                            amount = self._sub_amount(
+                                overrides, g.group_id, period, sid, g.price_full,
+                            )
+                            if amount <= 0:
+                                continue
                             key = (sid, f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}", period)
-                            accrued[key] = accrued.get(key, 0) + g.price_full
+                            accrued[key] = accrued.get(key, 0) + amount
 
         paid = {
             (p.student_id, p.teacher_id, p.period_month)
