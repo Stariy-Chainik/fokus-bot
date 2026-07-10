@@ -6,6 +6,17 @@ from .visibility import TeacherVisibilityService
 from .cloudkassir_service import CloudKassirService
 from .student_service import StudentService, TierToggleError
 from .student_request_service import StudentRequestService, LinkExistingOutcome
+from .profit_service import (
+    ProfitService,
+    ProfitSummary,
+    ProfitLessonRow,
+    TeacherProfitRow,
+    TeacherProfitDetail,
+    SubscriptionProfitRow,
+    calculate_profit_lesson,
+    calculate_teacher_profit,
+    build_teacher_profit_detail,
+)
 
 __all__ = [
     "LessonService",
@@ -19,4 +30,13 @@ __all__ = [
     "TierToggleError",
     "StudentRequestService",
     "LinkExistingOutcome",
+    "ProfitService",
+    "ProfitSummary",
+    "ProfitLessonRow",
+    "TeacherProfitRow",
+    "TeacherProfitDetail",
+    "SubscriptionProfitRow",
+    "calculate_profit_lesson",
+    "calculate_teacher_profit",
+    "build_teacher_profit_detail",
 ]

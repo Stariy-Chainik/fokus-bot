@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-Guide for Claude Code (claude.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Three roles: **admin**, **teacher**, **client (parent)**.
+Guide for Codex (Codex.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Three roles: **admin**, **teacher**, **client (parent)**.
 
 ---
 
@@ -42,7 +42,7 @@ Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-se
 
 1. Build **`SheetsClient`** from settings (one shared gspread client, caches Worksheet handles).
 2. Construct **14 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
-3. Construct **8 services**: `LessonService`, `PaymentService`, `ProfitService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
+3. Construct **7 services**: `LessonService`, `PaymentService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
 4. Pick **FSM storage**: `RedisStorage` if `REDIS_URL` is set, else `MemoryStorage`.
 5. Register two middlewares (in this order):
    - **`DedupUpdateMiddleware`** (outer) — drops re-delivered Telegram updates by `m:{chat_id}:{message_id}` / `c:{callback_query.id}` key with 60 s TTL, GC after 256 entries.
@@ -67,8 +67,7 @@ bot/handlers/
     salaries.py          # teacher earnings by period (salary_teacher/period)
     bills/               # ПАКЕТ: _base (router+гарды), helpers (_send_bill_to_parents),
                          #   view (просмотр+рассылка группе), send, confirm (оплаты)
-    profit/              # ПАКЕТ: _base (render DTO), overview, finance_entries (FSM fin:*),
-                         #   daily; все расчёты выполняет ProfitService
+    profit.py            # «Прибыль»: занятия + абонементы + ручные доходы/расходы (fin:*)
     debtors.py           # «⚠️ Должники»: сводный контроль оплат + массовое напоминание
     branches/            # ПАКЕТ (P5): _base (router+_render_group_card), crud_branches,
                          #   groups, billing, members
@@ -78,8 +77,7 @@ bot/handlers/
   teacher/
     record_lesson/       # ПАКЕТ (P5): _base, flows, finalize (LessonService),
                          #   entry, schedule, group, soloist, pair, shared. FSM RecordLessonStates
-    my_lessons/          # ПАКЕТ: _base, listing (фильтры/пагинация), detail (общая с admin),
-                         #   deletion, guests (добавление в сохранённое групповое занятие)
+    my_lessons.py        # view/delete own lessons; lesson_detail shared with admin
     submit_period.py     # lock period for billing (allowed from 25th of month)
     my_groups/           # ПАКЕТ: _base (рендер карточки), roster, members, attendance
     partners/            # ПАКЕТ: _base, lists (пары/солисты), cards, partner_manage,
@@ -132,7 +130,6 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). |
 | `BillingService` ([billing_service.py](bot/services/billing_service.py)) | Pure functions only: `calc_earned()` (teacher salary) and `build_billing_rows()` (virtual per-student Billing rows, computed on demand from a Lesson + Teacher). |
 | `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins/billing teachers can issue bills anytime. |
-| `ProfitService` | Хранилище-независимые DTO и расчёт экрана/API «Прибыль»: строки педагогов и занятий, выручка, зарплата, маржа, абонементы, ручные доходы/расходы. `get_lesson_summary()`, `get_month_summary()`, `get_teacher_detail()`. Telegram-хендлер только форматирует результат. |
 | `StudentService` | Бизнес-логика ученика поверх нескольких репо: `create_with_group()`, `delete_student()`, `toggle_tier()`, `pairs_in_group()` / `soloists_in_group()`, `partner_candidates()`, `get_student_card()` → `StudentCard` DTO (собирает карточку из 7 репо, чтобы хендлер только рисовал). |
 | `StudentRequestService` | Обработка заявок педагогов на новых учеников: `approve_create()`, `approve_link_existing()` (→ `LinkExistingOutcome`). |
 | `TeacherVisibilityService` | Who can see whom: `students_for_teacher()`, `students_in_group_for_teacher()`, `teachers_for_student()`, `is_visible()`. Pure intersection of `teacher_groups` and `student_groups`. |
@@ -181,7 +178,7 @@ In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlight
 
 **Admin proxy pattern**: `proxy_teacher_id` in FSM state lets an admin (or Клецова) record lessons on behalf of another teacher. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id` (in `record_lesson/_base.py`). Proxy by Клецова requires admin approval (`proxy_approve` / `proxy_deny` / `proxy_record_go` in `teacher/record_lesson/entry.py`); admins bypass approval entirely.
 
-**Lesson-history back-nav**: FSM key `t_stu_les_back` stores the return callback when a teacher opens a lesson detail from a student/pair card. `cb_lesson_detail` in `teacher/my_lessons/detail.py` honors it before falling back to the default.
+**Lesson-history back-nav**: FSM key `t_stu_les_back` stores the return callback when a teacher opens a lesson detail from a student/pair card. `cb_lesson_detail` in `my_lessons.py` honors it before falling back to the default.
 
 ### Race-condition guards
 

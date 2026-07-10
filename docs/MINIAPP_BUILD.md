@@ -41,7 +41,8 @@ middlewares/auth              →      lib/auth (валидация initData) + 
 ```
 
 **Ключевой принцип:** вся денежная/доменная логика — в `lib/domain/*` как **чистые функции** (без БД),
-портированные из [billing_service.py](../bot/services/billing_service.py) / [visibility.py](../bot/services/visibility.py)
+портированные из [billing_service.py](../bot/services/billing_service.py),
+[profit_service.py](../bot/services/profit_service.py) и [visibility.py](../bot/services/visibility.py)
 **вместе с тестами**. API-роуты только читают БД → зовут домен → пишут БД.
 
 ---
@@ -305,8 +306,11 @@ model StudentRequest {
 
 ## 4. Доменный слой (порт чистых функций + тесты)
 
-`lib/domain/` — перенос [billing_service.py](../bot/services/billing_service.py) и
+`lib/domain/` — перенос [billing_service.py](../bot/services/billing_service.py),
+[profit_service.py](../bot/services/profit_service.py) и
 [visibility.py](../bot/services/visibility.py). **Перенести и тесты** (Vitest) из `tests/` — они эталон.
+`ProfitSummary` / `TeacherProfitDetail` из Python-сервиса задают готовую форму данных для
+`GET /profit?period=`; HTML-разметку из Telegram-хендлера в домен не переносить.
 
 ```ts
 // lib/domain/billing.ts
@@ -512,7 +516,8 @@ web/
   `@telegram-apps/sdk`. Критерий: пустое приложение открывается в Telegram, `initData` доходит до сервера.
 - **Фаза 1 — БД.** Внести `schema.prisma` из §3, `prisma migrate`. Критерий: миграция применяется, типы генерятся.
 - **Фаза 2 — домен + тесты.** Портировать `lib/domain/*` (§4) и **перенести характеризующие тесты** из
-  `tests/test_billing_service.py`, `test_attendees.py`, `test_visibility.py`. Критерий: Vitest зелёный.
+  `tests/test_billing_service.py`, `test_profit_service.py`, `test_attendees.py`, `test_visibility.py`.
+  Критерий: Vitest зелёный; суммы `ProfitSummary` совпадают с Python на одинаковых входных данных.
 - **Фаза 3 — auth.** `verifyInitData` + сессия + резолв роли (§5) + `middleware.ts`. Критерий: три роли
   корректно определяются; чужие эндпоинты закрыты.
 - **Фаза 4 — API (чтение).** Списки/карточки: teachers, students, groups, lessons, bills-compute. Критерий:

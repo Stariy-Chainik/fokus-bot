@@ -30,7 +30,7 @@ from bot.repositories import (
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
-    CloudKassirService, StudentService, StudentRequestService,
+    CloudKassirService, StudentService, StudentRequestService, ProfitService,
 )
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
 from bot.handlers import common_router, admin_router, teacher_router, client_router
@@ -89,6 +89,9 @@ def _build_dispatcher(storage) -> Dispatcher:
         group_repo=group_repo, student_group_repo=student_group_repo,
         subscription_override_repo=subscription_override_repo,
     )
+    profit_service = ProfitService(
+        teacher_repo, lesson_repo, payment_service, finance_entry_repo,
+    )
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
     visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
     student_service = StudentService(
@@ -120,6 +123,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["finance_entry_repo"] = finance_entry_repo
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
+    dp["profit_service"] = profit_service
     dp["diagnostics_service"] = diagnostics_service
     dp["visibility"] = visibility
     dp["student_service"] = student_service
