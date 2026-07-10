@@ -4,12 +4,13 @@ from datetime import date, timedelta
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
 from bot.models.enums import LessonType
-from bot.repositories import TeacherRepository, LessonRepository
+from bot.repositories import TeacherRepository, LessonRepository, FinanceEntryRepository
 from bot.services import calc_earned, build_billing_rows, PaymentService
+from bot.states import FinanceEntryStates
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 
@@ -72,12 +73,19 @@ def _format_profit(
     title: str, rows: list[tuple[str, str, int, int, int, int]],
     total_income: int, total_salary: int,
     sub_rows: list[tuple[str, int, int]] | None = None,
+    fin_entries: list | None = None,
 ) -> str:
-    """sub_rows — абонементная выручка по группам (имя, учеников, сумма ₽);
-    передаётся только в месячном виде и включается в итоговую выручку."""
+    """sub_rows — абонементная выручка по группам (имя, учеников, сумма ₽).
+    fin_entries — ручные записи FinanceEntry (доходы: турниры и т.п.;
+    расходы: аренда и др.). Оба — только в месячном виде."""
     sub_total = sum(t for _, _, t in (sub_rows or []))
+    incomes = [e for e in (fin_entries or []) if e.kind == "income"]
+    expenses = [e for e in (fin_entries or []) if e.kind == "expense"]
+    fin_income = sum(e.amount for e in incomes)
+    fin_expense = sum(e.amount for e in expenses)
+
     lines = [f"<b>📊 {title}</b>", ""]
-    if not rows and not sub_total:
+    if not rows and not sub_total and not fin_entries:
         lines.append("Занятий нет.")
         return "\n".join(lines)
     for _tid, name, income, salary, grp, ind in rows:
@@ -99,13 +107,28 @@ def _format_profit(
             lines.append(f"  {gname}: {total} ₽ ({billed} уч.)")
         lines.append(f"  <b>Итого абонементы: {sub_total} ₽</b>")
         lines.append("")
-    grand_income = total_income + sub_total
+    if incomes:
+        lines.append("🏆 <b>Прочие доходы</b>")
+        for e in incomes:
+            lines.append(f"  {e.title}: {e.amount} ₽")
+        lines.append(f"  <b>Итого: {fin_income} ₽</b>")
+        lines.append("")
+    if expenses:
+        lines.append("📉 <b>Расходы</b>")
+        for e in expenses:
+            lines.append(f"  {e.title}: {e.amount} ₽")
+        lines.append(f"  <b>Итого: {fin_expense} ₽</b>")
+        lines.append("")
+    grand_income = total_income + sub_total + fin_income
+    grand_expense = total_salary + fin_expense
     lines += [
         "──────────────",
         f"Выручка:    {grand_income} ₽",
         f"Зарплата: {total_salary} ₽",
-        f"<b>Прибыль:  {grand_income - total_salary} ₽</b>",
     ]
+    if fin_expense:
+        lines.append(f"Расходы:   {fin_expense} ₽")
+    lines.append(f"<b>Прибыль:  {grand_income - grand_expense} ₽</b>")
     return "\n".join(lines)
 
 
@@ -148,25 +171,145 @@ async def cb_profit_view(callback: CallbackQuery, user: User | None) -> None:
     await callback.answer()
 
 
+async def _period_view(
+    period: str,
+    teacher_repo: TeacherRepository, lesson_repo: LessonRepository,
+    payment_service: PaymentService, finance_entry_repo: FinanceEntryRepository,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """(text, kb) месячного вида «Прибыли»: занятия + абонементы + ручные записи."""
+    rows, total_income, total_salary = await _calc_profit(period, teacher_repo, lesson_repo)
+    # Абонементы и ручные записи — только в месячном виде.
+    sub_rows = await payment_service.subscription_revenue_breakdown(period)
+    fin_entries = await finance_entry_repo.get_by_period(period)
+    text = _format_profit(
+        f"Прибыль за {display_period(period)}", rows, total_income, total_salary,
+        sub_rows=sub_rows, fin_entries=fin_entries,
+    )
+    kb = _profit_keyboard(rows, period, "profit:view")
+    fin_buttons = [
+        InlineKeyboardButton(text="➕ Доход", callback_data=f"fin:add:income:{period}"),
+        InlineKeyboardButton(text="➕ Расход", callback_data=f"fin:add:expense:{period}"),
+    ]
+    if fin_entries:
+        fin_buttons.append(InlineKeyboardButton(text="🗑", callback_data=f"fin:list:{period}"))
+    kb.inline_keyboard.insert(len(kb.inline_keyboard) - 1, fin_buttons)
+    return text, kb
+
+
 @router.callback_query(F.data.startswith("profit_period:"))
 async def cb_profit_period(
     callback: CallbackQuery, user: User | None,
     teacher_repo: TeacherRepository, lesson_repo: LessonRepository,
-    payment_service: PaymentService,
+    payment_service: PaymentService, finance_entry_repo: FinanceEntryRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     period = callback.data.split(":", 1)[1]
-    rows, total_income, total_salary = await _calc_profit(period, teacher_repo, lesson_repo)
-    # Абонементы — только в месячном виде (фикс-сумма месяца дню не атрибутируется).
-    sub_rows = await payment_service.subscription_revenue_breakdown(period)
-    text = _format_profit(
-        f"Прибыль за {display_period(period)}", rows, total_income, total_salary,
-        sub_rows=sub_rows,
-    )
-    await callback.message.edit_text(text, reply_markup=_profit_keyboard(rows, period, "profit:view"))
+    text, kb = await _period_view(period, teacher_repo, lesson_repo, payment_service, finance_entry_repo)
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+# ─── Ручные доходы/расходы месяца (турниры, аренда и т.п.) ───────────────────
+
+_FIN_KIND_LABELS = {"income": "доход", "expense": "расход"}
+
+
+@router.callback_query(F.data.startswith("fin:add:"))
+async def cb_fin_add(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, kind, period = callback.data.split(":", 3)
+    await state.set_state(FinanceEntryStates.entering_title)
+    await state.update_data(fin_kind=kind, fin_period=period)
+    example = "Турнир «Осенний кубок»" if kind == "income" else "Аренда зала"
+    await callback.message.edit_text(
+        f"<b>➕ {_FIN_KIND_LABELS[kind].capitalize()} за {display_period(period)}</b>\n\n"
+        f"Введите название (например, «{example}»):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="« Отмена", callback_data=f"profit_period:{period}")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.message(FinanceEntryStates.entering_title)
+async def fin_title_entered(message: Message, state: FSMContext) -> None:
+    title = " ".join((message.text or "").split())
+    if not title:
+        await message.answer("Название не может быть пустым. Введите ещё раз:")
+        return
+    await state.update_data(fin_title=title[:100])
+    await state.set_state(FinanceEntryStates.entering_amount)
+    await message.answer(f"«{title[:100]}» — введите сумму в рублях (целое число):")
+
+
+@router.message(FinanceEntryStates.entering_amount)
+async def fin_amount_entered(
+    message: Message, state: FSMContext,
+    teacher_repo: TeacherRepository, lesson_repo: LessonRepository,
+    payment_service: PaymentService, finance_entry_repo: FinanceEntryRepository,
+) -> None:
+    raw = (message.text or "").strip().replace(" ", "")
+    if not raw.isdigit() or int(raw) <= 0:
+        await message.answer("Нужно целое число рублей больше 0. Введите ещё раз:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    kind, period, title = data["fin_kind"], data["fin_period"], data["fin_title"]
+    entry = await finance_entry_repo.add(period, kind, title, int(raw))
+    logger.info("Финансовая запись %s: %s «%s» %d ₽ за %s",
+                entry.entry_id, kind, title, entry.amount, period)
+    text, kb = await _period_view(period, teacher_repo, lesson_repo, payment_service, finance_entry_repo)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("fin:list:"))
+async def cb_fin_list(
+    callback: CallbackQuery, user: User | None,
+    finance_entry_repo: FinanceEntryRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    period = callback.data.split(":", 2)[2]
+    entries = await finance_entry_repo.get_by_period(period)
+    if not entries:
+        await callback.answer("Записей нет", show_alert=True)
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=f"✖ {'🏆' if e.kind == 'income' else '📉'} {e.title} — {e.amount} ₽",
+            callback_data=f"fin:del:{e.entry_id}:{period}",
+        )]
+        for e in entries
+    ]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"profit_period:{period}")])
+    await callback.message.edit_text(
+        "<b>🗑 Удалить запись</b>\n\nНажмите на строку, чтобы удалить её:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("fin:del:"))
+async def cb_fin_delete(
+    callback: CallbackQuery, user: User | None,
+    teacher_repo: TeacherRepository, lesson_repo: LessonRepository,
+    payment_service: PaymentService, finance_entry_repo: FinanceEntryRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, _, entry_id, period = callback.data.split(":", 3)
+    ok = await finance_entry_repo.delete(entry_id)
+    text, kb = await _period_view(period, teacher_repo, lesson_repo, payment_service, finance_entry_repo)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer("Удалено" if ok else "Уже удалено")
 
 
 @router.callback_query(F.data == "profit_day_picker")

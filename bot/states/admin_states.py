@@ -67,3 +67,9 @@ class ClientCreateStates(StatesGroup):
 
 class ClientRegStates(StatesGroup):
     adding_child = State()
+
+
+class FinanceEntryStates(StatesGroup):
+    """Ручной доход/расход на экране «Прибыль»: название → сумма."""
+    entering_title = State()
+    entering_amount = State()

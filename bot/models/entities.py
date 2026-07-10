@@ -71,6 +71,21 @@ class TeacherGroup:
 
 
 @dataclass
+class FinanceEntry:
+    """Ручная запись дохода/расхода за месяц (экран «Прибыль»).
+
+    Доходы — турниры и прочее (суммы произвольные, периодичность любая);
+    расходы — аренда и др. kind: "income" | "expense".
+    """
+    entry_id: str              # FIN-XXXXXX
+    period_month: str          # YYYY-MM
+    kind: str                  # income | expense
+    title: str                 # «Турнир …», «Аренда» …
+    amount: int                # рублей
+    created_at: str = ""
+
+
+@dataclass
 class SubscriptionOverride:
     """Переопределение цены абонемента на конкретный месяц.
 

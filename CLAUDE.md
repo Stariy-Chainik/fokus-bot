@@ -115,6 +115,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `StudentGroupRepository` | `student_groups` | Many-to-many student ↔ group (join table) |
 | `ClientRepository` | `clients` | Parent entities; phone (normalized) + optional tg_id |
 | `StudentRequestRepository` | `student_requests` | Teacher-submitted requests to add a new student (admin approves) |
+| `FinanceEntryRepository` | `finance_entries` | Ручные доходы (турниры) / расходы (аренда) месяца — блоки на экране «Прибыль» |
 | `SubscriptionOverrideRepository` | `subscription_overrides` | Переопределение цены абонемента на месяц: `(group_id, period, student_id?)` → amount; пустой student_id = вся группа |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).

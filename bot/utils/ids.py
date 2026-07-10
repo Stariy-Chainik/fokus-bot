@@ -53,3 +53,7 @@ def generate_group_id(existing: list[str]) -> str:
 
 def generate_client_id(existing: list[str]) -> str:
     return _next_id("CLT", 4, existing)
+
+
+def generate_finance_id(existing: list[str]) -> str:
+    return _next_id("FIN", 6, existing)

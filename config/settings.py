@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     sheet_subscription_overrides: str = Field(
         default="subscription_overrides", alias="SHEET_SUBSCRIPTION_OVERRIDES",
     )
+    sheet_finance_entries: str = Field(
+        default="finance_entries", alias="SHEET_FINANCE_ENTRIES",
+    )
 
     # Payments — Telegram Payments (legacy)
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
