@@ -241,6 +241,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
   - Teachers can submit a period only from the **25th of the month**.
   - Admins reopen a whole period via teacher card → «🔓 Открыть период» (deletes the submission row entirely).
 - **Admin bills bypass submission**: admins can issue/send a bill to a parent at any moment — no «period not submitted» blocker. Bill amounts are recomputed from current lessons on each open.
+- **ИНВАРИАНТ оплат: оплачено клиентом ≥ отмечено педагогом** (индивидуальные и групповые). Обеспечивается сдачей периода (замок на добавление занятий → счёт финален к оплате). Правка админом **оплаченного** периода нарушает инвариант (доначисления нет) — по регламенту в оплаченный период изменения не вносить.
 - **Lesson names are denormalized**: `lesson.teacher_name`, `student_N_name` are creation-time snapshots. Renames don't rewrite history.
 - **Teacher visibility**: derived from `teacher_groups` ∩ `student_groups`. There is **no** `teacher_students` table.
 - **Multi-group students**: a student can belong to multiple groups; billing aggregates across all per period.
