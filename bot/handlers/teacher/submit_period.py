@@ -8,9 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User, TeacherPeriodSubmission
-from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
-from bot.services import LessonService, calc_earned
+from bot.services import LessonService
 from bot.repositories import TeacherRepository  # noqa: F401  (DI hint)
 from bot.states import SubmitPeriodStates
 from bot.keyboards.teacher import kb_teacher_menu

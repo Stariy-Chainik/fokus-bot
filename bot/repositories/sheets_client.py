@@ -2,7 +2,6 @@
 Единая точка доступа к Google Spreadsheet.
 Кешируем объекты листов, чтобы не делать лишних API-вызовов.
 """
-import json
 import logging
 from typing import Optional
 

@@ -9,20 +9,15 @@ from bot.models import User, GroupBillingMode
 from datetime import date
 
 from bot.repositories import (
-    BranchRepository, GroupRepository, TeacherGroupRepository,
-    TeacherRepository, StudentRepository, StudentGroupRepository,
+    GroupRepository, StudentRepository, StudentGroupRepository,
     SubscriptionOverrideRepository,
 )
 from bot.services import PaymentService
 from bot.states import (
-    AddBranchStates, EditBranchNameStates,
-    AddGroupStates, EditGroupNameStates,
-    GroupBillingStates, GroupAddStudentStates,
+    GroupBillingStates,
 )
-from bot.keyboards.admin import kb_back, kb_confirm
+from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
-from bot.utils.locks import InProgressGuard
-from bot.handlers.common import show_card
 from bot.handlers.access import is_admin as _is_admin
 
 from ._base import router

@@ -1,28 +1,19 @@
 from __future__ import annotations
-import re
 import logging
 
 from aiogram import F
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User, Student, StudentRequest, GroupBillingMode, StudentGroupTier
+from bot.models import User
 from bot.repositories import (
-    StudentRepository,
-    GroupRepository, BranchRepository, StudentGroupRepository,
-    StudentRequestRepository, ClientRepository,
+    GroupRepository,
+    BranchRepository, StudentGroupRepository,
 )
 from bot.services import (
-    StudentService, TierToggleError,
-    StudentRequestService, LinkExistingOutcome,
+    StudentService,
 )
-from bot.models.enums import RequestStatus
-from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates, ClientCreateStates
-from bot.handlers.common import show_card
 from bot.keyboards.admin import (
-    kb_students_menu,
-    kb_student_paged, kb_student_card, kb_partner_candidates,
-    kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
+    kb_back,
 )
 from bot.handlers.access import is_admin as _is_admin
 

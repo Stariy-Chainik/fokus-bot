@@ -14,9 +14,8 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User
 from bot.repositories import (
-    StudentRepository, TeacherRepository,
-    GroupRepository, BranchRepository, TeacherGroupRepository,
-    StudentGroupRepository, LessonRepository, TeacherPeriodSubmissionRepository,
+    StudentRepository, GroupRepository,
+    TeacherGroupRepository, LessonRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.services import TeacherVisibilityService
 from bot.states import PartnerAssignStates, TeacherRenameStudentStates

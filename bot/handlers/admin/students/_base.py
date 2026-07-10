@@ -1,35 +1,22 @@
 from __future__ import annotations
-import re
 import logging
 
-from aiogram import Router, F
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router
+from aiogram.types import CallbackQuery
 
-from bot.models import User, Student, StudentRequest, GroupBillingMode, StudentGroupTier
-from bot.repositories import (
-    StudentRepository,
-    GroupRepository, BranchRepository, StudentGroupRepository,
-    StudentRequestRepository, ClientRepository,
-)
+from bot.models import GroupBillingMode, StudentGroupTier
 from bot.services import (
-    StudentService, TierToggleError,
-    StudentRequestService, LinkExistingOutcome,
+    StudentService,
 )
-from bot.models.enums import RequestStatus
-from bot.states import AddStudentStates, StudentListStates, PartnerAssignStates, ClientCreateStates
 from bot.handlers.common import show_card
 from bot.keyboards.admin import (
-    kb_students_menu,
-    kb_student_paged, kb_student_card, kb_partner_candidates,
-    kb_confirm, kb_back, _STUDENT_PAGE_SIZE,
+    kb_student_card,
 )
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_students")
 
 
-from bot.handlers.access import is_admin as _is_admin
 
 
 # ─── Общий рендер карточки ученика ────────────────────────────────────────────

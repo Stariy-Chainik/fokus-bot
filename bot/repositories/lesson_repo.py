@@ -1,7 +1,7 @@
 from typing import Optional
 from bot.models import Lesson
 from bot.models.enums import LessonType
-from bot.utils import generate_lesson_id, now_str, attendee_ids
+from bot.utils import attendee_ids
 from .base import BaseRepository
 
 

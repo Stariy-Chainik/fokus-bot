@@ -1,32 +1,20 @@
 from __future__ import annotations
 import logging
-from datetime import date, timedelta
 
-from aiogram import Router, F
+from aiogram import F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery
 
-from bot.models import User, GroupBillingMode, StudentGroupTier
-from bot.models.enums import LessonType
+from bot.models import User
 from bot.repositories import (
     TeacherRepository, StudentRepository,
-    GroupRepository, BranchRepository, TeacherGroupRepository,
-    StudentGroupRepository, UserRepository,
+    GroupRepository, TeacherGroupRepository, StudentGroupRepository,
 )
 from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
-    kb_lesson_type, kb_lesson_type_after_save, kb_duration, kb_teacher_menu,
-    kb_attendance_yes_no, kb_pair_multi_select, kb_pair_from_soloists,
-    kb_multi_select, kb_group_roster_per_visit,
-    kb_other_groups_picker, kb_other_group_students,
-    kb_group_branch_picker, kb_group_picker, kb_shared_group_picker,
+    kb_group_picker,
 )
-from bot.keyboards.admin import kb_admin_menu
-from bot.utils import build_group_attendees_csv
-from bot.keyboards.calendar import kb_calendar
-from bot.utils.dates import format_date_display
-from bot.utils.locks import InProgressGuard
 
 from ._base import router
 from ._base import _tid, _header

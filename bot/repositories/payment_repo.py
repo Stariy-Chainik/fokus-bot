@@ -1,7 +1,7 @@
 from typing import Optional
 from bot.models import StudentPeriodPayment
 from bot.models.enums import PaymentStatus
-from bot.utils import generate_payment_id, now_str
+from bot.utils import now_str
 from .base import BaseRepository
 
 

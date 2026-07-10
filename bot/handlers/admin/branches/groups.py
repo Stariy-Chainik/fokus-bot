@@ -5,23 +5,16 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User, GroupBillingMode
-from datetime import date
+from bot.models import User
 
 from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
     TeacherRepository, StudentRepository, StudentGroupRepository,
 )
-from bot.services import PaymentService
 from bot.states import (
-    AddBranchStates, EditBranchNameStates,
     AddGroupStates, EditGroupNameStates,
-    GroupBillingStates, GroupAddStudentStates,
 )
 from bot.keyboards.admin import kb_back, kb_confirm
-from bot.utils.dates import display_period
-from bot.utils.locks import InProgressGuard
-from bot.handlers.common import show_card
 from bot.handlers.access import is_admin as _is_admin
 
 from ._base import router
