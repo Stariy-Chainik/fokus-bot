@@ -116,6 +116,25 @@ async def cb_reg_athlete(callback: CallbackQuery, state: FSMContext, diary_servi
     await callback.answer()
 
 
+@router.message(CommandStart(deep_link=True, magic=F.args == "athlete"))
+async def cmd_start_athlete(message: Message, state: FSMContext, diary_service: DiaryService) -> None:
+    """Ссылка t.me/<bot>?start=athlete — сразу список спортивной группы."""
+    await state.clear()
+    candidates = await diary_service.registration_candidates("", settings.athlete_group_id_set)
+    if not candidates or len(candidates) > _LIST_LIMIT:
+        await state.set_state(AthleteRegStates.waiting_surname)
+        await message.answer("🏃 Кабинет спортсмена.\n\nВведите свою фамилию:", reply_markup=_kb_cancel)
+        return
+    rows = [[InlineKeyboardButton(text=s.name, callback_data=f"athreg:pick:{s.student_id}")] for s in candidates]
+    rows.append([InlineKeyboardButton(text="✍️ Меня нет в списке — ввести фамилию", callback_data="athreg:typein")])
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="athreg:cancel")])
+    await message.answer(
+        "🏃 <b>Кабинет спортсмена</b>\nЗдесь вы записываете тренировки, получаете задания и оценки педагога, "
+        "а очки идут в рейтинг.\n\nНайдите себя в списке:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
 async def _ask_surname(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AthleteRegStates.waiting_surname)
     await callback.message.edit_text(
