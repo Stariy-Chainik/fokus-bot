@@ -38,11 +38,18 @@ async def _render(
     lines.append("")
     lines.append(stats_text(st, period, place=mine.place if mine and st.sessions else None, total=len(board)))
     if entries:
+        tasks_by_id = await diary_service.tasks_map(student.student_id)
         lines.append("\n<b>Тренировки:</b>")
         for e in entries[:15]:
             topics = ", ".join(e.topics) if e.topics else "—"
             grade = f" · ⭐{e.grade} {stars(e.grade)}" if e.grade else " · ⏳ без оценки"
             lines.append(f"• {format_date_display(e.date)[:5]} · {e.minutes} мин · {topics}{grade}")
+            if e.task_ids:
+                done = [f"{tasks_by_id[t].exercise} ({tasks_by_id[t].minutes} мин)" if t in tasks_by_id else t
+                        for t in e.task_ids]
+                lines.append("   📋 Задания: " + "; ".join(done))
+            if e.comment:
+                lines.append(f"   💬 {e.comment}")
             if e.grade_comment:
                 who = names.get(e.graded_by, "педагог")
                 lines.append(f"   📝 {who}: {e.grade_comment}")
