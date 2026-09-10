@@ -19,7 +19,10 @@ from .admin_states import (
 from .teacher_states import (
     TeacherRenameStudentStates,
     TeacherGroupAddStudentStates,
+    GradeEntryStates,
+    AssignTaskStates,
 )
+from .athlete_states import AthleteRegStates, LogTrainingStates
 
 __all__ = [
     "RecordLessonStates",
@@ -41,4 +44,8 @@ __all__ = [
     "FinanceEntryStates",
     "TeacherGroupAddStudentStates",
     "ReceiptStates",
+    "GradeEntryStates",
+    "AssignTaskStates",
+    "AthleteRegStates",
+    "LogTrainingStates",
 ]

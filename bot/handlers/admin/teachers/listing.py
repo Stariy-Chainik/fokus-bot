@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from config.settings import settings
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
@@ -105,6 +106,13 @@ async def cb_teacher_card(
     else:
         groups_block = "  —"
 
+    # Группы с оплатой педагогу процентом от сбора (REVENUE_SHARE_GROUPS)
+    share_map = settings.revenue_share_group_map
+    share_lines = "".join(
+        f"  Индивидуальные ({g.name}): <b>{share_map[g.group_id]}% от сбора</b>\n"
+        for g in groups if g.group_id in share_map
+    )
+
     text = (
         f"👨‍🏫 <b>{teacher.name}</b>\n"
         f"ID: {teacher.teacher_id}\n"
@@ -112,7 +120,8 @@ async def cb_teacher_card(
         f"📊 Ставки (руб. за 45 мин):\n"
         f"  Групповое: <b>{teacher.rate_group}</b>\n"
         f"  Инд. педагогу: <b>{teacher.rate_for_teacher}</b>\n"
-        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n\n"
+        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n"
+        f"{share_lines}\n"
         f"🏢 Группы:\n{groups_block}"
     )
     await show_card(callback, text, reply_markup=kb_teacher_card(teacher_id))

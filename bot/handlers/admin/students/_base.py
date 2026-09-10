@@ -97,6 +97,12 @@ async def _render_student_card(
     else:
         client_rows = [[("👤 Создать клиента", f"student_client_create:{student_id}")]]
 
+    athlete_text = ""
+    client_rows.append([("🔗 Ссылка для спортсмена", f"athreg:link:{student_id}")])
+    if student.athlete_tg_id:
+        athlete_text = f"\n🏃 Спортсмен: кабинет привязан (<code>{student.athlete_tg_id}</code>)"
+        client_rows.append([("🚫 Отвязать спортсмена", f"athreg:unlink:{student_id}:{student.athlete_tg_id}")])
+
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"
         f"ID: {student.student_id}\n"
@@ -104,7 +110,7 @@ async def _render_student_card(
         f"{tier_line}\n\n"
         f"Педагоги:\n{teachers_text}\n\n"
         f"Партнёр: {partner_text}"
-        f"{client_text}"
+        f"{client_text}{athlete_text}"
     )
     await show_card(
         callback,

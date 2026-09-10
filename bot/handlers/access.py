@@ -11,10 +11,16 @@
 from __future__ import annotations
 
 from bot.models import User
+from config.settings import settings
 
 
 def is_admin(user: User | None) -> bool:
     return user is not None and user.is_admin
+
+
+def can_teacher_bill(user: User | None) -> bool:
+    """Педагог из BILLING_TEACHER_IDS: выставление счетов ученикам своих групп."""
+    return is_teacher(user) and user.teacher_id in settings.billing_teacher_id_set
 
 
 def is_teacher(user: User | None) -> bool:

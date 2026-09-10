@@ -3,6 +3,7 @@ from .entities import (
     StudentPeriodPayment, TeacherPeriodSubmission,
     Branch, Group, TeacherGroup, StudentGroup, StudentRequest,
     Client, SubscriptionOverride, FinanceEntry,
+    TrainingEntry, AthleteTask,
 )
 from .enums import (
     LessonType, PaymentStatus, RequestStatus,
@@ -14,6 +15,7 @@ __all__ = [
     "StudentPeriodPayment", "TeacherPeriodSubmission",
     "Branch", "Group", "TeacherGroup", "StudentGroup", "StudentRequest",
     "Client", "SubscriptionOverride", "FinanceEntry",
+    "TrainingEntry", "AthleteTask",
     "LessonType", "PaymentStatus", "RequestStatus",
     "GroupBillingMode", "StudentGroupTier",
 ]

@@ -19,10 +19,12 @@ class LessonService:
         lesson_repo: LessonRepository,
         submission_repo: TeacherPeriodSubmissionRepository,
         teacher_repo: TeacherRepository,
+        salary_service=None,
     ) -> None:
         self._lesson_repo = lesson_repo
         self._submission_repo = submission_repo
         self._teacher_repo = teacher_repo
+        self._salary_service = salary_service
 
     async def _ensure_not_submitted(self, teacher_id: str, period_month: str) -> None:
         sub = await self._submission_repo.get_by_teacher_and_period(teacher_id, period_month)
@@ -52,10 +54,12 @@ class LessonService:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
 
-        if lesson_type == LessonType.INDIVIDUAL:
-            for sid in (student_1_id, student_2_id, student_3_id, student_4_id):
-                if sid and await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, sid, lesson_date):
-                    raise ValueError("Индивидуальное занятие с этим учеником на выбранную дату уже записано")
+        # Гард дублей — только «соло против соло»: пара/микрогруппа и соло с тем же
+        # учеником в один день допустимы в любом порядке.
+        participants = [sid for sid in (student_1_id, student_2_id, student_3_id, student_4_id) if sid]
+        if lesson_type == LessonType.INDIVIDUAL and len(participants) == 1:
+            if await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, participants[0], lesson_date):
+                raise ValueError("Соло-занятие с этим учеником на выбранную дату уже записано")
 
         if not bypass_period_lock:
             await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
@@ -188,5 +192,9 @@ class LessonService:
         if teacher is None:
             raise ValueError(f"Педагог {teacher_id} не найден")
         lessons = await self._lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-        total_earned = sum(calc_earned(ls.type, ls.duration_min, teacher) for ls in lessons)
+        if self._salary_service is not None:
+            total_earned = await self._salary_service.total_for(teacher, period_month)
+        else:
+            from .salary_service import compute_salary_lines, salary_total
+            total_earned = salary_total(compute_salary_lines(teacher, lessons))
         return lessons, teacher, total_earned

@@ -13,6 +13,8 @@ from .student_request_repo import StudentRequestRepository
 from .client_repo import ClientRepository
 from .subscription_override_repo import SubscriptionOverrideRepository
 from .finance_entry_repo import FinanceEntryRepository
+from .training_entry_repo import TrainingEntryRepository
+from .athlete_task_repo import AthleteTaskRepository
 
 __all__ = [
     "SheetsClient",
@@ -30,4 +32,6 @@ __all__ = [
     "ClientRepository",
     "SubscriptionOverrideRepository",
     "FinanceEntryRepository",
+    "TrainingEntryRepository",
+    "AthleteTaskRepository",
 ]

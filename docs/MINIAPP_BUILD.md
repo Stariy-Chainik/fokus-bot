@@ -13,7 +13,7 @@
 
 | Слой | Технология | Почему |
 |---|---|---|
-| Фронт + бэк | **Next.js 14 (App Router) + TypeScript** | один репозиторий: страницы (React) и API-роуты вместе; SSR; деплой в один клик |
+| Фронт + бэк | **Next.js 16 (App Router) + React 19 + TypeScript** | поддерживаемая ветка без известных уязвимостей по `npm audit`; страницы и API в одном репозитории |
 | UI | **Tailwind CSS** + Telegram theme vars | лёгкие адаптивные экраны в стиле Telegram |
 | Telegram | **`@telegram-apps/sdk`** (+ `@telegram-apps/sdk-react`) | initData, тема, кнопки Mini App |
 | БД | **PostgreSQL** | транзакции снимают костыли Google Sheets (гонки, `|`-разделитель, лимиты) |
@@ -47,7 +47,7 @@ middlewares/auth              →      lib/auth (валидация initData) + 
 
 ---
 
-## 3. Схема БД (Prisma) — точный перенос модели
+## 3. Схема БД (Prisma) — перенос домена и целевая модель оплат
 
 > Соответствует [bot/models/entities.py](../bot/models/entities.py). Читаемые ID (`TCH-xxxx`) сохранены как
 > первичные ключи (§5 спеки). **Изменение против бота:** поле `Lesson.attendees` (CSV) нормализовано в
@@ -59,7 +59,11 @@ generator client { provider = "prisma-client-js" }
 datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 
 enum LessonType        { GROUP INDIVIDUAL }
-enum PaymentStatus     { PENDING PAID }
+enum AuthProvider      { TELEGRAM PHONE }
+enum InvoiceStatus     { DRAFT PENDING PAID CANCELLED EXPIRED }
+enum InvoiceScope      { CART SUBSCRIPTION ADMIN_PERIOD }
+enum InvoiceItemType   { LESSON SUBSCRIPTION ADJUSTMENT }
+enum CoverageStatus    { ACTIVE RELEASED }
 enum RequestStatus     { PENDING APPROVED REJECTED }
 enum GroupBillingMode  { NONE PER_VISIT SUBSCRIPTION }   // SUBSCRIPTION = абонемент, фикс ₽/мес
 enum StudentGroupTier  { FULL SHORT }
@@ -70,6 +74,8 @@ model User {
   isAdmin   Boolean @default(false)
   teacherId String?
   teacher   Teacher? @relation(fields: [teacherId], references: [teacherId])
+  authIdentities AuthIdentity[]
+  confirmedInvoices Invoice[] @relation("ConfirmedInvoices")
 }
 
 model Teacher {
@@ -82,15 +88,36 @@ model Teacher {
   users          User[]
   groups         TeacherGroup[]
   lessons        Lesson[]
+  invoiceItems   InvoiceItem[]
 }
 
 model Client {
   clientId  String   @id           // CLT-xxxx
   name      String
   tgId      BigInt?
-  phone     String?
+  phone     String?  @unique       // E.164: +79...; обычный web-вход по одноразовому коду
   createdAt DateTime @default(now())
   students  Student[]
+  authIdentities AuthIdentity[]
+  invoices  Invoice[]
+  receipts  Receipt[]
+}
+
+// Вход через Telegram и/или подтверждённый телефон.
+// providerSubject: tgId строкой для TELEGRAM, E.164-телефон для PHONE.
+model AuthIdentity {
+  authIdentityId  String       @id @default(cuid())
+  provider        AuthProvider
+  providerSubject String
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [userId])
+  clientId        String?
+  client          Client?      @relation(fields: [clientId], references: [clientId])
+  verifiedAt      DateTime
+  createdAt       DateTime     @default(now())
+  @@unique([provider, providerSubject])
+  @@index([clientId])
+  @@index([userId])
 }
 
 model Student {
@@ -104,6 +131,8 @@ model Student {
   client       Client?  @relation(fields: [clientId], references: [clientId])
   parentTgIds  BigInt[] @default([])   // доступ в приложение; запрос: tgId = ANY(parentTgIds)
   groups       StudentGroup[]
+  invoices     Invoice[]
+  invoiceItems InvoiceItem[]
 }
 
 model Branch {
@@ -129,6 +158,7 @@ model Group {
   updatedAt     DateTime @updatedAt
   teachers      TeacherGroup[]
   students      StudentGroup[]
+  invoiceItems  InvoiceItem[]
 }
 
 model TeacherGroup {
@@ -167,7 +197,9 @@ model Lesson {
   groupId     String?               // только для GROUP
   recordedAt  DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?             // target web: soft-delete сохраняет финансовый аудит
   attendees   LessonAttendee[]      // только для GROUP; замена CSV-поля attendees
+  invoiceItems InvoiceItem[]
   @@index([teacherId, date])
   @@index([date])                   // выборки по периоду (prefix "YYYY-MM")
   // «занятия ученика» = OR по student1..4Id + join LessonAttendee; при ~5k строк/год (§3.1)
@@ -186,21 +218,55 @@ model LessonAttendee {
   @@index([studentId])              // счёт ученика за период (join с Lesson по date)
 }
 
-model StudentPeriodPayment {
-  paymentId       String   @id      // PAY-xxxxxx
-  studentId       String
-  studentName     String
-  teacherId       String
-  teacherName     String
-  periodMonth     String            // "YYYY-MM"
-  totalAmount     Int
-  status          PaymentStatus @default(PENDING)
-  paidAt          DateTime?
-  confirmedByTgId BigInt?
-  comment         String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  @@unique([studentId, teacherId, periodMonth])   // один счёт на (student,teacher,period)
+// Целевая модель Mini App/web: счёт-корзина с позициями.
+// Lesson не получает поле paid; кабинет родителя получает computed paymentStatus из InvoiceItem.
+model Invoice {
+  invoiceId         String       @id      // INV-xxxxxx
+  clientId          String
+  client            Client       @relation(fields: [clientId], references: [clientId])
+  studentId         String
+  student           Student      @relation(fields: [studentId], references: [studentId])
+  scope             InvoiceScope          // CART = выбранные начисления родителя
+  amount            Int
+  status            InvoiceStatus @default(DRAFT)
+  expiresAt         DateTime?              // только DRAFT; затем EXPIRED
+  paidAt            DateTime?
+  confirmedByUserId String?
+  confirmedBy       User?         @relation("ConfirmedInvoices", fields: [confirmedByUserId], references: [userId])
+  paymentMethod     String?
+  comment           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  items             InvoiceItem[]
+  externalPayments  ExternalPayment[]
+  receipts           Receipt[]
+  @@index([studentId, status])
+  @@index([clientId, status])
+}
+
+model InvoiceItem {
+  invoiceItemId String          @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice         @relation(fields: [invoiceId], references: [invoiceId], onDelete: Cascade)
+  itemType      InvoiceItemType
+  coverageKey   String          // LESSON:... | SUB:... | ADJ:{invoiceId}:{n}
+  coverageStatus CoverageStatus @default(ACTIVE)
+  studentId     String
+  student       Student         @relation(fields: [studentId], references: [studentId])
+  teacherId     String?
+  teacher       Teacher?        @relation(fields: [teacherId], references: [teacherId])
+  lessonId      String?         // itemType=LESSON
+  lesson        Lesson?         @relation(fields: [lessonId], references: [lessonId])
+  groupId       String?         // itemType=SUBSCRIPTION
+  group         Group?          @relation(fields: [groupId], references: [groupId])
+  periodMonth   String?         // SUBSCRIPTION/admin-period compatibility
+  date          String?         // snapshot for display, "YYYY-MM-DD"
+  description   String          // snapshot: "12.07 · Иванова · 60 мин"
+  amount        Int             // ₽ snapshot; total Invoice.amount = sum(items.amount)
+  createdAt     DateTime @default(now())
+  @@index([studentId, lessonId])
+  @@index([studentId, teacherId, periodMonth])
+  @@index([coverageKey, coverageStatus])
 }
 
 // Внешний онлайн-платёж (ЮКасса) — для верификации webhook и сверки (§6.1).
@@ -209,25 +275,27 @@ model ExternalPayment {
   id          String   @id @default(cuid())
   provider    String   @default("yookassa")
   externalId  String   @unique          // payment.id ЮКассы
-  studentId   String
-  periodMonth String                    // "YYYY-MM"
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [invoiceId])
+  idempotencyKey String @unique          // тот же ключ передаётся провайдеру
   amount      Int                       // ₽; сверяется с webhook перед подтверждением
   status      String   @default("pending") // pending|succeeded|canceled (зеркало провайдера)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  @@index([studentId, periodMonth])
+  @@index([invoiceId])
 }
 
 // Загруженный чек (реквизиты/СБП) — только для UI-состояния «ждёт подтверждения» (§6.1).
 model Receipt {
   id          String   @id @default(cuid())
-  studentId   String
-  periodMonth String
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [invoiceId])
   method      String                    // bank|sbp
   fileId      String                    // telegram file_id или путь в сторадже
-  uploadedBy  BigInt                    // tgId родителя
+  uploadedByClientId String
+  uploadedBy  Client   @relation(fields: [uploadedByClientId], references: [clientId])
   uploadedAt  DateTime @default(now())
-  @@index([studentId, periodMonth])
+  @@index([invoiceId])
 }
 
 // Цена абонемента на конкретный месяц: ученик → группа → group.priceFull; 0 = не начислять.
@@ -285,6 +353,20 @@ model StudentRequest {
 > `SubscriptionOverride.scopeKey` нужен из-за семантики PostgreSQL: составной `UNIQUE` допускает
 > несколько строк с `studentId = NULL`. Приложение пишет `scopeKey = studentId` для ученика и `"*"`
 > для всей группы, сохраняя ровно одно переопределение на область.
+>
+> `StudentPeriodPayment` — только исходная модель текущего бота, в целевой Prisma-схеме её нет.
+> Миграция преобразует каждую строку в `Invoice(scope=ADMIN_PERIOD)`: фиксирует ровно тот список
+> LESSON/SUBSCRIPTION-покрытий, который существовал на момент миграции, и сохраняет исходный totalAmount.
+> Если восстановленные позиции не складываются в старый итог, разница записывается отдельным
+> `InvoiceItem(type=ADJUSTMENT, coverageKey=ADJ:{invoiceId}:{n})`; она влияет на сумму/аудит, но не
+> на статус занятия. Старый PAID становится PAID/ACTIVE; старый PENDING сохраняется для аудита как
+> CANCELLED/RELEASED, а актуальные неоплаченные начисления родитель собирает заново. После переключения
+> все новые оплаты пишутся только в `Invoice`.
+>
+> Prisma не описывает partial unique index, поэтому миграция добавляет его вручную:
+> `CREATE UNIQUE INDEX invoice_item_active_coverage_uq ON "InvoiceItem" ("coverageKey")
+> WHERE "coverageStatus" = 'ACTIVE';`. Создание/отмена/истечение счёта выполняются в транзакции:
+> `PAID` сохраняет `ACTIVE` навсегда, а `CANCELLED/EXPIRED` переводит позиции в `RELEASED`.
 
 ### 3.1 Объём данных: решение по `lessons`
 
@@ -354,15 +436,18 @@ export function isVisible(teacherGroupIds: Set<string>, studentGroupIds: string[
 ```
 
 **Правила, которые нельзя переизобретать** (полный список — §12 спеки): формула 45 мин; деление поровну с
-остатком первому; `amount=0=абонемент`; один инвойс на `(student,teacher,period)`; «оплачено» вычисляется по
-`(period,teacher)`, не хранится; блокировка периода + обход админом + сдача с 25-го; запрет будущей даты;
-гард дублей соло; денормализация снапшотов имён.
+остатком первому; `amount=0=абонемент`; одно активное покрытие на `coverageKey`; «оплачено» вычисляется
+по PAID-позиции, не хранится в занятии; частичная оплата допустима; блокировка периода + обход админом
+и сдача с 25-го; запрет будущей даты; гард дублей соло; денормализация снапшотов имён.
 
 ---
 
-## 5. Аутентификация Telegram Mini App
+## 5. Аутентификация Mini App
 
-Критично для безопасности. Клиент шлёт `initData` (подписанная строка от Telegram); сервер её **проверяет**.
+> **Решение 2026-09-06:** отдельный сайт с входом по телефону (phone OTP) исключён из плана —
+> приложение работает **только как Telegram Mini App**. Единственный способ входа для всех ролей —
+> проверенный Telegram `initData` (подпись + срок жизни). Модель `AuthChallenge` и phone-OTP-флоу
+> из ранних версий этого документа не реализуются; `AuthIdentity` остаётся только с provider=TELEGRAM.
 
 ```ts
 // lib/auth/verifyInitData.ts
@@ -382,18 +467,43 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
     throw new Error("bad initData signature");
   }
   const authDate = Number(params.get("auth_date"));
-  if (Date.now() / 1000 - authDate > maxAgeSec) throw new Error("initData expired");
-  return JSON.parse(params.get("user")!) as { id: number; first_name: string; username?: string };
+  const ageSec = Date.now() / 1000 - authDate;
+  if (!Number.isFinite(authDate) || ageSec < -30 || ageSec > maxAgeSec) {
+    throw new Error("bad or expired auth_date");
+  }
+  const rawUser = params.get("user");
+  if (!rawUser) throw new Error("missing user");
+  return JSON.parse(rawUser) as { id: number; first_name: string; username?: string };
 }
 ```
 
-**Резолв роли** после проверки: `tgId` →
+**Резолв роли Telegram** после проверки: `tgId` →
 1. `User` с этим `tgId` и `isAdmin` → **admin** (+teacher, если `teacherId`);
 2. `User`/`Teacher` с `teacherId` → **teacher**;
-3. есть `Student`, где `tgId = ANY(parentTgIds)` → **client**;
+3. есть `Client.tgId` или `Student`, где `tgId = ANY(parentTgIds)` → найти единый `Client`, создать при
+   необходимости `AuthIdentity(TELEGRAM)` и выдать **client**-сессию с `clientId`;
 4. иначе — гость (экран регистрации клиента).
 
-Сессия: подписанный JWT-cookie с `{tgId, role, teacherId?}`; `middleware.ts` защищает `/api/*` и страницы.
+Если найденные дети ошибочно относятся к разным `Client`, доступ не объединяется автоматически:
+создаётся диагностическая ошибка для администратора. После миграции каждое клиентское действие
+проверяет `student.clientId == session.clientId`; `parentTgIds` остаётся только источником миграции/бота.
+
+**Телефонный вход клиента:**
+
+- `POST /api/auth/phone/request` принимает нормализуемый телефон, всегда возвращает одинаковый ответ
+  (не раскрывает, зарегистрирован ли клиент), применяет rate limit по IP и телефону;
+- сервер генерирует криптографически стойкий одноразовый код, хранит только его hash с TTL 5 минут,
+  максимум 5 попыток; после успешной проверки challenge удаляется;
+- `POST /api/auth/phone/verify` находит ровно один `Client` по E.164-телефону, создаёт/обновляет
+  `AuthIdentity(provider=PHONE)` и выдаёт сессию клиента;
+- неизвестный телефон не получает доступ к детям и после успешной проверки видит инструкцию обратиться
+  к администратору; администратор сначала привязывает E.164-телефон к существующему `Client`;
+- привязать Telegram к уже существующему клиенту можно только из авторизованной сессии клиента или
+  через подтверждённый администратором запрос — совпадения имени недостаточно.
+
+Сессия: подписанная короткоживущая `HttpOnly + Secure + SameSite=Lax` cookie с
+`{actorId, role, clientId?, teacherId?, authMethod}`; внутри не требуется `tgId`. Logout удаляет cookie,
+а повторная аутентификация выпускает новую. `middleware.ts` защищает `/api/*` и страницы.
 Каждый чувствительный эндпоинт **дополнительно** перепроверяет право (роль, видимость группы, принадлежность ученика).
 
 ---
@@ -404,6 +514,9 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
 
 **Auth**
 - `POST /api/auth/telegram` `{ initData }` → `{ role, teacherId? }` (ставит cookie).
+- `POST /api/auth/phone/request` `{ phone }` → нейтральный ответ; rate limit.
+- `POST /api/auth/phone/verify` `{ phone, code }` → `{ role:"client" }` (ставит cookie).
+- `POST /api/auth/logout` → удаляет текущую session-cookie.
 
 **Teachers** (admin)
 - `GET /teachers` · `GET /teachers/:id` (карточка: ставки, группы, история сдач) · `POST /teachers`
@@ -432,7 +545,9 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
   { "kind":"shared","date":"2026-07-01","durationMin":60,"studentIds":["STU-2","STU-3"] }
   ```
   Сервер: проверяет `date ≤ today`; гард дублей соло; блокировку периода (если не admin); пишет снапшоты имён.
-- `GET /lessons?teacherId=&studentId=&period=&date=` (фильтры) · `DELETE /lessons/:id` (блокировка/обход).
+- `GET /lessons?teacherId=&studentId=&period=&date=` (фильтры) · `DELETE /lessons/:id` (soft-delete).
+  Если начисление в DRAFT, транзакция удаляет позицию/пересчитывает счёт или отменяет пустой счёт;
+  при PENDING/PAID удаление блокируется до отмены платежа или оформленной админом коррекции/возврата.
 
 **Periods** (teacher)
 - `GET /periods/:teacherId/:month/preview` → `{ lessons, totalEarned }` (сумма `calcEarned`).
@@ -440,18 +555,42 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
 
 **Bills / Payments**
 - `GET /students/:id/bills/:period` → счёт, сгруппированный по педагогам (`compute`, on-demand).
-- `POST /payments/invoices` `{ studentId, periodMonth }` → get-or-create инвойсы (обновляет только не-PAID).
-- `POST /payments/:id/confirm` (одиночный) · `POST /periods/:studentId/:month/confirm` (все PENDING→PAID + фискализация).
-- `POST /payments/yookassa` `{ studentId, periodMonth }` → `{ confirmationUrl, externalPaymentId }`.
-  **Сумму клиент НЕ передаёт** — сервер вычисляет её из неоплаченных инвойсов (§6.1).
+- `GET /me/payables?studentId=&from=&to=` → универсальные начисления `LESSON|SUBSCRIPTION` с
+  `coverageKey`, суммой и вычисленным статусом.
+- `POST /me/invoices/cart` `{ studentId, payableKeys: [...] }` → транзакционно создаёт DRAFT `Invoice`
+  с `InvoiceItem[]` и резервирует покрытия partial unique index. **Сумму клиент НЕ передаёт**.
+  Один Invoice относится к одному ученику; экран «все дети» группирует выбор по детям и создаёт
+  отдельный счёт/платёж для каждого ребёнка.
+- `POST /invoices/:invoiceId/confirm` (admin) → подтверждает только этот PENDING-счёт + фискализация.
+- `POST /invoices/:invoiceId/cancel` → владелец отменяет только DRAFT и освобождает позиции.
+- `POST /invoices/:invoiceId/reject` (admin) → отклоняет PENDING ручной оплаты и освобождает позиции.
+- `POST /payments/yookassa` `{ invoiceId }` → `{ confirmationUrl, externalPaymentId }`.
+  Требует `Idempotency-Key`; переводит DRAFT→PENDING и берёт сумму из `Invoice.amount` (§6.1).
 - `POST /webhooks/yookassa` — с обязательной перепроверкой через API ЮКассы (§6.1).
 - `GET /payments/external/:id/status` → `{ status }` — кнопка «проверить ещё раз» (§6.1).
 
 **Прочее** (admin): `GET /salaries?period=`, `GET /profit?period=`, `GET /requests` +
 `POST /requests/:id/approve|reject`, `GET /diagnostics`.
 
-**Client**: `GET /me/children`, `GET /me/lessons?...`, `GET /me/bills?...`, `POST /me/add-child` (заявка),
-`POST /me/pay/...`.
+**Client**: `GET /me/children`, `GET /me/lessons?...`, `GET /me/bills?...`, `POST /me/add-child` (заявка).
+
+`GET /me/lessons?...` возвращает занятия уже с рассчитанным статусом оплаты:
+```json
+{
+  "lessonId": "LES-001234",
+  "date": "2026-07-12",
+  "teacherName": "Иванова",
+  "durationMin": 60,
+  "amount": 700,
+  "paymentStatus": "PAID",
+  "coverageKey": "LESSON:STU-0001:LES-001234",
+  "selectableForPayment": false
+}
+```
+`paymentStatus` — computed поле API, не колонка в `Lesson`: `NOT_CHARGEABLE`, `UNPAID`, `RESERVED`,
+`PENDING` или `PAID`. Выбирать можно только `UNPAID`. `RESERVED` означает DRAFT другого/текущего счёта,
+`PENDING` — платёж или чек ожидает завершения. Для `SUBSCRIPTION` API `/me/payables` возвращает одну
+месячную карточку начисления; отдельные занятия этой группы ссылаются на тот же subscription coverage.
 
 ### 6.1 Проверка оплат на стороне клиента (решение)
 
@@ -461,40 +600,59 @@ export function verifyInitData(initData: string, botToken: string, maxAgeSec = 8
 
 **Поток онлайн-оплаты (ЮКасса):**
 ```
-1. Клиент жмёт «Оплатить» → POST /payments/yookassa { studentId, periodMonth }
-   Сервер: проверяет initData-сессию и что studentId принадлежит родителю (tgId ∈ parentTgIds);
-   ВЫЧИСЛЯЕТ сумму из PENDING-инвойсов (от клиента сумму не принимает);
-   создаёт платёж в ЮКассе (idempotency key = uuid) и СОХРАНЯЕТ ExternalPayment
-   (externalId ЮКассы + studentId + periodMonth + amount); отдаёт confirmationUrl.
-2. Фронт открывает confirmationUrl; после оплаты пользователь возвращается по return_url.
-3. Фронт показывает «Проверяем оплату…» и поллит GET /students/:id/bills/:period
+1. Клиент на экране «Занятия» отмечает неоплаченные начисления из `/me/payables`. Это локальная корзина.
+   Быстрые действия «выбрать неделю/месяц» отмечают подходящие уроки и один раз каждый попавший
+   в диапазон месячный абонемент.
+2. Клиент жмёт «Перейти к оплате» → POST /me/invoices/cart { studentId, payableKeys }.
+   Сервер: проверяет Telegram-сессию (initData) и принадлежность studentId текущему Client;
+   проверяет актуальность всех coverageKey и отсутствие другого ACTIVE-покрытия;
+   ВЫЧИСЛЯЕТ сумму каждой позиции из доменных правил (от клиента сумму не принимает);
+   в одной транзакции создаёт DRAFT Invoice(scope=CART) + InvoiceItem[]; конфликт уникальности
+   возвращает 409 и свежий список начислений.
+3. Клиент жмёт «Оплатить» → POST /payments/yookassa { invoiceId }.
+   Сервер: снова проверяет владельца invoiceId и статус DRAFT, берёт сумму из Invoice.amount;
+   по обязательному Idempotency-Key создаёт или возвращает тот же платёж, переводит Invoice в PENDING
+   и СОХРАНЯЕТ ExternalPayment
+   (externalId ЮКассы + invoiceId + amount); отдаёт confirmationUrl.
+4. Фронт открывает confirmationUrl; после оплаты пользователь возвращается по return_url.
+5. Фронт показывает «Проверяем оплату…» и поллит GET /me/invoices/:invoiceId
    каждые 2–3 с, до ~90 с. (Поллинг, не WebSocket/SSE: сессии Mini App короткие,
    лёгкий запрос раз в 2–3 с в течение минуты — простейшее надёжное решение.)
-4. Параллельно приходит webhook: сервер НЕ верит телу запроса — берёт object.id,
-   запрашивает статус у API ЮКассы (GET /payments/{id}) и подтверждает период только
-   при реальном `succeeded` и совпадении суммы с ExternalPayment. Повторные webhook
-   безопасны: confirm_period идемпотентен (PAID пропускается).
-5. Поллинг видит PAID → фронт показывает ✅.
-6. Если за 90 с статус не сменился: «Платёж обрабатывается, статус обновится автоматически»
+6. Параллельно приходит webhook: сервер НЕ верит телу запроса — берёт object.id,
+   запрашивает статус у API ЮКассы (GET /payments/{id}) и подтверждает invoice только
+   при реальном `succeeded` и совпадении суммы с ExternalPayment/Invoice. Повторные webhook
+   безопасны: PAID-инвойс повторно не меняется. PENDING онлайн становится CANCELLED только после
+   подтверждённого статуса `canceled` у провайдера.
+7. Поллинг видит PAID → фронт показывает ✅ у всех занятий, которые покрыты InvoiceItem.
+8. Если за 90 с статус не сменился: «Платёж обрабатывается, статус обновится автоматически»
    + кнопка «Проверить ещё раз» → GET /payments/external/:id/status (сервер сам опрашивает
    ЮКассу по сохранённому externalId — страховка от потерянного webhook).
 ```
 
-**Ручные способы (наличные / реквизиты / СБП):** статус остаётся PENDING до подтверждения
-админом (как в боте). Для UX хранить факт загрузки чека (модель `Receipt`: studentId, period,
-fileId, uploadedAt) и показывать промежуточное состояние «чек отправлен, ждёт подтверждения» —
-домен (PENDING/PAID) не меняется, это чисто отображение.
+**Ручные способы (наличные / реквизиты / СБП):** выбор метода переводит DRAFT→PENDING; статус остаётся
+PENDING до `POST /invoices/:invoiceId/confirm` администратором. Подтверждается только этот invoiceId,
+не все счета месяца. `Receipt(invoiceId, fileId, uploadedAt)` даёт состояние «чек отправлен».
 
-**✅ на занятиях** — как в боте: вычисляется на сервере (`(period, teacher)` имеет PAID-инвойс),
-фронт только рендерит.
+**Жизненный цикл:** DRAFT без выбранного способа оплаты истекает, например, через 30 минут; PENDING
+онлайн не истекает до синхронизации с провайдером, а PENDING ручного способа — до решения администратора.
+Фоновая задача переводит просроченный DRAFT в EXPIRED и атомарно освобождает его покрытия. Пользователь
+может отменить DRAFT; админ может отклонить PENDING ручной оплаты; PAID неизменяем.
+CANCELLED/EXPIRED позиции получают `coverageStatus=RELEASED`.
+
+**✅ на занятиях** — вычисляется на сервере, фронт только рендерит. В текущем боте правило простое:
+`(period, teacher)` имеет PAID-инвойс. В Mini App/web правило шире: занятие оплачено, если существует
+PAID `InvoiceItem`, который его покрывает:
+- `itemType=LESSON`: `invoiceItem.lessonId == lesson.lessonId` и `invoice.status == PAID`;
+- `itemType=SUBSCRIPTION`: оплаченный абонемент покрывает группу/месяц по правилам абонемента.
 
 **Чек-лист безопасности платежей:**
 - сумма — только серверный расчёт; от клиента не принимается;
 - принадлежность ученика родителю проверяется на каждом платёжном эндпоинте;
+- один ACTIVE `coverageKey` обеспечивается partial unique index, а не только предварительной проверкой;
 - webhook перепроверяется через API ЮКассы (в боте уже реализовано —
   [payments.py: process_yookassa_event](../bot/handlers/client/payments.py), см. историю в
   [FOUND_BUGS.md B4](FOUND_BUGS.md); в веб-версии портировать 1-в-1);
-- idempotency key при создании платежа; идемпотентное подтверждение;
+- обязательный уникальный idempotency key при создании платежа; идемпотентное подтверждение;
 - `ExternalPayment` хранит внешний id → возможна сверка и ручная перепроверка.
 
 ---
@@ -508,7 +666,7 @@ web/
     domain/   billing.ts  profit.ts  subscriptions.ts  debt.ts
               visibility.ts  attendees.ts  periods.ts               # чистые функции + *.test.ts
     db/       client.ts  ids.ts  lessons.ts  payments.ts  students.ts …
-    auth/     verifyInitData.ts  session.ts  requireRole.ts
+    auth/     verifyInitData.ts  phoneOtp.ts  session.ts  requireRole.ts
   app/
     api/      teachers/  students/  lessons/  periods/  payments/  webhooks/ …/route.ts
     (mini)/   layout.tsx
@@ -525,32 +683,38 @@ web/
 ## 8. План сборки по фазам (делать сверху вниз, каждую — проверять)
 
 - **Фаза 0 — каркас.** `create-next-app` (TS, App Router, Tailwind), Prisma init, Postgres (Docker/Neon),
-  `@telegram-apps/sdk`. Критерий: пустое приложение открывается в Telegram, `initData` доходит до сервера.
+  `@telegram-apps/sdk`. Критерий: приложение открывается внутри Telegram (Mini App); отдельный сайт не поддерживаем.
 - **Фаза 1 — БД.** Внести `schema.prisma` из §3, `prisma migrate`. Критерий: миграция применяется, типы генерятся.
 - **Фаза 2 — домен + тесты.** Портировать `lib/domain/*` (§4) и **перенести характеризующие тесты** из
   `tests/test_billing_service.py`, `test_profit_service.py`, `test_subscription_billing.py`,
   `test_debt_map.py`, `test_attendees.py`, `test_visibility.py`.
   Критерий: Vitest зелёный; суммы `ProfitSummary` совпадают с Python на одинаковых входных данных.
-- **Фаза 3 — auth.** `verifyInitData` + сессия + резолв роли (§5) + `middleware.ts`. Критерий: три роли
-  корректно определяются; чужие эндпоинты закрыты.
+- **Фаза 3 — auth.** `verifyInitData` + сессия + резолв роли (§5) + `middleware.ts`. Только Telegram
+  `initData` — phone OTP исключён (решение 2026-09-06). Критерий: подпись/срок жизни проверяются,
+  три роли резолвятся, чужие эндпоинты недоступны.
 - **Фаза 4 — API (чтение).** Списки/карточки: teachers, students, groups, lessons, bills-compute. Критерий:
   цифры счёта/зарплаты совпадают с ботом на тех же данных.
 - **Фаза 5 — API (запись).** Запись занятий (4 kind), сдача/переоткрытие периода, инвойсы, подтверждение
-  оплаты — всё в транзакциях (заменяют локеры бота). Критерий: правила §6/§8 спеки соблюдены.
+  оплаты — всё в транзакциях (заменяют локеры бота). Обязательные integration-тесты: два параллельных
+  cart-запроса на один coverageKey (один получает 409); EXPIRED/CANCELLED освобождает позицию;
+  PAID не освобождает; ручное подтверждение меняет только один invoiceId; повторный Idempotency-Key и
+  повторный webhook не создают вторую оплату. Критерий: правила §6/§8 спеки соблюдены.
 - **Фаза 6 — UI по ролям.** Экраны из §9 спеки; навигация в стиле Telegram; тема из SDK.
 - **Фаза 7 — платежи.** ЮКасса + webhook + (опц.) CloudKassir-фискализация.
 - **Фаза 8 — миграция данных + деплой.** Экспорт из Google Sheets → Postgres (сохранить оба формата
-  attendees → `LessonAttendee`, снапшоты имён, читаемые ID). Деплой (Vercel/Fly + Neon/managed PG).
+  attendees → `LessonAttendee`, снапшоты имён, читаемые ID); преобразовать `StudentPeriodPayment` в
+  `Invoice/InvoiceItem`; создать TELEGRAM `AuthIdentity` и проверить, что каждый parentTgId резолвится
+  ровно в один Client. Деплой (Vercel/Fly + Neon/managed PG).
 
 ---
 
 ## 9. Не-договорные инварианты (свериться перед релизом)
 
 Всё из §12 [MINIAPP_SPEC.md](MINIAPP_SPEC.md#12-воспроизведение-в-mini-app-что-сохранить-что-переосмыслить).
-Кратко: формулы денег; `amount=0=абонемент`; один инвойс на `(student,teacher,period)` и обновление только
-не-PAID; «оплачено» — вычисление, не поле; блокировка периода (+обход админом, сдача с 25-го); видимость через
-пересечение групп; гард дублей соло; запрет будущей даты; денормализация имён; Client≠Student и порядок
-регистрации детей.
+Кратко: формулы денег; `amount=0=абонемент`; корзина из универсальных начислений; один ACTIVE
+`coverageKey`; частичная оплата допустима; подтверждается только конкретный invoiceId; «оплачено» —
+вычисление, не поле; блокировка периода (+обход админом, сдача с 25-го); видимость через пересечение групп;
+гард дублей соло; запрет будущей даты; денормализация имён; Client≠Student; вход только через Telegram `initData`.
 
 ---
 

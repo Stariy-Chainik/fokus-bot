@@ -71,7 +71,16 @@ async def _show_lessons(
     callback: CallbackQuery, lesson_repo: LessonRepository, teacher_id: str,
     filter_date: str | None = None, filter_month: str | None = None,
     filter_type: str | None = None,
+    teacher_group_repo=None,
 ) -> None:
+    # У педагога с revenue-share группой фильтр групп/индив скрываем (как в его кабинете):
+    # его индивидуальные хранятся как GROUP, разделение вводит в заблуждение.
+    from config.settings import settings
+    share_gids = set(settings.revenue_share_group_map)
+    show_type_filter = True
+    if share_gids and teacher_group_repo is not None:
+        own = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+        show_type_filter = not (own & share_gids)
     lessons = await lesson_repo.get_by_teacher(teacher_id)
     if filter_date:
         lessons = [ls for ls in lessons if ls.date == filter_date]
@@ -104,6 +113,7 @@ async def _show_lessons(
                 filter_date=filter_date, filter_month=filter_month,
                 filter_type=filter_type,
                 back_cb=back_cb, type_cb_prefix=type_cb_prefix,
+                show_type_filter=show_type_filter,
             ),
         )
         return
@@ -115,6 +125,7 @@ async def _show_lessons(
             filter_date=filter_date, filter_month=filter_month,
             filter_type=filter_type,
             back_cb=back_cb, type_cb_prefix=type_cb_prefix,
+            show_type_filter=show_type_filter,
         ),
     )
 
@@ -195,24 +206,26 @@ async def cb_admin_lessons_dates_back(
 @router.callback_query(F.data.startswith("aedl_pick:"))
 async def cb_admin_lessons_pick(
     callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, teacher_id, day = callback.data.split(":", 2)
-    await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day)
+    await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("aedl_all:"))
 async def cb_admin_lessons_all(
     callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     teacher_id = callback.data.split(":", 1)[1]
-    await _show_lessons(callback, lesson_repo, teacher_id)
+    await _show_lessons(callback, lesson_repo, teacher_id, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
@@ -233,12 +246,13 @@ async def cb_admin_lessons_month_pick(
 @router.callback_query(F.data.startswith("aedl_month:"))
 async def cb_admin_lessons_month(
     callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, teacher_id, ym = callback.data.split(":", 2)
-    await _show_lessons(callback, lesson_repo, teacher_id, filter_month=ym)
+    await _show_lessons(callback, lesson_repo, teacher_id, filter_month=ym, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
@@ -286,6 +300,7 @@ async def cb_admin_lessons_cal_nav(
 async def cb_admin_lessons_cal_pick(
     callback: CallbackQuery, user: User | None, state: FSMContext,
     lesson_repo: LessonRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -296,7 +311,7 @@ async def cb_admin_lessons_cal_pick(
     if not teacher_id:
         await callback.answer("Сессия истекла, начните сначала", show_alert=True)
         return
-    await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day)
+    await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
@@ -304,6 +319,7 @@ async def cb_admin_lessons_cal_pick(
 async def cb_admin_lessons_type(
     callback: CallbackQuery, user: User | None,
     lesson_repo: LessonRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -317,7 +333,7 @@ async def cb_admin_lessons_type(
     elif tag != "all":
         filter_date = tag
     await _show_lessons(
-        callback, lesson_repo, teacher_id,
+        callback, lesson_repo, teacher_id, teacher_group_repo=teacher_group_repo,
         filter_date=filter_date, filter_month=filter_month, filter_type=filter_type,
     )
     await callback.answer()

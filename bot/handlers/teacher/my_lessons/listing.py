@@ -42,10 +42,16 @@ def _filter_lessons(
     elif filter_month:
         lessons = [lesson for lesson in lessons if lesson.date[:7] == filter_month]
 
+    # Занятия в revenue-share группах (индивидуальные Яковлевой) по смыслу
+    # индивидуальные, хотя хранятся как GROUP — фильтруем по смыслу.
+    from config.settings import settings
+    share_gids = set(settings.revenue_share_group_map)
     if filter_type == "group":
-        lessons = [lesson for lesson in lessons if lesson.type == LessonType.GROUP]
+        lessons = [lesson for lesson in lessons
+                   if lesson.type == LessonType.GROUP and lesson.group_id not in share_gids]
     elif filter_type == "individual":
-        lessons = [lesson for lesson in lessons if lesson.type == LessonType.INDIVIDUAL]
+        lessons = [lesson for lesson in lessons
+                   if lesson.type == LessonType.INDIVIDUAL or lesson.group_id in share_gids]
     return lessons
 
 
@@ -74,11 +80,22 @@ async def _lessons_for_list(
     return lessons, periods
 
 
+async def _hide_type_filter(user: User, teacher_group_repo) -> bool:
+    """У педагога с revenue-share группой (Яковлева) фильтр групп/индив не показываем."""
+    from config.settings import settings
+    share = set(settings.revenue_share_group_map)
+    if not share:
+        return False
+    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    return bool(gids & share)
+
+
 async def _show_lessons(
     callback: CallbackQuery,
     user: User,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo,
     state: FSMContext,
     filter_date: str | None = None,
     filter_month: str | None = None,
@@ -123,6 +140,7 @@ async def _show_lessons(
         filter_date=filter_date,
         filter_month=filter_month,
         filter_type=filter_type,
+        show_type_filter=not await _hide_type_filter(user, teacher_group_repo),
     )
     if not lessons:
         extra = " (или все в сданных периодах)" if mode == "delete" else ""
@@ -218,6 +236,7 @@ async def cb_my_lessons_date(
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -248,6 +267,7 @@ async def cb_my_lessons_date(
         user,
         lesson_repo,
         submission_repo,
+        teacher_group_repo,
         state,
         filter_date=value,
     )
@@ -261,6 +281,7 @@ async def cb_my_lessons_month(
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -271,6 +292,7 @@ async def cb_my_lessons_month(
         user,
         lesson_repo,
         submission_repo,
+        teacher_group_repo,
         state,
         filter_month=period,
     )
@@ -302,6 +324,7 @@ async def cb_lv_pick(
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -312,6 +335,7 @@ async def cb_lv_pick(
         user,
         lesson_repo,
         submission_repo,
+        teacher_group_repo,
         state,
         filter_date=filter_date,
     )
@@ -325,6 +349,7 @@ async def cb_lessons_page(
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -354,6 +379,7 @@ async def cb_lessons_page(
             filter_date=filter_date,
             filter_month=filter_month,
             filter_type=filter_type,
+            show_type_filter=not await _hide_type_filter(user, teacher_group_repo),
         ),
     )
     await callback.answer()
@@ -366,6 +392,7 @@ async def cb_lessons_type(
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    teacher_group_repo: TeacherGroupRepository,
 ) -> None:
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -378,6 +405,7 @@ async def cb_lessons_type(
         user,
         lesson_repo,
         submission_repo,
+        teacher_group_repo,
         state,
         filter_date=filter_date,
         filter_month=filter_month,

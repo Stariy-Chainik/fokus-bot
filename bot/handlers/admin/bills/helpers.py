@@ -9,7 +9,7 @@ from bot.repositories import (
 )
 from bot.services import PaymentService
 from bot.utils.bill_format import build_bill_text
-from bot.utils.dates import display_period, last_periods
+from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from config.settings import settings
 
 
@@ -72,6 +72,50 @@ async def _student_group_names(
         if g:
             names.append(g.name)
     return names
+
+
+def _bill_detail_lines(student_name: str, period_month: str, bills: dict, payments: list) -> list[str]:
+    """Текст экрана «Счёт ученика за период»: разбивка по педагогам и занятиям.
+
+    Общий для админского флоу и педагога с правом счетов (BILLING_TEACHER_IDS).
+    """
+    pay_by_teacher = {p.teacher_id: p for p in payments}
+    lines = [f"<b>Счёт: {student_name}</b>", f"Период: {display_period(period_month)}", ""]
+    grand_total = 0
+    for teacher_id, agg in bills.items():
+        subtotal = agg["total"]
+        grand_total += subtotal
+        p = pay_by_teacher.get(teacher_id)
+        if p and p.status.value == "paid":
+            status = f"✅ Оплачен ({p.paid_at or ''})"
+        elif p:
+            status = "📋 Ожидает оплаты"
+        else:
+            status = "⏳ Счёт не создан"
+        lines.append(f"👨‍🏫 <b>{agg['name']}</b> — {subtotal} руб. — {status}")
+        items = agg["items"]
+        individual = [b for b in items if b.lesson_type != "group"]
+        group_items = [b for b in items if b.lesson_type == "group"]
+        if individual:
+            lines.append("  <i>Индивидуальные:</i>")
+            cur_date: str | None = None
+            for b in sorted(individual, key=lambda x: x.date):
+                if b.date != cur_date:
+                    cur_date = b.date
+                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
+                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
+        if group_items:
+            group_total = sum(b.amount for b in group_items)
+            lines.append(f"  <i>Групповые ({len(group_items)} посещений, {group_total} руб.):</i>")
+            cur_date = None
+            for b in sorted(group_items, key=lambda x: x.date):
+                if b.date != cur_date:
+                    cur_date = b.date
+                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
+                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
+        lines.append("")
+    lines.append(f"Итого: {grand_total} руб.")
+    return lines
 
 
 def _periods_only_buttons(action_prefix: str, back_cb: str) -> InlineKeyboardMarkup:

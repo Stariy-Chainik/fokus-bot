@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository, UserRepository
-from bot.keyboards.client import kb_client_menu, kb_admin_approve_child
+from bot.keyboards.client import client_welcome_text, kb_client_menu, kb_admin_approve_child
 from bot.states import ClientRegStates
 
 logger = logging.getLogger(__name__)
@@ -35,15 +35,16 @@ def _student_buttons(matches: list, cb_prefix: str) -> InlineKeyboardMarkup:
 async def handle_surname_input(
     message: Message,
     user: User | None,
+    state: FSMContext,
     student_repo: StudentRepository,
 ) -> None:
     if user is not None and (user.is_admin or user.teacher_id):
         return
 
     tg_id = message.from_user.id
-    existing = await student_repo.get_by_parent_tg_id(tg_id)
-    if existing:
-        await message.answer("Выберите раздел:", reply_markup=kb_client_menu())
+    # Уже привязанный спортсмен/родитель — просто показываем его меню.
+    from bot.handlers.common import show_family_menu, _get_current_role
+    if await show_family_menu(message, tg_id, student_repo, state, await _get_current_role(state)):
         return
 
     query = (message.text or "").strip()

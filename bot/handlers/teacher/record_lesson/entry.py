@@ -9,6 +9,7 @@ from bot.models import User
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
+    StudentGroupRepository,
 )
 from bot.services import LessonService, TeacherVisibilityService
 from bot.states import RecordLessonStates
@@ -60,7 +61,7 @@ async def cb_lesson_back(
     callback: CallbackQuery, state: FSMContext, user: User | None,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
-    branch_repo: BranchRepository,
+    branch_repo: BranchRepository, student_group_repo: StudentGroupRepository,
     teacher_repo: TeacherRepository, lesson_service: LessonService,
 ) -> None:
     if not _is_teacher(user):
@@ -77,20 +78,45 @@ async def cb_lesson_back(
 
     elif target == "kind":
         # очистим данные ниже по воронке
-        await state.update_data(kind=None, duration_min=None, selected_ids=[])
+        await state.update_data(kind=None, duration_min=None, selected_ids=[], rshare_flow=False)
         await state.set_state(RecordLessonStates.choosing_kind)
         data = await state.get_data()
         await callback.message.edit_text(
-            f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
+            f"{_header(data)}Тип занятия:",
+            reply_markup=kb_lesson_type(simple=bool(data.get("rshare_gid"))),
         )
 
     elif target == "duration":
-        await state.update_data(selected_ids=[])
+        update: dict = {"selected_ids": []}
+        if data.get("rshare_flow"):
+            # Возврат из ростера индивидуальных: восстанавливаем kind=rshare
+            update.update(kind="rshare", rshare_flow=False, selected_group_id=None)
+        await state.update_data(**update)
         await state.set_state(RecordLessonStates.choosing_duration)
         data = await state.get_data()
+        options = [60, 120] if data.get("kind") == "rshare" else None
         await callback.message.edit_text(
             f"{_header(data)}Выберите длительность:",
-            reply_markup=kb_duration(back_cb="lesson_back:kind"),
+            reply_markup=kb_duration(back_cb="lesson_back:kind", options=options),
+        )
+
+    elif target == "rshare_group":
+        # Индивидуальные: из списка учениц назад к группам филиала
+        await state.update_data(rshare_pool_ids=[])
+        from .flows import _show_rshare_group_picker
+        branch_id = data.get("rshare_branch_id") or ""
+        await _show_rshare_group_picker(
+            callback, state, branch_id, user, teacher_group_repo, group_repo,
+            student_repo, student_group_repo,
+        )
+
+    elif target == "rshare_branch":
+        # Индивидуальные: назад из списка участниц к выбору филиала (отметки сохраняются)
+        await state.update_data(rshare_pool_ids=[])
+        from .flows import _show_rshare_branch_picker
+        await _show_rshare_branch_picker(
+            callback, state, user, teacher_group_repo, group_repo, branch_repo,
+            student_repo, student_group_repo,
         )
 
     elif target == "attendance":

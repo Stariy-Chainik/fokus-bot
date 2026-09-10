@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.models import User, StudentGroupTier
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, TeacherGroupRepository, StudentGroupRepository,
@@ -153,7 +154,7 @@ async def cb_ms_add_other(
     data = await state.get_data()
     main_gid = data.get("selected_group_id")
     teacher_id = _tid(user, data)
-    all_gids = set(await teacher_group_repo.get_groups_for_teacher(teacher_id))
+    all_gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher_id))
     other_gids = all_gids - {main_gid}
     groups = []
     for gid in sorted(other_gids):

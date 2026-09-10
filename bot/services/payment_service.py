@@ -5,6 +5,7 @@ import uuid
 from bot.models import StudentPeriodPayment, Student
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
 from bot.utils import generate_payment_id, now_str
+from bot.utils.dates import last_periods
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
@@ -16,6 +17,29 @@ logger = logging.getLogger(__name__)
 # Абонемент — продукт группы, а не педагога, но модель инвойса требует teacher_id;
 # синтетический ключ хранится в той же строковой колонке.
 SUBSCRIPTION_KEY_PREFIX = "SUB:"
+_SUMMER_MONTHS = (7, 8)
+
+
+def subscription_billable_months(lesson_months: set, until: str) -> set:
+    """Месяцы, за которые начисляется абонемент группы (правило 2026-09-08).
+
+    Абонемент платится каждый месяц с первого занятия группы по `until`
+    включительно — каникулы тоже, — КРОМЕ июля и августа: летом начисляем
+    только за месяц, в котором у группы реально были занятия.
+    """
+    if not lesson_months:
+        return set()
+    year, month = (int(x) for x in min(lesson_months).split("-"))
+    until_year, until_month = (int(x) for x in until.split("-"))
+    out: set = set()
+    while (year, month) <= (until_year, until_month):
+        period = f"{year:04d}-{month:02d}"
+        if month not in _SUMMER_MONTHS or period in lesson_months:
+            out.add(period)
+        month += 1
+        if month > 12:
+            year, month = year + 1, 1
+    return out
 
 
 class PaymentService:
@@ -99,11 +123,14 @@ class PaymentService:
         """
         if self._sub_override_repo is None:
             return 0
-        months = {
+        lesson_months = {
             ls.date[:7]
             for ls in await self._lesson_repo.get_all()
             if ls.type == LessonType.GROUP and ls.group_id == group_id
-            and ls.date[:7] < effective_period
+        }
+        months = {
+            m for m in subscription_billable_months(lesson_months, until=effective_period)
+            if m < effective_period
         }
         if not months:
             return 0
@@ -156,17 +183,19 @@ class PaymentService:
                 sub_groups.append(group)
         if not sub_groups:
             return {}
-        # Месяцы активности групп — одним проходом по занятиям.
-        active: set[str] = set()
+        # Месяцы занятий каждой группы — одним проходом по занятиям.
         sub_ids = {g.group_id for g in sub_groups}
+        lesson_months: dict[str, set[str]] = {}
         for ls in await self._lesson_repo.get_all():
-            if (ls.type == LessonType.GROUP and ls.group_id in sub_ids
-                    and ls.date[:7] == period_month):
-                active.add(ls.group_id)
+            if ls.type == LessonType.GROUP and ls.group_id in sub_ids:
+                lesson_months.setdefault(ls.group_id, set()).add(ls.date[:7])
         overrides = await self._sub_override_map()
         result: dict[str, dict] = {}
         for group in sub_groups:
-            if group.group_id not in active:
+            billable = subscription_billable_months(
+                lesson_months.get(group.group_id, set()), until=period_month,
+            )
+            if period_month not in billable:
                 continue
             amount = self._sub_amount(
                 overrides, group.group_id, period_month, student_id, group.price_full,
@@ -260,7 +289,9 @@ class PaymentService:
             invoices.append(payment)
         return invoices
 
-    async def compute_debt_map(self, since_period: str | None = None) -> dict[str, dict[str, int]]:
+    async def compute_debt_map(
+        self, since_period: str | None = None, until_period: str | None = None,
+    ) -> dict[str, dict[str, int]]:
         """Карта долгов по всем ученикам и периодам: student_id → {period_month → долг ₽}.
 
         Долг считается on-demand так же, как «К оплате» у родителя: начисления
@@ -298,9 +329,13 @@ class PaymentService:
                 for ls in lessons:
                     if ls.type == LessonType.GROUP and ls.group_id:
                         months_by_group.setdefault(ls.group_id, set()).add(ls.date[:7])
+                until = until_period or last_periods(1)[0]
                 for g in sub_groups:
                     members = await self._student_group_repo.get_students_for_group(g.group_id)
-                    for period in months_by_group.get(g.group_id, ()):
+                    billable = subscription_billable_months(
+                        months_by_group.get(g.group_id, set()), until=until,
+                    )
+                    for period in sorted(billable):
                         for sid in members:
                             amount = self._sub_amount(
                                 overrides, g.group_id, period, sid, g.price_full,
@@ -348,13 +383,43 @@ class PaymentService:
         student_name: str,
         period_month: str,
         total_amount: int,
-    ) -> str:
-        """Создаёт платёж в ЮКасса, возвращает confirmation_url для клиента."""
+        sbp: bool = False,
+        customer_phone: str = "",
+        customer_email: str = "",
+        teacher_ids: list | None = None,
+    ) -> tuple:
+        """Создаёт платёж в ЮКасса, возвращает (confirmation_url, payment_id).
+
+        sbp=True — сразу метод СБП (без выбора на странице ЮКассы).
+        Магазин с фискализацией требует чек: контакт берём из телефона клиента,
+        иначе — YOOKASSA_RECEIPT_EMAIL.
+        """
         from yookassa import Configuration, Payment as YKPayment
         from config.settings import settings
         Configuration.configure(settings.yookassa_shop_id, settings.yookassa_secret_key)
         idempotency_key = str(uuid.uuid4())
+        extra = {"payment_method_data": {"type": "sbp"}} if sbp else {}
+        # Чек — только на почту: email клиента, иначе служебный email школы.
+        # Телефон не используем (СМС от ОФД платные) — решение 2026-09-08.
+        customer = {}
+        if customer_email:
+            customer = {"email": customer_email}
+        elif settings.yookassa_receipt_email:
+            customer = {"email": settings.yookassa_receipt_email}
+        if customer:
+            extra["receipt"] = {
+                "customer": customer,
+                "items": [{
+                    "description": f"Занятия — {student_name}, {period_month}"[:128],
+                    "quantity": "1.00",
+                    "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
+                    "vat_code": 1,  # без НДС
+                    "payment_subject": "service",
+                    "payment_mode": "full_payment",
+                }],
+            }
         payment = YKPayment.create({
+            **extra,
             "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
@@ -365,9 +430,33 @@ class PaymentService:
             "metadata": {
                 "student_id": student_id,
                 "period_month": period_month,
+                # выборочная оплата: подтверждаем только этих педагогов
+                **({"teacher_ids": ",".join(teacher_ids)} if teacher_ids else {}),
             },
         }, idempotency_key)
-        return payment.confirmation.confirmation_url
+        return payment.confirmation.confirmation_url, payment.id
+
+    async def confirm_teachers(
+        self,
+        student_id: str,
+        period_month: str,
+        teacher_ids: list,
+        confirmed_by_tg_id: int,
+    ) -> int:
+        """Подтверждает счета периода только по выбранным педагогам."""
+        count = 0
+        for tid in teacher_ids:
+            row = await self._payment_repo.get_by_student_period_teacher(
+                student_id, period_month, tid,
+            )
+            if row and row.status != PaymentStatus.PAID:
+                if await self._payment_repo.confirm(row.payment_id, confirmed_by_tg_id):
+                    count += 1
+        logger.info(
+            "Частичная оплата: student=%s period=%s педагоги=%s подтверждено=%d",
+            student_id, period_month, ",".join(teacher_ids), count,
+        )
+        return count
 
     async def confirm_period(
         self,

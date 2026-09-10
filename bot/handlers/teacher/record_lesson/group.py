@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.models import User
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, TeacherGroupRepository, StudentGroupRepository,
@@ -37,7 +38,7 @@ async def cb_group_branch(
         return
     branch_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
-    my_group_ids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+    my_group_ids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
     groups = sorted(
         [g for g in await group_repo.get_all()
          if g.group_id in my_group_ids and g.branch_id == branch_id],

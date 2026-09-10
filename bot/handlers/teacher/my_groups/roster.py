@@ -6,6 +6,7 @@ from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     StudentRepository, GroupRepository, BranchRepository, TeacherGroupRepository,
     StudentGroupRepository,
@@ -35,7 +36,7 @@ async def cb_my_groups(
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
     groups = [g for g in await group_repo.get_all() if g.group_id in gids]
 
     if not groups:

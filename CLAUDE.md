@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guide for Claude Code (claude.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Three roles: **admin**, **teacher**, **client (parent)**.
+Guide for Claude Code (claude.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Four roles: **admin**, **teacher**, **client (parent)**, **athlete (спортсмен — ученик со своим Telegram)**.
 
 ---
 
@@ -121,6 +121,11 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `ClientRepository` | `clients` | Parent entities; phone (normalized) + optional tg_id |
 | `StudentRequestRepository` | `student_requests` | Teacher-submitted requests to add a new student (admin approves) |
 | `FinanceEntryRepository` | `finance_entries` | Ручные доходы (турниры) / расходы (аренда) месяца — блоки на экране «Прибыль» |
+| `TeacherPayoutRepository` | `teacher_payouts` | Факты выплаты зарплаты педагогам: `(teacher_id, period_month, amount, paid_at, paid_by)`; несколько строк на месяц = аванс + остаток |
+| `SalaryOverrideRepository` | `salary_day_overrides` | Нестандартные дни: `(teacher_id, date, minutes, comment)` — минуты смены за дату, заменяют расчёт по группам |
+| `TeacherRateHistoryRepository` | `teacher_rate_history` | История ставок: `until_period` — «ставки действуют по этот месяц включительно»; для периода берётся ближайшая граница ≥ period, иначе карточка педагога. Кэш в памяти (`bot/services/rate_history.py`), обновляется фоном раз в 5 мин |
+| `TrainingEntryRepository` | `training_entries` | Дневник спортсмена: `(entry_id TE-, student_id, date, minutes, topics\|, task_ids\|, comment, grade 1–5, grade_comment, graded_by)`; оценку ставит педагог |
+| `AthleteTaskRepository` | `athlete_tasks` | Задания педагога спортсмену: `(task_id TK-, student_id, teacher_id, exercise, minutes, comment, source teacher\|lecture, status open\|closed)`; открыто до закрытия педагогом |
 | `SubscriptionOverrideRepository` | `subscription_overrides` | Переопределение цены абонемента на месяц: `(group_id, period, student_id?)` → amount; пустой student_id = вся группа |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).
@@ -130,12 +135,14 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | Service | Responsibility |
 |---|---|
 | `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). |
+| `SalaryService` ([salary_service.py](bot/services/salary_service.py)) | Единая точка зарплаты педагога за период: `lines_for(teacher, period)` → строки (занятия / в смене / смена / корректировка), `total_for()`. Используется в «Зарплатах», «Выплатах», «Прибыли» (extra_salary) и превью сдачи периода. |
 | `BillingService` ([billing_service.py](bot/services/billing_service.py)) | Pure functions only: `calc_earned()` (teacher salary) and `build_billing_rows()` (virtual per-student Billing rows, computed on demand from a Lesson + Teacher). |
 | `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins can issue bills anytime. |
 | `ProfitService` | Хранилище-независимые DTO и расчёт экрана/API «Прибыль»: строки педагогов и занятий, выручка, зарплата, маржа, абонементы, ручные доходы/расходы. `get_lesson_summary()`, `get_month_summary()`, `get_teacher_detail()`. Telegram-хендлер только форматирует результат. |
 | `StudentService` | Бизнес-логика ученика поверх нескольких репо: `create_with_group()`, `delete_student()`, `toggle_tier()`, `pairs_in_group()` / `soloists_in_group()`, `partner_candidates()`, `get_student_card()` → `StudentCard` DTO (собирает карточку из 7 репо, чтобы хендлер только рисовал). |
 | `StudentRequestService` | Обработка заявок педагогов на новых учеников: `approve_create()`, `approve_link_existing()` (→ `LinkExistingOutcome`). |
 | `TeacherVisibilityService` | Who can see whom: `students_for_teacher()`, `students_in_group_for_teacher()`, `teachers_for_student()`, `is_visible()`. Pure intersection of `teacher_groups` and `student_groups`. |
+| `DiaryService` ([diary_service.py](bot/services/diary_service.py)) | Кабинет спортсмена: записи тренировок, задания, оценки, статистика и рейтинг. Чистые функции `compute_stats()`, `compute_leaderboard()`: **очки = минуты × оценка** (без оценки — коэффициент 3), при фильтре по танцу минуты записи делятся поровну между её темами; места плотные. Темы — [bot/utils/diary_topics.py](bot/utils/diary_topics.py) (бальные танцы / предметы ХГ по названию группы). |
 | `DiagnosticsService` | `run_consistency_check()` → `DiagnosticsReport` (orphan lessons referencing missing teachers/students). |
 | `CloudKassirService` | `send_income_receipt(phone, student_name, period_month, amount)` — fires a fiscal receipt; phone is normalized to `+7…`. No-op if `CLOUDKASSIR_PUBLIC_ID` is empty. |
 
@@ -163,7 +170,7 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
 
 ### Keyboards
 
-Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. **Спецроли убраны** — все педагоги имеют одинаковое меню (`bot/staff.py` удалён; ранее там жили `PROXY_BUTTONS`/`BILLING_TEACHERS`).
+Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. **Спецроли-хардкод убраны** (`bot/staff.py` удалён; ранее там жили `PROXY_BUTTONS`/`BILLING_TEACHERS`). Единственное конфигурируемое отличие меню педагога: `kb_teacher_menu` показывает «🧾 Счета моих групп» (`teacher:bills`) педагогам из env `BILLING_TEACHER_IDS`.
 
 `kb_lesson_detail()` takes an `is_admin: bool` flag — when `True`, admins see the delete button even for locked lessons (with `(🔒 период сдан)` suffix).
 
@@ -177,6 +184,7 @@ In `bot/states/`. Each multi-step flow has its own `StatesGroup`. Some highlight
 - `AddBranchStates`, `EditBranchNameStates`, `AddGroupStates`, `EditGroupNameStates`, `GroupBillingStates`, `GroupAddStudentStates` — branch/group flows.
 - `TeacherRenameStudentStates`, `TeacherGroupAddStudentStates` — teacher flows.
 - `ClientCreateStates`, `ClientRegStates` — client side.
+- `AthleteRegStates`, `LogTrainingStates` — спортсмен: регистрация по фамилии, запись тренировки. `GradeEntryStates`, `AssignTaskStates` — педагог: оценка записи, новое задание.
 - `ReceiptStates` — uploading a payment receipt (client → admin).
 
 **Admin record-for-teacher pattern**: `proxy_teacher_id` is an internal FSM key set only by the admin handler `admin_rl_tch:*`. Helper `_tid(user, data)` returns `data.get("proxy_teacher_id") or user.teacher_id` (in `record_lesson/_base.py`). The former teacher-to-teacher proxy flow was removed; ordinary teachers cannot set this mode through a registered entry point.
@@ -210,6 +218,12 @@ amount (student invoice) = rate_for_student × (duration_min / 45)
 
 amount (PER_VISIT group) = group.price_full or group.price_short
   stored as snapshot in lesson.attendees at creation time: STU-001:60:700
+
+Ставки берутся на месяц занятия: `rate_history.effective_rates(teacher, period)` — при повышении цен
+  старые месяцы считаются по строкам листа teacher_rate_history (until_period ≥ period), иначе по карточке.
+
+earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные — Яковлева», 50%) =
+  процент × сумма amounts из attendees; длительность не влияет
 ```
 
 `Billing` rows are virtual — they are computed on demand by `build_billing_rows(lesson, teacher)` from a Lesson + Teacher. No billing repository/sheet is used (the model exists only for shape; `SHEET_BILLING` is legacy configuration).
@@ -254,7 +268,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 - **Teacher visibility**: derived from `teacher_groups` ∩ `student_groups`. There is **no** `teacher_students` table.
 - **Multi-group students**: a student can belong to multiple groups; billing aggregates across all per period.
 - **SHORT/FULL tiers** (`StudentGroupTier`): only for kindergarten groups (ЮБ/БП); all others have one price.
-- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (абонемент: фиксированная `price_full` ₽/мес с каждого ученика группы, **независимо от числа занятий**; начисляется за месяц, где у группы было ≥1 занятие; ключ начисления в счетах/долгах — `SUB:{group_id}`; см. `PaymentService._subscription_bills_for_student`). Цена переопределяется на конкретный месяц для ученика или всей группы (лист `subscription_overrides`, приоритет ученик → группа → `price_full`, `0` = не начислять; UI — «Биллинг ученикам» группы, callbacks `subovr:*`). Смена базовой цены действует **только вперёд**: админ выбирает месяц начала действия (`subeff:`), прошлые активные месяцы автоматически фиксируются старой ценой (или `0` при первом включении) — `PaymentService.pin_subscription_history`.
+- **Group billing modes**: `NONE` (free, attendance not billed), `PER_VISIT` (each attended lesson billed at group price), `SUBSCRIPTION` (абонемент: фиксированная `price_full` ₽/мес с каждого ученика группы, **независимо от числа занятий**; начисляется **каждый месяц с первого занятия группы, каникулы тоже, кроме июля/августа** (летом — только за месяц с ≥1 занятием; `subscription_billable_months`, правило 2026-09-08); ключ начисления в счетах/долгах — `SUB:{group_id}`; см. `PaymentService._subscription_bills_for_student`). Цена переопределяется на конкретный месяц для ученика или всей группы (лист `subscription_overrides`, приоритет ученик → группа → `price_full`, `0` = не начислять; UI — «Биллинг ученикам» группы, callbacks `subovr:*`). Смена базовой цены действует **только вперёд**: админ выбирает месяц начала действия (`subeff:`), прошлые активные месяцы автоматически фиксируются старой ценой (или `0` при первом включении) — `PaymentService.pin_subscription_history`.
 - **NONE/SUBSCRIPTION groups auto-save**: recording a group lesson for these modes skips attendance and saves immediately with `attendees=None` (roster shown only for PER_VISIT).
 - **Duplicate guard**:
   - Group lessons: **not** blocked — a group can be recorded twice in one day (different shifts/streams).
@@ -287,6 +301,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Link client | `student_link_client:{id}` | Associates student with a Client entity |
 | Approve child request | `admin_child_ok:{tg_id}:{student_id}` | Sent by a parent via `client:add_child` |
 | Salaries | `admin:salaries` | Earnings per teacher per period |
+| **Payouts** | `admin:payouts` | «💸 Выплатить зарплату»: месяц → педагоги (🟢/🟡/🔴, выплачено/начислено) → «✅ Выплатить остаток» или произвольная сумма (FSM `PayoutStates`). Начислено = `calc_earned` по занятиям; выплачено = сумма строк `teacher_payouts` ([admin/payouts.py](bot/handlers/admin/payouts.py)) |
 | Bills | `admin:bills` | Период → филиал → группа → **[📨 вся группа]** или ученик → отправка родителю (multi-recipient, no submission check). Рассылка по группе — `bill_group_send:{period}:{gid}` |
 | **Debtors** | `admin:debtors` | Сводный долг по всем ученикам/периодам (on-demand: начисления − PAID). Текущий месяц помечен `*` и в напоминание не входит. «📤 Напомнить всем» — рассылка родителям должников за закрытые месяцы (с подтверждением) |
 | Прибыль | `admin:profit` | Месяц: занятия + абонементы + ручные доходы (турниры) − зарплата − расходы (аренда); ввод/удаление записей кнопками ➕/🗑 (fin:*). День: только занятия |
@@ -314,6 +329,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Remove partner | `t_partner_clear:{id}` | Confirmation screen |
 | Rename student | `t_rename_student:{id}` | FSM: enter name |
 | My stats | `teacher:my_stats` | Personal earnings summary |
+| **Bills for own groups** | `teacher:bills` | Только педагоги из `BILLING_TEACHER_IDS`. Период → своя группа → ученик/вся группа → счёт родителю ([teacher/bills.py](bot/handlers/teacher/bills.py), переиспользует helpers и локи `admin/bills/`). Счёт полный — по всем педагогам ученика. |
 
 ### Client (parent)
 
@@ -332,19 +348,36 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Upload receipt | `receipt_upload:{method}:{...}` | FSM `ReceiptStates.waiting_for_receipt`; forwards to admins |
 | Admin confirms payment | `receipt_confirm:{stu}:{month}` | → `confirm_period()` → all PENDING → PAID → CloudKassir fiscal receipt (if configured) |
 | Cash notify | `cash_notify:{stu}:{month}` | Sends admin notification with confirm button |
+| Training diary (read-only) | `client:diary` → `cldiary:stu:{id}` / `cldiary:m:{id}:{YYYY-MM}` | Дневник ребёнка: статистика месяца, место в рейтинге, записи с оценками и комментариями педагога, открытые задания ([client/diary.py](bot/handlers/client/diary.py)) |
+
+### Athlete (спортсмен)
+
+Ученик спортивной группы (`ATHLETE_GROUP_IDS`) со своим Telegram. Пакет [bot/handlers/athlete/](bot/handlers/athlete/), клавиатуры [bot/keyboards/athlete.py](bot/keyboards/athlete.py). Роль хранится в `students.athlete_tg_id` (колонка 9); резолв — `show_family_menu()` в [common.py](bot/handlers/common.py) (спортсмен + родитель одновременно → выбор кабинета `mode:athlete` / `mode:client`).
+
+| Feature | Entry point | Notes |
+|---|---|---|
+| Registration | `/start` → «🏃 Я спортсмен» (`athreg:athlete`) | Фамилия → поиск только среди учеников `ATHLETE_GROUP_IDS` → «Да, это я» → привязка **без одобрения**; админам уведомление с «🚫 Отвязать» (`athreg:unlink:{sid}:{tg}`), родителям — информационное |
+| Log training | `ath:log` | FSM `LogTrainingStates`: дата (сегодня/вчера/календарь `athcal_*`) → минуты → темы (мультивыбор по индексу `athlog:tp:{i}`) → открытые задания (`athlog:tk:{id}`, шаг пропускается, если заданий нет) → комментарий |
+| My entries | `ath:entries` → `athent:list:{YYYY-MM}` / `athent:view:{id}` | Месяц (этот/прошлый); удалить можно только запись без оценки (`athent:del:{id}`) |
+| My tasks | `ath:tasks` | Открытые задания с «сделано N раз, последний DD.MM» |
+| Stats | `ath:stats:{YYYY-MM}` | Тренировок, минут, по танцам, средняя оценка, очки, место |
+| Rating | `ath:rating:{YYYY-MM}:{topic_idx\|all}` | Топ-10 + своё место; фильтр по танцу (индекс в `ALL_TOPICS`) |
+
+**Teacher / admin side** — пакет [bot/handlers/teacher/diary/](bot/handlers/teacher/diary/) (`teacher:diary` / `admin:diary`): список спортсменов с «🆕 N без оценки» → дневник (`tdiary:stu:{sid}:{YYYY-MM}`) → запись (`tdiary:entry:{id}`) → «⭐ Оценить» (`tgrade:*`, 1–5 + комментарий; push спортсмену и родителям) · «➕ Задание» (`ttask:new:{sid}`: упражнение из недавних своих или текст → минуты → комментарий; push спортсмену) · «📋 Задания» (`ttask:list:{sid}`, `ttask:close:{id}`) · «🏆 Рейтинг» (`tdiary:rating:*`, полный список). Педагог видит спортсменов своих групп (`TeacherVisibilityService`), админ — всех; педагогу push не шлём. Кнопка «📓 Дневник спортсмена» есть и в карточке ученика педагога.
+
 
 ---
 
 ## Special roles & configuration
 
-**Спецроли убраны — все педагоги имеют одинаковые права.** Ранее было две спецроли (конфиг в `bot/staff.py`, ныне удалён):
+**Спецроли-хардкод убраны** (конфиг в `bot/staff.py`, ныне удалён). Право счетов вернулось в конфигурируемом виде: env `BILLING_TEACHER_IDS` (на проде — `TCH-0009` Контарева) даёт педагогу «🧾 Счета моих групп», ограниченные его `teacher_groups`. Ранее было две спецроли:
 - **Клецова (TCH-0002)** — прокси-запись за Никишина/Криворчук. Удалено (прокси-хендлеры `proxy_*` вырезаны из `record_lesson/entry.py`; попутно закрыт баг B1). Запись за педагога осталась **только у админа** — «📝 Отметить занятие» → выбор педагога (`admin:record_lesson` → `admin_rl_tch:`, независимый флоу).
 - **Контарева (TCH-0009)** — личный биллинг по своим группам. Убран; выставление счетов — общая админская фича «🧾 Счёт ученика за период» ([admin/bills/](bot/handlers/admin/bills/)): на экране группы кнопка «📨 Отправить счета всей группе» (`bill_group_send:`) либо выбор конкретного ученика.
 
 **PER_VISIT groups** (each attended lesson billed):
 - GRP-0007, GRP-0008, GRP-0010, GRP-0015 — various groups
-- GRP-0017 «БП Спортивная — Никишин» (TCH-0005): `price_full=700`
-- GRP-0018 «БП Спортивная — Криворчук» (TCH-0008): `price_full=700`
+- GRP-0017 «БП БТ Спортивная — Никишин» (TCH-0005): `price_full=800` (с 09.2026; до этого 700)
+- GRP-0018 «БП БТ Спортивная — Криворчук» (TCH-0008): `price_full=800` (с 09.2026; до этого 700)
 
 ---
 
@@ -358,6 +391,8 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | `audit_teacher_students.py` | Read-only consistency check: every student's visibility to each teacher matches `teacher_groups ∩ student_groups`. |
 | `migrate_student_groups.py` | One-shot migration from legacy `students.group_id` column to the `student_groups` join table. Idempotent. |
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
+| `sync_yakovleva_attendance.py [YYYY-MM]` | Синхронизация посещений Яковлевой (ХГ) из внешней таблицы «Посещения» (источник правды, read-only) в бота: составы + занятия с посещаемостью, пробные бесплатно. Идемпотентный. На проде — systemd-таймер `fokus-sync-yakovleva.timer`, ежедневно 20:00 UTC (23:00 МСК), текущий и предыдущий месяц. |
+| `setup_diary_sheets.py` | Идемпотентно создаёт листы `training_entries`, `athlete_tasks` и колонку `students.athlete_tg_id` (9-я) для кабинета спортсмена. |
 | `send_bills_grp0004.py` | Template script for ad-hoc bill mailings to one group. Parametrized at the top (`GROUP_ID`, `PERIOD`, `RECIPIENT`). |
 
 Production: **Hetzner VPS (Nuremberg)**, systemd unit `fokus-bot.service`, deployed by `./scripts/deploy.sh`. Logs via `journalctl -u fokus-bot`. The Railway-related `WEBHOOK_URL` / `Procfile` are present but unused — current production runs in polling mode under systemd.
@@ -371,7 +406,7 @@ Required:
 - `GOOGLE_CREDENTIALS_JSON` — service account JSON (inline, single-line)
 - `SPREADSHEET_ID` — main Google Spreadsheet ID
 
-Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`, `SHEET_SUBSCRIPTION_OVERRIDES`, `SHEET_FINANCE_ENTRIES`.
+Optional — Google Sheets tab names (have sensible defaults — only set to override): `SHEET_USERS`, `SHEET_TEACHERS`, `SHEET_STUDENTS`, `SHEET_LESSONS`, `SHEET_BILLING`, `SHEET_PAYMENTS`, `SHEET_TEACHER_PERIOD_SUBMISSIONS`, `SHEET_BRANCHES`, `SHEET_GROUPS`, `SHEET_TEACHER_GROUPS`, `SHEET_STUDENT_GROUPS`, `SHEET_STUDENT_REQUESTS`, `SHEET_CLIENTS`, `SHEET_SUBSCRIPTION_OVERRIDES`, `SHEET_FINANCE_ENTRIES`, `SHEET_TRAINING_ENTRIES`, `SHEET_ATHLETE_TASKS` (два последних + колонка `students.athlete_tg_id` создаются скриптом `scripts/setup_diary_sheets.py`).
 
 Optional — payments:
 - `DEBTORS_SINCE_PERIOD` — долги на экране «⚠️ Должники» считаются с этого периода (`YYYY-MM`); пусто — за всё время. Отсекает месяцы до внедрения учёта оплат (на проде: `2026-07`).
@@ -384,6 +419,12 @@ Optional — payments:
 - `YOOKASSA_RETURN_URL` — return URL after YooKassa payment (default `https://t.me/fokus_bot`)
 - `PAYMENT_WEBHOOK_PORT` — port for the YooKassa webhook aiohttp server (default `8081`)
 - `CLOUDKASSIR_PUBLIC_ID`, `CLOUDKASSIR_API_SECRET` — fiscal receipt service; if empty, fiscal receipts are skipped silently
+- `BILLING_TEACHER_IDS` — teacher_id через запятую/`|` (напр. `TCH-0009`): этим педагогам доступна кнопка «🧾 Счета моих групп» — просмотр и отправка счетов родителям учеников **своих** групп. Пусто — счета только у админов.
+- `DIRECT_PAY_TEACHER_IDS` — teacher_id через запятую (на проде: `TCH-0002` Клецова): **индивидуальные** занятия этих педагогов родители оплачивают педагогу напрямую — `build_billing_rows` не начисляет их (счета/долги/прибыль), `calc_earned` = 0; родителю показывается «оплата педагогу напрямую». Группы педагога — как обычно.
+- `REVENUE_SHARE_GROUPS` — `GRP-XXXX:процент,...`: в этих группах зарплата педагога = процент от сбора с посетивших (а не ставка × время). На проде: `GRP-0020:50` — «ХГ Индивидуальные — Яковлева» (1–3 ученицы по 1800 ₽, техгруппа скрыта из UI педагога, шаг длительности пропущен).
+- `SHIFT_GROUPS` — `GRP-XXXX:start-end,...` (минуты от начала смены): группы одной смены внахлёст. Зарплата за день = `rate_group` × длина объединения интервалов групп, у которых в этот день были занятия (`bot/services/salary_service.py`: `shift_minutes`, `compute_salary_lines`); занятия этих групп per-lesson дают 0. Нестандартные дни — лист `salary_day_overrides` (минуты за дату заменяют расчёт; UI: «💸 Выплатить зарплату» → педагог → «🕒 Нестандартный день»). На проде: Боброво ХГ Яковлевой `GRP-0021:0-60,GRP-0022:0-120,GRP-0023:60-180`, `SHIFT_LABEL=Смена Боброво` (все три → 3 ч = 5100 ₽). Заменяет прежний костыль `SALARY_DURATION_GROUPS` для этих групп.
+- `ATHLETE_GROUP_IDS` — спортивные группы (по умолчанию `GRP-0001` «БП БТ Спортивная»): их ученики могут завести кабинет спортсмена — сами находят себя по фамилии на `/start` → «Я спортсмен». Участники рейтинга — все привязанные спортсмены.
+- `SALARY_DURATION_GROUPS` — `GRP-XXXX:минуты,...`: зарплатная длительность группы независимо от выбранной при записи (пересекающиеся по времени группы). `0` = занятие отмечается (абонемент срабатывает), но в зарплату не идёт. На проде: `GRP-0021:0,GRP-0022:90,GRP-0023:90` — вечер ВБ ХГ Яковлевой 17:00–20:00 = Младшая 0 + Средняя 1,5 ч + Старшая 1,5 ч = 6000 ₽.
 
 Optional — infrastructure:
 - `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)

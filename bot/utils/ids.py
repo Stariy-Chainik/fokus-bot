@@ -57,3 +57,15 @@ def generate_client_id(existing: list[str]) -> str:
 
 def generate_finance_id(existing: list[str]) -> str:
     return _next_id("FIN", 6, existing)
+
+
+def generate_payout_id(existing: list[str]) -> str:
+    return _next_id("PO", 6, existing)
+
+
+def generate_training_entry_id(existing: list[str]) -> str:
+    return _next_id("TE", 6, existing)
+
+
+def generate_task_id(existing: list[str]) -> str:
+    return _next_id("TK", 6, existing)

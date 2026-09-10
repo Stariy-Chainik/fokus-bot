@@ -10,7 +10,9 @@ from aiogram.exceptions import TelegramBadRequest
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository, StudentRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
-from bot.keyboards.client import kb_client_menu
+from bot.keyboards.common import kb_mode_select_family, kb_welcome_choice
+from bot.keyboards.client import kb_client_menu, client_welcome_text
+from bot.keyboards.athlete import kb_athlete_menu, athlete_welcome_text
 
 logger = logging.getLogger(__name__)
 router = Router(name="common")
@@ -32,24 +34,61 @@ async def show_card(
         await event.answer()
 
 
-@router.message(CommandStart(deep_link=False))
+async def _send_or_edit(target, text: str, kb: InlineKeyboardMarkup | None) -> None:
+    """target — Message (ответ снизу) или callback.message (правка на месте)."""
+    if hasattr(target, "edit_text"):
+        try:
+            await target.edit_text(text, reply_markup=kb)
+            return
+        except TelegramBadRequest:
+            pass
+    await target.answer(text, reply_markup=kb)
+
+
+async def show_family_menu(
+    target, tg_id: int, student_repo: StudentRepository, state: FSMContext,
+    role_hint: str | None,
+) -> bool:
+    """Меню спортсмена/родителя по tg_id. Возвращает False, если ни той, ни другой роли нет.
+    Обе роли сразу → выбор кабинета (если role_hint не подсказывает)."""
+    athlete = await student_repo.get_by_athlete_tg_id(tg_id)
+    parents = await student_repo.get_by_parent_tg_id(tg_id)
+    if athlete is None and not parents:
+        return False
+    if athlete is not None and parents:
+        role = role_hint if role_hint in ("athlete", "client") else None
+        if role is None:
+            await _send_or_edit(target, "Выберите кабинет:", kb_mode_select_family())
+            return True
+    else:
+        role = "athlete" if athlete is not None else "client"
+    await _set_current_role(state, role)
+    if role == "athlete":
+        text, kb = athlete_welcome_text(athlete), kb_athlete_menu(can_switch_parent=bool(parents))
+    else:
+        text, kb = client_welcome_text(parents), kb_client_menu(can_switch_athlete=athlete is not None)
+    await _send_or_edit(target, text, kb)
+    return True
+
+
+# magic=F.args.is_(None): deep_link=False в aiogram НЕ исключает /start с payload —
+# без magic этот хендлер перехватывал бы ссылки-приглашения групп (?start=g_...).
+@router.message(CommandStart(magic=F.args.is_(None)))
 async def cmd_start(
-    message: Message, user: User | None,
+    message: Message, user: User | None, state: FSMContext,
     user_repo: UserRepository, teacher_repo: TeacherRepository,
     student_repo: StudentRepository,
 ) -> None:
     tg_id = message.from_user.id
 
     if user is None or (not user.is_admin and not user.teacher_id):
-        students = await student_repo.get_by_parent_tg_id(tg_id)
-        if students:
-            await message.answer("Добро пожаловать!\n\nВыберите раздел:", reply_markup=kb_client_menu())
+        role_hint = await _clear_state_preserve_role(state)
+        if await show_family_menu(message, tg_id, student_repo, state, role_hint):
             return
 
     if user is None:
-        await message.answer(
-            "Добро пожаловать!\n\nВведите фамилию ученика для регистрации:",
-        )
+        await state.clear()
+        await message.answer("Добро пожаловать!\n\nКто вы?", reply_markup=kb_welcome_choice())
         return
 
     if user.is_admin and user.teacher_id:
@@ -140,9 +179,15 @@ async def _show_role_menu(
 
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message, user: User | None, state: FSMContext) -> None:
+async def cmd_menu(
+    message: Message, user: User | None, state: FSMContext,
+    student_repo: StudentRepository,
+) -> None:
     """Быстрый возврат в главное меню из любой точки (включая FSM)."""
     role_hint = await _clear_state_preserve_role(state)
+    if user is None or (not user.is_admin and not user.teacher_id):
+        if await show_family_menu(message, message.from_user.id, student_repo, state, role_hint):
+            return
     if user is None:
         await message.answer("Сначала отправьте /start для регистрации.")
         return
@@ -177,6 +222,19 @@ async def cb_mode_teacher(callback: CallbackQuery, user: User | None, state: FSM
     await callback.message.edit_text(
         "Меню педагога:", reply_markup=kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"mode:athlete", "mode:client"}))
+async def cb_mode_family(
+    callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository,
+) -> None:
+    role = callback.data.split(":", 1)[1]
+    await _clear_state_preserve_role(state)
+    ok = await show_family_menu(callback.message, callback.from_user.id, student_repo, state, role)
+    if not ok:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
     await callback.answer()
 
 
@@ -216,13 +274,9 @@ async def cb_go_home(
     """Быстрый возврат в главное меню активной роли (чистит FSM, сохраняет роль)."""
     role_hint = await _clear_state_preserve_role(state)
 
-    # Клиентская роль
+    # Спортсмен / родитель
     if user is None or (not user.is_admin and not user.teacher_id):
-        students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
-        if students:
-            await callback.message.edit_text(
-                "Выберите раздел:", reply_markup=kb_client_menu(),
-            )
+        if await show_family_menu(callback.message, callback.from_user.id, student_repo, state, role_hint):
             await callback.answer()
             return
 

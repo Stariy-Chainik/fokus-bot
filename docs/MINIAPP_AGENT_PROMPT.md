@@ -47,15 +47,24 @@
 - Тесты бота — **золотой эталон**: портируй их в Vitest и держи зелёными.
 
 ### Стек (из BUILD §1) — не менять
-Next.js 14 (App Router) + TypeScript + PostgreSQL + Prisma + Tailwind + `@telegram-apps/sdk` + Zod + Vitest.
+Next.js 16 (App Router) + React 19 + TypeScript + PostgreSQL + Prisma + Tailwind + `@telegram-apps/sdk` + Zod + Vitest 4.
 Один репозиторий (страницы + API-роуты). БД — Postgres (не Google Sheets).
 
 ### Железные правила (воспроизвести дословно; полный список — SPEC §12 / BUILD §9)
 - Формулы денег: единица **45 мин**, `round`, деление счёта поровну с **остатком первому ученику**,
   снапшот цены для `per_visit`. Портируй `billing_service.py` буква-в-букву.
 - `amount = 0` в групповом занятии = **абонемент** (в счёт не входит).
-- Счёт-инвойс: **один на `(student, teacher, period)`**; при пересчёте обновляется **только не-PAID**.
-- **«Оплачено» вычисляется**, а не хранится на занятии: по наличию PAID за `(period, teacher)`.
+- Текущий счёт-инвойс бота: **один на `(student, teacher, period)`**; при пересчёте обновляется
+  **только не-PAID**.
+- Для Mini App/web заложи целевую модель корзины оплаты: `Invoice + InvoiceItem`. Родитель выбирает
+  универсальные начисления `LESSON|SUBSCRIPTION`; быстрый выбор недели/месяца добавляет уроки и каждый
+  абонемент один раз. Сервер создаёт DRAFT-инвойс с позициями.
+- `InvoiceStatus = DRAFT|PENDING|PAID|CANCELLED|EXPIRED`. У каждой позиции стабильный `coverageKey`;
+  partial unique index допускает только одно ACTIVE-покрытие. PAID неизменяем, отмена/истечение
+  освобождают позиции.
+- **«Оплачено» вычисляется**, а не хранится на занятии. Кабинет родителя получает у каждого занятия
+  computed `payment_status` с сервера. В текущем боте это PAID за `(period, teacher)`, в Mini App —
+  PAID `InvoiceItem` по `lesson_id`/`student_id` или оплаченный абонемент, покрывающий группу/месяц.
 - **Долг** = начислено − PAID (`compute_debt_map`); учёт с `DEBTORS_SINCE_PERIOD` (стартовый период).
 - **Прибыль** = занятия + абонементы + ручные доходы − зарплата − расходы; эталонные DTO/итоги —
   `profit_service.py` и `test_profit_service.py`.
@@ -67,30 +76,34 @@ Next.js 14 (App Router) + TypeScript + PostgreSQL + Prisma + Tailwind + `@telegr
 - Читаемые ID (`TCH-`, `STU-`, `LES-` …) — сохранить.
 
 ### Безопасность (критично)
-- **Аутентификация только через проверку `initData`** на сервере (BUILD §5) — HMAC-подпись Telegram,
-  затем резолв роли (admin/teacher/client). Никакого доверия к клиентскому `tgId`.
+- **Два входа в один кабинет** (BUILD §5): Telegram — только после HMAC-проверки `initData`; обычный
+  web для родителя — телефонный OTP с TTL, лимитом попыток/rate limit и резолвом в тот же `Client`.
+  Никакого доверия к `tgId` или телефону, просто присланному фронтом.
 - **Webhook ЮКассы**: телу запроса **не доверять** — брать только `object.id` и перепроверять платёж
   через API ЮКассы; подтверждать лишь при реальном `succeeded` (эталон — `payments.py`
   `process_yookassa_event`; см. BUILD §6.1). Это исправление бага **B4** — не повторяй старое поведение.
-- **Сумму платежа считает сервер** из неоплаченных инвойсов; от клиента сумма не принимается.
-- Проверяй принадлежность ученика родителю (`tgId ∈ parentTgIds`) на каждом платёжном эндпоинте.
+- **Сумму платежа считает сервер** из выбранных `payableKeys` / позиций `InvoiceItem`; от клиента сумма
+  не принимается.
+- Проверяй принадлежность ученика текущему `clientId` сессии на каждом платёжном эндпоинте.
+- Подтверждай только конкретный `invoiceId`; не переноси `confirm_period()` в целевой поток корзины.
 - Учти **B1** из `FOUND_BUGS.md`: любое действие «от имени другого» проверяй по факту выданного
   разрешения, а не по «трудно угадать параметр».
 
 ### Метод работы — строго по фазам (BUILD §8), каждую проверять
-0. Каркас (`create-next-app`, Prisma, Postgres, Telegram SDK) → initData доходит до сервера.
+0. Каркас (`create-next-app`, Prisma, Postgres, Telegram SDK) → работает Mini App и обычный web.
 1. БД: внести `schema.prisma` из BUILD §3, `prisma migrate`.
 2. **Домен + тесты СНАЧАЛА**: портируй `lib/domain/*` (billing, profit, subscriptions, visibility,
    attendees, debt) и **перенеси
    характеризующие тесты в Vitest** — они должны стать зелёными до перехода дальше.
-3. Auth: `verifyInitData` + сессия + резолв роли + `middleware.ts`.
+3. Auth: `verifyInitData` + phone OTP + единая сессия + резолв роли + `middleware.ts`.
 4. API (чтение): списки/карточки, расчёт счёта — цифры должны совпасть с эталонными тестами.
 5. API (запись): запись занятий (4 вида: group/pair/soloist/shared), сдача/переоткрытие периода,
-   инвойсы, подтверждение оплаты — всё в транзакциях (заменяют локеры бота).
+   инвойсы, unique ACTIVE coverage, жизненный цикл/истечение, подтверждение конкретного invoiceId —
+   всё в транзакциях; обязательны concurrency/idempotency-тесты из BUILD §8.
 6. UI по ролям (экраны из SPEC §9), навигация в стиле Telegram.
 7. Платежи: ЮКасса + верифицированный webhook (§6.1) + опц. фискализация.
-8. Миграция данных Google Sheets → Postgres (сохранить снапшоты имён, оба формата attendees → таблица
-   `LessonAttendee`, читаемые ID) + деплой.
+8. Миграция данных Google Sheets → Postgres (снапшоты имён, оба формата attendees → `LessonAttendee`,
+   старые оплаты → `Invoice/InvoiceItem`, parentTgIds → `AuthIdentity`, читаемые ID) + деплой.
 
 ### Что НЕ делать
 - Не тащить паттерны aiogram/gspread/FSM и костыли Google Sheets (кэш, retry, `|`-разделитель, set-локеры) —

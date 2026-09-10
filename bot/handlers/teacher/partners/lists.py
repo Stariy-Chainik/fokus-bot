@@ -5,6 +5,7 @@ from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository, TeacherGroupRepository,
 )
@@ -28,7 +29,7 @@ async def cb_my_soloists_groups(
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
     groups = sorted(
         [g for g in await group_repo.get_all() if g.group_id in gids],
         key=lambda g: (g.sort_order, g.name),
@@ -99,7 +100,7 @@ async def cb_my_pairs_groups(
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    gids = set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
+    gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
     groups = sorted(
         [g for g in await group_repo.get_all() if g.group_id in gids],
         key=lambda g: (g.sort_order, g.name),

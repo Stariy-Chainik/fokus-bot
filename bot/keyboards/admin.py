@@ -13,7 +13,9 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💾 Подтвердить оплату", callback_data="bills:confirm_payment")],
         [InlineKeyboardButton(text="📝 Отметить занятие", callback_data="admin:record_lesson")],
         [InlineKeyboardButton(text="✏️ Редактировать занятие", callback_data="admin:edit_lesson")],
+        [InlineKeyboardButton(text="💸 Выплатить зарплату", callback_data="admin:payouts")],
         [InlineKeyboardButton(text="📊 Прибыль", callback_data="profit:view")],
+        [InlineKeyboardButton(text="📓 Дневники спортсменов", callback_data="admin:diary")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
     ]
     if can_switch_role:

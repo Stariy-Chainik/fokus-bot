@@ -28,6 +28,7 @@ class Client:
     tg_id: Optional[int] = None
     created_at: str = ""
     phone: Optional[str] = None
+    email: Optional[str] = None  # для фискальных чеков (колонка 6 листа clients)
 
 
 @dataclass
@@ -39,6 +40,7 @@ class Student:
     group_tier: StudentGroupTier = StudentGroupTier.FULL
     client_id: Optional[str] = None
     parent_tg_ids: list[int] = field(default_factory=list)
+    athlete_tg_id: Optional[int] = None  # свой Telegram спортсмена (колонка 9)
 
 
 @dataclass
@@ -191,3 +193,47 @@ class StudentPeriodPayment:
     updated_at: str
     teacher_id: str = ""
     teacher_name: str = ""
+
+
+@dataclass
+class TeacherPayout:
+    """Выплата зарплаты педагогу за месяц (может быть несколько: аванс + остаток)."""
+    payout_id: str        # PO-XXXXXX
+    teacher_id: str
+    period_month: str     # YYYY-MM
+    amount: int           # рублей
+    paid_at: str          # YYYY-MM-DD HH:MM:SS
+    paid_by_tg_id: int
+    comment: str = ""
+
+
+@dataclass
+class TrainingEntry:
+    """Запись дневника спортсмена: самостоятельная тренировка в зале."""
+    entry_id: str              # TE-XXXXXX
+    student_id: str
+    date: str                  # YYYY-MM-DD
+    minutes: int
+    topics: list[str] = field(default_factory=list)    # танцы/темы
+    task_ids: list[str] = field(default_factory=list)  # отработанные задания
+    comment: str = ""
+    created_at: str = ""
+    grade: Optional[int] = None        # 1–5, ставит педагог
+    grade_comment: str = ""
+    graded_by: str = ""                # teacher_id или ADM:<tg_id>
+    graded_at: str = ""
+
+
+@dataclass
+class AthleteTask:
+    """Задание педагога спортсмену: упражнение + минуты. Открыто, пока педагог не закроет."""
+    task_id: str               # TK-XXXXXX
+    student_id: str
+    teacher_id: str
+    exercise: str
+    minutes: int
+    comment: str = ""
+    source: str = "teacher"    # teacher | lecture
+    created_at: str = ""
+    status: str = "open"       # open | closed
+    closed_at: str = ""

@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     sheet_finance_entries: str = Field(
         default="finance_entries", alias="SHEET_FINANCE_ENTRIES",
     )
+    sheet_teacher_payouts: str = Field(default="teacher_payouts", alias="SHEET_TEACHER_PAYOUTS")
+    sheet_teacher_rate_history: str = Field(
+        default="teacher_rate_history", alias="SHEET_TEACHER_RATE_HISTORY",
+    )
+    # Кабинет спортсмена: дневник тренировок и задания педагога
+    sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
+    sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")
 
     # Payments — Telegram Payments (legacy)
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
@@ -41,6 +48,8 @@ class Settings(BaseSettings):
     yookassa_shop_id: str = Field(default="", alias="YOOKASSA_SHOP_ID")
     yookassa_secret_key: str = Field(default="", alias="YOOKASSA_SECRET_KEY")
     yookassa_return_url: str = Field(default="https://t.me/fokus_bot", alias="YOOKASSA_RETURN_URL")
+    # Email для фискального чека ЮКассы, когда у клиента нет телефона в базе
+    yookassa_receipt_email: str = Field(default="", alias="YOOKASSA_RECEIPT_EMAIL")
     payment_webhook_port: int = Field(default=8081, alias="PAYMENT_WEBHOOK_PORT")
 
     # CloudKassir (онлайн-касса)
@@ -51,6 +60,74 @@ class Settings(BaseSettings):
     # Долги считаются начиная с этого периода (YYYY-MM); пусто — за всё время.
     # Нужен, чтобы месяцы до внедрения учёта оплат не показывались как «долг».
     debtors_since_period: str = Field(default="", alias="DEBTORS_SINCE_PERIOD")
+
+    # Секрет для ссылок-приглашений в группу (t.me/bot?start=g_...).
+    # Пусто — используется BOT_TOKEN. Смена секрета отзывает все ссылки.
+    group_link_secret: str = Field(default="", alias="GROUP_LINK_SECRET")
+
+    # Педагоги, которым разрешено выставлять счета ученикам своих групп
+    # (teacher_id через запятую или |, например: TCH-0009). Пусто — счета только у админов.
+    billing_teacher_ids: str = Field(default="", alias="BILLING_TEACHER_IDS")
+
+    @property
+    def billing_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.billing_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
+    # Спортивные группы: их ученики могут завести кабинет спортсмена
+    # (сами находят себя по фамилии). group_id через запятую или |.
+    athlete_group_ids: str = Field(default="GRP-0001", alias="ATHLETE_GROUP_IDS")
+
+    @property
+    def athlete_group_id_set(self) -> set:
+        return {g.strip() for g in self.athlete_group_ids.replace("|", ",").split(",") if g.strip()}
+
+    # Педагоги, чьи ИНДИВИДУАЛЬНЫЕ занятия родители оплачивают напрямую педагогу
+    # (мимо школы): не попадают в счета/долги/прибыль, зарплата школы = 0.
+    direct_pay_teacher_ids: str = Field(default="", alias="DIRECT_PAY_TEACHER_IDS")
+
+    @property
+    def direct_pay_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.direct_pay_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
+    # Группы, где зарплата педагога = процент от сбора с учеников за занятие
+    # (а не ставка × время). Формат: GRP-0020:50,GRP-0021:40
+    revenue_share_groups: str = Field(default="", alias="REVENUE_SHARE_GROUPS")
+
+    # Смена: группы внахлёст, интервалы в минутах от начала смены.
+    # Зарплата за день = ставка группы × объединение интервалов проведённых групп.
+    # Формат: GRP-0021:0-60,GRP-0022:0-120,GRP-0023:60-180
+    shift_groups: str = Field(default="", alias="SHIFT_GROUPS")
+    shift_label: str = Field(default="Смена", alias="SHIFT_LABEL")
+    sheet_salary_overrides: str = Field(default="salary_day_overrides", alias="SHEET_SALARY_OVERRIDES")
+
+    @property
+    def shift_group_map(self) -> dict:
+        from bot.services.salary_service import parse_shift_groups
+        return parse_shift_groups(self.shift_groups)
+
+    # Группы с фиксированной длительностью для зарплаты педагога (минуты),
+    # независимо от выбранной при записи. Формат: GRP-0022:90,GRP-0023:90
+    salary_duration_groups: str = Field(default="", alias="SALARY_DURATION_GROUPS")
+
+    @property
+    def salary_duration_group_map(self) -> dict:
+        out = {}
+        for chunk in self.salary_duration_groups.replace("|", ",").split(","):
+            if ":" in chunk:
+                gid, minutes = chunk.split(":", 1)
+                if gid.strip() and minutes.strip().isdigit():
+                    out[gid.strip()] = int(minutes.strip())
+        return out
+
+    @property
+    def revenue_share_group_map(self) -> dict:
+        out = {}
+        for chunk in self.revenue_share_groups.replace("|", ",").split(","):
+            if ":" in chunk:
+                gid, pct = chunk.split(":", 1)
+                if gid.strip() and pct.strip().isdigit():
+                    out[gid.strip()] = int(pct.strip())
+        return out
 
     # Способы оплаты
     payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")

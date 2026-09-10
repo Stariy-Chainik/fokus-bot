@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.models import User, GroupBillingMode
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, BranchRepository, TeacherGroupRepository,
@@ -15,7 +16,7 @@ from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
     kb_lesson_type, kb_attendance_yes_no, kb_pair_multi_select, kb_multi_select,
     kb_group_roster_per_visit, kb_group_branch_picker, kb_group_picker,
-    kb_shared_group_picker,
+    kb_shared_group_picker, kb_rshare_branch_picker, kb_rshare_group_picker,
 )
 
 from ._base import _tid, _menu_kb, _all_students_in_group, _header
@@ -53,6 +54,7 @@ async def _start_group_flow(
 ) -> None:
     data = await state.get_data()
     group_ids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+    group_ids.discard(data.get("rshare_gid") or "")  # инд. Яковлевой — не «Групповое»
     all_groups = await group_repo.get_all()
     my_groups = [g for g in all_groups if g.group_id in group_ids]
 
@@ -181,6 +183,7 @@ async def _show_group_roster(
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
     teacher_group_repo: TeacherGroupRepository | None = None,
+    back_cb: str = "lesson_back:attendance",
 ) -> None:
     proxy_data = await state.get_data()
     group = await group_repo.get_by_id(group_id)
@@ -223,7 +226,7 @@ async def _show_group_roster(
             members, set(), data["per_visit_tiers"],
             group.price_short, group.duration_short,
             group.price_full, group.duration_full,
-            back_cb="lesson_back:attendance",
+            back_cb=back_cb,
             extra_students=None,
             show_add_other=state_update["has_other_groups"],
         )
@@ -232,8 +235,140 @@ async def _show_group_roster(
             f"{_header(data)}Группа: <b>{group.name}</b>\n"
             f"Отметьте присутствующих ({len(members)} в составе):"
         )
-        kb = kb_multi_select(members, set(), back_cb="lesson_back:attendance", show_toggle_all=True)
+        kb = kb_multi_select(members, set(), back_cb=back_cb, show_toggle_all=True)
     await callback.message.edit_text(text, reply_markup=kb)
+
+
+async def _rshare_branches(
+    data: dict, user: User,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    branch_repo: BranchRepository,
+) -> list:
+    """Филиалы, где у педагога есть группы (кроме технической revenue-share)."""
+    gids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+    gids.discard(data.get("rshare_gid") or "")
+    branch_ids = set()
+    for gid in gids:
+        g = await group_repo.get_by_id(gid)
+        if g:
+            branch_ids.add(g.branch_id)
+    return sorted(
+        [b for b in await branch_repo.get_all() if b.branch_id in branch_ids],
+        key=lambda b: b.name,
+    )
+
+
+async def _show_rshare_branch_picker(
+    callback: CallbackQuery, state: FSMContext, user: User,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    branch_repo: BranchRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    data = await state.get_data()
+    branches = await _rshare_branches(data, user, teacher_group_repo, group_repo, branch_repo)
+    if not branches:
+        await state.clear()
+        await callback.message.edit_text(
+            "У вас нет групп с ученицами. Обратитесь к администратору.",
+            reply_markup=_menu_kb(user, data),
+        )
+        return
+    if len(branches) == 1:
+        await _show_rshare_group_picker(
+            callback, state, branches[0].branch_id, user,
+            teacher_group_repo, group_repo, student_repo, student_group_repo,
+        )
+        return
+    total = len(data.get("selected_ids") or [])
+    await state.set_state(RecordLessonStates.choosing_group_branch)
+    await callback.message.edit_text(
+        f"{_header(data)}Из какого филиала участницы?"
+        + (f"\nУже отмечено: {total}" if total else ""),
+        reply_markup=kb_rshare_branch_picker(branches, total_selected=total),
+    )
+
+
+async def _rshare_groups_in_branch(
+    data: dict, user: User, branch_id: str,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+) -> list:
+    gids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+    gids.discard(data.get("rshare_gid") or "")
+    groups = []
+    for gid in gids:
+        g = await group_repo.get_by_id(gid)
+        if g and g.branch_id == branch_id:
+            groups.append(g)
+    return sorted(groups, key=lambda g: g.name)
+
+
+async def _show_rshare_group_picker(
+    callback: CallbackQuery, state: FSMContext, branch_id: str, user: User,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
+) -> None:
+    """Фильтр по группам внутри филиала. Одна группа — сразу список учениц."""
+    data = await state.get_data()
+    groups = await _rshare_groups_in_branch(data, user, branch_id, teacher_group_repo, group_repo)
+    if not groups:
+        await callback.answer("В этом филиале нет ваших групп", show_alert=True)
+        return
+    await state.update_data(rshare_branch_id=branch_id)
+    if len(groups) == 1:
+        await _show_rshare_pool(
+            callback, state, groups[0].group_id, user,
+            teacher_group_repo, group_repo, student_repo, student_group_repo,
+        )
+        return
+    selected = set(data.get("selected_ids") or [])
+    counts = {}
+    for g in groups:
+        member_ids = set(await student_group_repo.get_students_for_group(g.group_id))
+        counts[g.group_id] = len(selected & member_ids)
+    await state.set_state(RecordLessonStates.choosing_group)
+    await callback.message.edit_text(
+        f"{_header(data)}Выберите группу:"
+        + (f"\nОтмечено всего: {len(selected)}" if selected else ""),
+        reply_markup=kb_rshare_group_picker(groups, counts, total_selected=len(selected)),
+    )
+
+
+async def _show_rshare_pool(
+    callback: CallbackQuery, state: FSMContext, group_id: str, user: User,
+    teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
+    student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
+) -> None:
+    """Ученицы одной группы для индивидуального занятия."""
+    data = await state.get_data()
+    group = await group_repo.get_by_id(group_id)
+    if not group:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    students = sorted(
+        await _all_students_in_group(group_id, student_repo, student_group_repo),
+        key=lambda s: s.name,
+    )
+    if not students:
+        await callback.answer("В группе нет учениц", show_alert=True)
+        return
+    branch_id = data.get("rshare_branch_id") or group.branch_id
+    many_groups = len(await _rshare_groups_in_branch(
+        data, user, branch_id, teacher_group_repo, group_repo,
+    )) > 1
+    back_cb = "lesson_back:rshare_group" if many_groups else "lesson_back:rshare_branch"
+    selected = set(data.get("selected_ids") or [])
+    await state.update_data(
+        rshare_pool_ids=[s.student_id for s in students], rshare_pool_back=back_cb,
+        per_visit_tiers={}, extra_student_ids=[], has_other_groups=False,
+    )
+    await state.set_state(RecordLessonStates.selecting_attendees)
+    data = await state.get_data()
+    await callback.message.edit_text(
+        f"{_header(data)}Группа: <b>{group.name}</b>\n"
+        f"Отметьте участниц (1–3). Отмечено всего: {len(selected)}.\n"
+        f"«Назад» — другая группа/филиал, отметки сохранятся.",
+        reply_markup=kb_multi_select(students, selected, back_cb=back_cb),
+    )
 
 
 async def _collect_soloists(teacher_id: str, visibility: TeacherVisibilityService):
@@ -270,12 +405,26 @@ async def _show_pair_list(
 
 
 
-async def _proceed_to_kind(callback: CallbackQuery, state: FSMContext, lesson_date: str) -> None:
-    await state.update_data(lesson_date=lesson_date)
+async def _proceed_to_kind(
+    callback: CallbackQuery, state: FSMContext, lesson_date: str,
+    user: User | None = None,
+    teacher_group_repo: TeacherGroupRepository | None = None,
+) -> None:
+    data = await state.get_data()
+    # Педагог с revenue-share группой (Яковлева): упрощённое меню
+    # «Групповое / Индивидуальное»; rshare_gid запоминаем на весь флоу.
+    rshare_gid = ""
+    if user is not None and teacher_group_repo is not None:
+        from config.settings import settings
+        share_gids = set(settings.revenue_share_group_map)
+        if share_gids:
+            own = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+            rshare_gid = next(iter(own & share_gids), "")
+    await state.update_data(lesson_date=lesson_date, rshare_gid=rshare_gid)
     await state.set_state(RecordLessonStates.choosing_kind)
     data = await state.get_data()
     await callback.message.edit_text(
-        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(),
+        f"{_header(data)}Тип занятия:", reply_markup=kb_lesson_type(simple=bool(rshare_gid)),
     )
 
 
@@ -296,10 +445,17 @@ async def _refresh_multi_select(
         else:
             mine = await visibility.students_for_teacher(_tid(user, data))
             back_cb = "lesson_back:duration"
+    elif cur_state == RecordLessonStates.selecting_attendees.state and data.get("rshare_pool_ids"):
+        pool = set(data["rshare_pool_ids"])
+        mine = sorted(
+            [s for s in await student_repo.get_all() if s.student_id in pool],
+            key=lambda s: s.name,
+        )
+        back_cb = data.get("rshare_pool_back") or "lesson_back:rshare_branch"
     elif cur_state == RecordLessonStates.selecting_attendees.state and gid:
         assert student_group_repo is not None, "student_group_repo required for attendance roster"
         mine = await _all_students_in_group(gid, student_repo, student_group_repo)
-        back_cb = "lesson_back:attendance"
+        back_cb = "lesson_back:duration" if data.get("rshare_flow") else "lesson_back:attendance"
     else:
         mine = await visibility.students_for_teacher(_tid(user, data))
         back_cb = "lesson_back:attendance"
@@ -345,7 +501,7 @@ async def _show_shared_group_picker(
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
     data = await state.get_data()
-    group_ids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
+    group_ids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
     all_groups = sorted(
         [g for g in await group_repo.get_all() if g.group_id in group_ids],
         key=lambda g: g.name,

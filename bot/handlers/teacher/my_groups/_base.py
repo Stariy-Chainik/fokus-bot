@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models.enums import GroupBillingMode
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     StudentRepository, GroupRepository, BranchRepository, TeacherGroupRepository,
     StudentGroupRepository,
@@ -19,7 +20,7 @@ router = Router(name="teacher_my_groups")
 
 
 async def _owns_group(teacher_id: str, group_id: str, tg_repo: TeacherGroupRepository) -> bool:
-    gids = set(await tg_repo.get_groups_for_teacher(teacher_id))
+    gids = hide_service_groups(await tg_repo.get_groups_for_teacher(teacher_id))
     return group_id in gids
 
 

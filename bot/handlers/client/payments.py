@@ -76,7 +76,11 @@ async def process_yookassa_event(
         logger.warning("YooKassa webhook: у платежа %s нет student_id/period_month в metadata", payment_id)
         return 200
 
-    count = await payment_service.confirm_period(student_id, period_month, 0)
+    teacher_ids = [t for t in (meta.get("teacher_ids") or "").split(",") if t]
+    if teacher_ids:
+        count = await payment_service.confirm_teachers(student_id, period_month, teacher_ids, 0)
+    else:
+        count = await payment_service.confirm_period(student_id, period_month, 0)
     if count > 0:
         amount = getattr(getattr(payment, "amount", None), "value", "?")
         msg = (

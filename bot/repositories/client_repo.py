@@ -9,6 +9,8 @@ from .base import BaseRepository
 logger = logging.getLogger(__name__)
 
 _TG_ID_COL = 3
+_PHONE_COL = 5
+_EMAIL_COL = 6
 
 
 def _parse_tg_id(value) -> Optional[int]:
@@ -25,6 +27,7 @@ def _row_to_client(row: dict) -> Client:
         tg_id=_parse_tg_id(row.get("tg_id")),
         created_at=str(row.get("created_at") or ""),
         phone=str(row["phone"]) if row.get("phone") else None,
+        email=str(row["email"]).strip() if row.get("email") else None,
     )
 
 
@@ -44,15 +47,32 @@ class ClientRepository(BaseRepository):
                 return c
         return None
 
-    async def create(self, name: str, created_by_tg_id: int, phone: str = "") -> Client:
+    async def create(
+        self, name: str, created_by_tg_id: int, phone: str = "",
+        tg_id: Optional[int] = None,
+    ) -> Client:
         existing_ids = [c.client_id for c in await self.get_all()]
         client_id = generate_client_id(existing_ids)
         created_at = now_str()
-        await self._append_row([client_id, name, "", created_at, phone])
+        await self._append_row([client_id, name, str(tg_id) if tg_id else "", created_at, phone])
         return Client(
-            client_id=client_id, name=name, tg_id=None,
+            client_id=client_id, name=name, tg_id=tg_id,
             created_at=created_at, phone=phone or None,
         )
+
+    async def update_email(self, client_id: str, email: str) -> bool:
+        row_idx = await self._find_row_index("client_id", client_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _EMAIL_COL, email)
+        return True
+
+    async def update_phone(self, client_id: str, phone: str) -> bool:
+        row_idx = await self._find_row_index("client_id", client_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _PHONE_COL, phone)
+        return True
 
     async def clear_tg_id(self, client_id: str) -> bool:
         row_idx = await self._find_row_index("client_id", client_id)

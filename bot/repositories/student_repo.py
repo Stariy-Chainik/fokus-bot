@@ -8,10 +8,21 @@ logger = logging.getLogger(__name__)
 
 # Колонки листа `students` (1-based):
 # 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
+# 8 kindergarten_group (устарело) | 9 athlete_tg_id (свой Telegram спортсмена)
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
 _PARENT_TG_IDS_COL = 7
+_ATHLETE_TG_ID_COL = 9
+
+
+def _parse_tg_id(value) -> Optional[int]:
+    """Sheets может вернуть 826576855 или 826576855.0."""
+    try:
+        n = int(float(str(value).strip()))
+    except (ValueError, TypeError):
+        return None
+    return n or None
 
 
 def _row_to_student(row: dict) -> Student:
@@ -41,6 +52,7 @@ def _row_to_student(row: dict) -> Student:
         group_tier=tier,
         client_id=client_id or None,
         parent_tg_ids=parent_tg_ids,
+        athlete_tg_id=_parse_tg_id(row.get("athlete_tg_id")),
     )
 
 
@@ -152,6 +164,23 @@ class StudentRepository(BaseRepository):
     async def get_by_parent_tg_id(self, tg_id: int) -> list[Student]:
         return [s for s in await self.get_all() if tg_id in s.parent_tg_ids]
 
+    # ─── Спортсмен (свой Telegram ученика) ────────────────────────────────────
+
+    async def get_by_athlete_tg_id(self, tg_id: int) -> Optional[Student]:
+        for s in await self.get_all():
+            if s.athlete_tg_id == tg_id:
+                return s
+        return None
+
+    async def set_athlete_tg_id(self, student_id: str, tg_id: Optional[int]) -> bool:
+        """Привязывает (или отвязывает при None) Telegram спортсмена к ученику.
+        Требует заголовок athlete_tg_id в 9-й колонке листа (scripts/setup_diary_sheets.py)."""
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _ATHLETE_TG_ID_COL, tg_id if tg_id else "")
+        return True
+
     async def add_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
         student = await self.get_by_id(student_id)
         if student is None:
@@ -162,6 +191,18 @@ class StudentRepository(BaseRepository):
         if row_idx is None:
             return False
         new_ids = student.parent_tg_ids + [tg_id]
+        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
+        return True
+
+    async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
+        """Отвязывает родителя от ученика (отмена ошибочной привязки)."""
+        student = await self.get_by_id(student_id)
+        if student is None or tg_id not in student.parent_tg_ids:
+            return False
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        new_ids = [i for i in student.parent_tg_ids if i != tg_id]
         await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
         return True
 

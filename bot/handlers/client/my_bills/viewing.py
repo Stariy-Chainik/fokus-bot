@@ -25,7 +25,10 @@ async def _show_bills(
     students_all: list,
     student_id: str,
     payment_service: PaymentService,
+    show_older: bool = False,
 ) -> None:
+    """show_older=False — только текущий и прошлый месяц (+ кнопка «Другие месяцы»);
+    True — остальные месяцы из последних 6."""
     if student_id != "all":
         students = [s for s in students_all if s.student_id == student_id]
         if not students:
@@ -34,7 +37,8 @@ async def _show_bills(
     else:
         students = students_all
 
-    periods = last_periods(6)
+    all_periods = last_periods(6)
+    periods = all_periods[2:] if show_older else all_periods[:2]
 
     period_rows: list[tuple[str, str, str]] = []
     for period_month in periods:
@@ -67,18 +71,43 @@ async def _show_bills(
 
         period_rows.append((period_month, f"{label}{suffix}", icon))
 
-    if not period_rows:
+    if not period_rows and not show_older:
         await callback.message.edit_text(
-            "📋 Занятий за последние 6 месяцев не найдено.",
-            reply_markup=kb_client_menu(),
+            "📋 Занятий за текущий и прошлый месяц не найдено.",
+            reply_markup=kb_bills_list(
+                [], student_id, show_back=len(students_all) > 1,
+                more_cb=f"cl_bills_more:{student_id}",
+            ),
+        )
+        await callback.answer()
+        return
+    if not period_rows and show_older:
+        await callback.message.edit_text(
+            "📋 За более ранние месяцы занятий не найдено.",
+            reply_markup=kb_bills_list(
+                [], student_id, show_back=False,
+                recent_cb=f"cl_bills_stu:{student_id}",
+            ),
         )
         await callback.answer()
         return
 
+    who = (
+        students[0].name if student_id != "all" and len(students) == 1
+        else "все дети"
+    )
+    title = f"<b>💳 Оплата занятий — {who}</b>"
+    if show_older:
+        title += "\nДругие месяцы:"
     try:
         await callback.message.edit_text(
-            "<b>📋 Счета</b>",
-            reply_markup=kb_bills_list(period_rows, student_id),
+            title,
+            reply_markup=kb_bills_list(
+                period_rows, student_id,
+                show_back=len(students_all) > 1 and not show_older,
+                more_cb=None if show_older else f"cl_bills_more:{student_id}",
+                recent_cb=f"cl_bills_stu:{student_id}" if show_older else None,
+            ),
         )
     except TelegramBadRequest:
         pass
@@ -121,6 +150,20 @@ async def cb_cl_bills_stu(
     await _show_bills(callback, students, student_id, payment_service)
 
 
+@router.callback_query(F.data.startswith("cl_bills_more:"))
+async def cb_cl_bills_more(
+    callback: CallbackQuery,
+    student_repo: StudentRepository,
+    payment_service: PaymentService,
+) -> None:
+    student_id = callback.data.split(":", 1)[1]
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    if not students:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await _show_bills(callback, students, student_id, payment_service, show_older=True)
+
+
 @router.callback_query(F.data.startswith("client_bill:"))
 async def cb_bill_detail(
     callback: CallbackQuery,
@@ -143,7 +186,11 @@ async def cb_bill_detail(
     else:
         students = all_students
 
-    lines = [f"<b>📋 {_period_label(period_month)}</b>\n"]
+    if len(students) == 1:
+        title_who = f" — {students[0].name}"
+    else:
+        title_who = " — все дети"
+    lines = [f"<b>📋 {_period_label(period_month)}{title_who}</b>\n"]
     grand_total = 0
     unpaid_total = 0
     payment_ids: list[str] = []

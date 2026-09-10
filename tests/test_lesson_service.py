@@ -21,12 +21,15 @@ class _FakeLessonRepo:
         return [ls.lesson_id for ls in self.added]
 
     async def individual_lesson_exists(self, teacher_id, student_id, lesson_date):
-        return any(
-            ls.teacher_id == teacher_id and ls.date == lesson_date
-            and student_id in (ls.student_1_id, ls.student_2_id,
-                               ls.student_3_id, ls.student_4_id)
-            for ls in self.added
-        )
+        # Как в реальном репо: считаются только соло-занятия (ровно 1 ученик).
+        for ls in self.added:
+            if ls.teacher_id != teacher_id or ls.date != lesson_date:
+                continue
+            sids = [x for x in (ls.student_1_id, ls.student_2_id,
+                                ls.student_3_id, ls.student_4_id) if x]
+            if len(sids) == 1 and sids[0] == student_id:
+                return True
+        return False
 
     async def add(self, lesson):
         self.added.append(lesson)
@@ -83,17 +86,54 @@ def test_shared_respects_period_lock():
         pass
 
 
-def test_shared_duplicate_guard_applies_per_student():
+def _solo(svc, sid, name, date="2026-07-01"):
+    return _run(svc.create(
+        teacher=_teacher(), lesson_type=LessonType.INDIVIDUAL, lesson_date=date,
+        duration_min=45, student_1_id=sid, student_1_name=name,
+    ))
+
+
+def _pair(svc, a, b, date="2026-07-01"):
+    return _run(svc.create(
+        teacher=_teacher(), lesson_type=LessonType.INDIVIDUAL, lesson_date=date,
+        duration_min=45, student_1_id=a[0], student_1_name=a[1],
+        student_2_id=b[0], student_2_name=b[1],
+    ))
+
+
+def test_solo_then_pair_same_day_allowed():
+    svc = _service()
+    _solo(svc, "STU-1", "Азов")
+    _pair(svc, ("STU-1", "Азов"), ("STU-2", "Бобров"))  # не должно падать
+    assert len(svc._lesson_repo.added) == 2
+
+
+def test_pair_then_solo_same_day_allowed():
+    svc = _service()
+    _pair(svc, ("STU-1", "Азов"), ("STU-2", "Бобров"))
+    _solo(svc, "STU-1", "Азов")
+    assert len(svc._lesson_repo.added) == 2
+
+
+def test_solo_twice_same_day_blocked():
+    svc = _service()
+    _solo(svc, "STU-1", "Азов")
+    try:
+        _solo(svc, "STU-1", "Азов")
+        assert False, "ожидался ValueError (дубль соло)"
+    except ValueError:
+        pass
+
+
+def test_shared_after_shared_same_student_allowed():
+    """Микрогруппы не блокируют друг друга (гард только «соло против соло»)."""
     svc = _service()
     _run(svc.create_shared_individual(
         _teacher(), "2026-07-01", 60,
         students=[("STU-1", "Азов"), ("STU-2", "Бобров")],
     ))
-    try:
-        _run(svc.create_shared_individual(
-            _teacher(), "2026-07-01", 45,
-            students=[("STU-2", "Бобров"), ("STU-3", "Мидин")],
-        ))
-        assert False, "ожидался ValueError (дубль соло-занятия STU-2)"
-    except ValueError:
-        pass
+    _run(svc.create_shared_individual(
+        _teacher(), "2026-07-01", 45,
+        students=[("STU-2", "Бобров"), ("STU-3", "Мидин")],
+    ))
+    assert len(svc._lesson_repo.added) == 2

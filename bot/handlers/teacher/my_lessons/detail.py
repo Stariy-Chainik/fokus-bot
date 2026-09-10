@@ -54,9 +54,16 @@ async def cb_lesson_detail(
         f"Тип: {'Групповое' if lesson.type == LessonType.GROUP else 'Индивидуальное'}",
         f"Длительность: {lesson.duration_min} мин",
     ]
+    from config.settings import settings as _settings
+    if lesson.group_id in _settings.revenue_share_group_map:
+        lines.pop()  # длительность у индивидуальных не влияет на суммы — не показываем
     if lesson.group_id:
+        from config.settings import settings
         group = await group_repo.get_by_id(lesson.group_id)
-        if group:
+        share = settings.revenue_share_group_map.get(lesson.group_id)
+        if share is not None:
+            lines.append(f"🎯 Индивидуальное (педагогу {share}% от сбора)")
+        elif group:
             lines.append(f"Группа: {group.name}")
     if lesson.student_1_name:
         lines.append(f"Ученик 1: {lesson.student_1_name}")

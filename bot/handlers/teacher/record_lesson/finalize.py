@@ -29,7 +29,11 @@ _confirming_lesson_ids = InProgressGuard()
 
 async def _reset_for_next_lesson(state: FSMContext, lesson_date: str, data: dict) -> None:
     """Цикл «ещё занятие с той же датой»: чистим выбор, оставляем дату и proxy."""
-    await state.set_data({"lesson_date": lesson_date, "proxy_teacher_id": data.get("proxy_teacher_id")})
+    await state.set_data({
+        "lesson_date": lesson_date,
+        "proxy_teacher_id": data.get("proxy_teacher_id"),
+        "rshare_gid": data.get("rshare_gid") or "",
+    })
     await state.set_state(RecordLessonStates.choosing_kind)
 
 
@@ -39,6 +43,9 @@ async def _finalize_group(
     lesson_service: LessonService, group_repo: GroupRepository | None,
 ) -> bool:
     attendee_ids = list(data.get("selected_ids", []))
+    if data.get("rshare_flow") and not (1 <= len(attendee_ids) <= 3):
+        await callback.answer("Отметьте от 1 до 3 участниц", show_alert=True)
+        return False
     group_id = data.get("selected_group_id") or ""
     tiers = data.get("per_visit_tiers") or {}
     group = None
@@ -55,9 +62,10 @@ async def _finalize_group(
         bypass_period_lock=bypass_lock,
     )
     extra = f"\nОтмечено: {len(attendee_ids)}" if attendee_ids else ""
+    title = "Индивидуальное занятие записано" if data.get("rshare_flow") else "Групповое занятие записано"
     await _reset_for_next_lesson(state, lesson_date, data)
     await callback.message.edit_text(
-        f"<b>✅ Групповое занятие записано</b>\nID: {lesson.lesson_id}\n"
+        f"<b>✅ {title}</b>\nID: {lesson.lesson_id}\n"
         f"Дата: {format_date_display(lesson.date)}{extra}\n\n"
         f"Продолжим? Выберите тип следующего занятия:",
         reply_markup=after_save_kb,
@@ -197,7 +205,10 @@ async def _finalize(
         lesson_date = data["lesson_date"]
         duration = int(data["duration_min"])
         _is_admin_mode = user and user.is_admin and (not user.teacher_id or data.get("proxy_teacher_id"))
-        after_save_kb = kb_lesson_type_after_save(back_cb="admin:menu" if _is_admin_mode else "teacher:menu")
+        after_save_kb = kb_lesson_type_after_save(
+            back_cb="admin:menu" if _is_admin_mode else "teacher:menu",
+            simple=bool(data.get("rshare_gid")),
+        )
         bypass_lock = bool(user and user.is_admin)
 
         branch_args = (

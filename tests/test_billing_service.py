@@ -38,6 +38,32 @@ def test_calc_earned_group_uses_rate_group():
     assert calc_earned(LessonType.GROUP, 90, t) == 1000
 
 
+def test_calc_earned_revenue_share_group(monkeypatch):
+    """REVENUE_SHARE_GROUPS: зарплата = процент от сбора, время не влияет."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "revenue_share_groups", "GRP-0020:50")
+    t = _teacher(rate_group=1500)
+    two = "STU-0001:60:1800,STU-0002:60:1800"
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0020", two) == 1800
+    assert calc_earned(LessonType.GROUP, 120, t, "GRP-0020", two) == 1800
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0020", "STU-0001:60:1800") == 900
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0020", two + ",STU-0003:60:1800") == 2700
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0020", None) == 0  # никто не пришёл
+    # чужая группа — обычная формула по ставке
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0001", two) == 2000
+
+
+def test_calc_earned_salary_duration_override(monkeypatch):
+    """SALARY_DURATION_GROUPS: зарплата группы считается из фикс. минут."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "salary_duration_groups", "GRP-0022:90,GRP-0021:0")
+    t = _teacher(rate_group=1500)
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0022") == 3000   # 90 мин по ставке
+    assert calc_earned(LessonType.GROUP, 120, t, "GRP-0022") == 3000  # выбор педагога не влияет
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0021") == 0      # объединённая: в зарплату не идёт
+    assert calc_earned(LessonType.GROUP, 60, t, "GRP-0009") == 2000   # прочие группы — как раньше
+
+
 def test_calc_earned_individual_uses_rate_for_teacher():
     t = _teacher(rate_for_teacher=800)
     assert calc_earned(LessonType.INDIVIDUAL, 45, t) == 800
@@ -124,3 +150,45 @@ def test_billing_row_period_month_derived_from_date():
     lesson = _lesson(date="2026-04-23", student_1_id="STU-1", student_1_name="X")
     rows = build_billing_rows(lesson, t)
     assert rows[0].period_month == "2026-04"
+
+
+def test_direct_pay_teacher_individual_not_billed(monkeypatch):
+    """DIRECT_PAY_TEACHER_IDS: индивидуальные — ни счёта, ни зарплаты; группы как обычно."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    t = _teacher(rate_group=500, rate_for_teacher=800, rate_for_student=900)
+    solo = _lesson(student_1_id="STU-1", student_1_name="A")
+    assert build_billing_rows(solo, t) == []
+    assert calc_earned(LessonType.INDIVIDUAL, 45, t) == 0
+    group = _lesson(type=LessonType.GROUP, attendees="STU-1:60:700", group_id="GRP-0001")
+    assert [r.amount for r in build_billing_rows(group, t)] == [700]
+    assert calc_earned(LessonType.GROUP, 45, t) == 500
+
+
+def test_rate_history_applies_old_rates_to_past_months():
+    """Ставки «по август включительно» — старые; сентябрь и дальше — карточка."""
+    from bot.services import rate_history
+    rate_history.load([rate_history.RateRow("TCH-0001", "2026-08", 400, 600, 700)])
+    t = _teacher(rate_group=500, rate_for_teacher=800, rate_for_student=900)  # новые (карточка)
+    old_solo = _lesson(date="2026-08-10", student_1_id="STU-1", student_1_name="A")
+    new_solo = _lesson(date="2026-09-10", student_1_id="STU-1", student_1_name="A")
+    assert build_billing_rows(old_solo, t)[0].amount == 700
+    assert build_billing_rows(new_solo, t)[0].amount == 900
+    assert calc_earned(LessonType.INDIVIDUAL, 45, t, period="2026-06") == 600
+    assert calc_earned(LessonType.GROUP, 45, t, period="2026-08") == 400
+    assert calc_earned(LessonType.INDIVIDUAL, 45, t, period="2026-09") == 800
+    assert calc_earned(LessonType.INDIVIDUAL, 45, t) == 800  # без периода — текущие
+
+
+def test_rate_history_picks_nearest_boundary():
+    """Несколько исторических строк: берётся ближайшая граница ≥ периода."""
+    from bot.services import rate_history
+    rate_history.load([
+        rate_history.RateRow("TCH-0001", "2026-05", 300, 500, 600),
+        rate_history.RateRow("TCH-0001", "2026-08", 400, 600, 700),
+    ])
+    t = _teacher(rate_for_student=900)
+    assert rate_history.effective_rates(t, "2026-04")[2] == 600
+    assert rate_history.effective_rates(t, "2026-05")[2] == 600
+    assert rate_history.effective_rates(t, "2026-06")[2] == 700
+    assert rate_history.effective_rates(t, "2026-09")[2] == 900

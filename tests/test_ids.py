@@ -27,3 +27,10 @@ def test_only_matching_prefix_counted():
 
 def test_zero_padding_width():
     assert generate_payment_id(["PAY-000042"]) == "PAY-000043"
+
+
+def test_diary_ids():
+    from bot.utils.ids import generate_training_entry_id, generate_task_id
+    assert generate_training_entry_id([]) == "TE-000001"
+    assert generate_training_entry_id(["TE-000007", "TK-000009"]) == "TE-000008"
+    assert generate_task_id(["TK-000009"]) == "TK-000010"

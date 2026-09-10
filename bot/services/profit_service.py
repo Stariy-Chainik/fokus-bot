@@ -145,19 +145,21 @@ def calculate_profit_lesson(
         lesson_type=lesson.type,
         duration_min=lesson.duration_min,
         income=income,
-        salary=calc_earned(lesson.type, lesson.duration_min, teacher),
+        salary=calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date[:7]),
     )
 
 
 def calculate_teacher_profit(
     teacher: Teacher,
     lessons: list[Lesson],
+    extra_salary: int = 0,
 ) -> TeacherProfitRow | None:
+    """extra_salary — зарплата вне занятий: смены и корректировки дней (salary_service)."""
     billed_lessons = [
         row for lesson in lessons
         if (row := calculate_profit_lesson(lesson, teacher)) is not None
     ]
-    if not billed_lessons:
+    if not billed_lessons and extra_salary == 0:
         return None
     group_count = sum(
         1 for row in billed_lessons if row.lesson_type == LessonType.GROUP
@@ -166,7 +168,7 @@ def calculate_teacher_profit(
         teacher_id=teacher.teacher_id,
         teacher_name=teacher.name,
         income=sum(row.income for row in billed_lessons),
-        salary=sum(row.salary for row in billed_lessons),
+        salary=sum(row.salary for row in billed_lessons) + extra_salary,
         group_lessons=group_count,
         individual_lessons=len(billed_lessons) - group_count,
     )
@@ -196,11 +198,13 @@ class ProfitService:
         lesson_repo,
         payment_service,
         finance_entry_repo,
+        salary_service=None,
     ) -> None:
         self._teacher_repo = teacher_repo
         self._lesson_repo = lesson_repo
         self._payment_service = payment_service
         self._finance_entry_repo = finance_entry_repo
+        self._salary_service = salary_service
 
     async def get_lesson_summary(self, period: str) -> ProfitSummary:
         rows: list[TeacherProfitRow] = []
@@ -209,7 +213,13 @@ class ProfitService:
                 teacher.teacher_id,
                 period,
             )
-            row = calculate_teacher_profit(teacher, lessons)
+            extra = 0
+            if self._salary_service is not None:
+                extra = sum(
+                    line.amount for line in await self._salary_service.lines_for(teacher, period)
+                    if line.kind in ("shift", "override")
+                )
+            row = calculate_teacher_profit(teacher, lessons, extra_salary=extra)
             if row is not None:
                 rows.append(row)
         return ProfitSummary(period=period, teacher_rows=tuple(rows))

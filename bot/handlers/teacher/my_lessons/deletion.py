@@ -84,6 +84,6 @@ async def cb_delete_lesson_do(
         )
         return
     text = f"Занятие {lesson_id} удалено." if deleted else "Занятие не найдено."
-    back_keyboard = kb_back("admin:edit_lesson") if user.is_admin else kb_teacher_menu()
+    back_keyboard = kb_back("admin:edit_lesson") if user.is_admin else kb_teacher_menu(teacher_id=user.teacher_id)
     await callback.message.edit_text(text, reply_markup=back_keyboard)
     await callback.answer()

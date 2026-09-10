@@ -131,7 +131,7 @@ async def cb_submit_period_start(
         await callback.message.edit_text(
             f"<b>Сдать период</b>\n"
             f"Текущий месяц ({display_period(current)}) уже сдан, других открытых периодов нет.",
-            reply_markup=kb_teacher_menu(),
+            reply_markup=kb_teacher_menu(teacher_id=user.teacher_id),
         )
         await callback.answer()
         return
@@ -168,7 +168,7 @@ async def cb_submit_pick_other(
     open_periods, counts = await _open_periods(user.teacher_id, lesson_repo, submission_repo)
     if not open_periods:
         await callback.message.edit_text(
-            "Нет открытых периодов.", reply_markup=kb_teacher_menu(),
+            "Нет открытых периодов.", reply_markup=kb_teacher_menu(teacher_id=user.teacher_id),
         )
         await callback.answer()
         return
@@ -228,7 +228,7 @@ async def cb_submit_confirm(
         if await submission_repo.get_by_teacher_and_period(user.teacher_id, period_month):
             await state.clear()
             await callback.message.edit_text(
-                f"Период {display_period(period_month)} уже сдан.", reply_markup=kb_teacher_menu(),
+                f"Период {display_period(period_month)} уже сдан.", reply_markup=kb_teacher_menu(teacher_id=user.teacher_id),
             )
             await callback.answer()
             return
@@ -262,7 +262,7 @@ async def cb_submit_confirm(
             f"👥 Групповые ({group}): {gline}\n"
             f"👤 Индивидуальные ({ind}): {iline}\n\n"
             f"Занятия этого месяца больше редактировать нельзя.",
-            reply_markup=kb_teacher_menu(),
+            reply_markup=kb_teacher_menu(teacher_id=user.teacher_id),
         )
         await callback.answer()
     finally:

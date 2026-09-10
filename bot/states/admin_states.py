@@ -73,3 +73,12 @@ class FinanceEntryStates(StatesGroup):
     """Ручной доход/расход на экране «Прибыль»: название → сумма."""
     entering_title = State()
     entering_amount = State()
+
+
+class PayoutStates(StatesGroup):
+    # Ввод произвольной суммы выплаты педагогу (аванс / частичная)
+    waiting_amount = State()
+    # Нестандартный день: дата → минуты → комментарий
+    waiting_ovr_date = State()
+    waiting_ovr_minutes = State()
+    waiting_ovr_comment = State()

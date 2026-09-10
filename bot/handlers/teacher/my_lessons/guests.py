@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.models import GroupBillingMode, User
+from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository,
     LessonRepository,
@@ -40,7 +41,7 @@ async def cb_lesson_guest_list(
 
     present_ids = set(attendee_ids(lesson.attendees)) if lesson.attendees else set()
     group_ids = set(
-        await teacher_group_repo.get_groups_for_teacher(lesson.teacher_id)
+        hide_service_groups(await teacher_group_repo.get_groups_for_teacher(lesson.teacher_id))
     )
     all_students = await student_repo.get_all()
     candidates_by_id: dict[str, object] = {}

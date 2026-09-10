@@ -10,7 +10,7 @@ from bot.models import User
 from bot.repositories import (
     TeacherRepository, LessonRepository, TeacherPeriodSubmissionRepository,
 )
-from bot.services import calc_earned
+from bot.services.salary_service import SalaryService
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
@@ -95,6 +95,7 @@ async def cb_salary_show(
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    salary_service: SalaryService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -115,7 +116,7 @@ async def cb_salary_show(
         return
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total_earned = sum(calc_earned(ls.type, ls.duration_min, teacher) for ls in lessons)
+    total_earned = await salary_service.total_for(teacher, period_month)
     group, ind, gline, iline = format_lesson_breakdown(lessons)
     total = group + ind
 
@@ -145,13 +146,14 @@ async def _show_day_salary(
     date_str: str,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
+    salary_service: SalaryService,
 ) -> None:
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
         await callback.answer("Педагог не найден", show_alert=True)
         return
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, date_str)
-    total_earned = sum(calc_earned(ls.type, ls.duration_min, teacher) for ls in lessons)
+    total_earned = await salary_service.total_for(teacher, date_str)
     group, ind, gline, iline = format_lesson_breakdown(lessons)
     total = group + ind
 
@@ -265,6 +267,7 @@ async def cb_salary_dday_pick(
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     state: FSMContext,
+    salary_service: SalaryService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
@@ -272,7 +275,7 @@ async def cb_salary_dday_pick(
     date_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     teacher_id = data.get("salary_day_teacher_id", "")
-    await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo)
+    await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)
     await callback.answer()
 
 
@@ -282,10 +285,11 @@ async def cb_salary_day_show(
     user: User | None,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
+    salary_service: SalaryService,
 ) -> None:
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     _, teacher_id, date_str = callback.data.split(":", 2)
-    await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo)
+    await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)
     await callback.answer()

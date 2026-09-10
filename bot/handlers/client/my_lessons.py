@@ -9,9 +9,10 @@ from aiogram.types import CallbackQuery
 from bot.models.enums import LessonType, PaymentStatus
 from bot.repositories import StudentRepository, LessonRepository, TeacherRepository
 from bot.repositories.payment_repo import PaymentRepository
+from config.settings import settings
 from bot.keyboards.client import (
     kb_client_student_select, kb_lessons_period_select,
-    kb_lessons_month_list, kb_lessons_back,
+    kb_lessons_month_list, kb_lessons_back, kb_lessons_month_filter,
 )
 from bot.keyboards.calendar import kb_calendar
 from bot.services.billing_service import build_billing_rows
@@ -36,6 +37,7 @@ async def _show_lessons(
     payment_repo: PaymentRepository,
     period_str: str,
     student_id: str = "all",
+    teacher_filter: str = "all",
 ) -> None:
     all_students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not all_students:
@@ -58,6 +60,7 @@ async def _show_lessons(
     )
     lines: list[str] = [f"<b>{title}</b>"]
     total_lessons = 0
+    seen_teachers: dict[str, str] = {}  # педагоги платных занятий — для фильтра
 
     for student in students:
         lessons = sorted(
@@ -91,19 +94,43 @@ async def _show_lessons(
             if ls.type == LessonType.GROUP and amount == 0:
                 continue
 
+            seen_teachers.setdefault(ls.teacher_id, teacher_short)
+            if teacher_filter != "all" and ls.teacher_id != teacher_filter:
+                continue
+
             total_lessons += 1
             date_prefix = f"{format_date_short_with_wd(ls.date)} — " if is_month else ""
-            type_tag = " (группа)" if ls.type == LessonType.GROUP else ""
-            amount_part = f" · {amount} ₽" if amount > 0 else ""
-            paid_icon = " ✅" if (ls.date[:7], ls.teacher_id) in paid_keys else ""
+            if ls.type == LessonType.GROUP and ls.group_id in settings.revenue_share_group_map:
+                type_tag = " (индивид.)"  # индивидуальные Яковлевой хранятся как GROUP
+            elif ls.type == LessonType.GROUP:
+                type_tag = " (группа)"
+            else:
+                type_tag = ""
+            direct = (ls.type == LessonType.INDIVIDUAL
+                      and ls.teacher_id in settings.direct_pay_teacher_id_set)
+            if direct:
+                amount_part = " · оплата педагогу напрямую"
+                paid_icon = ""
+            else:
+                amount_part = f" · {amount} ₽" if amount > 0 else ""
+                paid_icon = " ✅" if (ls.date[:7], ls.teacher_id) in paid_keys else ""
+            if ls.type == LessonType.GROUP and ls.group_id in settings.revenue_share_group_map:
+                dur_part = ""  # длительность индивидуальных на цену не влияет
+            else:
+                dur_part = f" — {ls.duration_min} мин"
             lines.append(
-                f"  • {date_prefix}{teacher_short}{type_tag} — {ls.duration_min} мин{amount_part}{paid_icon}"
+                f"  • {date_prefix}{teacher_short}{type_tag}{dur_part}{amount_part}{paid_icon}"
             )
 
     if total_lessons == 0:
         lines.append("\nЗанятий нет.")
 
-    await callback.message.edit_text("\n".join(lines), reply_markup=kb_lessons_back(student_id))
+    if is_month:
+        teachers = sorted(seen_teachers.items(), key=lambda x: x[1])
+        kb = kb_lessons_month_filter(student_id, period_str, teachers, active=teacher_filter)
+    else:
+        kb = kb_lessons_back(student_id)
+    await callback.message.edit_text("\n".join(lines), reply_markup=kb)
 
 
 @router.callback_query(F.data == "client:lessons")
@@ -250,6 +277,23 @@ async def cb_cl_month_list_s(
     await callback.message.edit_text(
         "Выберите месяц:",
         reply_markup=kb_lessons_month_list(student_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cl_month_t:"))
+async def cb_cl_month_teacher(
+    callback: CallbackQuery,
+    student_repo: StudentRepository,
+    lesson_repo: LessonRepository,
+    teacher_repo: TeacherRepository,
+    payment_repo: PaymentRepository,
+) -> None:
+    # cl_month_t:{student_id}:{ym}:{teacher_id|all}
+    _, student_id, period_str, teacher_id = callback.data.split(":", 3)
+    await _show_lessons(
+        callback, student_repo, lesson_repo, teacher_repo, payment_repo,
+        period_str, student_id, teacher_filter=teacher_id,
     )
     await callback.answer()
 

@@ -27,13 +27,15 @@ from bot.repositories import (
     StudentGroupRepository,
     StudentRequestRepository,
     ClientRepository, SubscriptionOverrideRepository, FinanceEntryRepository,
+    TrainingEntryRepository, AthleteTaskRepository,
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
     CloudKassirService, StudentService, StudentRequestService, ProfitService,
+    DiaryService,
 )
 from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
-from bot.handlers import common_router, admin_router, teacher_router, client_router
+from bot.handlers import common_router, admin_router, teacher_router, athlete_router, client_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,9 +83,19 @@ def _build_dispatcher(storage) -> Dispatcher:
         sheets_client, settings.sheet_subscription_overrides,
     )
     finance_entry_repo = FinanceEntryRepository(sheets_client, settings.sheet_finance_entries)
+    from bot.repositories.teacher_rate_history_repo import TeacherRateHistoryRepository
+    rate_history_repo = TeacherRateHistoryRepository(sheets_client, settings.sheet_teacher_rate_history)
+    from bot.repositories.teacher_payout_repo import TeacherPayoutRepository
+    payout_repo = TeacherPayoutRepository(sheets_client, settings.sheet_teacher_payouts)
+    from bot.repositories.salary_override_repo import SalaryOverrideRepository
+    salary_override_repo = SalaryOverrideRepository(sheets_client, settings.sheet_salary_overrides)
+    training_entry_repo = TrainingEntryRepository(sheets_client, settings.sheet_training_entries)
+    athlete_task_repo = AthleteTaskRepository(sheets_client, settings.sheet_athlete_tasks)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
-    lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo)
+    from bot.services.salary_service import SalaryService
+    salary_service = SalaryService(lesson_repo, salary_override_repo)
+    lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service)
     payment_service = PaymentService(
         payment_repo, lesson_repo, teacher_repo,
         group_repo=group_repo, student_group_repo=student_group_repo,
@@ -91,6 +103,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     )
     profit_service = ProfitService(
         teacher_repo, lesson_repo, payment_service, finance_entry_repo,
+        salary_service=salary_service,
     )
     diagnostics_service = DiagnosticsService(lesson_repo, teacher_repo, student_repo)
     visibility = TeacherVisibilityService(student_repo, teacher_group_repo, student_group_repo)
@@ -100,6 +113,10 @@ def _build_dispatcher(storage) -> Dispatcher:
     )
     student_request_service = StudentRequestService(
         student_request_repo, student_repo, student_group_repo,
+    )
+    diary_service = DiaryService(
+        training_entry_repo, athlete_task_repo, student_repo,
+        student_group_repo, group_repo, visibility,
     )
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
@@ -121,6 +138,10 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["client_repo"] = client_repo
     dp["subscription_override_repo"] = subscription_override_repo
     dp["finance_entry_repo"] = finance_entry_repo
+    dp["rate_history_repo"] = rate_history_repo
+    dp["payout_repo"] = payout_repo
+    dp["salary_override_repo"] = salary_override_repo
+    dp["salary_service"] = salary_service
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
     dp["profit_service"] = profit_service
@@ -129,13 +150,16 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["student_service"] = student_service
     dp["student_request_service"] = student_request_service
     dp["cloudkassir_service"] = cloudkassir_service
+    dp["training_entry_repo"] = training_entry_repo
+    dp["athlete_task_repo"] = athlete_task_repo
+    dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())
     dp.update.middleware(AuthMiddleware(user_repo))
 
     # ── Роутеры ──────────────────────────────────────────────────────────────
-    dp.include_routers(common_router, admin_router, teacher_router, client_router)
+    dp.include_routers(common_router, admin_router, teacher_router, athlete_router, client_router)
 
     return dp
 
@@ -150,6 +174,26 @@ def _register_payment_webhook(app, dp: Dispatcher, bot: Bot) -> None:
         make_yookassa_webhook_handler(payment_service, bot, user_repo),
     )
     logger.info("Маршрут /yookassa-webhook зарегистрирован")
+
+
+def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
+    """Регистрирует HTTP API личного кабинета (Telegram Mini App)."""
+    from bot.api import register_miniapp_api
+    register_miniapp_api(app, dp, bot)
+
+
+async def _rate_history_refresher(dp: Dispatcher, interval_sec: int = 300) -> None:
+    """Держит в памяти историю ставок педагогов (лист teacher_rate_history)."""
+    from bot.services import rate_history
+    repo = dp["rate_history_repo"]
+    while True:
+        try:
+            rows = await repo.get_all()
+            rate_history.load(rows)
+            logger.debug("История ставок загружена: %d строк", len(rows))
+        except Exception as exc:  # лист может отсутствовать — работаем по карточкам
+            logger.warning("История ставок недоступна (%s) — используются текущие ставки", exc)
+        await asyncio.sleep(interval_sec)
 
 
 async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
@@ -173,6 +217,7 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
 
     app.router.add_get("/health", health)
     _register_payment_webhook(app, dp, bot)
+    _register_miniapp_api(app, dp, bot)
 
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=webhook_path)
     setup_application(app, dp, bot=bot)
@@ -195,9 +240,10 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
     logger.info("Запуск в режиме polling")
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # Отдельный aiohttp-сервер для приёма webhook-уведомлений ЮКасса
+    # Отдельный aiohttp-сервер: webhook ЮКассы + API Mini App
     app = web.Application()
     _register_payment_webhook(app, dp, bot)
+    _register_miniapp_api(app, dp, bot)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", settings.payment_webhook_port).start()
@@ -222,10 +268,17 @@ async def main() -> None:
         BotCommand(command="menu", description="Главное меню"),
     ])
 
-    if settings.webhook_url:
-        await _run_webhook(bot, dp)
-    else:
-        await _run_polling(bot, dp)
+    # История ставок педагогов: первая загрузка до старта, дальше — фоновое обновление
+    refresher = asyncio.create_task(_rate_history_refresher(dp))
+    await asyncio.sleep(0)  # дать задаче выполнить первую загрузку
+
+    try:
+        if settings.webhook_url:
+            await _run_webhook(bot, dp)
+        else:
+            await _run_polling(bot, dp)
+    finally:
+        refresher.cancel()
 
 
 if __name__ == "__main__":
