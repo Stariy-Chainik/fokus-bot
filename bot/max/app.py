@@ -5,6 +5,7 @@ import logging
 
 from maxapi import Bot, Dispatcher
 from maxapi.enums.parse_mode import ParseMode
+from maxapi.exceptions.max import InvalidToken
 
 from .middlewares import DepsMiddleware, DedupMiddleware
 from .handlers import router as parent_router
@@ -21,7 +22,7 @@ def build(token: str, deps: dict, tg_bot):
     return bot, dp
 
 
-async def run_max(bot, dp, *, retry_delay: int = 15) -> None:
+async def run_max(bot, dp, *, retry_delay: int = 15, token_retry_delay: int = 120) -> None:
     """Polling с перезапуском: сбой MAX не должен ронять Telegram-бота."""
     while True:
         try:
@@ -31,6 +32,12 @@ async def run_max(bot, dp, *, retry_delay: int = 15) -> None:
             return
         except asyncio.CancelledError:
             raise
+        except InvalidToken:
+            logger.error(
+                "MAX: токен отклонён (401). Проверьте MAX_BOT_TOKEN в .env — возможно, "
+                "он перевыпущен в @MasterBot. Повтор через %d с", token_retry_delay,
+            )
+            await asyncio.sleep(token_retry_delay)
         except Exception as exc:
             logger.error("MAX polling упал: %s — перезапуск через %d с", exc, retry_delay)
             await asyncio.sleep(retry_delay)
