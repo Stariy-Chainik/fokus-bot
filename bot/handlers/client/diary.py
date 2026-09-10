@@ -8,13 +8,14 @@ from bot.repositories import StudentRepository, TeacherRepository
 from bot.services import DiaryService
 from bot.keyboards.athlete import kb_period_toggle
 from bot.utils.dates import last_periods, display_period, format_date_display
-from bot.utils.diary_format import stats_text, tasks_text, stars
+from bot.utils.diary_format import stats_text, tasks_text, stars, leaderboard_text
 
 router = Router(name="client_diary")
 
 
 def _kb(student_id: str, period: str, this: str, prev: str, many: bool) -> InlineKeyboardMarkup:
     rows = [kb_period_toggle(f"cldiary:m:{student_id}", period, this, prev)]
+    rows.append([InlineKeyboardButton(text="🏆 Рейтинг группы", callback_data=f"cldiary:rating:{student_id}:{period}")])
     if many:
         rows.append([InlineKeyboardButton(text="« К детям", callback_data="client:diary")])
     rows.append([InlineKeyboardButton(text="« Меню", callback_data="go:home")])
@@ -88,4 +89,27 @@ async def cb_client_diary_student(
         await callback.answer("Нет доступа", show_alert=True)
         return
     await _render(callback, student, period, len(students) > 1, diary_service, teacher_repo)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cldiary:rating:"))
+async def cb_client_diary_rating(
+    callback: CallbackQuery, student_repo: StudentRepository, diary_service: DiaryService,
+) -> None:
+    """Полный рейтинг месяца для родителя; свой ребёнок выделен."""
+    parts = callback.data.split(":")
+    student_id = parts[2]
+    period = parts[3] if len(parts) > 3 else last_periods(1)[0]
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    if not any(s.student_id == student_id for s in students):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    this, prev = last_periods(2)
+    rows = await diary_service.leaderboard(period)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        kb_period_toggle(f"cldiary:rating:{student_id}", period, this, prev),
+        [InlineKeyboardButton(text="« К дневнику", callback_data=f"cldiary:m:{student_id}:{period}")],
+        [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
+    ])
+    await callback.message.edit_text(leaderboard_text(rows, period, None, highlight=student_id), reply_markup=kb)
     await callback.answer()
