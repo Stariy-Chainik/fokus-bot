@@ -9,13 +9,11 @@ async def parent_students(student_repo, max_uid: int) -> list:
     return await student_repo.get_by_parent_max_id(max_uid)
 
 
-async def show_menu(event, students: list, *, new_message: bool = False) -> None:
-    """Меню родителя: правка сообщения callback или новое сообщение."""
+async def show_menu(event, students: list, max_uid: int, *, new_message: bool = False) -> None:
+    """Меню родителя: правка сообщения callback или новое сообщение пользователю max_uid."""
     text, rows = welcome_text(students), menu_rows(platform="max")
     if new_message or not hasattr(event, "callback"):
-        target = event.message if hasattr(event, "message") and event.message is not None else None
-        uid = event.user.user_id if hasattr(event, "user") else target.sender.user_id
-        await send_screen(event.bot, uid, text, rows)
+        await send_screen(event.bot, max_uid, text, rows)
     else:
         await edit_screen(event, text, rows)
 

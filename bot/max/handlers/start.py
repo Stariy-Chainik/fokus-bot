@@ -85,7 +85,7 @@ async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_rep
         await alert(event, "Ученик не найден")
         return
     if max_uid in student.parent_max_ids:
-        await show_menu(event, await parent_students(student_repo, max_uid))
+        await show_menu(event, await parent_students(student_repo, max_uid), max_uid)
         return
     prev_addrs = list(student.parent_addrs)
     await student_repo.add_parent_max_id(student_id, max_uid)
@@ -106,7 +106,7 @@ async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_rep
         f"Если это не член семьи — сообщите администратору.",
     )
     await edit_screen(event, f"✅ Вы привязаны к ученику <b>{student.name}</b>", [])
-    await show_menu(event, await parent_students(student_repo, max_uid), new_message=True)
+    await show_menu(event, await parent_students(student_repo, max_uid), max_uid, new_message=True)
 
 
 @router.message_callback(F.callback.payload.startswith("glink_none:"))
@@ -130,7 +130,7 @@ async def on_text_no_state(event: MessageCreated, max_uid, student_repo):
         return
     students = await parent_students(student_repo, max_uid)
     if students:
-        await show_menu(event, students, new_message=True)
+        await show_menu(event, students, max_uid, new_message=True)
         return
     if len(text) < 2:
         await event.message.answer("Введите фамилию ученика (минимум 2 символа):")
@@ -159,7 +159,7 @@ async def on_reg_confirm(event: MessageCallback, max_uid, student_repo):
         await student_repo.add_parent_max_id(student_id, max_uid)
         logger.info("MAX: родитель max_id=%s привязан к %s", max_uid, student_id)
     await edit_screen(event, f"✅ Вы привязаны к ученику <b>{student.name}</b>", [])
-    await show_menu(event, await parent_students(student_repo, max_uid), new_message=True)
+    await show_menu(event, await parent_students(student_repo, max_uid), max_uid, new_message=True)
 
 
 @router.message_callback(F.callback.payload == "client_reg_retry")
@@ -212,7 +212,7 @@ async def on_add_request(event: MessageCallback, context, max_uid, student_repo,
         await alert(event, "Ученик не найден")
         return
     if max_uid in student.parent_max_ids:
-        await show_menu(event, await parent_students(student_repo, max_uid))
+        await show_menu(event, await parent_students(student_repo, max_uid), max_uid)
         return
     sender = event.callback.user
     name = f"{sender.first_name} {sender.last_name or ''}".strip()
@@ -234,4 +234,4 @@ async def on_home(event: MessageCallback, context, max_uid, student_repo):
     if not students:
         await edit_screen(event, "Введите фамилию ученика для регистрации:", [])
         return
-    await show_menu(event, students)
+    await show_menu(event, students, max_uid)
