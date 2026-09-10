@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     sheet_teacher_rate_history: str = Field(
         default="teacher_rate_history", alias="SHEET_TEACHER_RATE_HISTORY",
     )
+    # Бот в мессенджере MAX (кабинет родителя). Пусто — MAX не запускается.
+    max_bot_token: str = Field(default="", alias="MAX_BOT_TOKEN")
+
     # Кабинет спортсмена: дневник тренировок и задания педагога
     sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
     sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")

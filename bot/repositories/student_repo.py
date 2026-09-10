@@ -8,12 +8,19 @@ logger = logging.getLogger(__name__)
 
 # Колонки листа `students` (1-based):
 # 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
-# 8 kindergarten_group (устарело) | 9 athlete_tg_id (свой Telegram спортсмена)
+# 8 kindergarten_group (устарело) | 9 athlete_tg_id (свой Telegram спортсмена) | 10 parent_max_ids
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
 _PARENT_TG_IDS_COL = 7
 _ATHLETE_TG_ID_COL = 9
+_PARENT_MAX_IDS_COL = 10
+
+
+def _parse_id_list(raw) -> list[int]:
+    text = str(raw or "").strip()
+    sep = "|" if "|" in text else ","
+    return [int(x) for x in text.split(sep) if x.strip().lstrip("-").isdigit()]
 
 
 def _parse_tg_id(value) -> Optional[int]:
@@ -53,6 +60,7 @@ def _row_to_student(row: dict) -> Student:
         client_id=client_id or None,
         parent_tg_ids=parent_tg_ids,
         athlete_tg_id=_parse_tg_id(row.get("athlete_tg_id")),
+        parent_max_ids=_parse_id_list(row.get("parent_max_ids")),
     )
 
 
@@ -163,6 +171,50 @@ class StudentRepository(BaseRepository):
 
     async def get_by_parent_tg_id(self, tg_id: int) -> list[Student]:
         return [s for s in await self.get_all() if tg_id in s.parent_tg_ids]
+
+    # ─── Родители в MAX (колонка 10) и общие методы по адресу ─────────────────
+
+    async def get_by_parent_max_id(self, max_id: int) -> list[Student]:
+        return [s for s in await self.get_all() if max_id in s.parent_max_ids]
+
+    async def _write_parent_max_ids(self, student_id: str, ids: list[int]) -> bool:
+        row_idx = await self._find_row_index("student_id", student_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _PARENT_MAX_IDS_COL, "|".join(str(i) for i in ids))
+        return True
+
+    async def add_parent_max_id(self, student_id: str, max_id: int) -> bool:
+        student = await self.get_by_id(student_id)
+        if student is None:
+            return False
+        if max_id in student.parent_max_ids:
+            return True
+        return await self._write_parent_max_ids(student_id, student.parent_max_ids + [max_id])
+
+    async def remove_parent_max_id(self, student_id: str, max_id: int) -> bool:
+        student = await self.get_by_id(student_id)
+        if student is None or max_id not in student.parent_max_ids:
+            return False
+        return await self._write_parent_max_ids(
+            student_id, [i for i in student.parent_max_ids if i != max_id],
+        )
+
+    async def get_by_parent(self, addr) -> list[Student]:
+        """addr = ("tg", id) | ("max", id)."""
+        platform, ident = addr
+        return await (self.get_by_parent_max_id(ident) if platform == "max"
+                      else self.get_by_parent_tg_id(ident))
+
+    async def add_parent(self, student_id: str, addr) -> bool:
+        platform, ident = addr
+        return await (self.add_parent_max_id(student_id, ident) if platform == "max"
+                      else self.add_parent_tg_id(student_id, ident))
+
+    async def remove_parent(self, student_id: str, addr) -> bool:
+        platform, ident = addr
+        return await (self.remove_parent_max_id(student_id, ident) if platform == "max"
+                      else self.remove_parent_tg_id(student_id, ident))
 
     # ─── Спортсмен (свой Telegram ученика) ────────────────────────────────────
 

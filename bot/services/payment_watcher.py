@@ -3,8 +3,9 @@
 После создания платежа запускается фоновая задача: раз в `interval` секунд
 статус перепроверяется напрямую у API ЮКассы (по кредам магазина — телу
 клиента не доверяем, та же модель, что у вебхука). На `succeeded` — счета
-периода помечаются PAID, уведомляются админы и плательщик. Идемпотентно
-с вебхуком: повторное подтверждение ничего не меняет (PENDING уже нет).
+периода помечаются PAID, уведомляются админы (Telegram) и плательщик
+(по адресу `parent_addr` — Telegram или MAX, через ParentNotifier).
+Идемпотентно с вебхуком: повторное подтверждение ничего не меняет.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ import asyncio
 import logging
 
 from aiogram.exceptions import TelegramAPIError
+
+from bot.services.parent_notifier import resolve_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +31,9 @@ async def _fetch(payment_id: str):
 
 async def _watch(
     payment_id: str, student_id: str, student_name: str, period_month: str,
-    payment_service, bot, user_repo, parent_tg_id: int | None,
-    interval: int, max_checks: int, fetch=_fetch, teacher_ids: list | None = None,
+    payment_service, bot, user_repo, parent_addr=None,
+    interval: int = _INTERVAL_SEC, max_checks: int = _MAX_CHECKS, fetch=_fetch,
+    teacher_ids: list | None = None, notifier=None,
 ) -> None:
     for _ in range(max_checks):
         await asyncio.sleep(interval)
@@ -55,15 +59,11 @@ async def _watch(
             payment_id, student_id, period_month, count,
         )
         if count > 0:
-            if parent_tg_id:
-                try:
-                    await bot.send_message(
-                        parent_tg_id,
-                        f"✅ Оплата получена! {student_name}, "
-                        f"{period_month} — {amount} руб. Спасибо!",
-                    )
-                except TelegramAPIError:
-                    pass
+            if parent_addr:
+                await (notifier or resolve_notifier(bot)).send(
+                    parent_addr,
+                    f"✅ Оплата получена! {student_name}, {period_month} — {amount} руб. Спасибо!",
+                )
             msg = (
                 f"💰 Оплата через ЮКасса\n\n"
                 f"Ученик: {student_name} ({student_id})\n"
@@ -81,13 +81,14 @@ async def _watch(
 
 def start_payment_watch(
     payment_id: str, student_id: str, student_name: str, period_month: str,
-    payment_service, bot, user_repo, parent_tg_id: int | None = None,
+    payment_service, bot, user_repo, parent_addr=None,
     interval: int = _INTERVAL_SEC, max_checks: int = _MAX_CHECKS, fetch=_fetch,
-    teacher_ids: list | None = None,
+    teacher_ids: list | None = None, notifier=None,
 ) -> asyncio.Task:
-    """Запускает фоновый опрос платежа; задача живёт в текущем event loop."""
+    """Запускает фоновый опрос платежа; задача живёт в текущем event loop.
+    parent_addr — ("tg", id) | ("max", id) плательщика (см. parent_notifier)."""
     return asyncio.create_task(_watch(
         payment_id, student_id, student_name, period_month,
-        payment_service, bot, user_repo, parent_tg_id, interval, max_checks, fetch,
-        teacher_ids,
+        payment_service, bot, user_repo, parent_addr, interval, max_checks, fetch,
+        teacher_ids, notifier,
     ))

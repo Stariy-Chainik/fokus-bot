@@ -19,6 +19,7 @@ from bot.states import AthleteRegStates
 from bot.keyboards.common import kb_welcome_choice
 from bot.keyboards.athlete import kb_athlete_menu, athlete_welcome_text
 from bot.utils.notify import notify
+from bot.services.parent_notifier import resolve_notifier
 from bot.handlers.access import is_admin, is_teacher_or_admin
 from bot.utils.group_links import build_athlete_payload, parse_athlete_payload
 from ._base import router
@@ -190,7 +191,7 @@ async def cb_reg_pick(
                      f"🏃 <b>Новый спортсмен в боте</b>\n\n"
                      f"{sender.full_name}{username} (<code>{tg_id}</code>)\n"
                      f"Ученик: <b>{student.name}</b>", reply_markup=kb_undo)
-        await notify(callback.bot, student.parent_tg_ids,
+        await resolve_notifier(callback.bot).send_many(student.parent_addrs,
                      f"ℹ️ <b>{student.name}</b> завёл кабинет спортсмена в боте: теперь он(а) может "
                      f"вести дневник тренировок, а вы — видеть записи и оценки педагога "
                      f"в разделе «📓 Дневник тренировок».")

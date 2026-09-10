@@ -59,7 +59,7 @@ def _build_storage():
     return MemoryStorage()
 
 
-def _build_dispatcher(storage) -> Dispatcher:
+def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp = Dispatcher(storage=storage)
 
     # ── Sheets client и репозитории ──────────────────────────────────────────
@@ -118,6 +118,8 @@ def _build_dispatcher(storage) -> Dispatcher:
         training_entry_repo, athlete_task_repo, student_repo,
         student_group_repo, group_repo, visibility,
     )
+    from bot.services.parent_notifier import ParentNotifier
+    notifier = ParentNotifier(tg_bot=tg_bot).set_as_default()
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
         settings.cloudkassir_api_secret,
@@ -150,6 +152,7 @@ def _build_dispatcher(storage) -> Dispatcher:
     dp["student_service"] = student_service
     dp["student_request_service"] = student_request_service
     dp["cloudkassir_service"] = cloudkassir_service
+    dp["notifier"] = notifier
     dp["training_entry_repo"] = training_entry_repo
     dp["athlete_task_repo"] = athlete_task_repo
     dp["diary_service"] = diary_service
@@ -261,7 +264,7 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     storage = _build_storage()
-    dp = _build_dispatcher(storage)
+    dp = _build_dispatcher(storage, tg_bot=bot)
 
     await bot.set_my_commands([
         BotCommand(command="start", description="Запуск / главное меню"),

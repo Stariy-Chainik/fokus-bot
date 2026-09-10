@@ -33,6 +33,7 @@ from bot.repositories import (
 from bot.keyboards.client import kb_client_menu
 from bot.states.client_states import GroupLinkStates
 from bot.utils.group_links import parse_start_payload
+from bot.services.parent_notifier import resolve_notifier, parse_addr
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_group_link")
@@ -148,7 +149,7 @@ async def cb_group_link_pick(
         await callback.answer()
         return
 
-    prev_parent_ids = list(student.parent_tg_ids)
+    prev_parent_addrs = list(student.parent_addrs)
     await student_repo.add_parent_tg_id(student_id, tg_id)
     logger.info(
         "Привязка по ссылке группы %s: tg_id=%s → %s", group_id, tg_id, student_id,
@@ -180,16 +181,12 @@ async def cb_group_link_pick(
             await callback.bot.send_message(admin.tg_id, admin_text, reply_markup=kb_undo)
         except TelegramAPIError as exc:
             logger.warning("Не доставлено админу tg_id=%s: %s", admin.tg_id, exc)
-    for parent_id in prev_parent_ids:
-        try:
-            await callback.bot.send_message(
-                parent_id,
-                f"ℹ️ К вашему ребёнку <b>{student.name}</b> привязался "
-                f"{sender.full_name}{username}.\n"
-                f"Если это не член семьи — сообщите администратору.",
-            )
-        except TelegramAPIError:
-            pass  # родитель мог не открывать бота — это нормально
+    await resolve_notifier(callback.bot).send_many(
+        prev_parent_addrs,
+        f"ℹ️ К вашему ребёнку <b>{student.name}</b> привязался "
+        f"{sender.full_name}{username}.\n"
+        f"Если это не член семьи — сообщите администратору.",
+    )
 
     # Телефон не спрашиваем (чеки уходят на email) — сразу необязательный email.
     await state.update_data(glink_student_id=student_id)
@@ -276,23 +273,20 @@ async def cb_group_link_admin_undo(
     if user is None or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, tg_id_raw = callback.data.split(":", 2)
-    tg_id = int(tg_id_raw)
-    removed = await student_repo.remove_parent_tg_id(student_id, tg_id)
+    _, student_id, addr_raw = callback.data.split(":", 2)
+    addr = parse_addr(addr_raw)
+    removed = addr is not None and await student_repo.remove_parent(student_id, addr)
     if not removed:
         await callback.answer("Привязка уже отменена", show_alert=True)
         return
     student = await student_repo.get_by_id(student_id)
     student_name = student.name if student else student_id
-    logger.info("Админ %s отменил привязку tg_id=%s к %s", callback.from_user.id, tg_id, student_id)
-    try:
-        await callback.bot.send_message(
-            tg_id,
-            f"Ваша привязка к ученику <b>{student_name}</b> отменена администратором.\n"
-            f"Если это ошибка — свяжитесь со школой.",
-        )
-    except TelegramAPIError:
-        pass
+    logger.info("Админ %s отменил привязку %s к %s", callback.from_user.id, addr_raw, student_id)
+    await resolve_notifier(callback.bot).send(
+        addr,
+        f"Ваша привязка к ученику <b>{student_name}</b> отменена администратором.\n"
+        f"Если это ошибка — свяжитесь со школой.",
+    )
     await callback.message.edit_text(
         f"{callback.message.html_text}\n\n🚫 <b>Привязка отменена</b>",
     )

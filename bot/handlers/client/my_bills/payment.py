@@ -13,6 +13,8 @@ from bot.repositories import StudentRepository, ClientRepository, UserRepository
 from bot.repositories.client_repo import ClientRepository
 from bot.services import PaymentService
 from bot.services.payment_watcher import start_payment_watch
+from bot.services.parent_notifier import resolve_notifier, parse_addr, tg_addr
+from bot.screens.parent_bills import bill_back_rows
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
 from bot.keyboards.client import (
@@ -352,7 +354,7 @@ async def cb_pay_method(
             )
             start_payment_watch(
                 payment_id, student.student_id, student.name, period_month,
-                payment_service, callback.bot, user_repo, parent_tg_id=callback.from_user.id,
+                payment_service, callback.bot, user_repo, parent_addr=tg_addr(callback.from_user.id),
                 teacher_ids=sel_tids if partial else None,
             )
             await callback.message.edit_text(
@@ -381,7 +383,7 @@ async def cb_pay_method(
             )
             start_payment_watch(
                 payment_id, student.student_id, student.name, period_month,
-                payment_service, callback.bot, user_repo, parent_tg_id=callback.from_user.id,
+                payment_service, callback.bot, user_repo, parent_addr=tg_addr(callback.from_user.id),
                 teacher_ids=sel_tids if partial else None,
             )
             await callback.message.edit_text(
@@ -588,15 +590,14 @@ async def cb_receipt_reject(
     except TelegramBadRequest:
         pass
 
-    try:
-        await callback.bot.send_message(
-            int(parent_raw),
-            f"❌ Оплата за {_period_label(period_month)} ({student_name}) не подтверждена "
-            f"администратором.\nПроверьте чек и сумму или свяжитесь со школой.",
-            reply_markup=kb_bill_back(student_id, period_month),
-        )
-    except (TelegramAPIError, ValueError) as exc:
-        logger.warning("Не удалось уведомить родителя об отказе: %s", exc)
+    ok = await resolve_notifier(callback.bot).send(
+        parse_addr(parent_raw),
+        f"❌ Оплата за {_period_label(period_month)} ({student_name}) не подтверждена "
+        f"администратором.\nПроверьте чек и сумму или свяжитесь со школой.",
+        rows=bill_back_rows(student_id, period_month),
+    )
+    if not ok:
+        logger.warning("Не удалось уведомить родителя %s об отказе", parent_raw)
     logger.info("Админ %s не подтвердил оплату student=%s period=%s",
                 callback.from_user.id, student_id, period_month)
     await callback.answer("Оплата не подтверждена")

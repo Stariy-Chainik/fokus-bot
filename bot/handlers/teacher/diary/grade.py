@@ -13,6 +13,7 @@ from bot.states import GradeEntryStates
 from bot.utils.dates import format_date_display
 from bot.utils.diary_format import entry_full, stars
 from bot.utils.notify import notify
+from bot.services.parent_notifier import resolve_notifier
 from ._base import router, actor, grader_id, visible_athlete
 from .listing import render_entry
 
@@ -95,7 +96,7 @@ async def _finish(
     await notify(target.bot, [student.athlete_tg_id],
                  f"⭐ <b>{who}</b> оценил(а) вашу тренировку {format_date_display(entry.date)} "
                  f"({entry.minutes} мин, {topics}): <b>{grade}/5</b> {stars(int(grade))}{note}")
-    await notify(target.bot, student.parent_tg_ids,
+    await resolve_notifier(target.bot).send_many(student.parent_addrs,
                  f"⭐ <b>{student.name}</b>: тренировка {format_date_display(entry.date)} "
                  f"({entry.minutes} мин, {topics}) оценена педагогом {who}: <b>{grade}/5</b>{note}")
     logger.info("Оценка %s ← %s: %s", entry_id, grader_id(user, target.from_user.id), grade)

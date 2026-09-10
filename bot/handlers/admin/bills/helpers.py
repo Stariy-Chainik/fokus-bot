@@ -8,6 +8,7 @@ from bot.repositories import (
     ClientRepository,
 )
 from bot.services import PaymentService
+from bot.services.parent_notifier import addrs_of, resolve_notifier, fmt_addr
 from bot.utils.bill_format import build_bill_text
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from config.settings import settings
@@ -26,23 +27,18 @@ async def _send_bill_to_parents(
     bill_text, _ = build_bill_text(student.name, group_names, period, bills)
 
     client = await client_repo.get_by_id(student.client_id) if student.client_id else None
-    recipients: list[int] = []
-    if client and client.tg_id:
-        recipients.append(client.tg_id)
-    for pid in (student.parent_tg_ids or []):
-        if pid not in recipients:
-            recipients.append(pid)
+    recipients = addrs_of(student, client)  # Telegram и MAX
+    notifier = resolve_notifier(callback.bot)
 
     sent_to = 0
     sent_invoices = 0
-    for tg_id in recipients:
-        try:
-            await callback.bot.send_message(tg_id, bill_text)
-            sent_to += 1
-        except Exception as exc:
-            logger.error("Ошибка отправки родителю tg_id=%s: %s", tg_id, exc)
+    for addr in recipients:
+        if not await notifier.send(addr, bill_text):
+            logger.error("Ошибка отправки родителю %s", fmt_addr(addr))
             continue
-        if settings.payment_provider_token:
+        sent_to += 1
+        tg_id = addr[1]
+        if settings.payment_provider_token and addr[0] == "tg":
             for p in invoices:
                 if p.status.value != "paid":
                     try:

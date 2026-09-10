@@ -18,7 +18,7 @@ class _Bot:
     def __init__(self):
         self.sent = []
 
-    async def send_message(self, chat_id, text):
+    async def send_message(self, chat_id, text, reply_markup=None):
         self.sent.append((chat_id, text))
 
 
@@ -39,7 +39,7 @@ def test_watch_confirms_on_succeeded():
 
     svc, bot = _Service(), _Bot()
     asyncio.run(_watch("p1", "STU-1", "Пупкин Вася", "2026-09",
-                       svc, bot, _Users(), parent_tg_id=42,
+                       svc, bot, _Users(), parent_addr=("tg", 42),
                        interval=0, max_checks=10, fetch=fetch))
     assert svc.confirmed == [("STU-1", "2026-09")]
     assert {chat for chat, _ in bot.sent} == {42, 999}  # родитель и админ

@@ -4,30 +4,22 @@ from datetime import date, timedelta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.utils.dates import display_period, last_periods
+from bot.screens.adapters import to_aiogram_markup
+from bot.screens.parent_menu import menu_rows, welcome_text
+from bot.screens.parent_bills import bill_back_rows
 
 
 def client_welcome_text(students: list) -> str:
     """Шапка главного экрана родителя: за каких детей открыт кабинет."""
-    names = [s.name for s in students]
-    who = ("Ребёнок: <b>" + names[0] + "</b>") if len(names) == 1 \
-        else "Дети: <b>" + ", ".join(names) + "</b>"
-    return f"👨‍👩‍👧 <b>Личный кабинет родителя</b>\n{who}\n\nВыберите раздел:"
+    return welcome_text(students)
 
 
 def kb_client_menu(can_switch_athlete: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📅 Занятия", callback_data="client:lessons")],
-        [InlineKeyboardButton(text="💳 Оплата занятий", callback_data="client:my_bills")],
-        [InlineKeyboardButton(text="📓 Дневник тренировок", callback_data="client:diary")],
-        [InlineKeyboardButton(text="➕ Добавить ребёнка", callback_data="client:add_child")],
-        [InlineKeyboardButton(text="✉️ Email для чеков", callback_data="client:email")],
-    ]
-    if can_switch_athlete:
-        rows.append([InlineKeyboardButton(text="🏃 Кабинет спортсмена", callback_data="mode:athlete")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return to_aiogram_markup(menu_rows(can_switch_athlete))
 
 
-def kb_admin_approve_child(parent_tg_id: int, student_id: str) -> InlineKeyboardMarkup:
+def kb_admin_approve_child(parent_tg_id, student_id: str) -> InlineKeyboardMarkup:
+    """parent_tg_id — tg_id или строка адреса (`m<id>` для MAX, см. parent_notifier.fmt_addr)."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Одобрить", callback_data=f"admin_child_ok:{parent_tg_id}:{student_id}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_child_no:{parent_tg_id}:{student_id}"),
@@ -139,10 +131,7 @@ def kb_bill_detail(payment_ids: list[str], can_pay: bool, period_month: str, stu
 
 
 def kb_bill_back(student_id: str, period_month: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« К счёту", callback_data=f"client_bill:{student_id}:{period_month}")],
-        [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
-    ])
+    return to_aiogram_markup(bill_back_rows(student_id, period_month))
 
 
 def kb_payment_method(

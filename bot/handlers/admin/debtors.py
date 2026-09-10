@@ -12,11 +12,11 @@ from datetime import date
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository
 from bot.services import PaymentService
+from bot.services.parent_notifier import resolve_notifier
 from bot.utils.dates import display_period
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
@@ -64,7 +64,7 @@ async def _collect_debtors(
             "periods": dict(sorted(periods.items())),
             "total": total,
             "closed_total": closed_total,
-            "has_parent": bool(student.parent_tg_ids),
+            "has_parent": bool(student.parent_addrs),
         })
     debtors.sort(key=lambda d: d["total"], reverse=True)
     return debtors
@@ -229,14 +229,9 @@ async def cb_debtors_remind_go(
                 + "\n".join(period_lines)
                 + "\n\nДетали и оплата — в разделе «💳 Мои счета»."
             )
-            delivered = False
-            for tg_id in d["student"].parent_tg_ids:
-                try:
-                    await callback.bot.send_message(tg_id, text)
-                    delivered = True
-                except TelegramAPIError as exc:
-                    logger.warning("Напоминание не доставлено tg_id=%s (ученик %s): %s",
-                                   tg_id, d["student"].student_id, exc)
+            delivered = await resolve_notifier(callback.bot).send_many(
+                d["student"].parent_addrs, text,
+            ) > 0
             if delivered:
                 sent_parents += 1
             else:
@@ -246,7 +241,7 @@ async def cb_debtors_remind_go(
         summary = (
             "📤 <b>Напоминания отправлены</b>\n\n"
             f"Доставлено: {sent_parents} из {len(targets)}"
-            + (f"\nНе доставлено (Telegram недоступен): {failed}" if failed else "")
+            + (f"\nНе доставлено (мессенджер недоступен): {failed}" if failed else "")
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="« К должникам", callback_data="debtors:p:0")],

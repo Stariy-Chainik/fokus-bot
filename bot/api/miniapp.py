@@ -137,7 +137,7 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
                 from bot.services.payment_watcher import start_payment_watch
                 start_payment_watch(
                     payment_id, student.student_id, student.name, period_month,
-                    payment_service, bot, user_repo, parent_tg_id=tg_id,
+                    payment_service, bot, user_repo, parent_addr=("tg", tg_id),
                 )
         except Exception as exc:
             logger.error("Mini App: ошибка создания платежа ЮКасса: %s", exc)

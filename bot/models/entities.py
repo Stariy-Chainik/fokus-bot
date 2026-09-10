@@ -29,6 +29,7 @@ class Client:
     created_at: str = ""
     phone: Optional[str] = None
     email: Optional[str] = None  # для фискальных чеков (колонка 6 листа clients)
+    max_id: Optional[int] = None  # аккаунт родителя в MAX (колонка 7)
 
 
 @dataclass
@@ -41,6 +42,12 @@ class Student:
     client_id: Optional[str] = None
     parent_tg_ids: list[int] = field(default_factory=list)
     athlete_tg_id: Optional[int] = None  # свой Telegram спортсмена (колонка 9)
+    parent_max_ids: list[int] = field(default_factory=list)  # родители в MAX (колонка 10)
+
+    @property
+    def parent_addrs(self) -> list:
+        """Адреса родителей: [("tg", id), ..., ("max", id), ...]."""
+        return [("tg", i) for i in self.parent_tg_ids] + [("max", i) for i in self.parent_max_ids]
 
 
 @dataclass

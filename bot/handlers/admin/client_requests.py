@@ -3,11 +3,11 @@ import logging
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
-from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository
-from bot.keyboards.client import kb_client_menu
+from bot.screens.parent_menu import menu_rows
+from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.keyboards.admin import kb_back
 
 logger = logging.getLogger(__name__)
@@ -27,28 +27,25 @@ async def cb_admin_child_ok(
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    _, parent_tg_id_str, student_id = callback.data.split(":", 2)
-    parent_tg_id = int(parent_tg_id_str)
+    _, parent_raw, student_id = callback.data.split(":", 2)
+    parent_addr = parse_addr(parent_raw)
 
     student = await student_repo.get_by_id(student_id)
-    if not student:
+    if not student or parent_addr is None:
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    await student_repo.add_parent_tg_id(student_id, parent_tg_id)
-    logger.info("Админ одобрил: tg_id=%s → student_id=%s", parent_tg_id, student_id)
+    await student_repo.add_parent(student_id, parent_addr)
+    logger.info("Админ одобрил: %s → student_id=%s", parent_raw, student_id)
 
-    try:
-        await callback.bot.send_message(
-            parent_tg_id,
-            f"✅ Заявка одобрена!\n\nВы привязаны к ученику <b>{student.name}</b>.\n\nВыберите раздел:",
-            reply_markup=kb_client_menu(),
-        )
-    except TelegramAPIError as exc:
-        logger.warning("Не удалось уведомить родителя об одобрении заявки tg_id=%s: %s", parent_tg_id, exc)
+    await resolve_notifier(callback.bot).send(
+        parent_addr,
+        f"✅ Заявка одобрена!\n\nВы привязаны к ученику <b>{student.name}</b>.\n\nВыберите раздел:",
+        rows=menu_rows(platform=parent_addr[0]),
+    )
 
     await callback.message.edit_text(
-        f"✅ Одобрено\n\nУченик: {student.name}\ntg_id: {parent_tg_id}",
+        f"✅ Одобрено\n\nУченик: {student.name}\nРодитель: {parent_raw}",
         reply_markup=kb_back("admin:menu"),
     )
     await callback.answer()
@@ -64,24 +61,21 @@ async def cb_admin_child_no(
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    _, parent_tg_id_str, student_id = callback.data.split(":", 2)
-    parent_tg_id = int(parent_tg_id_str)
+    _, parent_raw, student_id = callback.data.split(":", 2)
+    parent_addr = parse_addr(parent_raw)
 
     student = await student_repo.get_by_id(student_id)
     student_name = student.name if student else student_id
-    logger.info("Админ отклонил: tg_id=%s → student_id=%s", parent_tg_id, student_id)
+    logger.info("Админ отклонил: %s → student_id=%s", parent_raw, student_id)
 
-    try:
-        await callback.bot.send_message(
-            parent_tg_id,
-            "❌ Администратор отклонил вашу заявку.",
-            reply_markup=kb_client_menu(),
+    if parent_addr:
+        await resolve_notifier(callback.bot).send(
+            parent_addr, "❌ Администратор отклонил вашу заявку.",
+            rows=menu_rows(platform=parent_addr[0]),
         )
-    except TelegramAPIError as exc:
-        logger.warning("Не удалось уведомить родителя об отклонении заявки tg_id=%s: %s", parent_tg_id, exc)
 
     await callback.message.edit_text(
-        f"❌ Отклонено\n\nУченик: {student_name}\ntg_id: {parent_tg_id}",
+        f"❌ Отклонено\n\nУченик: {student_name}\nРодитель: {parent_raw}",
         reply_markup=kb_back("admin:menu"),
     )
     await callback.answer()

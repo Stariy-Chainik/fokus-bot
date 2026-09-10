@@ -7,6 +7,7 @@ from .cloudkassir_service import CloudKassirService
 from .student_service import StudentService, TierToggleError
 from .student_request_service import StudentRequestService, LinkExistingOutcome
 from .diary_service import DiaryService, DiaryStats, LeaderRow
+from .parent_notifier import ParentNotifier, resolve_notifier, tg_addr, max_addr, fmt_addr, parse_addr
 from .profit_service import (
     ProfitService,
     ProfitSummary,
@@ -32,6 +33,7 @@ __all__ = [
     "StudentRequestService",
     "LinkExistingOutcome",
     "DiaryService",
+    "ParentNotifier", "resolve_notifier", "tg_addr", "max_addr", "fmt_addr", "parse_addr",
     "DiaryStats",
     "LeaderRow",
     "ProfitService",
