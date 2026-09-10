@@ -95,9 +95,28 @@ async def cb_reg_parent(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+_LIST_LIMIT = 40  # больше — только поиск по фамилии
+
+
 @router.callback_query(F.data == "athreg:athlete")
-async def cb_reg_athlete(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_reg_athlete(callback: CallbackQuery, state: FSMContext, diary_service: DiaryService) -> None:
+    """Список учеников спортивных групп; ввод фамилии — запасной вариант."""
     await state.clear()
+    candidates = await diary_service.registration_candidates("", settings.athlete_group_id_set)
+    if not candidates or len(candidates) > _LIST_LIMIT:
+        await _ask_surname(callback, state)
+        return
+    rows = [[InlineKeyboardButton(text=s.name, callback_data=f"athreg:pick:{s.student_id}")] for s in candidates]
+    rows.append([InlineKeyboardButton(text="✍️ Меня нет в списке — ввести фамилию", callback_data="athreg:typein")])
+    rows.append([InlineKeyboardButton(text="« Отмена", callback_data="athreg:cancel")])
+    await callback.message.edit_text(
+        "🏃 Кабинет спортсмена доступен ученикам спортивных групп.\n\nНайдите себя в списке:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+async def _ask_surname(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AthleteRegStates.waiting_surname)
     await callback.message.edit_text(
         "🏃 Кабинет спортсмена доступен ученикам спортивных групп.\n\n"
@@ -105,6 +124,11 @@ async def cb_reg_athlete(callback: CallbackQuery, state: FSMContext) -> None:
         reply_markup=_kb_cancel,
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "athreg:typein")
+async def cb_reg_typein(callback: CallbackQuery, state: FSMContext) -> None:
+    await _ask_surname(callback, state)
 
 
 @router.callback_query(F.data == "athreg:cancel")
