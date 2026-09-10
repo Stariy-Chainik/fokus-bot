@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guide for Claude Code (claude.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Four roles: **admin**, **teacher**, **client (parent)**, **athlete (спортсмен — ученик со своим Telegram)**.
+Guide for Claude Code (claude.ai/code) working in this repository. Project: **fokus-bot** — Telegram bot (aiogram 3) for a dance-school CRM, using **Google Sheets as the database**. Four roles: **admin**, **teacher**, **client (parent)**, **athlete (спортсмен — ученик со своим Telegram)**. Родитель дополнительно может работать через **бот в мессенджере MAX** (тот же процесс и данные, см. «MAX front»).
 
 ---
 
@@ -30,7 +30,7 @@ asyncio.run(main())"
 
 Tests are run with `.venv/bin/python -m pytest -q` (characterization/unit tests, including callback wiring). No linter is configured. After automated checks, manually exercise the affected Telegram flow; for production changes, inspect service logs.
 
-Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-settings`, `python-dotenv`, `redis`, `yookassa`, `qrcode[pil]`. Runtime list is in [requirements.txt](requirements.txt); test tooling is in [requirements-dev.txt](requirements-dev.txt).
+Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `maxapi` требует ≥ 3.10). Main deps: `aiogram 3.31`, `maxapi 1.2`, `gspread 6`, `pydantic 2`, `pydantic-settings`, `python-dotenv`, `redis`, `yookassa`, `qrcode[pil]`. Runtime list is in [requirements.txt](requirements.txt); test tooling is in [requirements-dev.txt](requirements-dev.txt).
 
 ---
 
@@ -52,6 +52,16 @@ Python 3.12+. Main deps: `aiogram 3.13`, `gspread 6`, `pydantic 2`, `pydantic-se
 8. Webhooks:
    - Telegram: `/webhook/{bot_token}` if `WEBHOOK_URL` is set, otherwise polling.
    - YooKassa: `/yookassa-webhook` always registered on `PAYMENT_WEBHOOK_PORT` (default 8081).
+
+### MAX front (кабинет родителя в мессенджере MAX)
+
+Второй мессенджер для **родителя** на тех же репозиториях/сервисах: пакет [bot/max/](bot/max/) (библиотека `maxapi`, Python ≥ 3.10). `bot/__main__.py` при непустом `MAX_BOT_TOKEN` собирает `maxapi.Dispatcher` (`bot/max/app.py::build`) и запускает polling отдельной задачей (`run_max`, перезапуск при сбое); пустой токен — MAX выключен, Telegram работает как прежде. Ключевые части:
+
+- **Идентификация**: `students.parent_max_ids` (кол. 10, `|`), `clients.max_id` (кол. 7). Адрес родителя `Addr = ("tg"|"max", id)` — [bot/services/parent_notifier.py](bot/services/parent_notifier.py): `fmt_addr` (`123` для TG, `m456` для MAX) / `parse_addr`; `Student.parent_addrs`; `StudentRepository.get_by_parent/add_parent/remove_parent(addr)`.
+- **ParentNotifier** (`dp["notifier"]`, `resolve_notifier(bot)`): единая доставка уведомлений родителям в оба мессенджера (счета, должники, отказ по чеку, ЮКасса-watcher, оценки, привязки, заявки). Кнопки в уведомлениях — нейтральные ряды из `bot/screens`.
+- **Экраны без транспорта**: [bot/screens/](bot/screens/) (`Btn/cb/url`, `parent_menu.py`, `parent_bills.py`) + данные [bot/services/parent_views.py](bot/services/parent_views.py) (`bills_periods`, `bill_detail`, `unpaid_for`, `qr_png`, `admin_confirm_rows`, `receipt_caption`…). Telegram-хендлеры `client/my_bills/*` и MAX-хендлеры `bot/max/handlers/*` используют одни и те же callback-строки и билдеры; адаптеры — `bot/screens/adapters.py` (aiogram) и `bot/max/render.py` (MAX: `to_max_markup`, `send_screen`, `edit_screen`, `split_text` ≤ 4000).
+- **MAX-хендлеры** получают зависимости по имени параметра из `DepsMiddleware` (`bot/max/middlewares.py`, копия `dp.workflow_data` + `max_uid`, `tg_bot`, `max_bot`), FSM — параметр `context`. Релиз 1: вход (`bot_started` с payload ссылки группы `g_…` — тот же payload, что для `t.me`; фамилия; второй ребёнок → одобрение админа в Telegram), меню (`menu_rows(platform="max")`: счета + добавить ребёнка), счета, оплата (СБП онлайн, реквизиты + QR-вложение + чек, наличные). Чек из MAX скачивается (`download_bytes`) и уходит админам **в Telegram** с кнопками `rcpp:`/`receipt_confirm:`/`rcpt_no:…:m<id>`; ответ родителю — через notifier. Занятия/дневник/email в MAX — релиз 2.
+- Ссылки групп для MAX печатает `scripts/gen_group_links.py` (`https://max.ru/<bot>?start=g_…`) при заданном токене. Тесты: `tests/test_parent_screens.py`, `tests/test_parent_notifier.py`, `tests/test_max_front.py` (importorskip maxapi).
 
 ### Handlers
 
@@ -425,6 +435,9 @@ Optional — payments:
 - `SHIFT_GROUPS` — `GRP-XXXX:start-end,...` (минуты от начала смены): группы одной смены внахлёст. Зарплата за день = `rate_group` × длина объединения интервалов групп, у которых в этот день были занятия (`bot/services/salary_service.py`: `shift_minutes`, `compute_salary_lines`); занятия этих групп per-lesson дают 0. Нестандартные дни — лист `salary_day_overrides` (минуты за дату заменяют расчёт; UI: «💸 Выплатить зарплату» → педагог → «🕒 Нестандартный день»). На проде: Боброво ХГ Яковлевой `GRP-0021:0-60,GRP-0022:0-120,GRP-0023:60-180`, `SHIFT_LABEL=Смена Боброво` (все три → 3 ч = 5100 ₽). Заменяет прежний костыль `SALARY_DURATION_GROUPS` для этих групп.
 - `ATHLETE_GROUP_IDS` — спортивные группы (по умолчанию `GRP-0001` «БП БТ Спортивная»): их ученики могут завести кабинет спортсмена — сами находят себя по фамилии на `/start` → «Я спортсмен». Участники рейтинга — все привязанные спортсмены.
 - `SALARY_DURATION_GROUPS` — `GRP-XXXX:минуты,...`: зарплатная длительность группы независимо от выбранной при записи (пересекающиеся по времени группы). `0` = занятие отмечается (абонемент срабатывает), но в зарплату не идёт. На проде: `GRP-0021:0,GRP-0022:90,GRP-0023:90` — вечер ВБ ХГ Яковлевой 17:00–20:00 = Младшая 0 + Средняя 1,5 ч + Старшая 1,5 ч = 6000 ₽.
+
+Optional — MAX (кабинет родителя):
+- `MAX_BOT_TOKEN` — токен бота MAX от @MasterBot; пусто — MAX не запускается. Ссылки групп для MAX используют тот же `GROUP_LINK_SECRET`.
 
 Optional — infrastructure:
 - `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)

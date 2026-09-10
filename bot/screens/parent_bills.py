@@ -1,11 +1,163 @@
-"""Счета и оплата родителя — транспорт-независимые ряды кнопок (расширяется по мере переноса)."""
+"""Счета и оплата родителя — текст и ряды кнопок, общие для Telegram и MAX.
+
+Все callback-строки те же, что в Telegram-боте (client_bill:, client_pay:, pay_method: …),
+поэтому один и тот же экран обслуживают оба фронта.
+"""
 from __future__ import annotations
 
-from .types import cb
+from bot.services.parent_views import period_label
+from .types import cb, url
+
+HOME = "go:home"
 
 
-def bill_back_rows(student_id: str, period_month: str, home_cb: str = "go:home") -> list:
+def bill_back_rows(student_id: str, period_month: str, home_cb: str = HOME) -> list:
     return [
         [cb("« К счёту", f"client_bill:{student_id}:{period_month}")],
         [cb("« Меню", home_cb)],
     ]
+
+
+def student_select_screen(students: list, section: str) -> tuple:
+    """section = 'lessons' | 'bills'."""
+    prefix = "cl_stu" if section == "lessons" else "cl_bills_stu"
+    rows = [[cb(s.name, f"{prefix}:{s.student_id}")] for s in students]
+    rows.append([cb("👨‍👩‍👧 Все вместе", f"{prefix}:all")])
+    rows.append([cb("« Меню", HOME)])
+    return "Выберите ученика:", rows
+
+
+def bills_list_screen(
+    period_rows: list, student_id: str, who: str, show_older: bool, show_back: bool,
+) -> tuple:
+    """period_rows: [PeriodRow]. Пустой список — сообщение «не найдено»."""
+    if not period_rows:
+        text = ("📋 За более ранние месяцы занятий не найдено." if show_older
+                else "📋 Занятий за текущий и прошлый месяц не найдено.")
+    else:
+        text = f"<b>💳 Оплата занятий — {who}</b>" + ("\nДругие месяцы:" if show_older else "")
+    rows = [[cb(f"{r.icon} {r.label}", f"client_bill:{student_id}:{r.period}")] for r in period_rows]
+    if show_older:
+        rows.append([cb("« К текущим месяцам", f"cl_bills_stu:{student_id}")])
+    else:
+        rows.append([cb("📆 Другие месяцы", f"cl_bills_more:{student_id}")])
+        if student_id != "all" and show_back:
+            rows.append([cb("« Назад", "client:my_bills")])
+    rows.append([cb("« Меню", HOME)])
+    return text, rows
+
+
+def bill_detail_screen(detail, period_month: str, student_id: str) -> tuple:
+    rows = []
+    if detail.can_pay:
+        rows.append([cb("💳 Оплатить", f"client_pay:{student_id}:{period_month}")])
+    rows.append([cb("« Назад", f"cl_bills_stu:{student_id}")])
+    rows.append([cb("« Меню", HOME)])
+    return "\n".join(detail.lines), rows
+
+
+def teacher_select_screen(student_id: str, period_month: str, who: str, unpaid: list, chosen: set) -> tuple:
+    rows = []
+    for i, u in enumerate(unpaid):
+        mark = "✅" if u["tid"] in chosen else "⬜"
+        rows.append([cb(f"{mark} {u['name']} — {u['amount']} руб.", f"pselt:{i}")])
+    total = sum(u["amount"] for u in unpaid if u["tid"] in chosen)
+    if total > 0:
+        rows.append([cb(f"➡️ К оплате: {total} руб.", "pselgo")])
+    rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
+    who_part = f" — {who}" if who else ""
+    text = (f"<b>💳 Оплата за {period_label(period_month)}{who_part}</b>\n"
+            f"Отметьте, каких педагогов оплачиваете:")
+    return text, rows
+
+
+def methods_screen(student_id: str, period_month: str, who: str, sel: list, yookassa: bool,
+                   cash: bool = False, bank: bool = True, sbp: bool = False) -> tuple:
+    total = sum(u["amount"] for u in sel)
+    who_part = f" — {who}" if who else ""
+    lines = [f"<b>💳 Оплата за {period_label(period_month)}{who_part}</b>"]
+    for u in sel:
+        lines.append(f"  • {u['name']} — {u['amount']} руб.")
+    lines.append(f"Сумма: <b>{total} руб.</b>\n\nВыберите способ оплаты:")
+    lines.append(
+        "\n<i>📱 СБП онлайн — оплата подтверждается автоматически, чек прикреплять не нужно.\n"
+        "🏦 По реквизитам — после перевода обязательно прикрепите чек, "
+        "иначе оплата не будет зачтена.</i>"
+    )
+    rows = []
+    if yookassa:
+        rows.append([cb("📱 СБП онлайн", f"pay_method:ysbp:{student_id}:{period_month}")])
+    if cash:
+        rows.append([cb("💵 Наличные", f"pay_method:cash:{student_id}:{period_month}")])
+    if bank:
+        rows.append([cb("🏦 По реквизитам", f"pay_method:bank:{student_id}:{period_month}")])
+    if sbp:
+        rows.append([cb("📱 СБП", f"pay_method:sbp:{student_id}:{period_month}")])
+    rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
+    return "\n".join(lines), rows
+
+
+def cash_screen(total: int, student_id: str, period_month: str) -> tuple:
+    text = (f"<b>💵 Оплата наличными</b>\n"
+            f"Сумма: <b>{total} руб.</b>\n\n"
+            f"Передайте деньги администратору или преподавателю.\n"
+            f"Нажмите кнопку, чтобы уведомить администратора.")
+    rows = [
+        [cb("📨 Уведомить об оплате", f"cash_notify:{student_id}:{period_month}")],
+        [cb("« Назад", f"client_pay:{student_id}:{period_month}")],
+    ]
+    return text, rows
+
+
+def receipt_rows(method: str, student_id: str, period_month: str) -> list:
+    return [
+        [cb("📎 Прикрепить чек", f"receipt_upload:{method}:{student_id}:{period_month}")],
+        [cb("« Назад", f"client_pay:{student_id}:{period_month}")],
+    ]
+
+
+def bank_screen(total: int, student_id: str, period_month: str, bank_details: str) -> tuple:
+    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b>", ""]
+    if bank_details:
+        lines += [bank_details.replace("\\n", "\n"), ""]
+    lines.append("После оплаты прикрепите фото чека.")
+    return "\n".join(lines), receipt_rows("bank", student_id, period_month)
+
+
+def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str) -> tuple:
+    lines = ["<b>📱 Оплата через СБП</b>", f"Сумма: <b>{total} руб.</b>", ""]
+    if sbp_details:
+        lines += [sbp_details, ""]
+    lines.append("После оплаты прикрепите фото чека.")
+    return "\n".join(lines), receipt_rows("sbp", student_id, period_month)
+
+
+def online_pay_screen(kind: str, total: int, pay_url: str, student_id: str, period_month: str) -> tuple:
+    if kind == "ysbp":
+        text = (f"<b>📱 Оплата через СБП</b>\n"
+                f"Сумма: <b>{total} руб.</b>\n\n"
+                f"Нажмите кнопку — откроется страница СБП (QR или переход в банк).\n"
+                f"После оплаты статус обновится автоматически.")
+        label = "📱 Перейти к оплате"
+    else:
+        text = (f"<b>💳 Оплата картой онлайн</b>\n"
+                f"Сумма: <b>{total} руб.</b>\n\n"
+                f"Нажмите кнопку для перехода на страницу оплаты.\n"
+                f"После оплаты статус обновится автоматически.")
+        label = "💳 Перейти к оплате"
+    rows = [[url(label, pay_url)], [cb("« К счёту", f"client_bill:{student_id}:{period_month}")]]
+    return text, rows
+
+
+def receipt_prompt_screen(student_id: str, period_month: str) -> tuple:
+    return "📎 Отправьте фото или документ чека об оплате:", [
+        [cb("« Отмена", f"client_pay:{student_id}:{period_month}")],
+    ]
+
+
+def receipt_sent_screen(student_id: str, period_month: str) -> tuple:
+    return "✅ Чек отправлен администратору. Ожидайте подтверждения.", bill_back_rows(student_id, period_month)
+
+
+def cash_sent_screen(student_id: str, period_month: str) -> tuple:
+    return "✅ Администратор уведомлён. Ожидайте подтверждения.", bill_back_rows(student_id, period_month)

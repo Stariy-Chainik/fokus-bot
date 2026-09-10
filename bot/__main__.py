@@ -275,6 +275,20 @@ async def main() -> None:
     refresher = asyncio.create_task(_rate_history_refresher(dp))
     await asyncio.sleep(0)  # дать задаче выполнить первую загрузку
 
+    # Бот в MAX (кабинет родителя) — в том же процессе, на тех же репозиториях
+    max_task = None
+    if settings.max_bot_token:
+        import bot.max as max_front
+        if max_front.available:
+            max_bot, max_dp = max_front.build_max(settings.max_bot_token, dict(dp.workflow_data), bot)
+            dp["notifier"].max_bot = max_bot
+            from bot.max.app import run_max
+            max_task = asyncio.create_task(run_max(max_bot, max_dp))
+        else:
+            logger.warning("MAX_BOT_TOKEN задан, но библиотека maxapi не установлена — MAX отключён")
+    else:
+        logger.info("MAX отключён (MAX_BOT_TOKEN пуст)")
+
     try:
         if settings.webhook_url:
             await _run_webhook(bot, dp)
@@ -282,6 +296,8 @@ async def main() -> None:
             await _run_polling(bot, dp)
     finally:
         refresher.cancel()
+        if max_task is not None:
+            max_task.cancel()
 
 
 if __name__ == "__main__":

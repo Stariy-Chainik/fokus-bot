@@ -33,6 +33,15 @@ async def main() -> None:
     me = await bot.get_me()
     await bot.session.close()
 
+    max_username = None
+    if settings.max_bot_token:
+        try:
+            from maxapi import Bot as MaxBot
+            mbot = MaxBot(settings.max_bot_token)
+            max_username = getattr(await mbot.get_me(), "username", None)
+        except Exception as exc:  # библиотека не установлена / токен невалиден
+            print(f"MAX: ссылки не построены ({exc})")
+
     sc = SheetsClient(settings)
     groups = await GroupRepository(sc, settings.sheet_groups).get_all()
     branches = {b.branch_id: b.name for b in await BranchRepository(sc, settings.sheet_branches).get_all()}
@@ -47,6 +56,8 @@ async def main() -> None:
     for g in sorted(groups, key=lambda g: (branches.get(g.branch_id, ""), g.name)):
         payload = build_start_payload(g.group_id, secret)
         link = f"https://t.me/{me.username}?start={payload}"
+        if max_username:
+            link += f"\n    MAX: https://max.ru/{max_username}?start={payload}"
         print(f"{g.name:40} {branches.get(g.branch_id, '?'):18} {counts.get(g.group_id, 0):>8}  {link}")
 
 
