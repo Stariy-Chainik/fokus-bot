@@ -97,18 +97,19 @@ class PaymentService:
         if not active:
             return []
         overrides = await self._sub_override_map()
-        joined = await self._student_group_repo.get_joined_map()
+        membership = await self._student_group_repo.get_membership_map()
         result: list[tuple[str, int, int]] = []
         for g in sorted(sub_groups, key=lambda x: x.name):
             if g.group_id not in active:
                 continue
-            members = await self._student_group_repo.get_students_for_group(g.group_id)
+            members = await self._student_group_repo.get_students_for_group(
+                g.group_id, include_left=True)
             billed = 0
             total = 0
             for sid in members:
-                since = joined.get((sid, g.group_id), "")
-                if since and period_month < since:
-                    continue  # вступил позже — в выручке месяца не участвует
+                row = membership.get((sid, g.group_id))
+                if row is not None and not row.covers(period_month):
+                    continue  # вне периода членства
                 amount = self._sub_amount(overrides, g.group_id, period_month, sid, g.price_full)
                 if amount > 0:
                     billed += 1
@@ -179,7 +180,7 @@ class PaymentService:
         """
         if self._group_repo is None or self._student_group_repo is None:
             return {}
-        gids = await self._student_group_repo.get_groups_for_student(student_id)
+        gids = await self._student_group_repo.get_groups_for_student(student_id, include_left=True)
         if not gids:
             return {}
         sub_groups = []
@@ -196,7 +197,7 @@ class PaymentService:
             if ls.type == LessonType.GROUP and ls.group_id in sub_ids:
                 lesson_months.setdefault(ls.group_id, set()).add(ls.date[:7])
         overrides = await self._sub_override_map()
-        joined = await self._student_group_repo.get_joined_map()
+        membership = await self._student_group_repo.get_membership_map()
         result: dict[str, dict] = {}
         for group in sub_groups:
             billable = subscription_billable_months(
@@ -204,9 +205,9 @@ class PaymentService:
             )
             if period_month not in billable:
                 continue
-            # Месяцы до вступления в группу не начисляем (пусто = ученик был с начала)
-            since = joined.get((student_id, group.group_id), "")
-            if since and period_month < since:
+            # Начисляем только за месяцы, когда ученик числился в группе
+            row = membership.get((student_id, group.group_id))
+            if row is not None and not row.covers(period_month):
                 continue
             amount = self._sub_amount(
                 overrides, group.group_id, period_month, student_id, group.price_full,
@@ -433,17 +434,18 @@ class PaymentService:
                     if ls.type == LessonType.GROUP and ls.group_id:
                         months_by_group.setdefault(ls.group_id, set()).add(ls.date[:7])
                 until = until_period or last_periods(1)[0]
-                joined = await self._student_group_repo.get_joined_map()
+                membership = await self._student_group_repo.get_membership_map()
                 for g in sub_groups:
-                    members = await self._student_group_repo.get_students_for_group(g.group_id)
+                    members = await self._student_group_repo.get_students_for_group(
+                        g.group_id, include_left=True)
                     billable = subscription_billable_months(
                         months_by_group.get(g.group_id, set()), until=until,
                     )
                     for period in sorted(billable):
                         for sid in members:
-                            since = joined.get((sid, g.group_id), "")
-                            if since and period < since:
-                                continue  # вступил позже этого месяца
+                            row = membership.get((sid, g.group_id))
+                            if row is not None and not row.covers(period):
+                                continue  # вне периода членства
                             amount = self._sub_amount(
                                 overrides, g.group_id, period, sid, g.price_full,
                             )

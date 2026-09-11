@@ -6,7 +6,7 @@
 """
 import asyncio
 
-from bot.models import Teacher, Lesson, Group, StudentPeriodPayment, SubscriptionOverride
+from bot.models import StudentGroup, Teacher, Lesson, Group, StudentPeriodPayment, SubscriptionOverride
 from bot.models.enums import LessonType, PaymentStatus, GroupBillingMode
 from bot.services.payment_service import PaymentService
 
@@ -64,19 +64,27 @@ class _FakeGroupRepo:
 
 
 class _FakeStudentGroupRepo:
-    def __init__(self, pairs, joined=None):
+    def __init__(self, pairs, joined=None, left=None):
         self._pairs = [(p[0], p[1]) for p in pairs]  # list[(student_id, group_id)]
-        # joined: {(sid, gid): "YYYY-MM"} — месяц вступления; пусто = с начала группы
+        # joined/left: {(sid, gid): "YYYY-MM"} — месяцы вступления и ухода
         self._joined = dict(joined or {})
+        self._left = dict(left or {})
 
-    async def get_groups_for_student(self, sid):
-        return [g for s, g in self._pairs if s == sid]
+    def _row(self, sid, gid):
+        return StudentGroup(student_id=sid, group_id=gid,
+                            joined_period=self._joined.get((sid, gid), ""),
+                            left_period=self._left.get((sid, gid), ""))
 
-    async def get_students_for_group(self, gid):
-        return [s for s, g in self._pairs if g == gid]
+    async def get_groups_for_student(self, sid, include_left=False):
+        return [g for s, g in self._pairs
+                if s == sid and (include_left or self._row(s, g).is_active)]
 
-    async def get_joined_map(self):
-        return dict(self._joined)
+    async def get_students_for_group(self, gid, include_left=False):
+        return [s for s, g in self._pairs
+                if g == gid and (include_left or self._row(s, g).is_active)]
+
+    async def get_membership_map(self):
+        return {(s, g): self._row(s, g) for s, g in self._pairs}
 
 
 def _teacher(tid="TCH-0001"):
@@ -149,13 +157,13 @@ def _override(gid, period, sid, amount):
                                 student_id=sid, amount=amount)
 
 
-def _service(lessons, groups, pairs, payments=(), overrides=None, joined=None):
+def _service(lessons, groups, pairs, payments=(), overrides=None, joined=None, left=None):
     return PaymentService(
         payment_repo=_FakePaymentRepo(list(payments)),
         lesson_repo=_FakeLessonRepo(lessons),
         teacher_repo=_FakeTeacherRepo([_teacher()]),
         group_repo=_FakeGroupRepo(groups),
-        student_group_repo=_FakeStudentGroupRepo(pairs, joined),
+        student_group_repo=_FakeStudentGroupRepo(pairs, joined, left),
         subscription_override_repo=(
             _FakeOverrideRepo(overrides) if overrides is not None else None
         ),
@@ -459,3 +467,38 @@ def test_joined_period_does_not_touch_per_visit_groups():
         joined={("STU-A", "GRP-0002"): "2026-06"},
     )
     assert _run(svc.compute_debt_map(until_period="2026-06")) == {"STU-A": {"2026-04": 700}}
+
+
+# ── Месяц ухода: прошлые месяцы сохраняются, новые не начисляются ────────────
+
+def test_left_period_keeps_past_months_and_stops_future():
+    """Ушёл с июня: апрель и май остаются в долге, июнь уже нет."""
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
+                   left={("STU-A", "GRP-0001"): "2026-06"})
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-06")) == {}
+    assert _run(svc.compute_debt_map(until_period="2026-06")) == {
+        "STU-A": {"2026-04": 3000, "2026-05": 3000}}
+
+
+def test_left_period_excludes_from_revenue_of_that_month():
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)],
+                   [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+                   left={("STU-A", "GRP-0001"): "2026-06"})
+    assert _run(svc.subscription_revenue_breakdown("2026-05")) == [("Хип-хоп дети", 2, 6000)]
+    assert _run(svc.subscription_revenue_breakdown("2026-06")) == [("Хип-хоп дети", 1, 3000)]
+
+
+def test_joined_and_left_together_bill_only_the_window():
+    """Пришёл в мае, ушёл с июня — платит только за май."""
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
+                   joined={("STU-A", "GRP-0001"): "2026-05"},
+                   left={("STU-A", "GRP-0001"): "2026-06"})
+    assert _run(svc.compute_debt_map(until_period="2026-06")) == {"STU-A": {"2026-05": 3000}}
+
+
+def test_membership_covers_helper():
+    row = StudentGroup("STU-A", "GRP-0001", joined_period="2026-05", left_period="2026-08")
+    assert not row.covers("2026-04") and row.covers("2026-05") and row.covers("2026-07")
+    assert not row.covers("2026-08") and not row.is_active
+    assert StudentGroup("STU-A", "GRP-0001").covers("2020-01")  # пустые поля — всегда

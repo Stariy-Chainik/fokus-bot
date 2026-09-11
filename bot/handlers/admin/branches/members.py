@@ -15,6 +15,8 @@ from bot.states import (
     GroupAddStudentStates,
 )
 from bot.handlers.access import is_admin as _is_admin
+from bot.services.membership import is_subscription, leave_group, leave_options
+from bot.utils.dates import current_period
 
 from ._base import router
 
@@ -234,11 +236,31 @@ async def cb_group_rm_do(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, group_id, student_id = callback.data.split(":", 2)
+    parts = callback.data.split(":")
+    group_id, student_id = parts[1], parts[2]
+    left_period = parts[3] if len(parts) > 3 else ""
     student = await student_repo.get_by_id(student_id)
-    removed = await student_group_repo.remove(student_id, group_id)
-    if removed and student:
-        await callback.answer(f"✅ {student.name} убран(а) из группы")
+
+    if not left_period and await is_subscription(group_id, group_repo):
+        rows = [[InlineKeyboardButton(text=label, callback_data=f"grp_rm_do:{group_id}:{student_id}:{period}")]
+                for period, label in leave_options()]
+        rows.append([InlineKeyboardButton(text="« Отмена", callback_data=f"group_card:{group_id}")])
+        await callback.message.edit_text(
+            f"<b>Убрать {student.name if student else student_id} из группы</b>\n\n"
+            f"Абонементная группа: прошлые месяцы останутся в счёте.\n"
+            f"С какого месяца прекратить начисление?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+        await callback.answer()
+        return
+
+    result = await leave_group(student_id, group_id, left_period or current_period(),
+                               group_repo, student_group_repo)
+    who = student.name if student else student_id
+    if result == "marked":
+        await callback.answer(f"✅ {who}: ушёл(ла) с {left_period}")
+    elif result == "removed":
+        await callback.answer(f"✅ {who} убран(а) из группы")
     else:
         await callback.answer("Не удалось убрать (возможно, уже убран)")
     await _render_group_card(

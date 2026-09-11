@@ -16,6 +16,8 @@ from bot.keyboards.admin import (
     kb_back,
 )
 from bot.handlers.access import is_admin as _is_admin
+from bot.services.membership import is_subscription, leave_group, leave_options
+from bot.utils.dates import current_period
 
 from ._base import router
 
@@ -156,10 +158,30 @@ async def cb_student_groups_remove_do(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, group_id = callback.data.split(":", 2)
-    await student_group_repo.remove(student_id, group_id)
+    parts = callback.data.split(":")
+    student_id, group_id = parts[1], parts[2]
+    left_period = parts[3] if len(parts) > 3 else ""
     group = await group_repo.get_by_id(group_id)
-    toast = f"Убран из группы «{group.name}»" if group else "Убран из группы"
+
+    # Абонемент: спрашиваем, с какого месяца прекращать начисление
+    if not left_period and await is_subscription(group_id, group_repo):
+        rows = [[InlineKeyboardButton(text=label, callback_data=f"sg_rm_do:{student_id}:{group_id}:{period}")]
+                for period, label in leave_options()]
+        rows.append([InlineKeyboardButton(text="« Отмена", callback_data=f"student_card:{student_id}")])
+        await callback.message.edit_text(
+            f"<b>Убрать из «{group.name if group else group_id}»</b>\n\n"
+            f"Это абонементная группа. Прошлые месяцы останутся в счёте.\n"
+            f"С какого месяца прекратить начисление?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+        await callback.answer()
+        return
+
+    result = await leave_group(student_id, group_id, left_period or current_period(),
+                               group_repo, student_group_repo)
+    name = f"«{group.name}»" if group else "группы"
+    toast = (f"Помечен ушедшим из {name} с {left_period}" if result == "marked"
+             else f"Убран из {name}" if result == "removed" else "Не удалось убрать")
     await callback.answer(toast, show_alert=False)
     await _render_student_card(callback, student_id, "students:list", student_service)
 

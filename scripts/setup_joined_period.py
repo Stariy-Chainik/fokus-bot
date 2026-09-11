@@ -1,7 +1,9 @@
-"""Колонка student_groups.joined_period — месяц вступления ученика в группу. Идемпотентно.
+"""Колонки student_groups: joined_period и left_period. Идемпотентно.
 
-Абонемент начисляется только с этого месяца, поэтому добавление ученика в группу
-задним числом больше не создаёт долг за прошлые месяцы.
+joined_period — месяц вступления: абонемент начисляется только с него, поэтому
+добавление ученика в группу задним числом не создаёт долг за прошлые месяцы.
+left_period — месяц ухода: с него начисление прекращается, но прошлые месяцы
+остаются в счёте (строка членства не удаляется).
 
 Существующим строкам проставляется первый месяц занятий их группы — поведение
 счётов и долгов не меняется. Дальше даты редактирует админ в карточке группы.
@@ -24,6 +26,8 @@ from config.settings import settings
 APPLY = "--apply" in sys.argv
 COL_NAME = "joined_period"
 COL_IDX = 3
+LEFT_NAME = "left_period"
+LEFT_IDX = 4
 
 
 def get_sheet():
@@ -46,6 +50,17 @@ def main() -> None:
             print(f"{ws.title}.{COL_NAME}: будет добавлена колонка {COL_IDX}")
     else:
         print(f"{ws.title}.{COL_NAME}: есть (колонка {header.index(COL_NAME) + 1})")
+
+    if LEFT_NAME not in header:
+        if APPLY:
+            if ws.col_count < LEFT_IDX:
+                ws.add_cols(LEFT_IDX - ws.col_count)
+            ws.update_cell(1, LEFT_IDX, LEFT_NAME)
+            print(f"{ws.title}.{LEFT_NAME}: добавлена колонка {LEFT_IDX}")
+        else:
+            print(f"{ws.title}.{LEFT_NAME}: будет добавлена колонка {LEFT_IDX}")
+    else:
+        print(f"{ws.title}.{LEFT_NAME}: есть (колонка {header.index(LEFT_NAME) + 1})")
 
     # Первый месяц занятий каждой группы — из листа занятий
     lessons = sh.worksheet(settings.sheet_lessons).get_all_records()

@@ -114,6 +114,17 @@ class StudentGroup:
     student_id: str
     group_id: str
     joined_period: str = ""  # YYYY-MM, с какого месяца ученик в группе; пусто = «был всегда»
+    left_period: str = ""    # YYYY-MM, с какого месяца ушёл (этот месяц уже не оплачивает)
+
+    @property
+    def is_active(self) -> bool:
+        return not self.left_period
+
+    def covers(self, period_month: str) -> bool:
+        """Начислять ли абонемент за этот месяц: ученик числился в группе."""
+        if self.joined_period and period_month < self.joined_period:
+            return False
+        return not (self.left_period and period_month >= self.left_period)
 
 
 @dataclass

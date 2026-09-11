@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 from bot.handlers.access import is_teacher as _is_teacher
+from bot.services.membership import is_subscription, leave_group, leave_options
+from bot.utils.dates import current_period
 
 
 
@@ -301,14 +303,34 @@ async def cb_t_grp_rm_do(
     if not _is_teacher(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, group_id, student_id = callback.data.split(":", 2)
+    parts = callback.data.split(":")
+    group_id, student_id = parts[1], parts[2]
+    left_period = parts[3] if len(parts) > 3 else ""
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
         return
     student = await student_repo.get_by_id(student_id)
-    removed = await student_group_repo.remove(student_id, group_id)
-    if removed and student:
-        await callback.answer(f"✅ {student.name} убран(а) из группы")
+
+    if not left_period and await is_subscription(group_id, group_repo):
+        rows = [[InlineKeyboardButton(text=label, callback_data=f"t_grp_rm_do:{group_id}:{student_id}:{period}")]
+                for period, label in leave_options()]
+        rows.append([InlineKeyboardButton(text="« Отмена", callback_data=f"t_group_card:{group_id}")])
+        await callback.message.edit_text(
+            f"<b>Убрать {student.name if student else student_id} из группы</b>\n\n"
+            f"Группа с абонементом: оплата за прошлые месяцы сохранится.\n"
+            f"С какого месяца прекратить начисление?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+        await callback.answer()
+        return
+
+    result = await leave_group(student_id, group_id, left_period or current_period(),
+                               group_repo, student_group_repo)
+    who = student.name if student else student_id
+    if result == "marked":
+        await callback.answer(f"✅ {who}: ушёл(ла) с {left_period}")
+    elif result == "removed":
+        await callback.answer(f"✅ {who} убран(а) из группы")
     else:
         await callback.answer("Не удалось убрать")
     await _render_t_group_card(

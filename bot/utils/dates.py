@@ -57,6 +57,13 @@ def current_period() -> str:
     return _date.today().strftime("%Y-%m")
 
 
+def next_period() -> str:
+    """Следующий месяц в формате YYYY-MM."""
+    from dateutil.relativedelta import relativedelta
+    from datetime import date as _date
+    return (_date.today() + relativedelta(months=1)).strftime("%Y-%m")
+
+
 def last_periods(n: int) -> list[str]:
     """Последние n периодов (YYYY-MM), от текущего месяца назад.
 
