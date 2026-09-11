@@ -131,7 +131,7 @@
 | created_at / updated_at | datetime | |
 | teacher_id | str | FK→teachers **ЛИБО синтетический ключ `SUB:{group_id}`** — абонементное начисление группы (не педагог!) |
 | teacher_name | str | для `SUB:` — «Абонемент «{группа}»» |
-| payment_method | enum ∅ | `cash` \| `receipt_bank` \| `receipt_sbp` \| `receipt_unknown` \| `yookassa_sbp` \| `yookassa_card` \| `yookassa` \| `telegram` \| `admin_manual`; пусто у старых оплат |
+| payment_method | enum ∅ | `cash` \| `receipt_bank` \| `receipt_unknown` \| `yookassa_sbp` \| `yookassa_card` \| `yookassa` \| `provider_online` \| `admin_manual`; `provider_online` — только legacy-совместимость, в текущем UI способа нет; пусто у старых оплат |
 
 Уникальность: **один счёт на (student_id, teacher_id, period_month)** — по соглашению.
 

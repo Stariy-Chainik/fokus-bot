@@ -114,10 +114,10 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
                 return
             lines.append(f"  <b>{mark} {title}:</b>")
             for b in selected:
-                kind = "групповое" if b.lesson_type == "group" else "индивидуальное"
+                kind = "групп." if b.lesson_type == "group" else "инд."
                 lines.append(
                     f"    {mark} {format_date_short_with_wd(b.date)} · {kind}"
-                    f" · {b.duration_min} мин · {b.amount} руб."
+                    f" · {b.duration_min} мин · {b.amount} ₽"
                 )
 
         # Неоплаченные уроки всегда сверху, оплаченные — ниже.

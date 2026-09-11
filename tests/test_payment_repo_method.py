@@ -74,6 +74,6 @@ def test_confirm_period_writes_method_to_each_paid_row():
         "student_id": "STU-1", "period_month": "2026-09", "status": "pending",
         "total_amount": 1300,
     }])
-    count = asyncio.run(repo.confirm_all_for_period("STU-1", "2026-09", 7, "receipt_sbp"))
+    count = asyncio.run(repo.confirm_all_for_period("STU-1", "2026-09", 7, "receipt_bank"))
     assert count == 1
-    assert (2, 14, "receipt_sbp") in repo.updated
+    assert (2, 14, "receipt_bank") in repo.updated

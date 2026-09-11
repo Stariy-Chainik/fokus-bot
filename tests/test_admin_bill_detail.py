@@ -38,9 +38,9 @@ def test_unpaid_lessons_are_listed_before_paid_lessons():
     text = "\n".join(_bill_detail_lines("Алиса", "2026-09", bills, payments))
 
     assert "<b>⬜ К оплате:</b>" in text
-    assert "⬜ 19 сен, сб · индивидуальное · 60 мин · 1300 руб." in text
+    assert "⬜ 19 сен, сб · инд. · 60 мин · 1300 ₽" in text
     assert "<b>✅ Оплачено:</b>" in text
-    assert "✅ 12 сен, сб · групповое · 60 мин · 1300 руб." in text
+    assert "✅ 12 сен, сб · групп. · 60 мин · 1300 ₽" in text
     assert text.index("⬜ 19 сен") < text.index("✅ 5 сен")
     assert "🟡" not in text
     assert "частич" not in text.lower()

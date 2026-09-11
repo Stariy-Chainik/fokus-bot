@@ -140,7 +140,7 @@ CRM для танцевальной школы: учёт **занятий**, р�
 ### StudentPeriodPayment (счёт за период — хранится)
 `payment_id`, `student_id`, `student_name`, `period_month`(`YYYY-MM`), `total_amount:int`,
 `status:pending|paid`, `paid_at`, `confirmed_by_tg_id`, `comment`, `created_at`, `updated_at`,
-`teacher_id`, `teacher_name`, `payment_method` (`cash|receipt_bank|receipt_sbp|receipt_unknown|yookassa_sbp|yookassa_card|yookassa|telegram|admin_manual`; пусто у legacy-строк)
+`teacher_id`, `teacher_name`, `payment_method` (`cash|receipt_bank|receipt_unknown|yookassa_sbp|yookassa_card|yookassa|provider_online|admin_manual`; `provider_online` — только legacy-совместимость, в текущем UI способа нет; пусто у legacy-строк)
 - **Один счёт на `(student, teacher, period)`** (см. §8).
 
 ### Invoice + InvoiceItem (целевая модель Mini App — корзина оплаты)
