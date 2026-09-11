@@ -11,6 +11,20 @@ from bot.repositories import UserRepository
 logger = logging.getLogger(__name__)
 
 
+def _label(event: TelegramObject, tg_user: TgUser | None) -> str | None:
+    """Короткая метка апдейта для лога: кто и что прислал (middleware стоит на dp.update)."""
+    who = f"[{tg_user.id}]" if tg_user else "[?]"
+    cb = getattr(event, "callback_query", None) or (event if isinstance(event, CallbackQuery) else None)
+    if cb is not None:
+        return f"{who} cb:{cb.data}"
+    msg = getattr(event, "message", None) or (event if isinstance(event, Message) else None)
+    if msg is not None:
+        if msg.text:
+            return f"{who} msg:{msg.text[:40]!r}"
+        return f"{who} msg:<{msg.content_type}>"
+    return None
+
+
 class AuthMiddleware(BaseMiddleware):
     def __init__(self, user_repo: UserRepository) -> None:
         self._user_repo = user_repo
@@ -22,13 +36,8 @@ class AuthMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         t0 = time.monotonic()
-        label = None
-        if isinstance(event, CallbackQuery):
-            label = f"cb:{event.data}"
-        elif isinstance(event, Message) and event.text:
-            label = f"msg:{event.text[:40]}"
-
         tg_user: TgUser | None = data.get("event_from_user")
+        label = _label(event, tg_user)
         if tg_user:
             try:
                 data["user"] = await self._user_repo.get_by_tg_id(tg_user.id)

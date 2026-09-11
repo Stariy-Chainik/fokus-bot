@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ReceiptStates(StatesGroup):
     waiting_for_receipt = State()
+    choosing_bill = State()  # чек прислан без шага «Прикрепить чек» — выбираем счёт
 
 
 class GroupLinkStates(StatesGroup):

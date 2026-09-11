@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F
+from aiogram.filters import StateFilter
 from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, BufferedInputFile
@@ -21,6 +22,7 @@ from bot.services.parent_views import (
     client_contact, qr_png, breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
 from bot.screens.adapters import to_aiogram_markup
+from bot.screens import cb as cb_btn
 from bot.screens.parent_bills import (
     bill_back_rows, teacher_select_screen, methods_screen, cash_screen, bank_screen,
     sbp_screen, online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
@@ -441,3 +443,115 @@ async def cb_receipt_confirm(
                 )
     else:
         await callback.answer("Счёт уже подтверждён или не найден", show_alert=True)
+
+
+# ─── Чек, присланный без шага «Прикрепить чек» ────────────────────────────────
+# Родители часто отправляют фото чека просто так (или после перезапуска бота, когда
+# состояние диалога сброшено). Раньше такое сообщение молча терялось. Теперь: один
+# неоплаченный счёт — пересылаем админам сразу; несколько — просим выбрать.
+
+async def _unpaid_bills_of_parent(students: list, payment_service: PaymentService) -> list:
+    """[(student, period, total)] по текущему и прошлому месяцу."""
+    from bot.utils.dates import last_periods
+    out = []
+    for student in students:
+        for period in last_periods(2):
+            total, _ = await unpaid_for(student, period, payment_service)
+            if total > 0:
+                out.append((student, period, total))
+    return out
+
+
+def _file_of(message: Message) -> tuple[str, str] | None:
+    if message.photo:
+        return "photo", message.photo[-1].file_id
+    if message.document:
+        return "document", message.document.file_id
+    return None
+
+
+async def _forward_receipt(
+    bot, user_repo: UserRepository, kind: str, file_id: str, caption: str, rows,
+) -> int:
+    kb = to_aiogram_markup(rows)
+    sent = 0
+    for admin in await user_repo.get_admins():
+        try:
+            if kind == "photo":
+                await bot.send_photo(admin.tg_id, file_id, caption=caption, reply_markup=kb)
+            else:
+                await bot.send_document(admin.tg_id, file_id, caption=caption, reply_markup=kb)
+            sent += 1
+        except TelegramAPIError as exc:
+            logger.warning("Не удалось отправить чек админу tg_id=%s: %s", admin.tg_id, exc)
+    return sent
+
+
+async def _send_unbound_receipt(
+    bot, user_repo: UserRepository, payment_service: PaymentService,
+    student, period_month: str, total: int, kind: str, file_id: str, parent_tg_id: int,
+) -> None:
+    bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
+    caption = receipt_caption("bank", student.name, period_month, total,
+                              "\n".join(breakdown_lines(bills_map, list(bills_map))))
+    rows = admin_confirm_rows(student.student_id, period_month, "", False, tg_addr(parent_tg_id))
+    await _forward_receipt(bot, user_repo, kind, file_id, caption, rows)
+    logger.info("Чек без шага «Прикрепить»: tg_id=%s → %s %s", parent_tg_id, student.student_id, period_month)
+
+
+@router.message(StateFilter(None), F.photo | F.document)
+async def on_unbound_receipt(
+    message: Message, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
+) -> None:
+    if user is not None and (user.is_admin or user.teacher_id):
+        return
+    students = await student_repo.get_by_parent_tg_id(message.from_user.id)
+    if not students:
+        return
+    file = _file_of(message)
+    if file is None:
+        return
+    kind, file_id = file
+    bills = await _unpaid_bills_of_parent(students, payment_service)
+    if not bills:
+        await message.answer(
+            "📎 Файл получил, но неоплаченных счетов сейчас нет. "
+            "Если это чек за другой период — напишите администратору.",
+            reply_markup=to_aiogram_markup([[cb_btn("« Меню", "go:home")]]),
+        )
+        return
+    if len(bills) == 1:
+        student, period_month, total = bills[0]
+        await _send_unbound_receipt(message.bot, user_repo, payment_service,
+                                    student, period_month, total, kind, file_id, message.from_user.id)
+        text, rows = receipt_sent_screen(student.student_id, period_month)
+        await message.answer(text, reply_markup=to_aiogram_markup(rows))
+        return
+    await state.set_state(ReceiptStates.choosing_bill)
+    await state.update_data(rc_kind=kind, rc_file_id=file_id)
+    rows = [[cb_btn(f"{s.name} · {_period_label(p)} — {t} руб.", f"rcpick:{s.student_id}:{p}")]
+            for s, p, t in bills]
+    rows.append([cb_btn("« Отмена", "go:home")])
+    await message.answer("📎 Чек получил. За какой счёт эта оплата?", reply_markup=to_aiogram_markup(rows))
+
+
+@router.callback_query(F.data.startswith("rcpick:"), ReceiptStates.choosing_bill)
+async def cb_receipt_pick(
+    callback: CallbackQuery, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
+) -> None:
+    _, student_id, period_month = callback.data.split(":", 2)
+    data = await state.get_data()
+    await state.clear()
+    kind, file_id = data.get("rc_kind"), data.get("rc_file_id")
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    student = next((s for s in students if s.student_id == student_id), None)
+    if student is None or not file_id:
+        await callback.answer("Не удалось привязать чек, отправьте его ещё раз", show_alert=True)
+        return
+    total, _ = await unpaid_for(student, period_month, payment_service)
+    await _send_unbound_receipt(callback.bot, user_repo, payment_service,
+                                student, period_month, total, kind, file_id, callback.from_user.id)
+    await _edit(callback, receipt_sent_screen(student_id, period_month))
+    await callback.answer()

@@ -14,8 +14,9 @@ from maxapi.types import MessageCallback, MessageCreated, InputMediaBuffer
 from config.settings import settings
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import max_addr
+from bot.screens import cb
 from bot.services.parent_views import (
-    unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
+    period_label, unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
     breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
 from bot.screens.adapters import to_aiogram_markup
@@ -236,3 +237,84 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
         await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
     text, back_rows = receipt_sent_screen(student_id, period_month)
     await send_screen(event.bot, max_uid, text, back_rows)
+
+
+# ─── Чек без шага «Прикрепить чек» (MAX) ─────────────────────────────────────
+
+async def _unpaid_bills_of_parent(students: list, payment_service) -> list:
+    from bot.utils.dates import last_periods
+    out = []
+    for student in students:
+        for period in last_periods(2):
+            total, _ = await unpaid_for(student, period, payment_service)
+            if total > 0:
+                out.append((student, period, total))
+    return out
+
+
+async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, student, period_month, total,
+                           kind, url, filename, max_uid) -> bool:
+    bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
+    caption = receipt_caption("bank", student.name, period_month, total,
+                              "\n".join(breakdown_lines(bills_map, list(bills_map))))
+    rows = admin_confirm_rows(student.student_id, period_month, "", False, max_addr(max_uid))
+    try:
+        blob = await event_bot.download_bytes(url)
+    except Exception as exc:
+        logger.error("MAX: не удалось скачать чек: %s", exc)
+        return False
+    if kind == "image":
+        await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
+    else:
+        await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+    logger.info("MAX: чек без шага «Прикрепить»: max_id=%s → %s %s", max_uid, student.student_id, period_month)
+    return True
+
+
+@router.message_created(F.message.body.attachments, None)
+async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+    att = _receipt_attachment(event.message)
+    if att is None:
+        return
+    students = await student_repo.get_by_parent_max_id(max_uid)
+    if not students:
+        return
+    kind, url, filename = att
+    bills = await _unpaid_bills_of_parent(students, payment_service)
+    if not bills:
+        await send_screen(event.bot, max_uid,
+                          "📎 Файл получил, но неоплаченных счетов сейчас нет. "
+                          "Если это чек за другой период — напишите администратору.",
+                          [[cb("« Меню", "go:home")]])
+        return
+    if len(bills) == 1:
+        student, period_month, total = bills[0]
+        ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
+                                    kind, url, filename, max_uid)
+        text, rows = receipt_sent_screen(student.student_id, period_month) if ok else ("Не удалось получить файл. Попробуйте ещё раз.", [])
+        await send_screen(event.bot, max_uid, text, rows)
+        return
+    await context.set_state(MaxParentStates.choosing_bill)
+    await context.update_data(rc_kind=kind, rc_url=url, rc_filename=filename)
+    rows = [[cb(f"{s.name} · {period_label(p)} — {t} руб.", f"rcpick:{s.student_id}:{p}")] for s, p, t in bills]
+    rows.append([cb("« Отмена", "go:home")])
+    await send_screen(event.bot, max_uid, "📎 Чек получил. За какой счёт эта оплата?", rows)
+
+
+@router.message_callback(F.callback.payload.startswith("rcpick:"), MaxParentStates.choosing_bill)
+async def on_receipt_pick(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+    _, student_id, period_month = event.callback.payload.split(":", 2)
+    data = await context.get_data()
+    await context.clear()
+    students = await student_repo.get_by_parent_max_id(max_uid)
+    student = next((s for s in students if s.student_id == student_id), None)
+    if student is None or not data.get("rc_url"):
+        await alert(event, "Не удалось привязать чек, отправьте его ещё раз")
+        return
+    total, _ = await unpaid_for(student, period_month, payment_service)
+    ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
+                                data.get("rc_kind"), data["rc_url"], data.get("rc_filename") or "receipt", max_uid)
+    if ok:
+        await edit_screen(event, *receipt_sent_screen(student_id, period_month))
+    else:
+        await alert(event, "Не удалось получить файл. Отправьте чек ещё раз.")

@@ -2,9 +2,9 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, ExceptionTypeFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ErrorEvent
 from aiogram.exceptions import TelegramBadRequest
 
 from bot.models import User
@@ -296,3 +296,17 @@ async def cb_go_home(
 async def cb_noop(callback: CallbackQuery) -> None:
     """Подавляет «часики» на некликабельных кнопках (заголовки календаря и т.п.)."""
     await callback.answer()
+
+
+@router.errors(ExceptionTypeFilter(TelegramBadRequest))
+async def on_bad_request(event: ErrorEvent) -> None:
+    """Повторное нажатие той же кнопки: Telegram отвечает «message is not modified».
+    Это не ошибка — гасим «часики» и не засоряем лог трейсбеком."""
+    if "message is not modified" not in str(event.exception):
+        raise event.exception
+    cb = event.update.callback_query
+    if cb is not None:
+        try:
+            await cb.answer()
+        except TelegramBadRequest:
+            pass
