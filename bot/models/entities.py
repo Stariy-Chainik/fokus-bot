@@ -113,6 +113,7 @@ class SubscriptionOverride:
 class StudentGroup:
     student_id: str
     group_id: str
+    joined_period: str = ""  # YYYY-MM, с какого месяца ученик в группе; пусто = «был всегда»
 
 
 @dataclass

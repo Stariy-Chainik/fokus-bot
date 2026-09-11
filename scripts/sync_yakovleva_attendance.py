@@ -144,7 +144,7 @@ async def main() -> None:
         # Состав = список из таблицы (Боброво: без пробных — иначе начислится абонемент)
         wanted = {(await ensure(n)).student_id for n in roster if mode == "per_visit" or n not in trial_only}
         for sid in sorted(wanted - members):
-            await sg.add(sid, gid); changes += 1
+            await sg.add(sid, gid, joined_period=month); changes += 1
             print(f"  → {by_id[sid].name} → {gid}")
         for sid in sorted(members - wanted):
             await sg.remove(sid, gid); changes += 1

@@ -4,5 +4,6 @@ from . import groups         # noqa: F401
 from . import billing_modes  # noqa: F401
 from . import billing_subscription  # noqa: F401
 from . import members        # noqa: F401
+from . import joined         # noqa: F401
 
 __all__ = ["router"]

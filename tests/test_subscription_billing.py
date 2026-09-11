@@ -64,14 +64,19 @@ class _FakeGroupRepo:
 
 
 class _FakeStudentGroupRepo:
-    def __init__(self, pairs):
-        self._pairs = pairs  # list[(student_id, group_id)]
+    def __init__(self, pairs, joined=None):
+        self._pairs = [(p[0], p[1]) for p in pairs]  # list[(student_id, group_id)]
+        # joined: {(sid, gid): "YYYY-MM"} — месяц вступления; пусто = с начала группы
+        self._joined = dict(joined or {})
 
     async def get_groups_for_student(self, sid):
         return [g for s, g in self._pairs if s == sid]
 
     async def get_students_for_group(self, gid):
         return [s for s, g in self._pairs if g == gid]
+
+    async def get_joined_map(self):
+        return dict(self._joined)
 
 
 def _teacher(tid="TCH-0001"):
@@ -84,13 +89,18 @@ def _sub_group(gid="GRP-0001", price=3000):
                  billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=price)
 
 
-def _group_lesson(lesson_id, gid, lesson_date, teacher_id="TCH-0001"):
+def _per_visit_group(gid="GRP-0002", price=700):
+    return Group(group_id=gid, branch_id="BRN-0001", name="Поштучная",
+                 billing_mode=GroupBillingMode.PER_VISIT, price_full=price)
+
+
+def _group_lesson(lesson_id, gid, lesson_date, teacher_id="TCH-0001", attendees=None):
     return Lesson(
         lesson_id=lesson_id, teacher_id=teacher_id, teacher_name="—",
         type=LessonType.GROUP, student_1_id=None, student_1_name=None,
         student_2_id=None, student_2_name=None,
         date=lesson_date, duration_min=60, earned=0,
-        recorded_at="", updated_at="", attendees=None, group_id=gid,
+        recorded_at="", updated_at="", attendees=attendees, group_id=gid,
     )
 
 
@@ -139,13 +149,13 @@ def _override(gid, period, sid, amount):
                                 student_id=sid, amount=amount)
 
 
-def _service(lessons, groups, pairs, payments=(), overrides=None):
+def _service(lessons, groups, pairs, payments=(), overrides=None, joined=None):
     return PaymentService(
         payment_repo=_FakePaymentRepo(list(payments)),
         lesson_repo=_FakeLessonRepo(lessons),
         teacher_repo=_FakeTeacherRepo([_teacher()]),
         group_repo=_FakeGroupRepo(groups),
-        student_group_repo=_FakeStudentGroupRepo(pairs),
+        student_group_repo=_FakeStudentGroupRepo(pairs, joined),
         subscription_override_repo=(
             _FakeOverrideRepo(overrides) if overrides is not None else None
         ),
@@ -397,3 +407,55 @@ def test_debt_map_includes_holiday_months_but_not_summer():
     )
     debts = _run(svc.compute_debt_map(until_period="2026-10"))
     assert debts == {"STU-A": {"2026-05": 3000, "2026-06": 3000, "2026-09": 3000, "2026-10": 3000}}
+
+
+# ── Месяц вступления в группу: абонемент не начисляется задним числом ────────
+
+def _sub_lessons():
+    return [_group_lesson("LES-1", "GRP-0001", "2026-04-03"),
+            _group_lesson("LES-2", "GRP-0001", "2026-05-06"),
+            _group_lesson("LES-3", "GRP-0001", "2026-06-04")]
+
+
+def test_joined_period_skips_months_before_joining():
+    """Ученик вступил в июне — за апрель и май абонемента нет."""
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
+                   joined={("STU-A", "GRP-0001"): "2026-06"})
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04")) == {}
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-05")) == {}
+    bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-06"))
+    assert bills["SUB:GRP-0001"]["total"] == 3000
+
+
+def test_joined_period_empty_means_from_the_start():
+    """Пустой месяц вступления — прежнее поведение: начисляем со всех месяцев группы."""
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")])
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"]["total"] == 3000
+
+
+def test_debt_map_respects_joined_period():
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)],
+                   [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+                   joined={("STU-A", "GRP-0001"): "2026-06"})
+    debts = _run(svc.compute_debt_map(until_period="2026-06"))
+    assert debts["STU-A"] == {"2026-06": 3000}
+    assert debts["STU-B"] == {"2026-04": 3000, "2026-05": 3000, "2026-06": 3000}
+
+
+def test_revenue_breakdown_respects_joined_period():
+    svc = _service(_sub_lessons(), [_sub_group(price=3000)],
+                   [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+                   joined={("STU-A", "GRP-0001"): "2026-06"})
+    assert _run(svc.subscription_revenue_breakdown("2026-04")) == [("Хип-хоп дети", 1, 3000)]
+    assert _run(svc.subscription_revenue_breakdown("2026-06")) == [("Хип-хоп дети", 2, 6000)]
+
+
+def test_joined_period_does_not_touch_per_visit_groups():
+    """Месяц вступления касается только абонемента: поштучные занятия считаются как были."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0002", "2026-04-03", attendees="STU-A:60:700")],
+        [_per_visit_group("GRP-0002")],
+        [("STU-A", "GRP-0002")],
+        joined={("STU-A", "GRP-0002"): "2026-06"},
+    )
+    assert _run(svc.compute_debt_map(until_period="2026-06")) == {"STU-A": {"2026-04": 700}}

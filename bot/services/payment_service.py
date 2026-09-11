@@ -97,6 +97,7 @@ class PaymentService:
         if not active:
             return []
         overrides = await self._sub_override_map()
+        joined = await self._student_group_repo.get_joined_map()
         result: list[tuple[str, int, int]] = []
         for g in sorted(sub_groups, key=lambda x: x.name):
             if g.group_id not in active:
@@ -105,6 +106,9 @@ class PaymentService:
             billed = 0
             total = 0
             for sid in members:
+                since = joined.get((sid, g.group_id), "")
+                if since and period_month < since:
+                    continue  # вступил позже — в выручке месяца не участвует
                 amount = self._sub_amount(overrides, g.group_id, period_month, sid, g.price_full)
                 if amount > 0:
                     billed += 1
@@ -192,12 +196,17 @@ class PaymentService:
             if ls.type == LessonType.GROUP and ls.group_id in sub_ids:
                 lesson_months.setdefault(ls.group_id, set()).add(ls.date[:7])
         overrides = await self._sub_override_map()
+        joined = await self._student_group_repo.get_joined_map()
         result: dict[str, dict] = {}
         for group in sub_groups:
             billable = subscription_billable_months(
                 lesson_months.get(group.group_id, set()), until=period_month,
             )
             if period_month not in billable:
+                continue
+            # Месяцы до вступления в группу не начисляем (пусто = ученик был с начала)
+            since = joined.get((student_id, group.group_id), "")
+            if since and period_month < since:
                 continue
             amount = self._sub_amount(
                 overrides, group.group_id, period_month, student_id, group.price_full,
@@ -424,6 +433,7 @@ class PaymentService:
                     if ls.type == LessonType.GROUP and ls.group_id:
                         months_by_group.setdefault(ls.group_id, set()).add(ls.date[:7])
                 until = until_period or last_periods(1)[0]
+                joined = await self._student_group_repo.get_joined_map()
                 for g in sub_groups:
                     members = await self._student_group_repo.get_students_for_group(g.group_id)
                     billable = subscription_billable_months(
@@ -431,6 +441,9 @@ class PaymentService:
                     )
                     for period in sorted(billable):
                         for sid in members:
+                            since = joined.get((sid, g.group_id), "")
+                            if since and period < since:
+                                continue  # вступил позже этого месяца
                             amount = self._sub_amount(
                                 overrides, g.group_id, period, sid, g.price_full,
                             )

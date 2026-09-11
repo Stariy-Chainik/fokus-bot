@@ -5,6 +5,7 @@ from aiogram import Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 
+from bot.models.enums import GroupBillingMode
 from bot.repositories import (
     BranchRepository, GroupRepository, TeacherGroupRepository,
     TeacherRepository, StudentRepository, StudentGroupRepository,
@@ -20,7 +21,8 @@ router = Router(name="admin_branches")
 
 # ─── Общий рендер карточки группы ─────────────────────────────────────────────
 
-def _kb_group_card(group_id: str, branch_id: str, students: list) -> InlineKeyboardMarkup:
+def _kb_group_card(group_id: str, branch_id: str, students: list,
+                   subscription: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"student_card:{s.student_id}")]
         for s in students
@@ -28,6 +30,9 @@ def _kb_group_card(group_id: str, branch_id: str, students: list) -> InlineKeybo
     rows.append([InlineKeyboardButton(text="➕ Добавить ученика", callback_data=f"group_add_student:{group_id}")])
     if students:
         rows.append([InlineKeyboardButton(text="➖ Убрать ученика", callback_data=f"group_rm_student:{group_id}")])
+    if subscription and students:
+        rows.append([InlineKeyboardButton(
+            text="📅 Месяц вступления", callback_data=f"group_joined:{group_id}")])
     rows += [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
         [InlineKeyboardButton(text="💰 Биллинг ученикам", callback_data=f"group_billing:{group_id}")],
@@ -68,6 +73,9 @@ async def _render_group_card(
     )
     await show_card(
         message, text,
-        reply_markup=_kb_group_card(group_id, group.branch_id, students),
+        reply_markup=_kb_group_card(
+            group_id, group.branch_id, students,
+            subscription=group.billing_mode == GroupBillingMode.SUBSCRIPTION,
+        ),
     )
 

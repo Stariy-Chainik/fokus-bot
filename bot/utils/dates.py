@@ -51,6 +51,12 @@ def format_date_short_with_wd(value: str) -> str:
     return f"{dt.day} {_MONTHS_RU_SHORT[dt.month - 1]}, {_WEEKDAYS_RU_SHORT[dt.weekday()]}"
 
 
+def current_period() -> str:
+    """Текущий месяц в формате YYYY-MM."""
+    from datetime import date as _date
+    return _date.today().strftime("%Y-%m")
+
+
 def last_periods(n: int) -> list[str]:
     """Последние n периодов (YYYY-MM), от текущего месяца назад.
 

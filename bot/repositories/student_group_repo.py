@@ -1,12 +1,16 @@
 from __future__ import annotations
 from bot.models import StudentGroup
+from bot.utils.dates import current_period
 from .base import BaseRepository
+
+_JOINED_COL = 3
 
 
 def _row_to_sg(row: dict) -> StudentGroup:
     return StudentGroup(
         student_id=str(row["student_id"]),
         group_id=str(row["group_id"]),
+        joined_period=str(row.get("joined_period") or "").strip(),
     )
 
 
@@ -33,11 +37,29 @@ class StudentGroupRepository(BaseRepository):
             for sg in await self.get_all()
         )
 
-    async def add(self, student_id: str, group_id: str) -> StudentGroup:
+    async def get_joined_map(self) -> dict[tuple[str, str], str]:
+        """(student_id, group_id) → месяц вступления (пусто = с начала группы)."""
+        return {(sg.student_id, sg.group_id): sg.joined_period for sg in await self.get_all()}
+
+    async def add(
+        self, student_id: str, group_id: str, joined_period: str | None = None,
+    ) -> StudentGroup:
+        """joined_period (YYYY-MM) — с какого месяца считать абонемент; по умолчанию текущий."""
         if await self.exists(student_id, group_id):
             return StudentGroup(student_id=student_id, group_id=group_id)
-        await self._append_row([student_id, group_id])
-        return StudentGroup(student_id=student_id, group_id=group_id)
+        joined = joined_period or current_period()
+        await self._append_row([student_id, group_id, joined])
+        return StudentGroup(student_id=student_id, group_id=group_id, joined_period=joined)
+
+    async def set_joined_period(self, student_id: str, group_id: str, joined_period: str) -> bool:
+        """Изменить месяц вступления (админ правит задним числом)."""
+        records = await self._all_records()
+        for i, row in enumerate(records):
+            if (str(row.get("student_id")) == student_id
+                    and str(row.get("group_id")) == group_id):
+                await self._update_cell(i + 2, _JOINED_COL, joined_period)
+                return True
+        return False
 
     async def remove(self, student_id: str, group_id: str) -> bool:
         records = await self._all_records()
