@@ -11,7 +11,7 @@ from io import BytesIO
 
 from bot.utils.dates import display_period, last_periods, month_name_ru
 from bot.services.parent_notifier import fmt_addr
-from bot.services.payment_ledger import ledger_totals
+from bot.services.payment_ledger import ledger_totals, lesson_paid_marks
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +97,33 @@ async def bill_detail(students: list, period_month: str, payment_service) -> Bil
         for teacher_id, l in ledgers.items():
             if l.pending is not None:
                 d.payment_ids.append(l.pending.payment_id)
-            paid_mark = " ✅" if l.fully_paid else ""
             if l.subscription:
-                d.lines.append(f"<b>💳 {l.name}{paid_mark}</b>")
+                status_mark = "✅" if l.fully_paid else "⬜"
+                d.lines.append(f"<b>💳 {l.name} {status_mark}</b>")
                 d.lines.append("  фиксированная сумма за месяц")
             else:
-                d.lines.append(f"<b>Педагог: {l.name}{paid_mark}</b>")
-            for item in sorted(l.items, key=lambda b: b.date):
-                d.lines.append(f"  {format_date_display(item.date)}  {item.duration_min} мин  — {item.amount} руб.")
+                d.lines.append(f"<b>Педагог: {l.name}</b>")
+                items = sorted(l.items, key=lambda b: (b.date, b.lesson_id))
+                marks = lesson_paid_marks([item.amount for item in items], l.paid)
+                paid_items = [item for item, paid in zip(items, marks) if paid]
+                unpaid_items = [item for item, paid in zip(items, marks) if not paid]
+
+                # Неоплаченные занятия сразу видны сверху; оплаченные собраны ниже.
+                # Статус бинарный: без отдельного статуса «частично оплачено».
+                if unpaid_items:
+                    d.lines.append("  <b>⬜ К оплате:</b>")
+                    for item in unpaid_items:
+                        d.lines.append(
+                            f"    ⬜ {format_date_display(item.date)}  {item.duration_min} мин"
+                            f"  — {item.amount} руб."
+                        )
+                if paid_items:
+                    d.lines.append("  <b>✅ Оплачено:</b>")
+                    for item in paid_items:
+                        d.lines.append(
+                            f"    ✅ {format_date_display(item.date)}  {item.duration_min} мин"
+                            f"  — {item.amount} руб."
+                        )
             if l.fully_paid:
                 d.lines.append(f"  <i>Итого: {l.accrued} руб. — оплачено</i>\n")
             elif l.paid:

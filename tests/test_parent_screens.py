@@ -1,4 +1,5 @@
 """Экраны родителя (bot/screens) и данные (bot/services/parent_views) — общие для TG и MAX."""
+import asyncio
 from types import SimpleNamespace
 
 from bot.screens.parent_menu import menu_rows, welcome_text
@@ -7,9 +8,10 @@ from bot.screens.parent_bills import (
     bank_screen, online_pay_screen, student_select_screen, cash_screen,
 )
 from bot.services.parent_views import (
-    PeriodRow, BillDetail, breakdown_lines, admin_confirm_rows, receipt_caption, period_label,
+    PeriodRow, BillDetail, bill_detail, breakdown_lines, admin_confirm_rows, receipt_caption, period_label,
     selected_from, selection_fsm_data,
 )
+from bot.services.payment_ledger import TeacherLedger
 
 
 def _payloads(rows):
@@ -47,6 +49,50 @@ def test_bill_detail_screen_pay_button_only_when_can_pay():
     d.unpaid_total = 0
     _, kb = bill_detail_screen(d, "2026-09", "STU-1")
     assert kb[0][0].value == "cl_bills_stu:STU-1"
+
+
+def test_bill_detail_shows_unpaid_lessons_first_and_paid_lessons_below():
+    items = [
+        SimpleNamespace(lesson_id="LES-1", date="2026-09-05", duration_min=60, amount=1300),
+        SimpleNamespace(lesson_id="LES-2", date="2026-09-12", duration_min=60, amount=1300),
+        SimpleNamespace(lesson_id="LES-3", date="2026-09-19", duration_min=60, amount=1300),
+    ]
+    ledger = TeacherLedger(
+        "T1", "Мария Иванова", accrued=3900, paid=2600, items=items,
+        pending=SimpleNamespace(payment_id="PAY-000001"),
+    )
+
+    class _Service:
+        async def ledger_for(self, student, period_month):
+            return {"T1": ledger}
+
+    detail = asyncio.run(bill_detail([SimpleNamespace(name="Алиса")], "2026-09", _Service()))
+    text = "\n".join(detail.lines)
+
+    assert "<b>⬜ К оплате:</b>" in text
+    assert "⬜ 19.09.2026  60 мин  — 1300 руб." in text
+    assert "<b>✅ Оплачено:</b>" in text
+    assert "✅ 05.09.2026  60 мин  — 1300 руб." in text
+    assert text.index("⬜ 19.09.2026") < text.index("✅ 05.09.2026")
+    assert "частич" not in text.lower()
+    assert detail.unpaid_total == 1300
+
+
+def test_bill_detail_subscription_has_binary_status_only():
+    ledger = TeacherLedger(
+        "SUB:G1", "Абонемент «Юниоры»", accrued=7000, paid=0, subscription=True,
+        pending=SimpleNamespace(payment_id="PAY-000002"),
+    )
+
+    class _Service:
+        async def ledger_for(self, student, period_month):
+            return {"SUB:G1": ledger}
+
+    detail = asyncio.run(bill_detail([SimpleNamespace(name="Алиса")], "2026-09", _Service()))
+    text = "\n".join(detail.lines)
+
+    assert "<b>💳 Абонемент «Юниоры» ⬜</b>" in text
+    assert "частич" not in text.lower()
 
 
 def test_teacher_select_and_methods():
