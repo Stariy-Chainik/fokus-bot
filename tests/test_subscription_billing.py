@@ -165,7 +165,7 @@ def test_subscription_billed_once_regardless_of_lesson_count():
     agg = bills["SUB:GRP-0001"]
     assert agg["total"] == 3000
     assert agg["subscription"] is True
-    assert agg["name"] == "Абонемент «Хип-хоп дети»"
+    assert agg["name"] == "Абонемент"
 
 
 def test_no_lessons_in_month_no_subscription():

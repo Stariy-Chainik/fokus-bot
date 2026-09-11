@@ -205,7 +205,7 @@ class PaymentService:
             if amount <= 0:  # 0 = освобождение в этом месяце
                 continue
             result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = {
-                "name": f"Абонемент «{group.name}»",
+                "name": "Абонемент",  # без названия группы — не влезает в счёт
                 "total": amount,
                 "items": [],
                 "subscription": True,

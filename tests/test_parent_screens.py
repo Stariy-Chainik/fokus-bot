@@ -80,7 +80,7 @@ def test_bill_detail_shows_unpaid_lessons_first_and_paid_lessons_below():
 
 def test_bill_detail_subscription_has_binary_status_only():
     ledger = TeacherLedger(
-        "SUB:G1", "Абонемент «Юниоры»", accrued=7000, paid=0, subscription=True,
+        "SUB:G1", "Абонемент", accrued=7000, paid=0, subscription=True,
         pending=SimpleNamespace(payment_id="PAY-000002"),
     )
 
@@ -91,7 +91,7 @@ def test_bill_detail_subscription_has_binary_status_only():
     detail = asyncio.run(bill_detail([SimpleNamespace(name="Алиса")], "2026-09", _Service()))
     text = "\n".join(detail.lines)
 
-    assert "<b>💳 Абонемент «Юниоры» ⬜</b>" in text
+    assert "<b>💳 Абонемент ⬜</b>" in text
     assert "частич" not in text.lower()
 
 

@@ -50,7 +50,7 @@ def test_unpaid_lessons_are_listed_before_paid_lessons():
 def test_subscription_has_one_binary_status():
     bills = {
         "SUB:G1": {
-            "name": "Абонемент «Юниоры»",
+            "name": "Абонемент",
             "total": 7000,
             "items": [],
             "subscription": True,
