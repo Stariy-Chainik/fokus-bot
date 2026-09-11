@@ -8,6 +8,7 @@ from bot.repositories import (
     ClientRepository,
 )
 from bot.services import PaymentService
+from bot.services.payment_ledger import lesson_paid_marks
 from bot.services.parent_notifier import addrs_of, resolve_notifier, fmt_addr
 from bot.utils.bill_format import build_bill_text
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
@@ -96,35 +97,41 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
         grand_paid += min(paid, subtotal)
         if paid >= subtotal:
             status = f"✅ Оплачен ({last_paid_at.get(teacher_id, '')})"
-        elif paid:
-            status = f"🟡 Оплачено {paid}, к доплате {subtotal - paid}"
         elif teacher_id in has_pending:
-            status = "📋 Ожидает оплаты"
+            status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
+        elif paid:
+            status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
         else:
-            status = "⏳ Счёт не создан"
+            status = f"⏳ Счёт не создан — {subtotal} руб."
         lines.append(f"👨‍🏫 <b>{agg['name']}</b> — {subtotal} руб. — {status}")
-        items = agg["items"]
-        individual = [b for b in items if b.lesson_type != "group"]
-        group_items = [b for b in items if b.lesson_type == "group"]
-        if individual:
-            lines.append("  <i>Индивидуальные:</i>")
-            cur_date: str | None = None
-            for b in sorted(individual, key=lambda x: x.date):
-                if b.date != cur_date:
-                    cur_date = b.date
-                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
-                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
-        if group_items:
-            group_total = sum(b.amount for b in group_items)
-            lines.append(f"  <i>Групповые ({len(group_items)} посещений, {group_total} руб.):</i>")
-            cur_date = None
-            for b in sorted(group_items, key=lambda x: x.date):
-                if b.date != cur_date:
-                    cur_date = b.date
-                    lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
-                lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
+        items = sorted(agg["items"], key=lambda b: (b.date, b.lesson_id))
+        marks = lesson_paid_marks([b.amount for b in items], paid)
+        paid_items = [b for b, is_paid in zip(items, marks) if is_paid]
+        unpaid_items = [b for b, is_paid in zip(items, marks) if not is_paid]
+
+        def _append_items(title: str, mark: str, selected: list) -> None:
+            if not selected:
+                return
+            lines.append(f"  <b>{mark} {title}:</b>")
+            for b in selected:
+                kind = "групповое" if b.lesson_type == "group" else "индивидуальное"
+                lines.append(
+                    f"    {mark} {format_date_short_with_wd(b.date)} · {kind}"
+                    f" · {b.duration_min} мин · {b.amount} руб."
+                )
+
+        # Неоплаченные уроки всегда сверху, оплаченные — ниже.
+        _append_items("К оплате", "⬜", unpaid_items)
+        _append_items("Оплачено", "✅", paid_items)
+        if agg.get("subscription") and not items:
+            mark = "✅" if paid >= subtotal else "⬜"
+            lines.append(f"  {mark} Фиксированная сумма за месяц")
         lines.append("")
-    lines.append(f"Итого: {grand_total} руб." + (f" · оплачено {grand_paid}, к доплате {grand_total - grand_paid}" if 0 < grand_paid < grand_total else ""))
+    grand_due = grand_total - grand_paid
+    if grand_due:
+        lines.append(f"Итого: {grand_total} руб. · оплачено {grand_paid} · к оплате {grand_due}")
+    else:
+        lines.append(f"Итого: {grand_total} руб. · ✅ оплачено")
     return lines
 
 
@@ -136,4 +143,3 @@ def _periods_only_buttons(action_prefix: str, back_cb: str) -> InlineKeyboardMar
     ]
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
