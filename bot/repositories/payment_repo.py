@@ -6,6 +6,7 @@ from .base import BaseRepository
 
 
 def _row_to_payment(row: dict) -> StudentPeriodPayment:
+    confirmed_by = row.get("confirmed_by_tg_id")
     return StudentPeriodPayment(
         payment_id=str(row["payment_id"]),
         student_id=str(row["student_id"]),
@@ -14,12 +15,15 @@ def _row_to_payment(row: dict) -> StudentPeriodPayment:
         total_amount=int(row.get("total_amount") or 0),
         status=PaymentStatus(str(row.get("status") or "pending")),
         paid_at=str(row["paid_at"]) if row.get("paid_at") else None,
-        confirmed_by_tg_id=int(row["confirmed_by_tg_id"]) if row.get("confirmed_by_tg_id") else None,
+        confirmed_by_tg_id=(
+            int(confirmed_by) if confirmed_by is not None and str(confirmed_by) != "" else None
+        ),
         comment=str(row["comment"]) if row.get("comment") else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         teacher_id=str(row.get("teacher_id") or ""),
         teacher_name=str(row.get("teacher_name") or ""),
+        payment_method=str(row.get("payment_method") or ""),
     )
 
 
@@ -73,12 +77,13 @@ class PaymentRepository(BaseRepository):
             payment.total_amount,
             payment.status.value,
             payment.paid_at or "",
-            payment.confirmed_by_tg_id or "",
+            "" if payment.confirmed_by_tg_id is None else payment.confirmed_by_tg_id,
             payment.comment or "",
             payment.created_at,
             payment.updated_at,
             payment.teacher_id,
             payment.teacher_name,
+            payment.payment_method,
         ])
         return payment
 
@@ -96,6 +101,7 @@ class PaymentRepository(BaseRepository):
 
     async def confirm_all_for_period(
         self, student_id: str, period_month: str, confirmed_by_tg_id: int,
+        payment_method: str = "admin_manual",
     ) -> int:
         """Подтверждает все PENDING счета ученика за период. Возвращает кол-во обновлённых."""
         records = await self._all_records()
@@ -112,13 +118,17 @@ class PaymentRepository(BaseRepository):
             await self._update_cell(row_idx, 7, ts_now)
             await self._update_cell(row_idx, 8, confirmed_by_tg_id)
             await self._update_cell(row_idx, 11, ts_now)
+            await self._update_cell(row_idx, 14, payment_method)
             count += 1
         if count:
             self._invalidate_cache()
         return count
 
-    async def confirm(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
-        """Подтверждает оплату: status=paid, paid_at=now, confirmed_by_tg_id."""
+    async def confirm(
+        self, payment_id: str, confirmed_by_tg_id: int,
+        payment_method: str = "admin_manual",
+    ) -> bool:
+        """Подтверждает оплату и фиксирует её точный способ."""
         records = await self._all_records()
         ts_now = now_str()
         for i, row in enumerate(records):
@@ -128,5 +138,6 @@ class PaymentRepository(BaseRepository):
                 await self._update_cell(row_idx, 7, ts_now)                     # paid_at
                 await self._update_cell(row_idx, 8, confirmed_by_tg_id)         # confirmed_by_tg_id
                 await self._update_cell(row_idx, 11, ts_now)                    # updated_at
+                await self._update_cell(row_idx, 14, payment_method)             # payment_method
                 return True
         return False

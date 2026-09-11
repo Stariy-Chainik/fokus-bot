@@ -11,6 +11,7 @@ from bot.repositories import (
 )
 from .billing_service import build_billing_rows
 from .payment_ledger import TeacherLedger
+from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,7 @@ class PaymentService:
     async def record_payment(
         self, student_id: str, student_name: str, period_month: str, amount: int,
         confirmed_by_tg_id: int, teacher_ids: list | None = None, comment: str | None = None,
+        payment_method: str = "",
     ) -> tuple[int, int]:
         """Зачесть оплату на сумму amount по остаткам педагогов месяца.
 
@@ -302,6 +304,8 @@ class PaymentService:
         Возвращает (зачтено ₽, строк). Так сумма в чеке/платеже совпадает с учётом,
         даже если остаток вырос после новых занятий.
         """
+        if not payment_method:
+            payment_method = YOOKASSA if confirmed_by_tg_id == 0 else ADMIN_MANUAL
         student = Student(student_id=student_id, name=student_name)
         ledgers = await self.ledger_for(student, period_month)
         if teacher_ids:
@@ -317,17 +321,24 @@ class PaymentService:
                 continue
             pay = min(left, pending.total_amount)
             if pay == pending.total_amount:
-                await self._payment_repo.confirm(pending.payment_id, confirmed_by_tg_id)
+                await self._payment_repo.confirm(
+                    pending.payment_id, confirmed_by_tg_id, payment_method,
+                )
             else:
-                await self._add_paid_row(student, period_month, tid, ledgers[tid].name, pay, confirmed_by_tg_id, comment)
+                await self._add_paid_row(
+                    student, period_month, tid, ledgers[tid].name, pay,
+                    confirmed_by_tg_id, comment, payment_method,
+                )
                 await self._payment_repo.update_amount(pending.payment_id, pending.total_amount - pay)
             left -= pay
             credited += pay
             rows += 1
         if left > 0 and order:  # переплата — фиксируем на первого педагога из списка
             tid = order[0]
-            await self._add_paid_row(student, period_month, tid, ledgers[tid].name, left,
-                                     confirmed_by_tg_id, "переплата")
+            await self._add_paid_row(
+                student, period_month, tid, ledgers[tid].name, left,
+                confirmed_by_tg_id, "переплата", payment_method,
+            )
             credited += left
             rows += 1
         logger.info("Оплата зачтена: student=%s period=%s сумма=%d строк=%d", student_id, period_month, credited, rows)
@@ -335,7 +346,7 @@ class PaymentService:
 
     async def _add_paid_row(
         self, student: Student, period_month: str, teacher_id: str, teacher_name: str,
-        amount: int, confirmed_by_tg_id: int, comment: str | None,
+        amount: int, confirmed_by_tg_id: int, comment: str | None, payment_method: str,
     ) -> StudentPeriodPayment:
         now = now_str()
         payment = StudentPeriodPayment(
@@ -343,7 +354,7 @@ class PaymentService:
             student_id=student.student_id, student_name=student.name, period_month=period_month,
             total_amount=amount, status=PaymentStatus.PAID, paid_at=now,
             confirmed_by_tg_id=confirmed_by_tg_id, comment=comment, created_at=now, updated_at=now,
-            teacher_id=teacher_id, teacher_name=teacher_name,
+            teacher_id=teacher_id, teacher_name=teacher_name, payment_method=payment_method,
         )
         await self._payment_repo.add(payment)
         return payment
@@ -435,7 +446,10 @@ class PaymentService:
             per_student[period] = per_student.get(period, 0) + debt
         return debts
 
-    async def confirm_payment(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
+    async def confirm_payment(
+        self, payment_id: str, confirmed_by_tg_id: int,
+        payment_method: str = ADMIN_MANUAL,
+    ) -> bool:
         payment = next(
             (p for p in await self._payment_repo.get_all() if p.payment_id == payment_id),
             None,
@@ -449,7 +463,7 @@ class PaymentService:
         if payment.total_amount <= 0:
             logger.warning("Счёт %s с нулевым остатком — подтверждать нечего", payment_id)
             return False
-        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id)
+        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id, payment_method)
         if ok:
             logger.info("Счёт %s подтверждён", payment_id)
         return ok
@@ -519,6 +533,7 @@ class PaymentService:
         period_month: str,
         teacher_ids: list,
         confirmed_by_tg_id: int,
+        payment_method: str = ADMIN_MANUAL,
     ) -> int:
         """Подтверждает счета периода только по выбранным педагогам."""
         count = 0
@@ -527,7 +542,9 @@ class PaymentService:
                 student_id, period_month, tid,
             )
             if row and row.status != PaymentStatus.PAID and row.total_amount > 0:
-                if await self._payment_repo.confirm(row.payment_id, confirmed_by_tg_id):
+                if await self._payment_repo.confirm(
+                    row.payment_id, confirmed_by_tg_id, payment_method,
+                ):
                     count += 1
         logger.info(
             "Частичная оплата: student=%s period=%s педагоги=%s подтверждено=%d",
@@ -540,11 +557,11 @@ class PaymentService:
         student_id: str,
         period_month: str,
         confirmed_by_tg_id: int,
+        payment_method: str = ADMIN_MANUAL,
     ) -> int:
         """Подтверждает все счета периода. Возвращает кол-во подтверждённых."""
         count = await self._payment_repo.confirm_all_for_period(
-            student_id, period_month, confirmed_by_tg_id,
+            student_id, period_month, confirmed_by_tg_id, payment_method,
         )
         logger.info("Период %s ученика %s оплачен (%d счётов)", period_month, student_id, count)
         return count
-

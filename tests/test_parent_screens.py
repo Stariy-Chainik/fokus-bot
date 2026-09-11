@@ -133,9 +133,13 @@ def test_bank_online_cash_screens():
 
 def test_admin_confirm_rows_and_caption():
     rows = admin_confirm_rows("STU-1", "2026-09", "5.6", True, ("max", 42))
-    assert [b.value for row in rows for b in row] == ["rcpp:STU-1:2026-09:5.6", "rcpt_no:STU-1:2026-09:m42"]
+    assert [b.value for row in rows for b in row] == ["rcpp:STU-1:2026-09:5.6:a", "rcpt_no:STU-1:2026-09:m42"]
     rows = admin_confirm_rows("STU-1", "2026-09", "", False, ("tg", 7))
-    assert [b.value for row in rows for b in row] == ["receipt_confirm:STU-1:2026-09", "rcpt_no:STU-1:2026-09:7"]
+    assert [b.value for row in rows for b in row] == ["receipt_confirm:STU-1:2026-09:a", "rcpt_no:STU-1:2026-09:7"]
+    rows = admin_confirm_rows("STU-1", "2026-09", "5", True, ("tg", 7), 1300, "cash")
+    assert rows[0][0].value == "rcpp:STU-1:2026-09:5:1300:c"
+    rows = admin_confirm_rows("STU-1", "2026-09", "", False, ("tg", 7), 1300, "bank")
+    assert rows[0][0].value == "receipt_confirm:STU-1:2026-09:1300:b"
     cap = receipt_caption("bank", "Иванов", "2026-09", 800, "• Река — 800 руб.")
     assert cap.startswith("📎 Чек об оплате\n\nСпособ: 🏦 По реквизитам\nУченик: Иванов\nПериод: Сентябрь 2026\nСумма: 800 руб.")
     assert period_label("2026-01") == "Январь 2026"

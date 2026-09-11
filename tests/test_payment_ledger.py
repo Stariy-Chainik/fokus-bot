@@ -125,11 +125,12 @@ class _PayRepo2(_PayRepo):
     def __init__(self, rows):
         super().__init__(rows); self.confirmed = []
 
-    async def confirm(self, pid, by):
-        self.confirmed.append(pid)
+    async def confirm(self, pid, by, payment_method="admin_manual"):
+        self.confirmed.append((pid, payment_method))
         for r in self.rows:
             if r.payment_id == pid:
                 r.status = PaymentStatus.PAID
+                r.payment_method = payment_method
         return True
 
 
@@ -150,7 +151,9 @@ def test_record_payment_full_remainder_confirms_pending_row():
     bills = {"T1": {"name": "Река", "total": 2600, "items": []}}
     svc = _service2([_row("PAY-000001", "T1", 2600, PaymentStatus.PENDING)], bills)
     assert asyncio.run(svc.record_payment("STU-1", "Иванов", "2026-09", 2600, 7)) == (2600, 1)
-    assert svc._payment_repo.confirmed == ["PAY-000001"] and _state(svc) == [("T1", "paid", 2600)]
+    assert svc._payment_repo.confirmed == [("PAY-000001", "admin_manual")]
+    assert svc._payment_repo.rows[0].payment_method == "admin_manual"
+    assert _state(svc) == [("T1", "paid", 2600)]
 
 
 def test_record_payment_partial_splits_row_and_keeps_remainder():
@@ -160,6 +163,7 @@ def test_record_payment_partial_splits_row_and_keeps_remainder():
     assert asyncio.run(svc.record_payment("STU-1", "Иванов", "2026-09", 1300, 7, comment="чек")) == (1300, 1)
     assert _state(svc) == [("T1", "paid", 1300), ("T1", "pending", 2600)]
     assert svc._payment_repo.confirmed == []
+    assert svc._payment_repo.added[0].payment_method == "admin_manual"
 
 
 def test_record_payment_allocates_in_teacher_order_and_overpays_to_first():

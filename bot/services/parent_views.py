@@ -12,6 +12,7 @@ from io import BytesIO
 from bot.utils.dates import display_period, last_periods, month_name_ru
 from bot.services.parent_notifier import fmt_addr
 from bot.services.payment_ledger import ledger_totals, lesson_paid_marks
+from bot.services.payment_methods import callback_code
 
 logger = logging.getLogger(__name__)
 
@@ -239,15 +240,18 @@ def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | N
 
 def admin_confirm_rows(
     student_id: str, period_month: str, sel_pids: str, partial: bool, parent_addr, total: int | None = None,
+    method: str = "admin_manual",
 ) -> list:
     """Кнопки админу: подтвердить (частично — только выбранные счета) / не подтверждать.
     total — сумма из чека/уведомления: зачитывается именно она (record_payment), а не остаток
-    на момент нажатия (он мог вырасти после новых занятий)."""
+    на момент нажатия (он мог вырасти после новых занятий).
+    method кодируется одним символом в callback, чтобы точный способ дошёл до подтверждения."""
     from bot.screens import cb
     amount_part = f":{int(total)}" if total else ""
+    method_part = f":{callback_code(method)}"
     confirm_cb = (
-        f"rcpp:{student_id}:{period_month}:{sel_pids}{amount_part}"
-        if partial and sel_pids else f"receipt_confirm:{student_id}:{period_month}{amount_part}"
+        f"rcpp:{student_id}:{period_month}:{sel_pids}{amount_part}{method_part}"
+        if partial and sel_pids else f"receipt_confirm:{student_id}:{period_month}{amount_part}{method_part}"
     )
     return [
         [cb("✅ Подтвердить оплату", confirm_cb)],

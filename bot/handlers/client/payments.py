@@ -12,6 +12,7 @@ from bot.models.enums import PaymentStatus
 from bot.repositories import UserRepository
 from bot.repositories.payment_repo import PaymentRepository
 from bot.services import PaymentService
+from bot.services.payment_methods import TELEGRAM, yookassa_method
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_payments")
@@ -86,6 +87,7 @@ async def process_yookassa_event(
         amount_int = 0
     _, count = await payment_service.record_payment(
         student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
+        yookassa_method(payment),
     )
     if count > 0:
         msg = (
@@ -140,7 +142,9 @@ async def on_successful_payment(
     user_repo: UserRepository,
 ) -> None:
     payment_id = message.successful_payment.invoice_payload
-    ok = await payment_service.confirm_payment(payment_id, message.from_user.id)
+    ok = await payment_service.confirm_payment(
+        payment_id, message.from_user.id, TELEGRAM,
+    )
     if ok:
         await message.answer("✅ Оплата получена! Спасибо.")
         payment_repo: PaymentRepository = payment_service._payment_repo

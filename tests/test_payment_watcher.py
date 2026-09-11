@@ -13,9 +13,9 @@ class _Service:
         self.confirmed.append((student_id, period))
         return 1
 
-    async def record_payment(self, student_id, student_name, period, amount, by, teacher_ids=None, comment=None):
+    async def record_payment(self, student_id, student_name, period, amount, by, teacher_ids=None, comment=None, payment_method=""):
         self.confirmed.append((student_id, period))
-        self.amounts = getattr(self, "amounts", []) + [(amount, teacher_ids)]
+        self.amounts = getattr(self, "amounts", []) + [(amount, teacher_ids, payment_method)]
         return amount, 1
 
 
@@ -33,7 +33,10 @@ class _Users:
 
 
 def _payment(status):
-    return SimpleNamespace(status=status, amount=SimpleNamespace(value="850.00"))
+    return SimpleNamespace(
+        status=status, amount=SimpleNamespace(value="850.00"),
+        payment_method=SimpleNamespace(type="bank_card"),
+    )
 
 
 def test_watch_confirms_on_succeeded():
@@ -47,6 +50,7 @@ def test_watch_confirms_on_succeeded():
                        svc, bot, _Users(), parent_addr=("tg", 42),
                        interval=0, max_checks=10, fetch=fetch))
     assert svc.confirmed == [("STU-1", "2026-09")]
+    assert svc.amounts == [(850, None, "yookassa_card")]
     assert {chat for chat, _ in bot.sent} == {42, 999}  # родитель и админ
 
 

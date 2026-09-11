@@ -16,12 +16,14 @@ def _run(coro):
 class _FakePaymentService:
     def __init__(self):
         self.confirmed: list[tuple[str, str]] = []
+        self.payment_methods: list[str] = []
 
     async def confirm_period(self, student_id, period_month, confirmed_by_tg_id):
         self.confirmed.append((student_id, period_month))
         return 1
 
-    async def record_payment(self, student_id, student_name, period_month, amount, confirmed_by_tg_id, teacher_ids=None, comment=None):
+    async def record_payment(self, student_id, student_name, period_month, amount, confirmed_by_tg_id, teacher_ids=None, comment=None, payment_method=""):
+        self.payment_methods.append(payment_method)
         n = await self.confirm_period(student_id, period_month, confirmed_by_tg_id)
         return amount, n
 
@@ -31,12 +33,13 @@ class _FakeUserRepo:
         return []  # уведомления в этих тестах не проверяем
 
 
-def _api_payment(status="succeeded", student_id="STU-0001", period="2026-07", amount="500.00"):
+def _api_payment(status="succeeded", student_id="STU-0001", period="2026-07", amount="500.00", method="sbp"):
     """Объект платежа, как его возвращает API ЮКассы (усечённо)."""
     return SimpleNamespace(
         status=status,
         metadata={"student_id": student_id, "period_month": period},
         amount=SimpleNamespace(value=amount),
+        payment_method=SimpleNamespace(type=method),
     )
 
 
@@ -61,6 +64,7 @@ def test_succeeded_payment_confirms_period():
     ))
     assert status == 200
     assert svc.confirmed == [("STU-0001", "2026-07")]
+    assert svc.payment_methods == ["yookassa_sbp"]
 
 
 def test_forged_body_metadata_is_ignored_api_is_source_of_truth():

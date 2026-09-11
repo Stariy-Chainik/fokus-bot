@@ -15,6 +15,7 @@ import logging
 from aiogram.exceptions import TelegramAPIError
 
 from bot.services.parent_notifier import resolve_notifier
+from bot.services.payment_methods import yookassa_method
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,8 @@ async def _watch(
 
         amount = getattr(getattr(payment, "amount", None), "value", "?")
         credited, count = await payment_service.record_payment(
-            student_id, student_name, period_month, _to_int(amount), 0, teacher_ids or None, "ЮКасса",
+            student_id, student_name, period_month, _to_int(amount), 0,
+            teacher_ids or None, "ЮКасса", yookassa_method(payment),
         )
         logger.info(
             "Платёж %s succeeded (опрос): student=%s period=%s подтверждено счетов=%d",

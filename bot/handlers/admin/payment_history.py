@@ -20,6 +20,7 @@ from bot.states import PaymentHistoryStates
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period, month_name_ru
 from bot.handlers.access import is_admin as _is_admin
+from bot.services.payment_methods import label as payment_method_label
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_payment_history")
@@ -33,9 +34,10 @@ def _period_label(period_month: str) -> str:
 
 
 def _method(p) -> str:
-    if p.confirmed_by_tg_id == 0:
-        return "СБП онлайн (ЮКасса)"
-    return "вручную (чек / наличные / админ)"
+    return payment_method_label(
+        getattr(p, "payment_method", ""),
+        confirmed_by_tg_id=p.confirmed_by_tg_id,
+    )
 
 
 def _fmt_date(value: str | None) -> str:
@@ -207,8 +209,11 @@ async def cb_payhist_period(
     if paid:
         lines.append("\n<b>Оплачено:</b>")
         for p in sorted(paid, key=lambda p: (p.paid_at or "", p.teacher_name or "")):
+            comment = p.comment or ""
+            # Старые технические метки не дублируем рядом с точным способом.
+            note = "" if comment in {"чек", "ЮКасса"} else comment
             lines.append(f"✅ {_fmt_date(p.paid_at)} · {p.teacher_name or p.teacher_id} — <b>{p.total_amount} ₽</b>\n"
-                         f"    {_method(p)}" + (f" · {p.comment}" if p.comment else ""))
+                         f"    {_method(p)}" + (f" · {note}" if note else ""))
         lines.append(f"Итого оплачено: <b>{sum(p.total_amount for p in paid)} ₽</b>")
     if pending:
         lines.append("\n<b>Ожидает оплаты:</b>")

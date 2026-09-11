@@ -14,6 +14,7 @@ from maxapi.types import MessageCallback, MessageCreated, InputMediaBuffer
 from config.settings import settings
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import max_addr
+from bot.services.payment_methods import CASH, RECEIPT_UNKNOWN
 from bot.screens import cb
 from bot.services.parent_views import (
     period_label, unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
@@ -176,7 +177,10 @@ async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo,
     ledgers = await payment_service.ledger_for(student, period_month)
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     await _notify_admins_tg(tg_bot, user_repo, cash_notice(student.name, period_month, total, breakdown),
-                            admin_confirm_rows(student_id, period_month, sel_pids, partial, max_addr(max_uid), total))
+                            admin_confirm_rows(
+                                student_id, period_month, sel_pids, partial,
+                                max_addr(max_uid), total, CASH,
+                            ))
     await edit_screen(event, *cash_sent_screen(student_id, period_month))
 
 
@@ -225,7 +229,10 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     ledgers = await payment_service.ledger_for(student, period_month) if student else {}
     sel_tids = data.get("receipt_sel_tids") or list(bills_map)
     caption = receipt_caption(method, student_name, period_month, total, "\n".join(breakdown_lines(bills_map, sel_tids, ledgers=ledgers)))
-    rows = admin_confirm_rows(student_id, period_month, sel_pids, sel_partial, max_addr(max_uid), total)
+    rows = admin_confirm_rows(
+        student_id, period_month, sel_pids, sel_partial,
+        max_addr(max_uid), total, method,
+    )
     kind, url, filename = att
     try:
         blob = await event.bot.download_bytes(url)
@@ -260,7 +267,10 @@ async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, studen
     ledgers = await payment_service.ledger_for(student, period_month)
     caption = receipt_caption("bank", student.name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
-    rows = admin_confirm_rows(student.student_id, period_month, "", False, max_addr(max_uid), total)
+    rows = admin_confirm_rows(
+        student.student_id, period_month, "", False,
+        max_addr(max_uid), total, RECEIPT_UNKNOWN,
+    )
     try:
         blob = await event_bot.download_bytes(url)
     except Exception as exc:

@@ -200,6 +200,7 @@ class StudentPeriodPayment:
     updated_at: str
     teacher_id: str = ""
     teacher_name: str = ""
+    payment_method: str = ""  # cash | receipt_bank | receipt_sbp | receipt_unknown | yookassa_* | telegram | admin_manual
 
 
 @dataclass

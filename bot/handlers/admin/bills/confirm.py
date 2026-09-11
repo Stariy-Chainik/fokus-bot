@@ -13,6 +13,7 @@ from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period
 from bot.handlers.access import is_admin as _is_admin
+from bot.services.payment_methods import ADMIN_MANUAL
 
 from ._base import (
     router, _confirming_in_progress,
@@ -292,7 +293,9 @@ async def cb_do_confirm_payment(
     _confirming_in_progress.add(payment_id)
 
     try:
-        ok = await payment_service.confirm_payment(payment_id, callback.from_user.id)
+        ok = await payment_service.confirm_payment(
+            payment_id, callback.from_user.id, ADMIN_MANUAL,
+        )
         if ok:
             await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back(back_cb))
         else:
