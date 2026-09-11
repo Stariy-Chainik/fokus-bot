@@ -10,7 +10,7 @@ from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
 from .billing_service import build_billing_rows
-from .payment_ledger import TeacherLedger
+from .payment_ledger import TeacherLedger, lesson_marks
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
 logger = logging.getLogger(__name__)
@@ -290,6 +290,16 @@ class PaymentService:
         logger.info("Создан счёт %s student=%s teacher=%s период=%s сумма=%d",
                     payment.payment_id, student.student_id, teacher_id, period_month, amount)
         return payment
+
+    async def teacher_lesson_marks(
+        self, student, period_month: str, teacher_id: str,
+    ) -> tuple[list[dict], object]:
+        """(занятия педагога с отметками оплаты, TeacherLedger) — для экрана выбора занятий."""
+        ledgers = await self.ledger_for(student, period_month)
+        ledger = ledgers.get(teacher_id)
+        if ledger is None:
+            return [], None
+        return lesson_marks(ledger.items, ledger.paid), ledger
 
     async def record_payment(
         self, student_id: str, student_name: str, period_month: str, amount: int,

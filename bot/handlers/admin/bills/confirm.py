@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import User
@@ -11,9 +12,10 @@ from bot.repositories import (
 )
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
-from bot.utils.dates import display_period
+from bot.utils.dates import display_period, format_date_short_with_wd
 from bot.handlers.access import is_admin as _is_admin
 from bot.services.payment_methods import ADMIN_MANUAL
+from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 
 from ._base import (
     router, _confirming_in_progress,
@@ -210,9 +212,13 @@ async def cb_pay_pick_invoice(
                 text=f"✅ {p.teacher_name or '—'} — {p.total_amount} руб.{when}", callback_data="noop",
             )])
         else:
+            # По занятиям можно отметить выборочно; абонемент — только целиком
+            target = (f"pay_invoice:{p.payment_id}:{group_id}"
+                      if p.teacher_id.startswith(SUBSCRIPTION_KEY_PREFIX)
+                      else f"paysel:{p.payment_id}:{group_id}")
             rows.append([InlineKeyboardButton(
                 text=f"⏳ {p.teacher_name or '—'} — к доплате {p.total_amount} руб.",
-                callback_data=f"pay_invoice:{p.payment_id}:{group_id}",
+                callback_data=target,
             )])
     if not rows:
         rows.append([InlineKeyboardButton(text="✅ Всё оплачено", callback_data="noop")])
@@ -306,4 +312,180 @@ async def cb_do_confirm_payment(
     finally:
         _confirming_in_progress.discard(payment_id)
 
+    await callback.answer()
+
+
+# ─── Выборочная отметка занятий педагога ────────────────────────────────────
+# Админ отмечает галочками, какие занятия оплачены. Сумма считается по отметкам
+# и зачитывается через record_payment: остаток педагога закрывается от самых
+# ранних занятий (порядок дат), поэтому суммарно учёт всегда сходится.
+
+def _sel_screen(student_name: str, ledger, marks: list, chosen: set) -> tuple:
+    lines = [f"<b>{student_name}</b> — {ledger.name}",
+             f"Начислено {ledger.accrued} руб., оплачено {ledger.paid}, к доплате {ledger.remainder}",
+             "", "Отметьте занятия, которые оплачены:"]
+    rows: list[list[InlineKeyboardButton]] = []
+    total = 0
+    for i, m in enumerate(marks):
+        when = format_date_short_with_wd(m["date"])
+        label = f"{when} · {m['duration_min']} мин · {m['amount']} руб."
+        if m["paid"]:
+            rows.append([InlineKeyboardButton(text=f"✅ {label}", callback_data="noop")])
+            continue
+        mark = "☑️" if m["lesson_id"] in chosen else "⬜"
+        if m["lesson_id"] in chosen:
+            total += m["amount"]
+        rows.append([InlineKeyboardButton(text=f"{mark} {label}", callback_data=f"pslt:{i}")])
+    if total > 0:
+        rows.append([InlineKeyboardButton(
+            text=f"✅ Подтвердить оплату {total} руб.", callback_data="pslgo")])
+    return "\n".join(lines), rows, total
+
+
+async def _render_selection(callback: CallbackQuery, state: FSMContext,
+                            student_repo: StudentRepository, payment_service: PaymentService) -> None:
+    data = await state.get_data()
+    student = await student_repo.get_by_id(data["psel_student"])
+    marks, ledger = await payment_service.teacher_lesson_marks(
+        student, data["psel_period"], data["psel_teacher"],
+    )
+    back_cb = f"pcps:{data['psel_period']}:{data['psel_group']}:{data['psel_student']}"
+    if not marks or ledger is None:
+        await callback.message.edit_text("Занятий для отметки нет.", reply_markup=kb_back(back_cb))
+        return
+    chosen = set(data.get("psel_chosen") or [])
+    text, rows, _ = _sel_screen(student.name, ledger, marks, chosen)
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@router.callback_query(F.data.startswith("paysel:"))
+async def cb_pay_select_lessons(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, payment_repo: PaymentRepository,
+    payment_service: PaymentService,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, payment_id, group_id = callback.data.split(":", 2)
+    payment = await payment_repo.get_by_id(payment_id)
+    if payment is None:
+        await callback.answer("Счёт не найден", show_alert=True)
+        return
+    await state.update_data(
+        psel_student=payment.student_id, psel_period=payment.period_month,
+        psel_teacher=payment.teacher_id, psel_group=group_id, psel_chosen=[],
+    )
+    await _render_selection(callback, state, student_repo, payment_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pslt:"))
+async def cb_pay_select_toggle(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    if not data.get("psel_student"):
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    idx = int(callback.data.split(":", 1)[1])
+    student = await student_repo.get_by_id(data["psel_student"])
+    marks, _ = await payment_service.teacher_lesson_marks(
+        student, data["psel_period"], data["psel_teacher"],
+    )
+    if idx >= len(marks):
+        await callback.answer("Занятие не найдено", show_alert=True)
+        return
+    chosen = set(data.get("psel_chosen") or [])
+    chosen.symmetric_difference_update({marks[idx]["lesson_id"]})
+    await state.update_data(psel_chosen=list(chosen))
+    await _render_selection(callback, state, student_repo, payment_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "pslgo")
+async def cb_pay_select_confirm(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    if not data.get("psel_student"):
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    student = await student_repo.get_by_id(data["psel_student"])
+    marks, ledger = await payment_service.teacher_lesson_marks(
+        student, data["psel_period"], data["psel_teacher"],
+    )
+    chosen = set(data.get("psel_chosen") or [])
+    picked = [m for m in marks if m["lesson_id"] in chosen and not m["paid"]]
+    total = sum(m["amount"] for m in picked)
+    if total <= 0:
+        await callback.answer("Не отмечено ни одного занятия", show_alert=True)
+        return
+    back_cb = f"paysel:{ledger.pending.payment_id}:{data['psel_group']}" if ledger.pending else "admin:menu"
+    dates = ", ".join(format_date_short_with_wd(m["date"]) for m in picked)
+    await callback.message.edit_text(
+        f"<b>Подтвердить оплату?</b>\n"
+        f"Ученик: {student.name}\n"
+        f"Педагог: {ledger.name}\n"
+        f"Период: {display_period(data['psel_period'])}\n"
+        f"Занятий: {len(picked)} ({dates})\n"
+        f"Сумма: <b>{total} руб.</b>\n\n"
+        f"<i>Сумма закроет остаток начиная с самых ранних неоплаченных занятий.</i>",
+        reply_markup=kb_confirm(f"pslok:{total}", back_cb),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pslok:"))
+async def cb_pay_select_apply(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    data = await state.get_data()
+    if not data.get("psel_student"):
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    amount = int(callback.data.split(":", 1)[1])
+    student_id, period = data["psel_student"], data["psel_period"]
+    teacher_id, group_id = data["psel_teacher"], data["psel_group"]
+    guard_key = f"{student_id}:{period}:{teacher_id}"
+    if guard_key in _confirming_in_progress:
+        await callback.answer("Оплата уже обрабатывается", show_alert=True)
+        return
+    _confirming_in_progress.add(guard_key)
+    back_cb = f"pcps:{period}:{group_id}:{student_id}"
+    try:
+        student = await student_repo.get_by_id(student_id)
+        credited, rows_count = await payment_service.record_payment(
+            student_id, student.name if student else student_id, period, amount,
+            callback.from_user.id, [teacher_id], "отмечено вручную", ADMIN_MANUAL,
+        )
+        await state.update_data(psel_chosen=[])
+        if credited > 0:
+            logger.info("Админ %s отметил оплату %d руб.: %s %s %s",
+                        callback.from_user.id, credited, student_id, period, teacher_id)
+            await callback.message.edit_text(
+                f"✅ Оплата {credited} руб. отмечена ({rows_count} записей).",
+                reply_markup=kb_back(back_cb),
+            )
+        else:
+            await callback.message.edit_text("Нечего подтверждать — остаток уже закрыт.",
+                                             reply_markup=kb_back(back_cb))
+    except Exception as exc:
+        logger.error("Ошибка отметки оплаты %s: %s", guard_key, exc)
+        await callback.message.edit_text("Ошибка при отметке оплаты.", reply_markup=kb_back(back_cb))
+    finally:
+        _confirming_in_progress.discard(guard_key)
     await callback.answer()

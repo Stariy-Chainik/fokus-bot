@@ -152,3 +152,26 @@ def test_breakdown_lines_short_when_too_long():
     short = breakdown_lines(bills, ["T1"], limit=50)
     assert full[0].startswith("• Река — 100 руб.: 01.09 (60м, группа)")
     assert short == ["• Река — 100 руб. (29 зан.)"]
+
+
+def test_admin_lesson_selection_screen():
+    """Экран админа «отметить занятия»: оплаченные — без кнопки, выбранные считаются в сумму."""
+    from bot.handlers.admin.bills.confirm import _sel_screen
+    from bot.services.payment_ledger import TeacherLedger
+    ledger = TeacherLedger("TCH-1", "Река Станислав", accrued=7917, paid=2500)
+    marks = [
+        {"lesson_id": "LES-1", "date": "2026-09-01", "duration_min": 90, "amount": 2500, "paid": True},
+        {"lesson_id": "LES-2", "date": "2026-09-04", "duration_min": 90, "amount": 2500, "paid": False},
+        {"lesson_id": "LES-3", "date": "2026-09-11", "duration_min": 60, "amount": 1667, "paid": False},
+    ]
+    text, rows, total = _sel_screen("Зотов Антон", ledger, marks, {"LES-3"})
+    assert "Начислено 7917 руб., оплачено 2500, к доплате 5417" in text
+    labels = [(r[0].text, r[0].callback_data) for r in rows]
+    assert labels[0][1] == "noop" and labels[0][0].startswith("✅")
+    assert labels[1][0].startswith("⬜") and labels[1][1] == "pslt:1"
+    assert labels[2][0].startswith("☑️") and labels[2][1] == "pslt:2"
+    assert labels[3] == ("✅ Подтвердить оплату 1667 руб.", "pslgo")
+    assert total == 1667
+    # ничего не выбрано — кнопки подтверждения нет
+    _, rows_empty, total_empty = _sel_screen("Зотов Антон", ledger, marks, set())
+    assert total_empty == 0 and all(r[0].callback_data != "pslgo" for r in rows_empty)

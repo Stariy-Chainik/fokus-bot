@@ -70,3 +70,17 @@ def ledger_totals(ledgers: dict) -> tuple[int, int, int]:
     paid = sum(l.paid for l in ledgers.values())
     remainder = sum(l.remainder for l in ledgers.values())
     return accrued, paid, remainder
+
+
+def lesson_marks(items: list, paid: int) -> list[dict]:
+    """Занятия педагога за месяц с отметкой оплаты: [{lesson_id, date, duration_min, amount, paid}].
+
+    Порядок — по дате; оплата накопительная (любой платёж закрывает самые ранние занятия).
+    """
+    ordered = sorted(items, key=lambda b: (b.date, b.lesson_id))
+    marks = lesson_paid_marks([b.amount for b in ordered], paid)
+    return [
+        {"lesson_id": b.lesson_id, "date": b.date, "duration_min": b.duration_min,
+         "amount": b.amount, "lesson_type": b.lesson_type, "paid": ok}
+        for b, ok in zip(ordered, marks)
+    ]

@@ -188,3 +188,27 @@ def test_record_payment_nothing_pending_returns_zero():
     # всё оплачено, новый чек на 1000 → переплата отдельной строкой
     assert asyncio.run(svc.record_payment("STU-1", "Иванов", "2026-09", 1000, 7)) == (1000, 1)
     assert _state(svc) == [("T1", "paid", 1000), ("T1", "paid", 1000)]
+
+
+# ── lesson_marks: занятия с отметками для экрана админа ──────────────────────
+
+def _bill(lesson_id, date, amount, duration=45, lesson_type="individual"):
+    return SimpleNamespace(lesson_id=lesson_id, date=date, amount=amount,
+                           duration_min=duration, lesson_type=lesson_type)
+
+
+def test_lesson_marks_orders_by_date_and_marks_cumulatively():
+    from bot.services.payment_ledger import lesson_marks
+    items = [_bill("LES-3", "2026-09-11", 1667, 60), _bill("LES-1", "2026-09-01", 2500, 90),
+             _bill("LES-2", "2026-09-04", 2500, 90)]
+    marks = lesson_marks(items, paid=5000)
+    assert [(m["lesson_id"], m["paid"]) for m in marks] == [
+        ("LES-1", True), ("LES-2", True), ("LES-3", False)]
+    assert marks[0]["duration_min"] == 90 and marks[2]["amount"] == 1667
+
+
+def test_lesson_marks_without_payments_all_unpaid():
+    from bot.services.payment_ledger import lesson_marks
+    marks = lesson_marks([_bill("LES-1", "2026-09-01", 800)], paid=0)
+    assert marks == [{"lesson_id": "LES-1", "date": "2026-09-01", "duration_min": 45,
+                      "amount": 800, "lesson_type": "individual", "paid": False}]
