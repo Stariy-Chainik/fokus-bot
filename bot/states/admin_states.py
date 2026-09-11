@@ -26,6 +26,11 @@ class StudentListStates(StatesGroup):
     searching = State()
 
 
+class PaymentHistoryStates(StatesGroup):
+    """«📜 История оплат»: поиск ученика по фамилии."""
+    searching = State()
+
+
 class PartnerAssignStates(StatesGroup):
     choosing_partner = State()
     confirming = State()

@@ -312,6 +312,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Approve child request | `admin_child_ok:{tg_id}:{student_id}` | Sent by a parent via `client:add_child` |
 | Salaries | `admin:salaries` | Earnings per teacher per period |
 | **Payouts** | `admin:payouts` | «💸 Выплатить зарплату»: месяц → педагоги (🟢/🟡/🔴, выплачено/начислено) → «✅ Выплатить остаток» или произвольная сумма (FSM `PayoutStates`). Начислено = `calc_earned` по занятиям; выплачено = сумма строк `teacher_payouts` ([admin/payouts.py](bot/handlers/admin/payouts.py)) |
+| **Payment history** | `admin:payhist` | «📜 История оплат»: фамилия ученика (FSM `PaymentHistoryStates`) → месяцы (оплачено / ожидает) → оплаты месяца: педагог/абонемент, сумма, дата, способ (ЮКасса при `confirmed_by_tg_id=0`, иначе вручную) ([admin/payment_history.py](bot/handlers/admin/payment_history.py)) |
 | Bills | `admin:bills` | Период → филиал → группа → **[📨 вся группа]** или ученик → отправка родителю (multi-recipient, no submission check). Рассылка по группе — `bill_group_send:{period}:{gid}` |
 | **Debtors** | `admin:debtors` | Сводный долг по всем ученикам/периодам (on-demand: начисления − PAID). Текущий месяц помечен `*` и в напоминание не входит. «📤 Напомнить всем» — рассылка родителям должников за закрытые месяцы (с подтверждением) |
 | Прибыль | `admin:profit` | Месяц: занятия + абонементы + ручные доходы (турниры) − зарплата − расходы (аренда); ввод/удаление записей кнопками ➕/🗑 (fin:*). День: только занятия |
