@@ -13,7 +13,9 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 
 from bot.models import User
 from bot.models.enums import PaymentStatus
-from bot.repositories import StudentRepository, PaymentRepository
+from bot.repositories import (
+    StudentRepository, PaymentRepository, BranchRepository, GroupRepository, StudentGroupRepository,
+)
 from bot.states import PaymentHistoryStates
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period, month_name_ru
@@ -44,12 +46,78 @@ def _fmt_date(value: str | None) -> str:
 
 
 @router.callback_query(F.data == "admin:payhist")
-async def cb_payhist_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
+async def cb_payhist_start(
+    callback: CallbackQuery, user: User | None, state: FSMContext, branch_repo: BranchRepository,
+) -> None:
+    """Старт: филиалы кнопками или ввод фамилии (состояние поиска включено сразу)."""
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
     await state.set_state(PaymentHistoryStates.searching)
-    await callback.message.edit_text(_PROMPT, reply_markup=kb_back("admin:menu"))
+    branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
+    rows = [[InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"payhist_br:{b.branch_id}")] for b in branches]
+    rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
+    await callback.message.edit_text(
+        "📜 <b>История оплат</b>\n\nВыберите филиал — или просто введите фамилию ученика:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("payhist_br:"))
+async def cb_payhist_branch(
+    callback: CallbackQuery, user: User | None, state: FSMContext,
+    branch_repo: BranchRepository, group_repo: GroupRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.clear()
+    branch_id = callback.data.split(":", 1)[1]
+    branch = await branch_repo.get_by_id(branch_id)
+    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    rows = [[InlineKeyboardButton(text=g.name, callback_data=f"payhist_g:{g.group_id}")] for g in groups]
+    rows.append([InlineKeyboardButton(text="« Филиалы", callback_data="admin:payhist")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
+    await callback.message.edit_text(
+        f"📜 <b>История оплат — {branch.name if branch else branch_id}</b>\n\nВыберите группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("payhist_g:"))
+async def cb_payhist_group(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository, payment_repo: PaymentRepository,
+) -> None:
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    group_id = callback.data.split(":", 1)[1]
+    group = await group_repo.get_by_id(group_id)
+    member_ids = set(await student_group_repo.get_students_for_group(group_id))
+    students = sorted((s for s in await student_repo.get_all() if s.student_id in member_ids), key=lambda s: s.name.lower())
+    paid_by_student: dict[str, int] = {}
+    pending_by_student: dict[str, int] = {}
+    for p in await payment_repo.get_all():
+        if p.student_id in member_ids:
+            if p.status == PaymentStatus.PAID:
+                paid_by_student[p.student_id] = paid_by_student.get(p.student_id, 0) + p.total_amount
+            else:
+                pending_by_student[p.student_id] = pending_by_student.get(p.student_id, 0) + p.total_amount
+    rows = []
+    for s in students:
+        mark = "⏳ " if pending_by_student.get(s.student_id) else ("✅ " if paid_by_student.get(s.student_id) else "")
+        rows.append([InlineKeyboardButton(text=f"{mark}{s.name}", callback_data=f"payhist_stu:{s.student_id}")])
+    rows.append([InlineKeyboardButton(text="« Группы", callback_data=f"payhist_br:{group.branch_id if group else ''}")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
+    await callback.message.edit_text(
+        f"📜 <b>{group.name if group else group_id}</b>\n⏳ — есть неоплаченные счета, ✅ — всё оплачено.\n\nВыберите ученика:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
     await callback.answer()
 
 
@@ -73,7 +141,7 @@ async def on_payhist_search(
         return
     await state.clear()
     rows = [[InlineKeyboardButton(text=s.name, callback_data=f"payhist_stu:{s.student_id}")] for s in matches[:15]]
-    rows.append([InlineKeyboardButton(text="🔍 Другой поиск", callback_data="admin:payhist")])
+    rows.append([InlineKeyboardButton(text="« Филиалы / поиск", callback_data="admin:payhist")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
     await message.answer("Выберите ученика:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
