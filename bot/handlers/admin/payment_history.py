@@ -106,7 +106,7 @@ async def cb_payhist_group(
         if p.student_id in member_ids:
             if p.status == PaymentStatus.PAID:
                 paid_by_student[p.student_id] = paid_by_student.get(p.student_id, 0) + p.total_amount
-            else:
+            elif p.total_amount > 0:
                 pending_by_student[p.student_id] = pending_by_student.get(p.student_id, 0) + p.total_amount
     rows = []
     for s in students:
@@ -158,7 +158,7 @@ async def _render_periods(callback: CallbackQuery, student, payment_repo: Paymen
     for period in sorted(by_period, reverse=True):
         items = by_period[period]
         paid = sum(p.total_amount for p in items if p.status == PaymentStatus.PAID)
-        pending = sum(p.total_amount for p in items if p.status != PaymentStatus.PAID)
+        pending = sum(p.total_amount for p in items if p.status != PaymentStatus.PAID and p.total_amount > 0)
         label = f"{_period_label(period)} — {paid} ₽" + (f" · ожидает {pending} ₽" if pending else "")
         icon = "✅" if paid and not pending else ("⏳" if pending else "•")
         rows.append([InlineKeyboardButton(text=f"{icon} {label}", callback_data=f"payhist_p:{student.student_id}:{period}")])
@@ -202,7 +202,7 @@ async def cb_payhist_period(
         return
     pays = [p for p in await payment_repo.get_by_student_and_period(student_id, period)]
     paid = [p for p in pays if p.status == PaymentStatus.PAID]
-    pending = [p for p in pays if p.status != PaymentStatus.PAID]
+    pending = [p for p in pays if p.status != PaymentStatus.PAID and p.total_amount > 0]
     lines = [f"📜 <b>{student.name} — {_period_label(period)}</b>"]
     if paid:
         lines.append("\n<b>Оплачено:</b>")

@@ -16,6 +16,7 @@ from bot.keyboards.client import (
 )
 from bot.keyboards.calendar import kb_calendar
 from bot.services.billing_service import build_billing_rows
+from bot.services.payment_ledger import lesson_paid_marks
 from bot.utils.dates import format_date_short_with_wd, display_period
 
 logger = logging.getLogger(__name__)
@@ -60,35 +61,51 @@ async def _show_lessons(
     )
     lines: list[str] = [f"<b>{title}</b>"]
     total_lessons = 0
+    unpaid_total = 0
     seen_teachers: dict[str, str] = {}  # педагоги платных занятий — для фильтра
 
     for student in students:
-        lessons = sorted(
-            await lesson_repo.get_by_student_and_period(student.student_id, period_str),
+        # Отметки оплаты считаются по всему месяцу (оплаты накопительные), даже если показываем день
+        month_lessons = sorted(
+            await lesson_repo.get_by_student_and_period(student.student_id, period_str[:7]),
             key=lambda ls: ls.date,
         )
+        lessons = month_lessons if is_month else [ls for ls in month_lessons if ls.date == period_str]
         if not lessons:
             continue
 
-        # Загружаем статусы оплаты по уникальным периодам из занятий
-        periods_in_view = {ls.date[:7] for ls in lessons}
-        paid_keys: set[tuple[str, str]] = set()
-        for pm in periods_in_view:
-            for pay in await payment_repo.get_by_student_and_period(student.student_id, pm):
-                if pay.status == PaymentStatus.PAID:
-                    paid_keys.add((pm, pay.teacher_id))
+        # Оплаты по (месяц, педагог) складываются; галочка ставится по порядку дат,
+        # пока хватает оплаченной суммы (любой платёж закрывает самые ранние уроки).
+        paid_by: dict[tuple[str, str], int] = {}
+        for pay in await payment_repo.get_by_student_and_period(student.student_id, period_str[:7]):
+            if pay.status == PaymentStatus.PAID:
+                key = (period_str[:7], pay.teacher_id)
+                paid_by[key] = paid_by.get(key, 0) + pay.total_amount
+
+        # Суммы занятий (только этого ученика) и накопительные отметки оплаты — по всему месяцу
+        amounts: dict[str, int] = {}
+        for ls in month_lessons:
+            teacher = await teacher_repo.get_by_id(ls.teacher_id)
+            if teacher:
+                amounts[ls.lesson_id] = sum(
+                    row.amount for row in build_billing_rows(ls, teacher)
+                    if row.student_id == student.student_id
+                )
+        paid_mark: dict[str, bool] = {}
+        by_key: dict[tuple[str, str], list] = {}
+        for ls in month_lessons:
+            if amounts.get(ls.lesson_id, 0) > 0:
+                by_key.setdefault((ls.date[:7], ls.teacher_id), []).append(ls)
+        for key, group in by_key.items():
+            ordered = sorted(group, key=lambda x: (x.date, x.lesson_id))
+            for ls, mark in zip(ordered, lesson_paid_marks([amounts[x.lesson_id] for x in ordered], paid_by.get(key, 0))):
+                paid_mark[ls.lesson_id] = mark
 
         lines.append(f"\n<b>{student.name}:</b>")
 
         for ls in lessons:
-            teacher = await teacher_repo.get_by_id(ls.teacher_id)
             teacher_short = _short_name(ls.teacher_name)
-
-            amount = 0
-            if teacher:
-                for row in build_billing_rows(ls, teacher):
-                    if row.student_id == student.student_id:
-                        amount += row.amount
+            amount = amounts.get(ls.lesson_id, 0)
 
             # Групповые занятия без тарификации (абонемент/NONE) не показываем
             if ls.type == LessonType.GROUP and amount == 0:
@@ -113,7 +130,14 @@ async def _show_lessons(
                 paid_icon = ""
             else:
                 amount_part = f" · {amount} ₽" if amount > 0 else ""
-                paid_icon = " ✅" if (ls.date[:7], ls.teacher_id) in paid_keys else ""
+                if amount > 0:
+                    if paid_mark.get(ls.lesson_id):
+                        paid_icon = " ✅"
+                    else:
+                        paid_icon = " ⬜"
+                        unpaid_total += amount
+                else:
+                    paid_icon = ""
             if ls.type == LessonType.GROUP and ls.group_id in settings.revenue_share_group_map:
                 dur_part = ""  # длительность индивидуальных на цену не влияет
             else:
@@ -124,10 +148,18 @@ async def _show_lessons(
 
     if total_lessons == 0:
         lines.append("\nЗанятий нет.")
+    elif unpaid_total > 0:
+        lines.append(f"\n⬜ Не оплачено: <b>{unpaid_total} ₽</b>")
+        if student_id == "all":
+            lines.append("<i>Оплата — в разделе «💳 Оплата занятий».</i>")
+    elif is_month:
+        lines.append("\n✅ Все занятия оплачены")
 
     if is_month:
         teachers = sorted(seen_teachers.items(), key=lambda x: x[1])
-        kb = kb_lessons_month_filter(student_id, period_str, teachers, active=teacher_filter)
+        kb = kb_lessons_month_filter(
+            student_id, period_str, teachers, active=teacher_filter, pay_amount=unpaid_total,
+        )
     else:
         kb = kb_lessons_back(student_id)
     await callback.message.edit_text("\n".join(lines), reply_markup=kb)

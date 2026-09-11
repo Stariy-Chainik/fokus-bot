@@ -77,12 +77,17 @@ async def process_yookassa_event(
         return 200
 
     teacher_ids = [t for t in (meta.get("teacher_ids") or "").split(",") if t]
-    if teacher_ids:
-        count = await payment_service.confirm_teachers(student_id, period_month, teacher_ids, 0)
-    else:
-        count = await payment_service.confirm_period(student_id, period_month, 0)
+    amount = getattr(getattr(payment, "amount", None), "value", "?")
+    description = getattr(payment, "description", "") or ""
+    student_name = description.split(" — ")[0].strip() or student_id
+    try:
+        amount_int = int(round(float(str(amount))))
+    except (TypeError, ValueError):
+        amount_int = 0
+    _, count = await payment_service.record_payment(
+        student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
+    )
     if count > 0:
-        amount = getattr(getattr(payment, "amount", None), "value", "?")
         msg = (
             f"💰 Оплата через ЮКасса\n\n"
             f"Ученик: {student_id}\n"

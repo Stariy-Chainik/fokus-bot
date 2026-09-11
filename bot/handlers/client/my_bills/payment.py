@@ -90,17 +90,22 @@ async def cb_client_pay(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
-    parts = callback.data.split(":", 2)
+    parts = callback.data.split(":", 3)
     if len(parts) < 3:
         await callback.answer("Ошибка данных", show_alert=True)
         return
-    _, student_id, period_month = parts
+    student_id, period_month = parts[1], parts[2]
+    preselect = parts[3] if len(parts) > 3 else ""  # client_pay:{sid}:{period}:{teacher_id} — из «Занятий»
     result = await _get_student_and_total(callback, student_repo, payment_service, student_id, period_month)
     if result is None:
         return
     student, total, unpaid = result
     await state.update_data(pay_sel_key=None, pay_sel=[], pay_unpaid=[], pay_student_name=student.name)
-    if len(unpaid) > 1:
+    if preselect and any(u["tid"] == preselect for u in unpaid):
+        sel = [u for u in unpaid if u["tid"] == preselect]
+        await state.update_data(pay_sel_key=f"{student_id}:{period_month}", pay_sel=[preselect], pay_unpaid=unpaid)
+        await _show_methods(callback, student_id, period_month, sel, student.name)
+    elif len(unpaid) > 1:
         await _show_teacher_select(callback, state, student_id, period_month, unpaid)
     else:
         await _show_methods(callback, student_id, period_month, unpaid, student.name)
@@ -216,9 +221,10 @@ async def cb_cash_notify(
     partial = len(sel) < len(unpaid)
     sel_pids = ".".join(str(u["pid"]) for u in sel if u["pid"])
     bills_map = await payment_service.compute_bills_for_student_period(student_id, period_month)
-    breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel]))
+    ledgers = await payment_service.ledger_for(student, period_month)
+    breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     msg = cash_notice(student.name, period_month, total, breakdown)
-    kb = to_aiogram_markup(admin_confirm_rows(student_id, period_month, sel_pids, partial, tg_addr(callback.from_user.id)))
+    kb = to_aiogram_markup(admin_confirm_rows(student_id, period_month, sel_pids, partial, tg_addr(callback.from_user.id), total))
     for admin in await user_repo.get_admins():
         try:
             await callback.bot.send_message(admin.tg_id, msg, reply_markup=kb)
@@ -274,11 +280,12 @@ async def on_receipt_photo(
         total = sum(agg["total"] for agg in bills.values())
 
     bills_map = await payment_service.compute_bills_for_student_period(student_id, period_month)
+    ledgers = await payment_service.ledger_for(student, period_month) if student else {}
     sel_tids = data.get("receipt_sel_tids") or list(bills_map)
     caption = receipt_caption(method, student_name, period_month, total,
-                              "\n".join(breakdown_lines(bills_map, sel_tids)))
+                              "\n".join(breakdown_lines(bills_map, sel_tids, ledgers=ledgers)))
     confirm_kb = to_aiogram_markup(admin_confirm_rows(
-        student_id, period_month, sel_pids, sel_partial, tg_addr(message.from_user.id),
+        student_id, period_month, sel_pids, sel_partial, tg_addr(message.from_user.id), total,
     ))
     for admin in await user_repo.get_admins():
         try:
@@ -343,7 +350,9 @@ async def cb_receipt_confirm_partial(
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, period_month, pids_raw = callback.data.split(":", 3)
+    parts = callback.data.split(":")
+    student_id, period_month, pids_raw = parts[1], parts[2], parts[3]
+    claimed = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else None  # сумма из чека
     payment_ids = [f"PAY-{int(p):06d}" for p in pids_raw.split(".") if p.isdigit()]
     if not payment_ids:
         await callback.answer("Ошибка данных", show_alert=True)
@@ -352,12 +361,25 @@ async def cb_receipt_confirm_partial(
     repo = payment_service._payment_repo
     confirmed_total = 0
     count = 0
-    for pid in payment_ids:
-        row = await repo.get_by_id(pid)
-        if row and row.status != PaymentStatus.PAID:
-            if await payment_service.confirm_payment(pid, callback.from_user.id):
-                count += 1
-                confirmed_total += row.total_amount
+    if claimed:
+        # Зачитываем ровно сумму чека по остаткам выбранных педагогов (остаток мог вырасти)
+        student_row = await student_repo.get_by_id(student_id)
+        teacher_ids = []
+        for pid in payment_ids:
+            row = await repo.get_by_id(pid)
+            if row and row.teacher_id not in teacher_ids:
+                teacher_ids.append(row.teacher_id)
+        confirmed_total, count = await payment_service.record_payment(
+            student_id, student_row.name if student_row else student_id, period_month,
+            claimed, callback.from_user.id, teacher_ids or None, "чек",
+        )
+    else:  # старые кнопки без суммы — закрываем остатки целиком
+        for pid in payment_ids:
+            row = await repo.get_by_id(pid)
+            if row and row.status != PaymentStatus.PAID:
+                if await payment_service.confirm_payment(pid, callback.from_user.id):
+                    count += 1
+                    confirmed_total += row.total_amount
     if count == 0:
         await callback.answer("Счета уже подтверждены или не найдены", show_alert=True)
         return
@@ -397,18 +419,24 @@ async def cb_receipt_confirm(
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, period_month = callback.data.split(":", 2)
+    parts = callback.data.split(":")
+    student_id, period_month = parts[1], parts[2]
+    claimed = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None  # сумма из чека
 
     # Получаем сумму к подтверждению до confirm (после — статус уже PAID)
     student = await student_repo.get_by_id(student_id)
     pending_total = 0
     if student:
-        bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
-        invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
-        paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
-        pending_total = sum(agg["total"] for tid, agg in bills.items() if tid not in paid_teachers)
+        ledgers = await payment_service.ledger_for(student, period_month)
+        pending_total = sum(l.remainder for l in ledgers.values())
 
-    count = await payment_service.confirm_period(student_id, period_month, callback.from_user.id)
+    if claimed:
+        pending_total, count = await payment_service.record_payment(
+            student_id, student.name if student else student_id, period_month,
+            claimed, callback.from_user.id, None, "чек",
+        )
+    else:  # старые кнопки без суммы — закрываем все остатки
+        count = await payment_service.confirm_period(student_id, period_month, callback.from_user.id)
     if count > 0:
         old_text = callback.message.caption or callback.message.text or ""
         confirmed_suffix = "\n\n✅ Оплата подтверждена"
@@ -492,9 +520,10 @@ async def _send_unbound_receipt(
     student, period_month: str, total: int, kind: str, file_id: str, parent_tg_id: int,
 ) -> None:
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
+    ledgers = await payment_service.ledger_for(student, period_month)
     caption = receipt_caption("bank", student.name, period_month, total,
-                              "\n".join(breakdown_lines(bills_map, list(bills_map))))
-    rows = admin_confirm_rows(student.student_id, period_month, "", False, tg_addr(parent_tg_id))
+                              "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
+    rows = admin_confirm_rows(student.student_id, period_month, "", False, tg_addr(parent_tg_id), total)
     await _forward_receipt(bot, user_repo, kind, file_id, caption, rows)
     logger.info("Чек без шага «Прикрепить»: tg_id=%s → %s %s", parent_tg_id, student.student_id, period_month)
 

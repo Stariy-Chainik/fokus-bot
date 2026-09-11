@@ -67,9 +67,14 @@ def kb_lessons_month_list(student_id: str = "all") -> InlineKeyboardMarkup:
 def kb_lessons_month_filter(
     student_id: str, period: str,
     teachers: list, active: str = "all",
+    pay_amount: int = 0,
 ) -> InlineKeyboardMarkup:
-    """Экран занятий за месяц: фильтр по педагогу (teachers: [(id, имя)])."""
+    """Экран занятий за месяц: фильтр по педагогу (teachers: [(id, имя)]).
+    pay_amount > 0 — кнопка «Оплатить N ₽» (ведёт в счёт; при фильтре по педагогу — только он)."""
     rows = []
+    if pay_amount > 0 and student_id != "all":
+        target = f"client_pay:{student_id}:{period}" + (f":{active}" if active != "all" else "")
+        rows.append([InlineKeyboardButton(text=f"💳 Оплатить {pay_amount} ₽", callback_data=target)])
     if len(teachers) > 1:
         mark = " ✓" if active == "all" else ""
         rows.append([InlineKeyboardButton(

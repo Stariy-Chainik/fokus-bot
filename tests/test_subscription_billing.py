@@ -104,10 +104,10 @@ def _solo_lesson(lesson_id, sid, lesson_date, teacher_id="TCH-0001"):
     )
 
 
-def _payment(sid, tid, period, status):
+def _payment(sid, tid, period, status, amount=0):
     return StudentPeriodPayment(
         payment_id="PAY-000001", student_id=sid, student_name="—",
-        period_month=period, total_amount=0, status=status,
+        period_month=period, total_amount=amount, status=status,
         paid_at=None, confirmed_by_tg_id=None, comment=None,
         created_at="", updated_at="", teacher_id=tid, teacher_name="—",
     )
@@ -206,7 +206,7 @@ def test_debt_map_paid_subscription_excluded():
         [_group_lesson("LES-1", "GRP-0001", "2026-07-03")],
         [_sub_group(price=3000)],
         [("STU-A", "GRP-0001")],
-        payments=[_payment("STU-A", "SUB:GRP-0001", "2026-07", PaymentStatus.PAID)],
+        payments=[_payment("STU-A", "SUB:GRP-0001", "2026-07", PaymentStatus.PAID, amount=3000)],
     )
     assert _run(svc.compute_debt_map(until_period="2026-07")) == {}
 

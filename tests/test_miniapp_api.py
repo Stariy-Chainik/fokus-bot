@@ -25,7 +25,7 @@ class _StudentRepo:
 
 class _PaymentRepo:
     async def get_by_student_and_period(self, student_id, period):
-        return [SimpleNamespace(teacher_id="TCH-0001", status=PaymentStatus.PAID)]
+        return [SimpleNamespace(teacher_id="TCH-0001", status=PaymentStatus.PAID, total_amount=1000)]
 
 
 class _PaymentService:

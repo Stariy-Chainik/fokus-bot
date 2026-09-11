@@ -242,14 +242,14 @@ earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные 
 
 ## Payment flow (client side)
 
-Invoices stored as `StudentPeriodPayment` — one per `(student, teacher, period)`. Statuses: `PENDING` / `PAID`.
+**Накопительный счёт (с 2026-09-11).** Строки `StudentPeriodPayment` в листе `student_period_payments` — по связке `(student, teacher_id, period_month)` их может быть **несколько**: N строк `PAID` (каждая — один платёж со своей суммой) и не более одной `PENDING` — **остаток** = начислено − оплачено (может быть 0 — платить нечего). `PaymentService.ledger_for(student, period)` → `{teacher_id: TeacherLedger(accrued, paid, remainder, overpaid, pending, paid_rows, items, subscription)}` ([bot/services/payment_ledger.py](bot/services/payment_ledger.py)) синхронизирует строку-остаток при каждом открытии счёта; `get_or_create_invoices_for_student_period()` возвращает оплаченные строки + остаток. `PaymentRepository.get_by_student_period_teacher()` возвращает **только** строку-остаток, `get_rows_for()` — все. Так родитель может платить после каждого урока: каждое подтверждение закрывает остаток, следующий урок создаёт новый.
 
-**Lessons have no payment status field.** The ✅ in the «Занятия» screen is computed on the fly: for each lesson, check whether `(date[:7], teacher_id)` exists in `StudentPeriodPayment` with `status=PAID`.
+**Lessons have no payment status field.** ✅/⬜ в «Занятиях» считается на лету: оплаты по `(месяц, педагог)` складываются, уроки идут по датам, галочка ставится, пока хватает оплаченной суммы (`lesson_paid_marks`). Внизу экрана «Не оплачено: N ₽» и кнопка «💳 Оплатить» (`client_pay:{sid}:{period}[:{teacher_id}]` — при фильтре по педагогу он предвыбран).
 
-**Bill detail** ([my_bills/viewing.py: cb_bill_detail](bot/handlers/client/my_bills/viewing.py)):
-- Paid teachers shown with ✅ and «оплачено» label; their amount excluded from "К оплате".
-- "К оплате" = sum of only unpaid teachers' invoices.
-- "Оплатить" button hidden when nothing is left to pay.
+**Bill detail** ([my_bills/viewing.py](bot/handlers/client/my_bills/viewing.py) → `parent_views.bill_detail`):
+- По педагогу: «Итого X — оплачено» / «оплачено P, к доплате R» / «переплата» (если урок удалили после оплаты — учитывается вручную в следующем месяце).
+- "К оплате" = сумма остатков; «Оплатить» скрыта, когда остатков нет. Список месяцев: ✅ всё оплачено, ⏳ есть остаток (подпись «к доплате N», если уже платили).
+- «Должники» (`compute_debt_map`) считают долг как начислено − оплачено, поэтому доплата после новых уроков попадает в должников и напоминания.
 
 **Payment methods** (each configured via ENV — invisible if the corresponding setting is empty):
 1. 💵 Наличные — admin gets notification + confirm button (`PAYMENT_CASH_ENABLED`).
@@ -261,7 +261,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 
 **YooKassa webhook is verified** ([payments.py: process_yookassa_event](bot/handlers/client/payments.py)): the request body is **not trusted** — only `object.id` is taken from it, then the payment is re-fetched from the YooKassa API (`Payment.find_one`); status/metadata/amount come from the API response. Period is confirmed only on real `succeeded`. Network error during verification → HTTP 500 (YooKassa retries). Tests: [tests/test_yookassa_webhook.py](tests/test_yookassa_webhook.py).
 
-**Important**: if a lesson is added to a period after its invoice was marked PAID, the new amount will **not** be auto-billed — PAID records are not recalculated. The bot currently has no automatic additional-invoice flow; correction requires an explicit manual data/operational decision. Reopening only the teacher submission does not reopen the payment.
+**Important**: занятие, добавленное после оплаты, **доначисляется** автоматически (новая строка-остаток по педагогу); оплаченные строки никогда не меняются. Удаление оплаченного урока даёт «переплату» — она показывается, но не переносится автоматически.
 
 ---
 

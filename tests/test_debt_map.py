@@ -56,10 +56,10 @@ def _lesson(lesson_id, teacher_id, lesson_date, *, s1=None, s2=None,
     )
 
 
-def _payment(student_id, teacher_id, period, status):
+def _payment(student_id, teacher_id, period, status, amount=0):
     return StudentPeriodPayment(
         payment_id="PAY-000001", student_id=student_id, student_name="—",
-        period_month=period, total_amount=0, status=status,
+        period_month=period, total_amount=amount, status=status,
         paid_at=None, confirmed_by_tg_id=None, comment=None,
         created_at="", updated_at="", teacher_id=teacher_id, teacher_name="—",
     )
@@ -87,9 +87,19 @@ def test_paid_period_excluded():
     svc = _service(
         [_lesson("LES-1", "TCH-0001", "2026-05-10", s1="STU-A")],
         [_teacher()],
-        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID)],
+        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID, amount=1000)],
     )
     assert _run(svc.compute_debt_map()) == {}
+
+
+def test_partial_payment_keeps_remainder_as_debt():
+    """Накопительный счёт: оплачено 600 из 1000 → долг 400 (оплата после каждого урока)."""
+    svc = _service(
+        [_lesson("LES-1", "TCH-0001", "2026-05-10", s1="STU-A")],
+        [_teacher()],
+        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID, amount=600)],
+    )
+    assert _run(svc.compute_debt_map()) == {"STU-A": {"2026-05": 400}}
 
 
 def test_pending_invoice_still_counts_as_debt():
@@ -134,7 +144,7 @@ def test_paid_one_teacher_keeps_debt_to_another():
             _lesson("LES-2", "TCH-0002", "2026-05-12", s1="STU-A"),
         ],
         [_teacher("TCH-0001"), _teacher("TCH-0002", rate_for_student=1200)],
-        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID)],
+        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID, amount=1000)],
     )
     assert _run(svc.compute_debt_map()) == {"STU-A": {"2026-05": 1200}}
 

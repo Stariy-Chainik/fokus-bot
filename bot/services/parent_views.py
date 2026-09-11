@@ -9,9 +9,9 @@ import logging
 from dataclasses import dataclass, field
 from io import BytesIO
 
-from bot.models.enums import PaymentStatus
 from bot.utils.dates import display_period, last_periods, month_name_ru
 from bot.services.parent_notifier import fmt_addr
+from bot.services.payment_ledger import ledger_totals
 
 logger = logging.getLogger(__name__)
 
@@ -38,30 +38,31 @@ class PeriodRow:
 
 
 async def bills_periods(students: list, payment_service, show_older: bool = False) -> list[PeriodRow]:
-    """show_older=False — текущий и прошлый месяц; True — остальные из последних 6."""
+    """show_older=False — текущий и прошлый месяц; True — остальные из последних 6.
+    Иконка: ✅ всё оплачено, ⏳ есть остаток к оплате, 📅 текущий месяц."""
     all_periods = last_periods(6)
     periods = all_periods[2:] if show_older else all_periods[:2]
     rows: list[PeriodRow] = []
     for period_month in periods:
-        total = 0
+        accrued = paid = remainder = 0
         for student in students:
-            bills = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
-            total += sum(agg["total"] for agg in bills.values())
+            ledgers = await payment_service.ledger_for(student, period_month)
+            a, p_, r = ledger_totals(ledgers)
+            accrued += a; paid += p_; remainder += r
         label = period_label(period_month)
         if period_month == periods[0]:
             icon = "📅"
-            suffix = f" — {total} руб. (текущий)" if total else " — нет занятий"
+            if not accrued:
+                suffix = " — нет занятий"
+            elif remainder and paid:
+                suffix = f" — {accrued} руб., к доплате {remainder} (текущий)"
+            else:
+                suffix = f" — {accrued} руб. (текущий)"
         else:
-            paid = False
-            for student in students:
-                invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
-                if invoices and all(inv.status == PaymentStatus.PAID for inv in invoices):
-                    paid = True
-                    break
-            if total == 0:
+            if accrued == 0:
                 continue
-            icon = "✅" if paid else "⏳"
-            suffix = f" — {total} руб."
+            icon = "✅" if remainder == 0 else "⏳"
+            suffix = f" — {accrued} руб." + (f", к доплате {remainder}" if remainder and paid else "")
         rows.append(PeriodRow(period_month, f"{label}{suffix}", icon))
     return rows
 
@@ -72,14 +73,14 @@ async def bills_periods(students: list, payment_service, show_older: bool = Fals
 class BillDetail:
     lines: list = field(default_factory=list)
     grand_total: int = 0
+    paid_total: int = 0
     unpaid_total: int = 0
+    overpaid_total: int = 0
     payment_ids: list = field(default_factory=list)
-    has_invoices: bool = False
-    all_paid: bool = True
 
     @property
     def can_pay(self) -> bool:
-        return self.has_invoices and not self.all_paid and self.unpaid_total > 0
+        return self.unpaid_total > 0
 
 
 async def bill_detail(students: list, period_month: str, payment_service) -> BillDetail:
@@ -88,41 +89,41 @@ async def bill_detail(students: list, period_month: str, payment_service) -> Bil
     title_who = f" — {students[0].name}" if len(students) == 1 else " — все дети"
     d.lines.append(f"<b>📋 {period_label(period_month)}{title_who}</b>\n")
     for student in students:
-        bills = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
-        if not bills:
+        ledgers = await payment_service.ledger_for(student, period_month)
+        if not ledgers:
             continue
-        invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
-        by_teacher = {inv.teacher_id: inv for inv in invoices}
-        for inv in invoices:
-            d.has_invoices = True
-            d.payment_ids.append(inv.payment_id)
-            if inv.status != PaymentStatus.PAID:
-                d.all_paid = False
         if len(students) > 1:
             d.lines.append(f"<b>{student.name}:</b>")
-        for teacher_id, agg in bills.items():
-            inv = by_teacher.get(teacher_id)
-            teacher_paid = inv is not None and inv.status == PaymentStatus.PAID
-            teacher_name = agg["name"] or teacher_id
-            paid_mark = " ✅" if teacher_paid else ""
-            if agg.get("subscription"):
-                d.lines.append(f"<b>💳 {teacher_name}{paid_mark}</b>")
+        for teacher_id, l in ledgers.items():
+            if l.pending is not None:
+                d.payment_ids.append(l.pending.payment_id)
+            paid_mark = " ✅" if l.fully_paid else ""
+            if l.subscription:
+                d.lines.append(f"<b>💳 {l.name}{paid_mark}</b>")
                 d.lines.append("  фиксированная сумма за месяц")
             else:
-                d.lines.append(f"<b>Педагог: {teacher_name}{paid_mark}</b>")
-            for item in sorted(agg["items"], key=lambda b: b.date):
+                d.lines.append(f"<b>Педагог: {l.name}{paid_mark}</b>")
+            for item in sorted(l.items, key=lambda b: b.date):
                 d.lines.append(f"  {format_date_display(item.date)}  {item.duration_min} мин  — {item.amount} руб.")
-            if teacher_paid:
-                d.lines.append(f"  <i>Итого: {agg['total']} руб. — оплачено</i>\n")
+            if l.fully_paid:
+                d.lines.append(f"  <i>Итого: {l.accrued} руб. — оплачено</i>\n")
+            elif l.paid:
+                d.lines.append(f"  <i>Итого: {l.accrued} руб. — оплачено {l.paid}, к доплате {l.remainder}</i>\n")
             else:
-                d.lines.append(f"  <i>Итого: {agg['total']} руб.</i>\n")
-                d.unpaid_total += agg["total"]
-            d.grand_total += agg["total"]
+                d.lines.append(f"  <i>Итого: {l.accrued} руб.</i>\n")
+            if l.overpaid:
+                d.lines.append(f"  <i>переплата {l.overpaid} руб. — учтём в следующем месяце</i>\n")
+            d.grand_total += l.accrued
+            d.paid_total += l.paid
+            d.unpaid_total += l.remainder
+            d.overpaid_total += l.overpaid
     if d.grand_total == 0:
         d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
     elif d.unpaid_total > 0:
+        if d.paid_total:
+            d.lines.append(f"Оплачено: {d.paid_total} руб.")
         d.lines.append(f"<b>К оплате: {d.unpaid_total} руб.</b>")
-    elif d.has_invoices and d.all_paid:
+    else:
         d.lines.append("✅ Период полностью оплачен")
     return d
 
@@ -130,15 +131,12 @@ async def bill_detail(students: list, period_month: str, payment_service) -> Bil
 # ─── Оплата ──────────────────────────────────────────────────────────────────
 
 async def unpaid_for(student, period_month: str, payment_service) -> tuple[int, list]:
-    """(сумма к оплате, [{tid, name, amount, pid}]) — неоплаченные начисления по педагогам.
-    pid — числовая часть PAY-id (для коротких callback)."""
-    bills = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
-    invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
-    paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
-    pid_by_teacher = {inv.teacher_id: int(inv.payment_id.split("-")[-1]) for inv in invoices}
+    """(сумма к оплате, [{tid, name, amount, pid}]) — остатки по педагогам (начислено − оплачено).
+    pid — числовая часть PAY-id строки-остатка (для коротких callback)."""
+    ledgers = await payment_service.ledger_for(student, period_month)
     unpaid = sorted(
-        [{"tid": tid, "name": agg["name"], "amount": agg["total"], "pid": pid_by_teacher.get(tid, 0)}
-         for tid, agg in bills.items() if tid not in paid_teachers],
+        [{"tid": tid, "name": l.name, "amount": l.remainder, "pid": l.pending_pid}
+         for tid, l in ledgers.items() if l.remainder > 0],
         key=lambda x: x["name"],
     )
     return sum(u["amount"] for u in unpaid), unpaid
@@ -195,34 +193,42 @@ def qr_png(student_name: str, period_month: str, total: int) -> bytes | None:
 
 # ─── Сообщение админу о чеке / наличных ─────────────────────────────────────
 
-def breakdown_lines(bills: dict, tids: list, limit: int = 850) -> list[str]:
+def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | None = None) -> list[str]:
     """Разбивка для админа: педагог/абонемент — сумма и даты занятий.
+    ledgers (teacher_id → TeacherLedger) — показать «оплачено / к доплате» при частичной оплате.
     Если не влезает в подпись Telegram — короткий вариант (число занятий)."""
     full, short = [], []
     for tid in tids:
         agg = bills.get(tid)
         if not agg:
             continue
+        l = (ledgers or {}).get(tid)
+        paid_part = f" (оплачено {l.paid}, к доплате {l.remainder})" if l is not None and l.paid else ""
         items = sorted(agg.get("items") or [], key=lambda b: b.date)
         if agg.get("subscription") or not items:
-            full.append(f"• {agg['name']} — {agg['total']} руб.")
+            full.append(f"• {agg['name']} — {agg['total']} руб.{paid_part}")
             short.append(full[-1])
             continue
         dates = ", ".join(
             f"{b.date[8:10]}.{b.date[5:7]} ({b.duration_min}м{', группа' if b.lesson_type == 'group' else ''})"
             for b in items
         )
-        full.append(f"• {agg['name']} — {agg['total']} руб.: {dates}")
-        short.append(f"• {agg['name']} — {agg['total']} руб. ({len(items)} зан.)")
+        full.append(f"• {agg['name']} — {agg['total']} руб.{paid_part}: {dates}")
+        short.append(f"• {agg['name']} — {agg['total']} руб.{paid_part} ({len(items)} зан.)")
     return full if len("\n".join(full)) <= limit else short
 
 
-def admin_confirm_rows(student_id: str, period_month: str, sel_pids: str, partial: bool, parent_addr) -> list:
-    """Кнопки админу: подтвердить (частично — только выбранные счета) / не подтверждать."""
+def admin_confirm_rows(
+    student_id: str, period_month: str, sel_pids: str, partial: bool, parent_addr, total: int | None = None,
+) -> list:
+    """Кнопки админу: подтвердить (частично — только выбранные счета) / не подтверждать.
+    total — сумма из чека/уведомления: зачитывается именно она (record_payment), а не остаток
+    на момент нажатия (он мог вырасти после новых занятий)."""
     from bot.screens import cb
+    amount_part = f":{int(total)}" if total else ""
     confirm_cb = (
-        f"rcpp:{student_id}:{period_month}:{sel_pids}"
-        if partial and sel_pids else f"receipt_confirm:{student_id}:{period_month}"
+        f"rcpp:{student_id}:{period_month}:{sel_pids}{amount_part}"
+        if partial and sel_pids else f"receipt_confirm:{student_id}:{period_month}{amount_part}"
     )
     return [
         [cb("✅ Подтвердить оплату", confirm_cb)],

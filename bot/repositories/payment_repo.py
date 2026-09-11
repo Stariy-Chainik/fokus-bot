@@ -36,12 +36,22 @@ class PaymentRepository(BaseRepository):
             if p.student_id == student_id and p.period_month == period_month
         ]
 
+    async def get_rows_for(
+        self, student_id: str, period_month: str, teacher_id: str,
+    ) -> list[StudentPeriodPayment]:
+        """Все строки связки (ученик, педагог, месяц): оплаты (paid) и остаток (pending)."""
+        return [
+            p for p in await self.get_all()
+            if p.student_id == student_id and p.period_month == period_month
+            and p.teacher_id == teacher_id
+        ]
+
     async def get_by_student_period_teacher(
         self, student_id: str, period_month: str, teacher_id: str,
     ) -> Optional[StudentPeriodPayment]:
-        for p in await self.get_all():
-            if (p.student_id == student_id and p.period_month == period_month
-                    and p.teacher_id == teacher_id):
+        """Строка-остаток (pending) связки или None. Оплаченные строки см. get_rows_for."""
+        for p in await self.get_rows_for(student_id, period_month, teacher_id):
+            if p.status != PaymentStatus.PAID:
                 return p
         return None
 
@@ -94,7 +104,8 @@ class PaymentRepository(BaseRepository):
         for i, row in enumerate(records):
             if (str(row.get("student_id")) != student_id
                     or str(row.get("period_month")) != period_month
-                    or str(row.get("status") or "pending") == PaymentStatus.PAID.value):
+                    or str(row.get("status") or "pending") == PaymentStatus.PAID.value
+                    or int(float(row.get("total_amount") or 0)) <= 0):  # остаток 0 — платить нечего
                 continue
             row_idx = i + 2
             await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)

@@ -5,8 +5,10 @@ from bot.utils.dates import display_period, format_date_short_with_wd
 
 def build_bill_text(
     student_name: str, group_names: list[str], period_month: str, bills: dict,
+    paid: int = 0,
 ) -> tuple[str, int]:
-    """Возвращает (text, grand_total) — текст счёта в родительском формате."""
+    """Возвращает (text, grand_total) — текст счёта в родительском формате.
+    paid — уже оплачено за месяц (накопительный счёт): печатаем оплачено / остаток."""
     lines = [
         "📄 <b>Счёт за обучение</b>",
         "",
@@ -35,5 +37,9 @@ def build_bill_text(
             lines.append(f"    · {b.duration_min} мин · {b.amount} ₽")
         lines.append(f"  <b>Сумма: {agg['total']} ₽</b>")
         lines.append("")
-    lines.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
+    if paid > 0:
+        lines.append(f"Начислено: {grand_total} ₽ · оплачено: {paid} ₽")
+        lines.append(f"<b>Остаток к оплате: {max(grand_total - paid, 0)} ₽</b>")
+    else:
+        lines.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
     return "\n".join(lines), grand_total

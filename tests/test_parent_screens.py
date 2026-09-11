@@ -40,11 +40,11 @@ def test_bills_list_screen_recent_and_older():
 
 
 def test_bill_detail_screen_pay_button_only_when_can_pay():
-    d = BillDetail(lines=["x"], grand_total=100, unpaid_total=100, has_invoices=True, all_paid=False)
+    d = BillDetail(lines=["x"], grand_total=100, unpaid_total=100)
     assert d.can_pay
     _, kb = bill_detail_screen(d, "2026-09", "STU-1")
     assert kb[0][0].value == "client_pay:STU-1:2026-09"
-    d.all_paid, d.unpaid_total = True, 0
+    d.unpaid_total = 0
     _, kb = bill_detail_screen(d, "2026-09", "STU-1")
     assert kb[0][0].value == "cl_bills_stu:STU-1"
 

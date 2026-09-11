@@ -22,6 +22,13 @@ _INTERVAL_SEC = 20
 _MAX_CHECKS = 45  # ~15 минут
 
 
+def _to_int(value) -> int:
+    try:
+        return int(round(float(str(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
 async def _fetch(payment_id: str):
     from yookassa import Configuration, Payment as YKPayment
     from config.settings import settings
@@ -49,11 +56,10 @@ async def _watch(
         if status != "succeeded":
             continue
 
-        if teacher_ids:
-            count = await payment_service.confirm_teachers(student_id, period_month, teacher_ids, 0)
-        else:
-            count = await payment_service.confirm_period(student_id, period_month, 0)
         amount = getattr(getattr(payment, "amount", None), "value", "?")
+        credited, count = await payment_service.record_payment(
+            student_id, student_name, period_month, _to_int(amount), 0, teacher_ids or None, "ЮКасса",
+        )
         logger.info(
             "Платёж %s succeeded (опрос): student=%s period=%s подтверждено счетов=%d",
             payment_id, student_id, period_month, count,

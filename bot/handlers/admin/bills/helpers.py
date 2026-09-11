@@ -23,8 +23,10 @@ async def _send_bill_to_parents(
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> tuple[int, int, int]:
     """Отправить счёт родителям ученика. Возвращает (recipients_total, sent_to, sent_invoices)."""
-    invoices = await payment_service.get_or_create_invoices_for_student_period(student, period)
-    bill_text, _ = build_bill_text(student.name, group_names, period, bills)
+    ledgers = await payment_service.ledger_for(student, period)
+    invoices = [r for l in ledgers.values() for r in ([*l.paid_rows] + ([l.pending] if l.pending else []))]
+    paid_total = sum(l.paid for l in ledgers.values())
+    bill_text, _ = build_bill_text(student.name, group_names, period, bills, paid=paid_total)
 
     client = await client_repo.get_by_id(student.client_id) if student.client_id else None
     recipients = addrs_of(student, client)  # Telegram и MAX
@@ -40,7 +42,7 @@ async def _send_bill_to_parents(
         tg_id = addr[1]
         if settings.payment_provider_token and addr[0] == "tg":
             for p in invoices:
-                if p.status.value != "paid":
+                if p.status.value != "paid" and p.total_amount > 0:
                     try:
                         await callback.bot.send_invoice(
                             chat_id=tg_id,
@@ -75,16 +77,28 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
 
     Общий для админского флоу и педагога с правом счетов (BILLING_TEACHER_IDS).
     """
-    pay_by_teacher = {p.teacher_id: p for p in payments}
+    paid_by_teacher: dict[str, int] = {}
+    last_paid_at: dict[str, str] = {}
+    has_pending: set[str] = set()
+    for p in payments:
+        if p.status.value == "paid":
+            paid_by_teacher[p.teacher_id] = paid_by_teacher.get(p.teacher_id, 0) + p.total_amount
+            last_paid_at[p.teacher_id] = max(last_paid_at.get(p.teacher_id, ""), (p.paid_at or "")[:10])
+        else:
+            has_pending.add(p.teacher_id)
     lines = [f"<b>Счёт: {student_name}</b>", f"Период: {display_period(period_month)}", ""]
     grand_total = 0
+    grand_paid = 0
     for teacher_id, agg in bills.items():
         subtotal = agg["total"]
         grand_total += subtotal
-        p = pay_by_teacher.get(teacher_id)
-        if p and p.status.value == "paid":
-            status = f"✅ Оплачен ({p.paid_at or ''})"
-        elif p:
+        paid = paid_by_teacher.get(teacher_id, 0)
+        grand_paid += min(paid, subtotal)
+        if paid >= subtotal:
+            status = f"✅ Оплачен ({last_paid_at.get(teacher_id, '')})"
+        elif paid:
+            status = f"🟡 Оплачено {paid}, к доплате {subtotal - paid}"
+        elif teacher_id in has_pending:
             status = "📋 Ожидает оплаты"
         else:
             status = "⏳ Счёт не создан"
@@ -110,7 +124,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
                     lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
                 lines.append(f"    · {b.duration_min} мин · {b.amount} руб.")
         lines.append("")
-    lines.append(f"Итого: {grand_total} руб.")
+    lines.append(f"Итого: {grand_total} руб." + (f" · оплачено {grand_paid}, к доплате {grand_total - grand_paid}" if 0 < grand_paid < grand_total else ""))
     return lines
 
 

@@ -199,16 +199,22 @@ async def cb_pay_pick_invoice(
         return
 
     rows: list[list[InlineKeyboardButton]] = []
-    for p in invoices:
+    for p in sorted(invoices, key=lambda x: (x.teacher_name or "", x.status.value != "paid", x.paid_at or "")):
         paid = p.status.value == "paid"
-        icon = "✅" if paid else "⏳"
-        label = f"{icon} {p.teacher_name or '—'} — {p.total_amount} руб."
+        if not paid and p.total_amount <= 0:
+            continue  # остаток 0 — платить нечего
         if paid:
-            rows.append([InlineKeyboardButton(text=label, callback_data="noop")])
+            when = f" ({(p.paid_at or '')[:10]})" if p.paid_at else ""
+            rows.append([InlineKeyboardButton(
+                text=f"✅ {p.teacher_name or '—'} — {p.total_amount} руб.{when}", callback_data="noop",
+            )])
         else:
             rows.append([InlineKeyboardButton(
-                text=label, callback_data=f"pay_invoice:{p.payment_id}:{group_id}",
+                text=f"⏳ {p.teacher_name or '—'} — к доплате {p.total_amount} руб.",
+                callback_data=f"pay_invoice:{p.payment_id}:{group_id}",
             )])
+    if not rows:
+        rows.append([InlineKeyboardButton(text="✅ Всё оплачено", callback_data="noop")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
 
     await callback.message.edit_text(
@@ -238,9 +244,11 @@ async def cb_pay_confirm(
         await callback.answer("Счёт не найден", show_alert=True)
         return
     pick_cb = f"pcps:{payment.period_month}:{group_id}:{payment.student_id}"
-    if payment.status.value == "paid":
+    if payment.status.value == "paid" or payment.total_amount <= 0:
         await callback.message.edit_text(
-            f"Счёт {payment.payment_id} уже оплачен.", reply_markup=kb_back(pick_cb),
+            f"Счёт {payment.payment_id} уже оплачен." if payment.status.value == "paid"
+            else f"По счёту {payment.payment_id} остаток 0 — платить нечего.",
+            reply_markup=kb_back(pick_cb),
         )
         await callback.answer()
         return

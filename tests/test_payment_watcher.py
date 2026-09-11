@@ -13,6 +13,11 @@ class _Service:
         self.confirmed.append((student_id, period))
         return 1
 
+    async def record_payment(self, student_id, student_name, period, amount, by, teacher_ids=None, comment=None):
+        self.confirmed.append((student_id, period))
+        self.amounts = getattr(self, "amounts", []) + [(amount, teacher_ids)]
+        return amount, 1
+
 
 class _Bot:
     def __init__(self):

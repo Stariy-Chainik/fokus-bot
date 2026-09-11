@@ -18,6 +18,7 @@ from aiohttp import web
 
 from config.settings import settings
 from bot.models.enums import PaymentStatus
+from bot.services import payment_ledger
 from bot.utils.dates import last_periods
 from bot.utils.telegram_auth import verify_init_data
 
@@ -69,20 +70,22 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
                 )
                 if not bill_map:
                     continue
-                payments = await payment_repo.get_by_student_and_period(student.student_id, period)
-                status_by_teacher = {p.teacher_id: p.status for p in payments}
+                paid_sums = payment_ledger.paid_sums(
+                    await payment_repo.get_by_student_and_period(student.student_id, period),
+                )
                 teachers = []
                 to_pay = 0
                 for teacher_id, agg in bill_map.items():
-                    paid = status_by_teacher.get(teacher_id) == PaymentStatus.PAID
-                    pending = status_by_teacher.get(teacher_id) == PaymentStatus.PENDING
-                    if not paid:
-                        to_pay += agg["total"]
+                    paid_amount = paid_sums.get(teacher_id, 0)
+                    remainder = max(agg["total"] - paid_amount, 0)
+                    to_pay += remainder
                     teachers.append({
                         "teacherId": teacher_id,
                         "teacherName": agg["name"],
                         "total": agg["total"],
-                        "status": "PAID" if paid else ("PENDING" if pending else "UNPAID"),
+                        "paid": paid_amount,
+                        "toPay": remainder,
+                        "status": "PAID" if remainder == 0 else ("PARTIAL" if paid_amount else "UNPAID"),
                     })
                 out.append({
                     "studentId": student.student_id,
@@ -117,9 +120,11 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
         # Как в боте: сумма — только неоплаченные педагоги; PENDING-счета
         # создаются заранее, чтобы вебхук ЮКассы после succeeded пометил их PAID.
         bill_map = await payment_service.compute_bills_for_student_period(student_id, period_month)
-        invoices = await payment_service.get_or_create_invoices_for_student_period(student, period_month)
-        paid_teachers = {inv.teacher_id for inv in invoices if inv.status == PaymentStatus.PAID}
-        total = sum(agg["total"] for tid, agg in bill_map.items() if tid not in paid_teachers)
+        await payment_service.get_or_create_invoices_for_student_period(student, period_month)
+        paid_sums = payment_ledger.paid_sums(
+            await payment_repo.get_by_student_and_period(student_id, period_month),
+        )
+        total = sum(max(agg["total"] - paid_sums.get(tid, 0), 0) for tid, agg in bill_map.items())
         if total <= 0:
             return _json({"error": "nothing_to_pay"}, status=409)
 

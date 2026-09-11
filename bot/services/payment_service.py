@@ -10,6 +10,7 @@ from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
 from .billing_service import build_billing_rows
+from .payment_ledger import TeacherLedger
 
 logger = logging.getLogger(__name__)
 
@@ -239,55 +240,127 @@ class PaymentService:
         result.update(await self._subscription_bills_for_student(student_id, period_month))
         return result
 
+    async def ledger_for(self, student: Student, period_month: str) -> dict:
+        """Накопительный счёт по педагогам за месяц: teacher_id → TeacherLedger.
+
+        Синхронизирует строку-остаток (pending) в листе: остаток = начислено − оплачено.
+        Оплаченные строки не трогаются — их может быть несколько (оплата после каждого урока).
+        """
+        bills = await self.compute_bills_for_student_period(student.student_id, period_month)
+        if not bills:
+            return {}
+        rows = await self._payment_repo.get_by_student_and_period(student.student_id, period_month)
+        by_teacher: dict[str, list] = {}
+        for r in rows:
+            by_teacher.setdefault(r.teacher_id, []).append(r)
+        ledgers: dict[str, TeacherLedger] = {}
+        for teacher_id, agg in bills.items():
+            t_rows = by_teacher.get(teacher_id, [])
+            paid_rows = [r for r in t_rows if r.status == PaymentStatus.PAID]
+            pending = next((r for r in t_rows if r.status != PaymentStatus.PAID), None)
+            paid = sum(r.total_amount for r in paid_rows)
+            remainder = max(agg["total"] - paid, 0)
+            if pending is None:
+                if remainder > 0:
+                    pending = await self._create_invoice(student, period_month, teacher_id, agg["name"], remainder)
+            elif pending.total_amount != remainder:
+                logger.info("Остаток по %s изменился: %d → %d", pending.payment_id, pending.total_amount, remainder)
+                await self._payment_repo.update_amount(pending.payment_id, remainder)
+                pending.total_amount = remainder
+            ledgers[teacher_id] = TeacherLedger(
+                teacher_id=teacher_id, name=agg["name"], accrued=agg["total"], paid=paid,
+                items=list(agg.get("items") or []), paid_rows=paid_rows, pending=pending,
+                subscription=bool(agg.get("subscription")),
+            )
+        return ledgers
+
+    async def _create_invoice(
+        self, student: Student, period_month: str, teacher_id: str, teacher_name: str, amount: int,
+    ) -> StudentPeriodPayment:
+        now = now_str()
+        payment = StudentPeriodPayment(
+            payment_id=generate_payment_id(await self._payment_repo.get_existing_ids()),
+            student_id=student.student_id, student_name=student.name, period_month=period_month,
+            total_amount=amount, status=PaymentStatus.PENDING, paid_at=None,
+            confirmed_by_tg_id=None, comment=None, created_at=now, updated_at=now,
+            teacher_id=teacher_id, teacher_name=teacher_name,
+        )
+        await self._payment_repo.add(payment)
+        logger.info("Создан счёт %s student=%s teacher=%s период=%s сумма=%d",
+                    payment.payment_id, student.student_id, teacher_id, period_month, amount)
+        return payment
+
+    async def record_payment(
+        self, student_id: str, student_name: str, period_month: str, amount: int,
+        confirmed_by_tg_id: int, teacher_ids: list | None = None, comment: str | None = None,
+    ) -> tuple[int, int]:
+        """Зачесть оплату на сумму amount по остаткам педагогов месяца.
+
+        teacher_ids — какие остатки закрывать и в каком порядке (None — все, по имени).
+        Остаток закрывается целиком (строка → paid) или частично (новая paid-строка на
+        зачтённую сумму, остаток уменьшается). Лишнее — переплата отдельной строкой.
+        Возвращает (зачтено ₽, строк). Так сумма в чеке/платеже совпадает с учётом,
+        даже если остаток вырос после новых занятий.
+        """
+        student = Student(student_id=student_id, name=student_name)
+        ledgers = await self.ledger_for(student, period_month)
+        if teacher_ids:
+            order = [tid for tid in teacher_ids if tid in ledgers]
+        else:
+            order = sorted(ledgers, key=lambda t: ledgers[t].name)
+        left, credited, rows = int(amount), 0, 0
+        for tid in order:
+            if left <= 0:
+                break
+            pending = ledgers[tid].pending
+            if pending is None or pending.total_amount <= 0:
+                continue
+            pay = min(left, pending.total_amount)
+            if pay == pending.total_amount:
+                await self._payment_repo.confirm(pending.payment_id, confirmed_by_tg_id)
+            else:
+                await self._add_paid_row(student, period_month, tid, ledgers[tid].name, pay, confirmed_by_tg_id, comment)
+                await self._payment_repo.update_amount(pending.payment_id, pending.total_amount - pay)
+            left -= pay
+            credited += pay
+            rows += 1
+        if left > 0 and order:  # переплата — фиксируем на первого педагога из списка
+            tid = order[0]
+            await self._add_paid_row(student, period_month, tid, ledgers[tid].name, left,
+                                     confirmed_by_tg_id, "переплата")
+            credited += left
+            rows += 1
+        logger.info("Оплата зачтена: student=%s period=%s сумма=%d строк=%d", student_id, period_month, credited, rows)
+        return credited, rows
+
+    async def _add_paid_row(
+        self, student: Student, period_month: str, teacher_id: str, teacher_name: str,
+        amount: int, confirmed_by_tg_id: int, comment: str | None,
+    ) -> StudentPeriodPayment:
+        now = now_str()
+        payment = StudentPeriodPayment(
+            payment_id=generate_payment_id(await self._payment_repo.get_existing_ids()),
+            student_id=student.student_id, student_name=student.name, period_month=period_month,
+            total_amount=amount, status=PaymentStatus.PAID, paid_at=now,
+            confirmed_by_tg_id=confirmed_by_tg_id, comment=comment, created_at=now, updated_at=now,
+            teacher_id=teacher_id, teacher_name=teacher_name,
+        )
+        await self._payment_repo.add(payment)
+        return payment
+
     async def get_or_create_invoices_for_student_period(
         self, student: Student, period_month: str,
     ) -> list[StudentPeriodPayment]:
-        """Возвращает (создаёт при необходимости) по одному счёту на каждого педагога,
-        у которого есть индивидуальные занятия с этим учеником за период."""
-        bills = await self.compute_bills_for_student_period(student.student_id, period_month)
-        if not bills:
-            return []
-
-        invoices: list[StudentPeriodPayment] = []
-        for teacher_id, agg in bills.items():
-            existing = await self._payment_repo.get_by_student_period_teacher(
-                student.student_id, period_month, teacher_id,
-            )
-            if existing:
-                if existing.status != PaymentStatus.PAID and existing.total_amount != agg["total"]:
-                    logger.info(
-                        "Сумма счёта %s изменилась: %d → %d",
-                        existing.payment_id, existing.total_amount, agg["total"],
-                    )
-                    await self._payment_repo.update_amount(existing.payment_id, agg["total"])
-                    existing.total_amount = agg["total"]
-                invoices.append(existing)
-                continue
-            now = now_str()
-            existing_ids = await self._payment_repo.get_existing_ids()
-            payment_id = generate_payment_id(existing_ids)
-            payment = StudentPeriodPayment(
-                payment_id=payment_id,
-                student_id=student.student_id,
-                student_name=student.name,
-                period_month=period_month,
-                total_amount=agg["total"],
-                status=PaymentStatus.PENDING,
-                paid_at=None,
-                confirmed_by_tg_id=None,
-                comment=None,
-                created_at=now,
-                updated_at=now,
-                teacher_id=teacher_id,
-                teacher_name=agg["name"],
-            )
-            await self._payment_repo.add(payment)
-            logger.info(
-                "Создан счёт %s student=%s teacher=%s период=%s сумма=%d",
-                payment_id, student.student_id, teacher_id, period_month, agg["total"],
-            )
-            invoices.append(payment)
-        return invoices
+        """Все строки счетов ученика за месяц (оплаты + остатки) после синхронизации остатков.
+        Совместимость: раньше — по одной строке на педагога; теперь у педагога может быть
+        несколько оплаченных строк и одна строка-остаток."""
+        ledgers = await self.ledger_for(student, period_month)
+        rows: list[StudentPeriodPayment] = []
+        for ledger in ledgers.values():
+            rows.extend(ledger.paid_rows)
+            if ledger.pending is not None:
+                rows.append(ledger.pending)
+        return rows
 
     async def compute_debt_map(
         self, since_period: str | None = None, until_period: str | None = None,
@@ -345,20 +418,21 @@ class PaymentService:
                             key = (sid, f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}", period)
                             accrued[key] = accrued.get(key, 0) + amount
 
-        paid = {
-            (p.student_id, p.teacher_id, p.period_month)
-            for p in await self._payment_repo.get_all()
-            if p.status == PaymentStatus.PAID
-        }
+        paid: dict[tuple[str, str, str], int] = {}
+        for p in await self._payment_repo.get_all():
+            if p.status == PaymentStatus.PAID:
+                key = (p.student_id, p.teacher_id, p.period_month)
+                paid[key] = paid.get(key, 0) + p.total_amount
 
         debts: dict[str, dict[str, int]] = {}
         for (sid, tid, period), amount in accrued.items():
             if since_period and period < since_period:
                 continue
-            if amount <= 0 or (sid, tid, period) in paid:
+            debt = amount - paid.get((sid, tid, period), 0)  # накопительно: доплата после новых уроков
+            if debt <= 0:
                 continue
             per_student = debts.setdefault(sid, {})
-            per_student[period] = per_student.get(period, 0) + amount
+            per_student[period] = per_student.get(period, 0) + debt
         return debts
 
     async def confirm_payment(self, payment_id: str, confirmed_by_tg_id: int) -> bool:
@@ -371,6 +445,9 @@ class PaymentService:
             return False
         if payment.status == PaymentStatus.PAID:
             logger.warning("Повторное подтверждение счёта %s — игнорируем", payment_id)
+            return False
+        if payment.total_amount <= 0:
+            logger.warning("Счёт %s с нулевым остатком — подтверждать нечего", payment_id)
             return False
         ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id)
         if ok:
@@ -449,7 +526,7 @@ class PaymentService:
             row = await self._payment_repo.get_by_student_period_teacher(
                 student_id, period_month, tid,
             )
-            if row and row.status != PaymentStatus.PAID:
+            if row and row.status != PaymentStatus.PAID and row.total_amount > 0:
                 if await self._payment_repo.confirm(row.payment_id, confirmed_by_tg_id):
                     count += 1
         logger.info(
