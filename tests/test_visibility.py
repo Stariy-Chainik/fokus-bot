@@ -39,6 +39,10 @@ class _FakeTeacherGroupRepo:
     async def get_teachers_for_group(self, group_id):
         return list(self._g2t.get(group_id, []))
 
+    async def get_all(self):
+        from bot.models import TeacherGroup
+        return [TeacherGroup(tid, gid) for tid, gids in self._t2g.items() for gid in gids]
+
 
 class _FakeStudentGroupRepo:
     def __init__(self, student_to_groups):

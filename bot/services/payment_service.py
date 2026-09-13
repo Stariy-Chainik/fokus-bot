@@ -103,8 +103,7 @@ class PaymentService:
         for g in sorted(sub_groups, key=lambda x: x.name):
             if g.group_id not in active:
                 continue
-            members = await self._student_group_repo.get_students_for_group(
-                g.group_id, include_left=True)
+            members = [sid for (sid, gid) in membership if gid == g.group_id]  # вместе с ушедшими
             billed = 0
             total = 0
             for sid in members:
@@ -184,9 +183,10 @@ class PaymentService:
         gids = await self._student_group_repo.get_groups_for_student(student_id, include_left=True)
         if not gids:
             return {}
+        groups_by_id = {g.group_id: g for g in await self._group_repo.get_all(include_archived=True)}
         sub_groups = []
         for gid in gids:
-            group = await self._group_repo.get_by_id(gid)
+            group = groups_by_id.get(gid)
             if group and group.billing_mode == GroupBillingMode.SUBSCRIPTION:
                 sub_groups.append(group)
         if not sub_groups:
@@ -437,8 +437,7 @@ class PaymentService:
                 until = until_period or last_periods(1)[0]
                 membership = await self._student_group_repo.get_membership_map()
                 for g in sub_groups:
-                    members = await self._student_group_repo.get_students_for_group(
-                        g.group_id, include_left=True)
+                    members = [sid for (sid, gid) in membership if gid == g.group_id]  # вместе с ушедшими
                     billable = subscription_billable_months(
                         months_by_group.get(g.group_id, set()), until=until,
                     )

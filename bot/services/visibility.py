@@ -69,10 +69,8 @@ class TeacherVisibilityService:
         gids = await self._student_group_repo.get_groups_for_student(student_id)
         if not gids:
             return []
-        teacher_ids: set[str] = set()
-        for gid in gids:
-            for tid in await self._teacher_group_repo.get_teachers_for_group(gid):
-                teacher_ids.add(tid)
+        wanted = set(gids)
+        teacher_ids = {tg.teacher_id for tg in await self._teacher_group_repo.get_all() if tg.group_id in wanted}
         return sorted(teacher_ids)
 
     async def is_visible(self, teacher_id: str, student_id: str) -> bool:

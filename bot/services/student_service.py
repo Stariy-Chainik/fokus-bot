@@ -102,9 +102,10 @@ class StudentService:
         gids = await self._student_group_repo.get_groups_for_student(student_id)
         if not gids:
             return TierToggleError.NO_GROUPS
+        groups_by_id = {g.group_id: g for g in await self._group_repo.get_all(include_archived=True)}
         per_visit_group = None
         for gid in gids:
-            g = await self._group_repo.get_by_id(gid)
+            g = groups_by_id.get(gid)
             if g and g.billing_mode == GroupBillingMode.PER_VISIT:
                 per_visit_group = g
                 break
@@ -211,17 +212,18 @@ class StudentService:
         if student.partner_id:
             partner = await self._student_repo.get_by_id(student.partner_id)
 
+        groups_by_id = {g.group_id: g for g in await self._group_repo.get_all(include_archived=True)}
+        branches = {b.branch_id: b.name for b in await self._branch_repo.get_all()}
         groups: list[StudentCardGroup] = []
         primary_group: Group | None = None
         for gid in student.group_ids:
-            g = await self._group_repo.get_by_id(gid)
+            g = groups_by_id.get(gid)
             if g:
                 if primary_group is None:
                     primary_group = g
-                branch = await self._branch_repo.get_by_id(g.branch_id)
                 groups.append(StudentCardGroup(
                     group_id=gid, group=g,
-                    branch_name=branch.name if branch else g.branch_id,
+                    branch_name=branches.get(g.branch_id, g.branch_id),
                 ))
             else:
                 groups.append(StudentCardGroup(group_id=gid))
