@@ -53,10 +53,14 @@ python -m bot
 
 ```bash
 .venv/bin/python -m pytest -q
+.venv/bin/ruff check bot config tests scripts
+.venv/bin/mypy
 ```
 
 Для production достаточно `requirements.txt`; `requirements-dev.txt` дополнительно
-устанавливает только инструменты проверки.
+устанавливает только инструменты проверки (pytest, ruff, mypy). Golden-снимки экранов
+лежат в `tests/golden/`; после намеренного изменения текста экрана пересъёмка —
+`UPDATE_GOLDEN=1 .venv/bin/python -m pytest -q`.
 
 Тесты фиксируют формулы биллинга и прибыли, правила сервисов, webhook ЮКассы,
 работу локеров и связность callback-кнопок. После изменения пользовательского
@@ -67,14 +71,15 @@ python -m bot
 ```text
 bot/
   __main__.py       DI-контейнер и запуск polling/webhook
-  handlers/         Telegram-представление и FSM по ролям
+  handlers/         Telegram-представление и FSM по ролям; filters.py — роли как фильтры aiogram
+  screens/          экраны и карточки без привязки к мессенджеру (Telegram и MAX)
   services/         бизнес-правила и прикладные сценарии
   repositories/     доступ к листам Google Sheets
   models/           dataclass-сущности и enum
   keyboards/        inline-клавиатуры
   states/           FSM-состояния
   middlewares/      авторизация и дедупликация update
-  utils/            даты, ID, attendees, локеры
+  utils/            даты, ID, attendees, локеры, пагинация (paging), callback-строки (callbacks)
 config/
   settings.py       ENV-конфигурация
 tests/              характеризующие и модульные тесты

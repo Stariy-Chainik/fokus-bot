@@ -28,7 +28,7 @@ async def main():
 asyncio.run(main())"
 ```
 
-Tests are run with `.venv/bin/python -m pytest -q` (characterization/unit tests, including callback wiring). No linter is configured. After automated checks, manually exercise the affected Telegram flow; for production changes, inspect service logs.
+Tests are run with `.venv/bin/python -m pytest -q` (characterization/unit tests, including callback wiring). Линт и типы: `.venv/bin/ruff check bot config tests scripts` и `.venv/bin/mypy` (конфиг в `pyproject.toml`; mypy нестрогий, `union-attr` отключён только для aiogram-слоёв). Golden-снимки экранов — `tests/golden/*.txt`, пересъёмка после намеренного изменения текста: `UPDATE_GOLDEN=1 .venv/bin/python -m pytest -q` (см. `tests/fakes.py`). After automated checks, manually exercise the affected Telegram flow; for production changes, inspect service logs.
 
 Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `maxapi` требует ≥ 3.10). Main deps: `aiogram 3.31`, `maxapi 1.2`, `gspread 6`, `pydantic 2`, `pydantic-settings`, `python-dotenv`, `redis`, `yookassa`, `qrcode[pil]`. Runtime list is in [requirements.txt](requirements.txt); test tooling is in [requirements-dev.txt](requirements-dev.txt).
 
@@ -108,6 +108,32 @@ bot/handlers/
 
 Each handler file exports one `Router`. Aggregated in `bot/handlers/{admin,teacher,client}/__init__.py`, then in `bot/handlers/__init__.py`, registered in `bot/__main__.py`.
 
+### Доступ по ролям, callback-данные, экраны
+
+- **Роль — фильтр aiogram**, а не `if` в теле хендлера: [bot/handlers/filters.py](bot/handlers/filters.py) —
+  `AdminOnly()`, `TeacherOnly()`, `TeacherOrAdmin()`, `BillingTeacherOnly()` в декораторе
+  `@router.callback_query(F.data == "…", AdminOnly())`. При отказе фильтр сам показывает alert «Нет доступа»
+  и возвращает `False`; catch-all callback-хендлеров нет, так что отклонённый callback никуда не проваливается
+  (инвариант — `tests/test_guards_static.py`: каждый callback в `admin/`/`teacher/` защищён фильтром, предикатом в теле
+  или FSM-состоянием). Гарды message-хендлеров (молчаливый `return`) остаются в теле. Предикаты —
+  [bot/handlers/access.py](bot/handlers/access.py) (`TypeGuard`; `TeacherUser` — `User` с гарантированным `teacher_id`
+  после `is_teacher`).
+- **Callback-строки** разбираются именованными датаклассами [bot/utils/callbacks.py](bot/utils/callbacks.py)
+  (`XCb.unpack(callback.data)` / `.pack()`), строки байт-в-байт прежние (roundtrip по корпусу литералов —
+  `tests/test_callbacks.py`). Переведены самые насыщенные файлы (edit_lesson, branches/groups, my_bills/payment,
+  bills/confirm, client/my_lessons, salaries); остальные `split(":")` — по мере правок. aiogram `CallbackData`
+  не используется (пишет все поля — изменил бы строки).
+- **Пагинация** — [bot/utils/paging.py](bot/utils/paging.py) (`paginate` → `Page`) + `keyboards/common.nav_row`;
+  размеры страниц в `utils/constants.py`.
+- **Экраны и карточки** — [bot/screens/](bot/screens/): родительские экраны (`parent_bills.py`, включая
+  `render_bill_detail`), карточки (`cards.py`: `admin_student_card_view(StudentCard)`, `partner_label`).
+  Хендлер получает DTO из сервиса и только показывает результат.
+- **Состав группы** — `bot.services.rosters.group_members(student_repo, student_group_repo, group_id, key=…)`
+  (ключ сортировки — параметр: `BY_NAME`, `BY_NAME_CI`, `None`); копий «member_ids ∩ get_all()» в хендлерах нет.
+- **Справочники одним чтением**: в циклах не вызывать `repo.get_by_id` — `get_by_id` у всех репозиториев это
+  линейный скан `get_all()` с пересборкой dataclass'ов; предзагружать `{id → entity}` (`get_all(include_archived=True)`,
+  если раньше объект находился через `get_by_id`).
+
 ### Repositories
 
 All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.py)) which wraps gspread inside `asyncio.to_thread()` and provides:
@@ -144,10 +170,10 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 
 | Service | Responsibility |
 |---|---|
-| `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). |
+| `LessonService` | `create()` / `create_pair_batch()` / `create_soloist_batch()` / `delete()`. All accept `bypass_period_lock: bool` (admins pass `True`). Solo duplicates blocked via `individual_lesson_exists`; group duplicates intentionally **not** blocked (one group can have multiple shifts per day). `add_guest(lesson, student_id, group)` — гость в сохранённом групповом занятии (цена `price_full` PER_VISIT, иначе 0; B7). `can_submit_period(today, period)` — правило «сдать с 25-го». |
 | `SalaryService` ([salary_service.py](bot/services/salary_service.py)) | Единая точка зарплаты педагога за период: `lines_for(teacher, period)` → строки (занятия / в смене / смена / корректировка), `total_for()`. Используется в «Зарплатах», «Выплатах», «Прибыли» (extra_salary) и превью сдачи периода. |
 | `BillingService` ([billing_service.py](bot/services/billing_service.py)) | Pure functions only: `calc_earned()` (teacher salary) and `build_billing_rows()` (virtual per-student Billing rows, computed on demand from a Lesson + Teacher). |
-| `PaymentService` | `compute_bills_for_student_period()`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` (долги по всем ученикам/периодам — экран «Должники»). Does **not** check submission status — admins can issue bills anytime. |
+| `PaymentService` | `compute_bills_for_student_period()` → `{teacher_id \| SUB:gid → BillAggregate(name, total, items, subscription)}`, `get_or_create_invoices_for_student_period()`, `confirm_period()` (batch PENDING → PAID), `confirm_payment()` (single), `confirm_teachers()`, `record_payment()`, `create_yookassa_payment()` (returns confirmation URL), `compute_debt_map()` + `build_debtor_rows()` → `DebtorRow` (экран «Должники»), `student_lesson_marks()` → `StudentMonthLessons` (экран «Занятия» родителя: доля ученика и ✅/⬜ считает `payment_ledger.mark_student_lessons`, не хендлер). Does **not** check submission status — admins can issue bills anytime. |
 | `ProfitService` | Хранилище-независимые DTO и расчёт экрана/API «Прибыль»: строки педагогов и занятий, выручка, зарплата, маржа, абонементы, ручные доходы/расходы. `get_lesson_summary()`, `get_month_summary()`, `get_teacher_detail()`. Telegram-хендлер только форматирует результат. |
 | `StudentService` | Бизнес-логика ученика поверх нескольких репо: `create_with_group()`, `delete_student()`, `toggle_tier()`, `pairs_in_group()` / `soloists_in_group()`, `partner_candidates()`, `get_student_card()` → `StudentCard` DTO (собирает карточку из 7 репо, чтобы хендлер только рисовал). |
 | `StudentRequestService` | Обработка заявок педагогов на новых учеников: `approve_create()`, `approve_link_existing()` (→ `LinkExistingOutcome`). |
@@ -177,12 +203,13 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
 - [bot/utils/dates.py](bot/utils/dates.py) — date helpers (`now_str`, `format_date_display`, `period_month_from_date`, `display_period`, `format_date_short_with_wd`). Formats: storage `YYYY-MM-DD` / `YYYY-MM`, display `ДД.ММ.ГГГГ` / `ММ.ГГГГ`.
 - [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `CLT-XXXX`, `FIN-XXXXXX`. Each scans existing rows for the current max.
 - [bot/utils/lesson_stats.py](bot/utils/lesson_stats.py) — `format_lesson_breakdown(lessons) → (group_count, ind_count, group_line, ind_line)` for stats screens.
+- [bot/utils/paging.py](bot/utils/paging.py) — `paginate(items, page, size, clamp=False) → Page`; [bot/utils/callbacks.py](bot/utils/callbacks.py) — датаклассы callback (`unpack`/`pack`); [bot/utils/notify.py](bot/utils/notify.py) — `notify()` и `notify_safely(coro, лог)`; `dates.period_label()` — «Сентябрь 2026» (одна реализация для всех экранов).
 
 ### Keyboards
 
 Layout in `bot/keyboards/` by role: `admin.py`, `teacher.py`, `client.py`, `common.py`, `calendar.py`. Functions named `kb_*` return `InlineKeyboardMarkup`. **Спецроли-хардкод убраны** (`bot/staff.py` удалён; ранее там жили `PROXY_BUTTONS`/`BILLING_TEACHERS`). Единственное конфигурируемое отличие меню педагога: `kb_teacher_menu` показывает «🧾 Счета моих групп» (`teacher:bills`) педагогам из env `BILLING_TEACHER_IDS`.
 
-`kb_lesson_detail()` takes an `is_admin: bool` flag — when `True`, admins see the delete button even for locked lessons (with `(🔒 период сдан)` suffix).
+`kb_lesson_detail()` takes an `is_admin: bool` flag — when `True`, admins see the delete button even for locked lessons (with `(🔒 период сдан)` suffix). Навигация страниц — `keyboards/common.nav_row(page, callback_for, …)`; `kb_student_paged(Page)`.
 
 ### FSM states
 
@@ -215,6 +242,20 @@ Module-level `InProgressGuard` lockers (unified in P2, see [bot/utils/locks.py](
 Human-readable sequential strings; never autoincrement integers. See `bot/utils/ids.py`.
 
 ---
+
+## Tests
+
+`tests/fakes.py` — фейки Telegram (`FakeCallbackQuery`, `FakeMessage`, `FakeState`, `FakeBot`), in-memory репозитории
+(`StudentRepoFake`, `LessonRepoFake`, `PaymentRepoFake`, `StudentGroupRepoFake`, …), конструкторы сущностей (`mk_*`)
+и golden-инфраструктура (`assert_golden`, `screen_dump`). `install_fake_show_card()` подменяет `show_card` в модуле
+хендлера (настоящий различает `CallbackQuery` по `isinstance`).
+
+Что зафиксировано: экраны (карточки ученика/группы/педагога, занятие, занятия родителя, должники, история оплат,
+расшифровка выплаты, счёт родителю, клавиатуры с пагинацией) — golden в `tests/golden/`; формулы денег
+(`test_billing_service`, `test_payment_ledger`, `test_debt_map`, `test_subscription_billing`, `test_profit_*`);
+инварианты: `test_callback_wiring` (у кнопки есть хендлер), `test_callbacks` (roundtrip строк), `test_guards_static`
+(роль у каждого admin/teacher callback), `test_di_wiring` (снимок DI). Открытые дефекты зафиксированы как текущее
+поведение в `tests/test_known_bugs.py` (B2, B8) — при исправлении тест переписывается осознанно.
 
 ## Billing formulas
 
