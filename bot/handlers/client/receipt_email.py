@@ -30,6 +30,10 @@ async def cb_client_email(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, client_repo: ClientRepository,
 ) -> None:
+    from config.settings import settings
+    if not settings.parent_receipt_email:
+        await callback.answer("Раздел временно недоступен", show_alert=True)
+        return
     tg_id = callback.from_user.id
     if not await student_repo.get_by_parent_tg_id(tg_id):
         await callback.answer("Нет доступа", show_alert=True)

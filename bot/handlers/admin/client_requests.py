@@ -4,6 +4,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
+from config.settings import settings
 from bot.models import User
 from bot.repositories import StudentRepository
 from bot.screens.parent_menu import menu_rows
@@ -41,7 +42,7 @@ async def cb_admin_child_ok(
     await resolve_notifier(callback.bot).send(
         parent_addr,
         f"✅ Заявка одобрена!\n\nВы привязаны к ученику <b>{student.name}</b>.\n\nВыберите раздел:",
-        rows=menu_rows(platform=parent_addr[0]),
+        rows=menu_rows(platform=parent_addr[0], receipt_email=settings.parent_receipt_email),
     )
 
     await callback.message.edit_text(
@@ -71,7 +72,7 @@ async def cb_admin_child_no(
     if parent_addr:
         await resolve_notifier(callback.bot).send(
             parent_addr, "❌ Администратор отклонил вашу заявку.",
-            rows=menu_rows(platform=parent_addr[0]),
+            rows=menu_rows(platform=parent_addr[0], receipt_email=settings.parent_receipt_email),
         )
 
     await callback.message.edit_text(

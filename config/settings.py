@@ -151,6 +151,9 @@ class Settings(BaseSettings):
 
     # Способы оплаты
     payment_cash_enabled: bool = Field(default=True, alias="PAYMENT_CASH_ENABLED")
+    # Email родителя для фискальных чеков: кнопка «✉️ Email для чеков» в меню и шаг
+    # при регистрации по ссылке группы. False — родителю чеки не упоминаются.
+    parent_receipt_email: bool = Field(default=True, alias="PARENT_RECEIPT_EMAIL")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
     payment_qr_data: str = Field(default="", alias="PAYMENT_QR_DATA")

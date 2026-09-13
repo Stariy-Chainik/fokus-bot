@@ -426,6 +426,7 @@ Optional — Google Sheets tab names (have sensible defaults — only set to ove
 Optional — payments:
 - `DEBTORS_SINCE_PERIOD` — долги на экране «⚠️ Должники» считаются с этого периода (`YYYY-MM`); пусто — за всё время. Отсекает месяцы до внедрения учёта оплат (на проде: `2026-07`).
 - `PAYMENT_CASH_ENABLED` — show cash payment option (default `True`)
+- `PARENT_RECEIPT_EMAIL` — показывать родителю email для фискальных чеков: кнопка «✉️ Email для чеков» в меню (`menu_rows(receipt_email=…)`) и шаг после телефона при регистрации по ссылке группы (`group_link._ask_email`). `false` — кнопки нет, шаг пропускается, старая кнопка отвечает «Раздел временно недоступен»; сохранённые email и отправка `receipt` в ЮКассу не меняются (на проде `false` с 13.09.2026, пока решается вопрос с фискализацией).
 - `PAYMENT_BANK_DETAILS` — bank details text (`\n` becomes a newline; handler replaces `\\n` → `\n`)
 - `PAYMENT_QR_DATA` — ЦБ РФ format string for QR generation (`ST00012|Name=...|PersonalAcc=...`)
 - `PAYMENT_QR_IMAGE_URL` — fallback public HTTPS URL for QR image

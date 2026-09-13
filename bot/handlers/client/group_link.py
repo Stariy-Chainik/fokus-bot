@@ -347,7 +347,15 @@ async def on_contact_skip(message: Message, state: FSMContext) -> None:
 
 
 async def _ask_email(message: Message, state: FSMContext, client_id: str | None) -> None:
-    """Необязательный шаг: email для фискальных чеков об оплате."""
+    """Необязательный шаг: email для фискальных чеков об оплате.
+
+    При PARENT_RECEIPT_EMAIL=false шаг пропускается — сразу меню.
+    """
+    from config.settings import settings
+    if not settings.parent_receipt_email:
+        await state.clear()
+        await message.answer("Выберите раздел:", reply_markup=kb_client_menu())
+        return
     await state.set_state(GroupLinkStates.waiting_email)
     await state.update_data(glink_client_id=client_id)
     kb = ReplyKeyboardMarkup(

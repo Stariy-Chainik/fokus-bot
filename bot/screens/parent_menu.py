@@ -11,7 +11,8 @@ def welcome_text(students: list) -> str:
     return f"👨‍👩‍👧 <b>Личный кабинет родителя</b>\n{who}\n\nВыберите раздел:"
 
 
-def menu_rows(can_switch_athlete: bool = False, platform: str = "tg") -> list:
+def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
+              receipt_email: bool = True) -> list:
     if platform == "max":
         # Релиз 1 в MAX: счета и оплата; занятия/дневник/email появятся позже
         return [
@@ -23,8 +24,9 @@ def menu_rows(can_switch_athlete: bool = False, platform: str = "tg") -> list:
         [cb("💳 Оплата занятий", "client:my_bills")],
         [cb("📓 Дневник тренировок", "client:diary")],
         [cb("➕ Добавить ребёнка", "client:add_child")],
-        [cb("✉️ Email для чеков", "client:email")],
     ]
+    if receipt_email:
+        rows.append([cb("✉️ Email для чеков", "client:email")])
     if can_switch_athlete and platform == "tg":
         rows.append([cb("🏃 Кабинет спортсмена", "mode:athlete")])
     return rows

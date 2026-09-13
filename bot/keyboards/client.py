@@ -15,7 +15,10 @@ def client_welcome_text(students: list) -> str:
 
 
 def kb_client_menu(can_switch_athlete: bool = False) -> InlineKeyboardMarkup:
-    return to_aiogram_markup(menu_rows(can_switch_athlete))
+    from config.settings import settings
+    return to_aiogram_markup(menu_rows(
+        can_switch_athlete, receipt_email=settings.parent_receipt_email,
+    ))
 
 
 def kb_admin_approve_child(parent_tg_id, student_id: str) -> InlineKeyboardMarkup:
