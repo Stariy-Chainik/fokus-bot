@@ -2,12 +2,12 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from bot.models import Lesson, Teacher
-from bot.models.enums import LessonType
+from bot.models import Group, Lesson, Teacher
+from bot.models.enums import GroupBillingMode, LessonType
 from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
-from bot.utils import generate_lesson_id, now_str, period_month_from_date
+from bot.utils import AttendeeEntry, generate_lesson_id, now_str, parse_attendees, period_month_from_date, serialize_attendees
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,24 @@ class LessonService:
             )
             created.append(lesson)
         return created
+
+    # ─── Гость в сохранённом групповом занятии ───────────────────────────
+
+    async def add_guest(self, lesson: Lesson, student_id: str, group: Group | None) -> str | None:
+        """Добавить ученика в сохранённое групповое занятие; None — уже отмечен.
+
+        Цена гостя — price_full PER_VISIT-группы, иначе 0. Тариф SHORT ученика не
+        учитывается (B7 в docs/FOUND_BUGS.md) — поведение сохранено при переносе из хендлера.
+        Возвращает новую строку attendees.
+        """
+        amount = group.price_full if group and group.billing_mode == GroupBillingMode.PER_VISIT else 0
+        existing = parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)
+        if any(entry.student_id == student_id for entry in existing):
+            return None
+        existing.append(AttendeeEntry(student_id=student_id, duration_min=lesson.duration_min, amount=amount))
+        new_attendees = serialize_attendees(existing)
+        await self._lesson_repo.update_attendees(lesson.lesson_id, new_attendees)
+        return new_attendees
 
     # ─── Удаление ─────────────────────────────────────────────────────────
 

@@ -1,9 +1,9 @@
 """LessonService: create() с датой/замком, delete() с замком, preview_period()."""
 import pytest
 
-from bot.models.enums import LessonType
+from bot.models.enums import GroupBillingMode, LessonType
 from bot.services import LessonService
-from tests.fakes import ByIdRepo, LessonRepoFake, SubmissionRepoFake, mk_lesson, mk_submission, mk_teacher, run
+from tests.fakes import ByIdRepo, LessonRepoFake, SubmissionRepoFake, mk_group, mk_lesson, mk_submission, mk_teacher, run
 
 
 def _svc(lessons=(), subs=(), salary_service=None):
@@ -69,3 +69,17 @@ def test_preview_period_with_salary_service_and_unknown_teacher():
     assert run(svc.preview_period("TCH-0001", "2026-09"))[2] == 42
     with pytest.raises(ValueError, match="не найден"):
         run(svc.preview_period("TCH-0404", "2026-09"))
+
+
+def test_add_guest_prices_and_duplicates():
+    """Гость: price_full для PER_VISIT (тариф SHORT не учитывается — B7), 0 иначе, дубль → None."""
+    t = mk_teacher()
+    lesson = mk_lesson("LES-1", t, "2026-09-01", 60, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:60:850")
+    svc, _ = _svc([lesson])
+    per_visit = mk_group("GRP-1", billing_mode=GroupBillingMode.PER_VISIT, price_full=850, price_short=600)
+    assert run(svc.add_guest(lesson, "STU-2", per_visit)) == "STU-1:60:850,STU-2:60:850"
+    assert svc._lesson_repo.attendees_updates == [("LES-1", "STU-1:60:850,STU-2:60:850")]
+    lesson.attendees = "STU-1:60:850,STU-2:60:850"
+    assert run(svc.add_guest(lesson, "STU-2", per_visit)) is None                       # уже отмечен
+    assert run(svc.add_guest(lesson, "STU-3", mk_group("GRP-2"))) == "STU-1:60:850,STU-2:60:850,STU-3:60:0"
+    assert run(svc.add_guest(mk_lesson("LES-2", t, "2026-09-02", 45, LessonType.GROUP, group_id="GRP-9"), "STU-1", None)) == "STU-1:45:0"

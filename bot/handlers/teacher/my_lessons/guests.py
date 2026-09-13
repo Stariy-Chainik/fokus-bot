@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.handlers.filters import TeacherOrAdmin
-from bot.models import GroupBillingMode, Student, User
+from bot.models import Student, User
 from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository,
@@ -15,7 +15,8 @@ from bot.repositories import (
     TeacherGroupRepository,
     TeacherPeriodSubmissionRepository,
 )
-from bot.utils import AttendeeEntry, attendee_ids, parse_attendees, serialize_attendees
+from bot.services import LessonService
+from bot.utils import attendee_ids
 
 from ._base import _submitted_periods, router
 
@@ -82,6 +83,7 @@ async def cb_lesson_guest_pick(
     group_repo: GroupRepository,
     student_repo: StudentRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
+    lesson_service: LessonService,
     state: FSMContext,
 ) -> None:
     _, lesson_id, student_id = callback.data.split(":", 2)
@@ -102,28 +104,10 @@ async def cb_lesson_guest_pick(
         return
 
     group = await group_repo.get_by_id(lesson.group_id) if lesson.group_id else None
-    amount = (
-        group.price_full
-        if group and group.billing_mode == GroupBillingMode.PER_VISIT
-        else 0
-    )
-    new_entry = AttendeeEntry(
-        student_id=student_id,
-        duration_min=lesson.duration_min,
-        amount=amount,
-    )
-
-    existing = parse_attendees(
-        lesson.attendees or "",
-        default_duration=lesson.duration_min,
-    )
-    if any(entry.student_id == student_id for entry in existing):
+    new_attendees = await lesson_service.add_guest(lesson, student_id, group)
+    if new_attendees is None:
         await callback.answer("Этот ученик уже отмечен.", show_alert=True)
         return
-
-    existing.append(new_entry)
-    new_attendees = serialize_attendees(existing)
-    await lesson_repo.update_attendees(lesson_id, new_attendees)
 
     await callback.answer(f"✅ {student.name} добавлен(а).")
     lesson.attendees = new_attendees
