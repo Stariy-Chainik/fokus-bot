@@ -16,6 +16,19 @@ from bot.utils.dates import format_date_display, month_name_ru
 from bot.utils.constants import PAGE_SIZE
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.utils.callbacks import (
+    AdminLessonsAllCb,
+    AdminLessonsCalNavCb,
+    AdminLessonsCalPickCb,
+    AdminLessonsCalendarCb,
+    AdminLessonsDatesCb,
+    AdminLessonsMonthCb,
+    AdminLessonsMonthPickCb,
+    AdminLessonsPickDayCb,
+    AdminLessonsTeacherCb,
+    AdminLessonsTypeCb,
+    TeacherCardLessonsCb,
+)
 logger = logging.getLogger(__name__)
 router = Router(name="admin_edit_lesson")
 
@@ -157,7 +170,7 @@ async def cb_admin_lessons_dates(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = AdminLessonsTeacherCb.unpack(callback.data).teacher_id
     await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb="admin:edit_lesson")
     await callback.message.edit_text(
         "<b>За какую дату показать занятия?</b>",
@@ -174,7 +187,7 @@ async def cb_admin_lessons_from_card(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = TeacherCardLessonsCb.unpack(callback.data).teacher_id
     back_cb = f"teacher_card:{teacher_id}"
     await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb=back_cb)
     await callback.message.edit_text(
@@ -191,7 +204,7 @@ async def cb_admin_lessons_dates_back(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = AdminLessonsDatesCb.unpack(callback.data).teacher_id
     data = await state.get_data()
     back_cb = data.get("aedl_back_cb", "admin:edit_lesson")
     await state.update_data(aedl_teacher_id=teacher_id)
@@ -210,7 +223,8 @@ async def cb_admin_lessons_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, teacher_id, day = callback.data.split(":", 2)
+    cb = AdminLessonsPickDayCb.unpack(callback.data)
+    teacher_id, day = cb.teacher_id, cb.day
     await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
@@ -223,7 +237,7 @@ async def cb_admin_lessons_all(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = AdminLessonsAllCb.unpack(callback.data).teacher_id
     await _show_lessons(callback, lesson_repo, teacher_id, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
@@ -235,7 +249,7 @@ async def cb_admin_lessons_month_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = AdminLessonsMonthPickCb.unpack(callback.data).teacher_id
     await callback.message.edit_text(
         "Выберите месяц:", reply_markup=_month_picker_kb(teacher_id),
     )
@@ -250,7 +264,8 @@ async def cb_admin_lessons_month(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, teacher_id, ym = callback.data.split(":", 2)
+    cb = AdminLessonsMonthCb.unpack(callback.data)
+    teacher_id, ym = cb.teacher_id, cb.ym
     await _show_lessons(callback, lesson_repo, teacher_id, filter_month=ym, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
@@ -262,7 +277,7 @@ async def cb_admin_lessons_calendar(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = AdminLessonsCalendarCb.unpack(callback.data).teacher_id
     await state.update_data(aedl_teacher_id=teacher_id)
     today = date.today()
     await callback.message.edit_text(
@@ -282,7 +297,7 @@ async def cb_admin_lessons_cal_nav(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    ym = callback.data.split(":", 1)[1]
+    ym = AdminLessonsCalNavCb.unpack(callback.data).ym
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
     teacher_id = data.get("aedl_teacher_id", "")
@@ -304,7 +319,7 @@ async def cb_admin_lessons_cal_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    day = callback.data.split(":", 1)[1]
+    day = AdminLessonsCalPickCb.unpack(callback.data).day
     data = await state.get_data()
     teacher_id = data.get("aedl_teacher_id")
     if not teacher_id:
@@ -323,7 +338,8 @@ async def cb_admin_lessons_type(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, teacher_id, type_code, tag = callback.data.split(":", 3)
+    cb = AdminLessonsTypeCb.unpack(callback.data)
+    teacher_id, type_code, tag = cb.teacher_id, cb.type_code, cb.tag
     filter_type = {"g": "group", "i": "individual"}.get(type_code)
     filter_date: str | None = None
     filter_month: str | None = None
