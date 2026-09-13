@@ -56,8 +56,8 @@ class _FakeGroupRepo:
     def __init__(self, groups):
         self._groups = groups
 
-    async def get_all(self):
-        return self._groups
+    async def get_all(self, include_archived: bool = False):
+        return [g for g in self._groups if include_archived or not g.archived]
 
     async def get_by_id(self, gid):
         return next((g for g in self._groups if g.group_id == gid), None)

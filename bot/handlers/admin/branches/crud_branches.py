@@ -38,7 +38,10 @@ def _kb_branches_list(branches: list) -> InlineKeyboardMarkup:
 
 def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"💃 {g.name}", callback_data=f"group_card:{g.group_id}")]
+        [InlineKeyboardButton(
+            text=("📦 " if g.archived else "💃 ") + g.name,
+            callback_data=f"group_card:{g.group_id}",
+        )]
         for g in groups
     ]
     rows.append([InlineKeyboardButton(text="➕ Создать группу", callback_data=f"group:add:{branch_id}")])
@@ -115,12 +118,18 @@ async def cb_branch_card(
     if not branch:
         await callback.answer("Филиал не найден", show_alert=True)
         return
-    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
+    groups = sorted(
+        await group_repo.get_by_branch(branch_id, include_archived=True),
+        key=lambda g: (g.archived, g.sort_order, g.name),
+    )
+    active = [g for g in groups if not g.archived]
     text = (
         f"🏢 <b>{branch.name}</b>\n"
         f"ID: {branch.branch_id}\n\n"
-        f"Групп: {len(groups)}"
+        f"Групп: {len(active)}"
     )
+    if len(groups) != len(active):
+        text += f"  (в архиве: {len(groups) - len(active)})"
     await show_card(
         callback, text,
         reply_markup=_kb_branch_card(branch_id, groups, has_groups=bool(groups)),
@@ -197,7 +206,7 @@ async def cb_branch_del_confirm(
     if not branch:
         await callback.answer("Филиал не найден", show_alert=True)
         return
-    groups = await group_repo.get_by_branch(branch_id)
+    groups = await group_repo.get_by_branch(branch_id, include_archived=True)
     if groups:
         await callback.answer("Сначала удалите все группы филиала.", show_alert=True)
         return

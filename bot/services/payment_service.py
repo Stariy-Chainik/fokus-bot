@@ -83,7 +83,7 @@ class PaymentService:
         if self._group_repo is None or self._student_group_repo is None:
             return []
         sub_groups = [
-            g for g in await self._group_repo.get_all()
+            g for g in await self._group_repo.get_all(include_archived=True)
             if g.billing_mode == GroupBillingMode.SUBSCRIPTION
         ]
         if not sub_groups:
@@ -424,7 +424,7 @@ class PaymentService:
         # price_full) каждому участнику SUBSCRIPTION-группы за каждый месяц с ≥1 занятием.
         if self._group_repo is not None and self._student_group_repo is not None:
             sub_groups = [
-                g for g in await self._group_repo.get_all()
+                g for g in await self._group_repo.get_all(include_archived=True)
                 if g.billing_mode == GroupBillingMode.SUBSCRIPTION
             ]
             if sub_groups:

@@ -22,7 +22,8 @@ router = Router(name="admin_branches")
 # ─── Общий рендер карточки группы ─────────────────────────────────────────────
 
 def _kb_group_card(group_id: str, branch_id: str, students: list,
-                   subscription: bool = False) -> InlineKeyboardMarkup:
+                   subscription: bool = False,
+                   archived: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"student_card:{s.student_id}")]
         for s in students
@@ -36,6 +37,10 @@ def _kb_group_card(group_id: str, branch_id: str, students: list,
     rows += [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги группы", callback_data=f"group_teachers:{group_id}")],
         [InlineKeyboardButton(text="💰 Биллинг ученикам", callback_data=f"group_billing:{group_id}")],
+        [InlineKeyboardButton(
+            text="♻️ Вернуть из архива" if archived else "📦 В архив",
+            callback_data=f"group_arch:{'off' if archived else 'on'}:{group_id}",
+        )],
         [InlineKeyboardButton(text="« Назад", callback_data=f"branch_card:{branch_id}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -65,17 +70,23 @@ async def _render_group_card(
     students.sort(key=lambda s: s.name)
 
     text = (
-        f"💃 <b>{group.name}</b>\n"
+        f"{'📦' if group.archived else '💃'} <b>{group.name}</b>\n"
         f"🏢 Филиал: {branch_name}\n"
         f"ID: {group.group_id}\n\n"
         f"👨‍🏫 Педагоги: {teachers_list}\n\n"
         f"👩‍🎓 Учеников: {len(students)}"
     )
+    if group.archived:
+        text += (
+            "\n\n📦 <b>В архиве</b> — группа скрыта из списков записи занятий,"
+            " счетов и добавления учеников. История сохранена."
+        )
     await show_card(
         message, text,
         reply_markup=_kb_group_card(
             group_id, group.branch_id, students,
             subscription=group.billing_mode == GroupBillingMode.SUBSCRIPTION,
+            archived=group.archived,
         ),
     )
 

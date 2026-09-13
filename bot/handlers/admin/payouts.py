@@ -318,7 +318,7 @@ async def _detail_lines(
 ) -> list[str]:
     lines_all = await salary_service.lines_for(teacher, period)
     lessons = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, period)}
-    groups = {g.group_id: g for g in await group_repo.get_all()}
+    groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
     branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
 
     by_branch: dict[str, dict[str, list[tuple[str, int, bool]]]] = {}

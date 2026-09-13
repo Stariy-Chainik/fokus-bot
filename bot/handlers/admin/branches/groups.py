@@ -92,6 +92,34 @@ async def cb_group_card(
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("group_arch:"))
+async def cb_group_archive(
+    callback: CallbackQuery, user: User | None,
+    group_repo: GroupRepository, branch_repo: BranchRepository,
+    teacher_repo: TeacherRepository, student_repo: StudentRepository,
+    teacher_group_repo: TeacherGroupRepository,
+    student_group_repo: StudentGroupRepository,
+) -> None:
+    """В архив / из архива. Строка группы остаётся — история занятий и оплат цела."""
+    if not _is_admin(user):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    _, action, group_id = callback.data.split(":", 2)
+    archived = action == "on"
+    ok = await group_repo.set_archived(group_id, archived)
+    if ok:
+        logger.info(
+            "Группа %s %s (админ %s)",
+            group_id, "в архиве" if archived else "возвращена из архива", user.tg_id,
+        )
+    await _render_group_card(
+        callback.message, group_id,
+        group_repo, branch_repo, teacher_repo, student_repo,
+        teacher_group_repo, student_group_repo,
+    )
+    await callback.answer("📦 В архиве" if archived else "♻️ Вернули из архива")
+
+
 # ─── Переименование группы ───────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("group:rename_pick:"))

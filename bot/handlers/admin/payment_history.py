@@ -78,7 +78,10 @@ async def cb_payhist_branch(
     await state.clear()
     branch_id = callback.data.split(":", 1)[1]
     branch = await branch_repo.get_by_id(branch_id)
-    groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: g.name)
+    groups = sorted(
+        await group_repo.get_by_branch(branch_id, include_archived=True),
+        key=lambda g: (g.archived, g.name),
+    )
     rows = [[InlineKeyboardButton(text=g.name, callback_data=f"payhist_g:{g.group_id}")] for g in groups]
     rows.append([InlineKeyboardButton(text="« Филиалы", callback_data="admin:payhist")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])

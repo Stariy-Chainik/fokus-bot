@@ -8,11 +8,13 @@ from .base import BaseRepository
 # Колонки листа `groups` (1-based):
 # 1 group_id | 2 branch_id | 3 name | 4 created_at | 5 updated_at | 6 sort_order
 # 7 billing_mode | 8 price_short | 9 duration_short | 10 price_full | 11 duration_full
+# 12 archived ("1" — группа в архиве)
 _BILLING_MODE_COL = 7
 _PRICE_SHORT_COL = 8
 _DUR_SHORT_COL = 9
 _PRICE_FULL_COL = 10
 _DUR_FULL_COL = 11
+_ARCHIVED_COL = 12
 
 
 def _int_or(v, default: int) -> int:
@@ -41,21 +43,35 @@ def _row_to_group(row: dict) -> Group:
         duration_short=_int_or(row.get("duration_short"), 35),
         price_full=_int_or(row.get("price_full"), 0),
         duration_full=_int_or(row.get("duration_full"), 60),
+        archived=str(row.get("archived") or "").strip().lower() in ("1", "true", "да", "yes"),
     )
 
 
 class GroupRepository(BaseRepository):
-    async def get_all(self) -> list[Group]:
-        return [_row_to_group(r) for r in await self._all_records()]
+    async def get_all(self, include_archived: bool = False) -> list[Group]:
+        """По умолчанию без архивных: они не должны попадать в списки выбора.
+
+        История (счета, зарплаты, карточки) читает группу через ``get_by_id``
+        либо передаёт ``include_archived=True``.
+        """
+        groups = [_row_to_group(r) for r in await self._all_records()]
+        if include_archived:
+            return groups
+        return [g for g in groups if not g.archived]
 
     async def get_by_id(self, group_id: str) -> Optional[Group]:
-        for g in await self.get_all():
+        for g in await self.get_all(include_archived=True):
             if g.group_id == group_id:
                 return g
         return None
 
-    async def get_by_branch(self, branch_id: str) -> list[Group]:
-        return [g for g in await self.get_all() if g.branch_id == branch_id]
+    async def get_by_branch(
+        self, branch_id: str, include_archived: bool = False,
+    ) -> list[Group]:
+        return [
+            g for g in await self.get_all(include_archived=include_archived)
+            if g.branch_id == branch_id
+        ]
 
     async def add(self, branch_id: str, name: str) -> Group:
         existing_ids = [g.group_id for g in await self.get_all()]
@@ -63,7 +79,7 @@ class GroupRepository(BaseRepository):
         now = now_str()
         await self._append_row([
             group_id, branch_id, name, now, now, 0,
-            GroupBillingMode.NONE.value, 0, 35, 0, 60,
+            GroupBillingMode.NONE.value, 0, 35, 0, 60, "",
         ])
         return Group(
             group_id=group_id, branch_id=branch_id, name=name,
@@ -94,6 +110,15 @@ class GroupRepository(BaseRepository):
         await self._update_cell(row_idx, _DUR_SHORT_COL, duration_short)
         await self._update_cell(row_idx, _PRICE_FULL_COL, price_full)
         await self._update_cell(row_idx, _DUR_FULL_COL, duration_full)
+        await self._update_cell(row_idx, 5, now_str())
+        return True
+
+    async def set_archived(self, group_id: str, archived: bool) -> bool:
+        """В архив / из архива. Строку не удаляет — история занятий и оплат цела."""
+        row_idx = await self._find_row_index("group_id", group_id)
+        if row_idx is None:
+            return False
+        await self._update_cell(row_idx, _ARCHIVED_COL, "1" if archived else "")
         await self._update_cell(row_idx, 5, now_str())
         return True
 

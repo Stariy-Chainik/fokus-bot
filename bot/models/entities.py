@@ -71,6 +71,7 @@ class Group:
     duration_short: int = 35
     price_full: int = 0
     duration_full: int = 60
+    archived: bool = False   # группа не работает: скрыта из списков, история сохранена
 
 
 @dataclass
