@@ -12,6 +12,7 @@ from bot.keyboards.teacher import (
     kb_my_student_card, kb_my_pair_card,
 )
 from bot.handlers.common import show_card
+from bot.screens.cards import partner_label
 from bot.handlers.access import TeacherUser
 from bot.handlers.filters import TeacherOnly
 
@@ -45,14 +46,13 @@ async def _render_student_card(
     shared_gids = [gid for gid in student.group_ids if gid in teacher_gids]
     primary_gid = shared_gids[0] if shared_gids else ""
 
+    partner = await student_repo.get_by_id(student.partner_id) if student.partner_id else None
+    partner_name = partner_label(student, partner)
     if student.partner_id:
-        partner = await student_repo.get_by_id(student.partner_id)
-        partner_name = partner.name if partner else f"(удалён: {student.partner_id})"
         # Педагог может управлять парой только если партнёр тоже видим ему.
         can_manage = partner is not None and partner.student_id in mine_ids
         note = "" if can_manage else "\n\n⚠️ Партнёр у другого педагога — управляет админ."
     else:
-        partner_name = "— (солист)"
         can_manage = True
         note = ""
 

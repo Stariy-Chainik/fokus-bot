@@ -330,3 +330,12 @@ def test_access_denied_athlete():
     msg = FakeMessage(text="/start", user_id=999)
     assert run(athlete_of(msg, _Diary())) is None
     assert msg.screens == [("Кабинет спортсмена не привязан. Отправьте /start", None)]
+
+
+def test_partner_label_shared_between_admin_and_teacher_cards():
+    from bot.screens.cards import partner_label
+    solo = mk_student("STU-1", "Иванов")
+    paired = mk_student("STU-1", "Иванов", partner_id="STU-2")
+    assert partner_label(solo, None) == "— (солист)"
+    assert partner_label(paired, mk_student("STU-2", "Петрова Анна")) == "Петрова Анна"
+    assert partner_label(paired, None) == "(удалён: STU-2)"
