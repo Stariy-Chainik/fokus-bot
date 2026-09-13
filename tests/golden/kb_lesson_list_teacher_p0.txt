@@ -1,0 +1,10 @@
+[● Все] → lessons_type:a:all  [👥 Групповые] → lessons_type:g:all  [👤 Индив.] → lessons_type:i:all
+[━━━ 📅 12 сен, сб ━━━] → noop
+[45м · Иванов Иван] → lesson_detail:LES-000010
+[12.09.2026 · 60м · Иванов Иван + Петрова Анна] → lesson_detail:LES-000011
+[━━━ 📅 11 сен, пт ━━━] → noop
+[90м · группа] → lesson_detail:LES-000012
+[━━━ 📅 10 сен, чт ━━━] → noop
+[🎯 инд. · 2 уч.] → lesson_detail:LES-000013
+[След. →] → lessons_page:1:all:a
+[« Назад] → teacher:lesson_delete

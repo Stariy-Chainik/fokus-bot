@@ -1,0 +1,2 @@
+[🔒 Период сдан] → noop
+[« Назад к списку] → teacher:lesson_delete

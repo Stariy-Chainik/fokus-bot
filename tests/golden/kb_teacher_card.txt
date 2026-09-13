@@ -1,0 +1,9 @@
+[📋 Занятия педагога] → tc_lessons:TCH-0001
+[💰 Зарплата за период] → tc_salary:TCH-0001
+[💵 Выплата за день] → salary_day:TCH-0001
+[📊 Изменить ставки] → card_edit_rates:TCH-0001
+[🏢 Изменить группы] → t_edit_groups:TCH-0001
+[🔓 Открыть период] → open_period_list:TCH-0001
+[🗑 Удалить педагога] → del_teacher:TCH-0001
+[« Назад] → teachers:list
+[🏠 Главное меню] → go:home

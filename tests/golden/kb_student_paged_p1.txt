@@ -1,0 +1,23 @@
+[Ученик 21] → student_card:STU-0021
+[Ученик 22] → student_card:STU-0022
+[Ученик 23] → student_card:STU-0023
+[Ученик 24] → student_card:STU-0024
+[Ученик 25] → student_card:STU-0025
+[Ученик 26] → student_card:STU-0026
+[Ученик 27] → student_card:STU-0027
+[Ученик 28] → student_card:STU-0028
+[Ученик 29] → student_card:STU-0029
+[Ученик 30] → student_card:STU-0030
+[Ученик 31] → student_card:STU-0031
+[Ученик 32] → student_card:STU-0032
+[Ученик 33] → student_card:STU-0033
+[Ученик 34] → student_card:STU-0034
+[Ученик 35] → student_card:STU-0035
+[Ученик 36] → student_card:STU-0036
+[Ученик 37] → student_card:STU-0037
+[Ученик 38] → student_card:STU-0038
+[Ученик 39] → student_card:STU-0039
+[Ученик 40] → student_card:STU-0040
+[← Пред.] → spage:0  [След. →] → spage:2
+[🔍 Новый поиск] → students:list
+[« Назад] → admin:students

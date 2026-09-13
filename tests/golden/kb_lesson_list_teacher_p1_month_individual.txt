@@ -1,0 +1,7 @@
+[Все] → lessons_type:a:m-2026-09  [👥 Групповые] → lessons_type:g:m-2026-09  [● 👤 Индив.] → lessons_type:i:m-2026-09
+[━━━ 📅 30 авг, вс ━━━] → noop
+[🔒 45м · Сидоров Пётр + Кузнецова Мария + Орлов Олег] → lesson_detail:LES-000014
+[━━━ 📅 29 авг, сб ━━━] → noop
+[🔒 45м · —] → lesson_detail:LES-000015
+[← Пред.] → lessons_page:0:m-2026-09:i
+[« Назад] → teacher:lesson_delete

@@ -1,0 +1,8 @@
+[➕ Добавить в группу] → student_groups_add:STU-0001  [➖ Убрать из группы] → student_groups_remove:STU-0001
+[🔄 Изменить партнёра] → partner_assign:STU-0001
+[❌ Убрать партнёра] → partner_clear:STU-0001
+[🕐 Переключить на полный (60 мин / 850₽)] → student_tier_toggle:STU-0001
+[Отвязать клиента] → student_client_unbind:STU-0001
+[🔗 Ссылка для спортсмена] → athreg:link:STU-0001
+[« Назад] → students:list
+[🏠 Главное меню] → go:home

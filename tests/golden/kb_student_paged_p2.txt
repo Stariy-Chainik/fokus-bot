@@ -1,0 +1,8 @@
+[Ученик 41] → student_card:STU-0041
+[Ученик 42] → student_card:STU-0042
+[Ученик 43] → student_card:STU-0043
+[Ученик 44] → student_card:STU-0044
+[Ученик 45] → student_card:STU-0045
+[← Пред.] → spage:1
+[🔍 Новый поиск] → students:list
+[« Назад] → admin:students

@@ -1,0 +1,3 @@
+[🗑 Удалить занятие (🔒 период сдан)] → delete_lesson:LES-000012
+[➕ Добавить ученика] → lesson_guest_list:LES-000012
+[« Назад к списку] → admin:edit_lesson

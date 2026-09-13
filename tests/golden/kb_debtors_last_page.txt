@@ -1,0 +1,4 @@
+[«] → debtors:p:1  [3/3] → noop
+[📤 Напомнить всем (закрытые месяцы)] → debtors:remind
+[🔄 Обновить] → debtors:p:0
+[« Назад] → admin:menu

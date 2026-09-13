@@ -1,0 +1,4 @@
+[➕ Добавить в группу] → student_groups_add:STU-0002
+[💃 Назначить партнёра] → partner_assign:STU-0002
+[« Назад] → students:list
+[🏠 Главное меню] → go:home

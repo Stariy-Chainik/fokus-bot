@@ -1,0 +1,3 @@
+[«] → debtors:p:0  [2/3] → noop  [»] → debtors:p:2
+[🔄 Обновить] → debtors:p:0
+[« Назад] → admin:menu
