@@ -19,6 +19,16 @@ from bot.services.billing_service import build_billing_rows
 from bot.services.payment_ledger import lesson_paid_marks
 from bot.utils.dates import format_date_short_with_wd, display_period
 
+from bot.utils.callbacks import (
+    ClientCalNavCb,
+    ClientCalPickCb,
+    ClientCalendarCb,
+    ClientDateCb,
+    ClientMonthCb,
+    ClientMonthListCb,
+    ClientMonthTeacherCb,
+    ClientStudentCb,
+)
 logger = logging.getLogger(__name__)
 router = Router(name="client_lessons")
 
@@ -190,7 +200,7 @@ async def cb_client_lessons(
 async def cb_cl_stu(
     callback: CallbackQuery, student_repo: StudentRepository,
 ) -> None:
-    student_id = callback.data.split(":", 1)[1]
+    student_id = ClientStudentCb.unpack(callback.data).student_id
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not students:
         await callback.answer("Нет доступа", show_alert=True)
@@ -211,7 +221,8 @@ async def cb_cl_date(
     payment_repo: PaymentRepository,
 ) -> None:
     # cl_date:{student_id}:{date}
-    _, student_id, period_str = callback.data.split(":", 2)
+    cb = ClientDateCb.unpack(callback.data)
+    student_id, period_str = cb.student_id, cb.period_str
     await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
     await callback.answer()
 
@@ -242,7 +253,7 @@ async def cb_cl_calendar_s(
     lesson_repo: LessonRepository,
     state: FSMContext,
 ) -> None:
-    student_id = callback.data.split(":", 1)[1]
+    student_id = ClientCalendarCb.unpack(callback.data).student_id
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not students:
         await callback.answer("Нет доступа", show_alert=True)
@@ -269,7 +280,7 @@ async def cb_cl_nav(
     if not students:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    ym = callback.data.split(":", 1)[1]
+    ym = ClientCalNavCb.unpack(callback.data).ym
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
     student_id = data.get("cl_student_id", "all")
@@ -290,7 +301,7 @@ async def cb_cl_pick(
     payment_repo: PaymentRepository,
     state: FSMContext,
 ) -> None:
-    period_str = callback.data.split(":", 1)[1]
+    period_str = ClientCalPickCb.unpack(callback.data).date
     data = await state.get_data()
     student_id = data.get("cl_student_id", "all")
     await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
@@ -301,7 +312,7 @@ async def cb_cl_pick(
 async def cb_cl_month_list_s(
     callback: CallbackQuery, student_repo: StudentRepository,
 ) -> None:
-    student_id = callback.data.split(":", 1)[1]
+    student_id = ClientMonthListCb.unpack(callback.data).student_id
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not students:
         await callback.answer("Нет доступа", show_alert=True)
@@ -322,7 +333,8 @@ async def cb_cl_month_teacher(
     payment_repo: PaymentRepository,
 ) -> None:
     # cl_month_t:{student_id}:{ym}:{teacher_id|all}
-    _, student_id, period_str, teacher_id = callback.data.split(":", 3)
+    cb = ClientMonthTeacherCb.unpack(callback.data)
+    student_id, period_str, teacher_id = cb.student_id, cb.period_str, cb.teacher_id
     await _show_lessons(
         callback, student_repo, lesson_repo, teacher_repo, payment_repo,
         period_str, student_id, teacher_filter=teacher_id,
@@ -339,6 +351,7 @@ async def cb_cl_month(
     payment_repo: PaymentRepository,
 ) -> None:
     # cl_month:{student_id}:{ym}
-    _, student_id, period_str = callback.data.split(":", 2)
+    cb = ClientMonthCb.unpack(callback.data)
+    student_id, period_str = cb.student_id, cb.period_str
     await _show_lessons(callback, student_repo, lesson_repo, teacher_repo, payment_repo, period_str, student_id)
     await callback.answer()
