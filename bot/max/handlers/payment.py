@@ -72,7 +72,10 @@ async def on_pay(event: MessageCallback, context, max_uid, student_repo, payment
     if len(unpaid) > 1:
         await _teacher_select(event, context, student_id, period_month, unpaid)
     else:
-        await edit_screen(event, *methods_screen(student_id, period_month, student.name, unpaid, _yookassa_on()))
+        await edit_screen(event, *methods_screen(
+            student_id, period_month, student.name, unpaid, _yookassa_on(),
+            cash=settings.payment_cash_enabled,
+        ))
 
 
 @router.message_callback(F.callback.payload.startswith("pselt:"))
@@ -99,7 +102,10 @@ async def on_select_go(event: MessageCallback, context):
         return
     student_id, period_month = key.split(":", 1)
     sel = selected_from(data, student_id, period_month, unpaid)
-    await edit_screen(event, *methods_screen(student_id, period_month, data.get("pay_student_name") or "", sel, _yookassa_on()))
+    await edit_screen(event, *methods_screen(
+        student_id, period_month, data.get("pay_student_name") or "", sel, _yookassa_on(),
+        cash=settings.payment_cash_enabled,
+    ))
 
 
 @router.message_callback(F.callback.payload.startswith("pay_method:"))

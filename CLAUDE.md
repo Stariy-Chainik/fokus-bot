@@ -252,7 +252,7 @@ earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные 
 - «Должники» (`compute_debt_map`) считают долг как начислено − оплачено, поэтому доплата после новых уроков попадает в должников и напоминания.
 
 **Payment methods** (each configured via ENV — invisible if the corresponding setting is empty):
-1. 💵 Наличные — admin gets notification + confirm button (`PAYMENT_CASH_ENABLED`).
+1. 💵 Наличные — родитель жмёт «📨 Уведомить об оплате», админ подтверждает кнопкой (`PAYMENT_CASH_ENABLED`, по умолчанию включено; флаг передаётся в `methods_screen(cash=…)` из Telegram- и MAX-хендлеров).
 2. 🏦 По реквизитам — shows QR + bank details; client uploads receipt (`PAYMENT_BANK_DETAILS`).
 3. 📱 СБП — shows SBP details; client uploads receipt (`PAYMENT_SBP_DETAILS`).
 4. 💳 Картой онлайн — YooKassa link (`YOOKASSA_SHOP_ID` + `YOOKASSA_SECRET_KEY`).

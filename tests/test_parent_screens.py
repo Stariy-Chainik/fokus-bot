@@ -111,6 +111,18 @@ def test_teacher_select_and_methods():
     assert kb[0][0].value == "pay_method:bank:STU-1:2026-09"
 
 
+def test_methods_screen_with_cash():
+    """PAYMENT_CASH_ENABLED: наличные показываются сразу после СБП онлайн."""
+    unpaid = [{"tid": "T1", "name": "Река", "amount": 1000, "pid": 5}]
+    _, kb = methods_screen("STU-1", "2026-09", "Иванов", unpaid, yookassa=True, cash=True)
+    assert [b.value for row in kb for b in row] == [
+        "pay_method:ysbp:STU-1:2026-09",
+        "pay_method:cash:STU-1:2026-09",
+        "pay_method:bank:STU-1:2026-09",
+        "client_bill:STU-1:2026-09",
+    ]
+
+
 def test_selection_helpers():
     unpaid = [{"tid": "T1", "name": "A", "amount": 10, "pid": 1}, {"tid": "T2", "name": "B", "amount": 20, "pid": 0}]
     assert selected_from({}, "S", "2026-09", unpaid) == unpaid

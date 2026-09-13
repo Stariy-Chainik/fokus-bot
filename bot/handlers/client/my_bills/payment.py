@@ -69,7 +69,10 @@ _yookassa_on = lambda: bool(settings.yookassa_shop_id and settings.yookassa_secr
 
 
 async def _show_methods(callback: CallbackQuery, student_id: str, period_month: str, sel: list, who: str) -> None:
-    await _edit(callback, methods_screen(student_id, period_month, who, sel, _yookassa_on()))
+    await _edit(callback, methods_screen(
+        student_id, period_month, who, sel, _yookassa_on(),
+        cash=settings.payment_cash_enabled,
+    ))
 
 
 async def _show_teacher_select(
