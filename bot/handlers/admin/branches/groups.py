@@ -17,6 +17,18 @@ from bot.states import (
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.utils.callbacks import (
+    ConfirmDelGroupCb,
+    GroupAddCb,
+    GroupArchiveCb,
+    GroupCardCb,
+    GroupDelCb,
+    GroupDelPickCb,
+    GroupEditNameCb,
+    GroupRenamePickCb,
+    GroupTeacherToggleCb,
+    GroupTeachersCb,
+)
 from ._base import router
 from ._base import _render_group_card
 
@@ -44,7 +56,7 @@ async def cb_group_add_start(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    branch_id = callback.data.split(":", 2)[2]
+    branch_id = GroupAddCb.unpack(callback.data).branch_id
     await state.set_state(AddGroupStates.entering_name)
     await state.update_data(branch_id=branch_id)
     await callback.message.edit_text(
@@ -83,7 +95,7 @@ async def cb_group_card(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    group_id = callback.data.split(":", 1)[1]
+    group_id = GroupCardCb.unpack(callback.data).group_id
     await _render_group_card(
         callback.message, group_id,
         group_repo, branch_repo, teacher_repo, student_repo,
@@ -104,7 +116,8 @@ async def cb_group_archive(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, action, group_id = callback.data.split(":", 2)
+    cb = GroupArchiveCb.unpack(callback.data)
+    action, group_id = cb.action, cb.group_id
     archived = action == "on"
     ok = await group_repo.set_archived(group_id, archived)
     if ok:
@@ -129,7 +142,7 @@ async def cb_group_rename_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    branch_id = callback.data.split(":", 2)[2]
+    branch_id = GroupRenamePickCb.unpack(callback.data).branch_id
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     buttons = [
         [InlineKeyboardButton(text=g.name, callback_data=f"group:edit_name:{branch_id}:{g.group_id}")]
@@ -150,8 +163,8 @@ async def cb_group_edit_name_start(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    parts = callback.data.split(":", 3)
-    branch_id, group_id = parts[2], parts[3]
+    cb = GroupEditNameCb.unpack(callback.data)
+    branch_id, group_id = cb.branch_id, cb.group_id
     await state.set_state(EditGroupNameStates.entering_name)
     await state.update_data(group_id=group_id, branch_id=branch_id)
     await callback.message.edit_text(
@@ -186,7 +199,7 @@ async def cb_group_del_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    branch_id = callback.data.split(":", 2)[2]
+    branch_id = GroupDelPickCb.unpack(callback.data).branch_id
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     buttons = [
         [InlineKeyboardButton(text=f"🗑 {g.name}", callback_data=f"group:del:{g.group_id}")]
@@ -207,7 +220,7 @@ async def cb_group_del_confirm(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    group_id = callback.data.split(":", 2)[2]
+    group_id = GroupDelCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -233,7 +246,7 @@ async def cb_group_del_do(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    group_id = callback.data.split(":", 1)[1]
+    group_id = ConfirmDelGroupCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -262,7 +275,7 @@ async def cb_group_teachers(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    group_id = callback.data.split(":", 1)[1]
+    group_id = GroupTeachersCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -284,7 +297,8 @@ async def cb_gt_toggle(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, group_id, teacher_id = callback.data.split(":", 2)
+    cb = GroupTeacherToggleCb.unpack(callback.data)
+    group_id, teacher_id = cb.group_id, cb.teacher_id
     if await teacher_group_repo.exists(teacher_id, group_id):
         await teacher_group_repo.remove(teacher_id, group_id)
     else:
