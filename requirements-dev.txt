@@ -1,3 +1,6 @@
 # Зависимости для локальной разработки и тестов (в проде не нужны).
 -r requirements.txt
 pytest>=8,<9
+ruff>=0.6,<1
+mypy>=1.11,<2
+types-python-dateutil

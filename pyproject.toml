@@ -1,3 +1,10 @@
+[project]
+name = "fokus-bot"
+version = "0.1.0"
+description = "Telegram-CRM танцевальной школы «Фокус» (aiogram 3, Google Sheets)"
+# Прод: Python 3.12.3 (runtime.txt), локальный .venv — 3.12.
+requires-python = ">=3.12"
+
 [tool.pytest.ini_options]
 # Тесты запускаются из корня репозитория: `.venv/bin/python -m pytest`
 pythonpath = ["."]
@@ -7,3 +14,34 @@ filterwarnings = [
     # urllib3 предупреждает про LibreSSL на macOS-venv — шум, не относится к тестам.
     "ignore::Warning:urllib3",
 ]
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = [".venv", "web", "db_export"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# I (сортировка импортов) намеренно не включена: тронула бы каждый файл одним коммитом.
+
+[tool.ruff.lint.per-file-ignores]
+# Одноразовые скрипты: sys.path.insert(...) до импортов проекта — намеренно.
+"scripts/*" = ["E402"]
+# importorskip(maxapi) до импортов MAX-фронта.
+"tests/test_max_front.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["bot", "config"]
+exclude = ["scripts/", "web/", "db_export/"]
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false
+no_implicit_optional = true
+
+# aiogram 3 объявляет callback.message / callback.data / message.text как Optional —
+# в хендлерах это даёт сотни union-attr без пользы; проверка включена для services/repositories/utils.
+[[tool.mypy.overrides]]
+module = ["bot.handlers.*", "bot.max.*", "bot.api.*", "bot.keyboards.*", "bot.middlewares.*"]
+disable_error_code = ["union-attr"]
