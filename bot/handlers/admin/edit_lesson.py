@@ -14,13 +14,12 @@ from bot.keyboards.teacher import kb_lesson_list
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display, month_name_ru
 from bot.utils.constants import PAGE_SIZE
+from bot.handlers.access import is_admin as _is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_edit_lesson")
 
 
-
-from bot.handlers.access import is_admin as _is_admin
 
 
 def _month_label(ym: str) -> str:

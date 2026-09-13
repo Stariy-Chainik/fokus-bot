@@ -34,10 +34,9 @@ from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
 from bot.keyboards.client import kb_bill_back
 from config.settings import settings
+from ._base import router
 
 logger = logging.getLogger(__name__)
-
-from ._base import router
 
 
 async def _edit(callback: CallbackQuery, screen: tuple) -> None:

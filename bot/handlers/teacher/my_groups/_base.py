@@ -1,5 +1,5 @@
-from __future__ import annotations
 """Педагог: «Группы» — просмотр своих групп, управление составом."""
+from __future__ import annotations
 import logging
 
 from aiogram import Router

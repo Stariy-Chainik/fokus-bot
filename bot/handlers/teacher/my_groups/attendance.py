@@ -1,5 +1,5 @@
-from __future__ import annotations
 """Педагог: «Группы» — просмотр своих групп, управление составом."""
+from __future__ import annotations
 import logging
 from collections import defaultdict
 
@@ -14,15 +14,11 @@ from bot.repositories import (
 )
 from bot.utils.attendees import attendee_ids
 from bot.utils.dates import month_name_ru, last_periods
+from bot.handlers.access import is_teacher as _is_teacher
+from ._base import router, _owns_group
 
 logger = logging.getLogger(__name__)
 
-
-from bot.handlers.access import is_teacher as _is_teacher
-
-
-
-from ._base import router, _owns_group
 
 
 # ─── Посещаемость группы ─────────────────────────────────────────────────────

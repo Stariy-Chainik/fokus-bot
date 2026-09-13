@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 Базовый репозиторий.
 
@@ -9,6 +8,7 @@ from __future__ import annotations
   нагрузку на Sheets API (лимит 60 req/min). Инвалидируется при любой записи.
 - Retry с backoff для HTTP 429 / 503: временные сбои API не долетают до пользователя.
 """
+from __future__ import annotations
 import asyncio
 import logging
 import time

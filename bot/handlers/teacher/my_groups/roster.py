@@ -1,5 +1,5 @@
-from __future__ import annotations
 """Педагог: «Группы» — просмотр своих групп, управление составом."""
+from __future__ import annotations
 import logging
 
 from aiogram import F
@@ -11,15 +11,11 @@ from bot.repositories import (
     StudentRepository, GroupRepository, BranchRepository, TeacherGroupRepository,
     StudentGroupRepository,
 )
+from bot.handlers.access import is_teacher as _is_teacher
+from ._base import router, _owns_group, _render_t_group_card
 
 logger = logging.getLogger(__name__)
 
-
-from bot.handlers.access import is_teacher as _is_teacher
-
-
-
-from ._base import router, _owns_group, _render_t_group_card
 
 
 # ─── Список групп педагога ───────────────────────────────────────────────────

@@ -8,12 +8,11 @@ from bot.models import User
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.utils.dates import display_period, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
+from bot.handlers.access import is_teacher as _is_teacher
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_stats")
 
-
-from bot.handlers.access import is_teacher as _is_teacher
 
 
 def _period_buttons() -> InlineKeyboardMarkup:

@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 Админ: экран «⚠️ Должники» — сводный контроль оплат клиентов.
 
@@ -7,6 +6,7 @@ from __future__ import annotations
 напоминание родителям НЕ входит — напоминаем только за закрытые месяцы
 (правило месячного закрытия PER_VISIT-счетов).
 """
+from __future__ import annotations
 import logging
 from datetime import date
 
@@ -20,11 +20,11 @@ from bot.services.parent_notifier import resolve_notifier
 from bot.utils.dates import display_period
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
+from bot.handlers.access import is_admin as _is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_debtors")
 
-from bot.handlers.access import is_admin as _is_admin
 
 _PAGE_SIZE = 25
 _reminding = InProgressGuard()

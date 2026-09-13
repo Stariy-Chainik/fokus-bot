@@ -18,9 +18,9 @@ from bot.keyboards.admin import kb_back, kb_confirm
 from bot.handlers.access import is_admin as _is_admin
 
 from ._base import router
+from ._base import _render_group_card
 
 logger = logging.getLogger(__name__)
-from ._base import _render_group_card
 
 
 def _kb_group_teachers(group_id: str, teachers: list, assigned: set[str]) -> InlineKeyboardMarkup:

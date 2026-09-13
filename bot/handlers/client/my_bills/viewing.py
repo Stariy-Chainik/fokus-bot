@@ -11,10 +11,9 @@ from bot.services import PaymentService
 from bot.services.parent_views import bills_periods, bill_detail
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import student_select_screen, bills_list_screen, bill_detail_screen
+from ._base import router
 
 logger = logging.getLogger(__name__)
-
-from ._base import router
 
 
 async def _edit(callback: CallbackQuery, screen: tuple) -> None:

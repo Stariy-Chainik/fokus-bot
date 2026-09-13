@@ -20,9 +20,9 @@ from bot.keyboards.admin import (
 from bot.handlers.access import is_admin as _is_admin
 
 from ._base import router
+from ._base import _render_student_card
 
 logger = logging.getLogger(__name__)
-from ._base import _render_student_card
 
 
 # ─── Список учеников с поиском ───────────────────────────────────────────────

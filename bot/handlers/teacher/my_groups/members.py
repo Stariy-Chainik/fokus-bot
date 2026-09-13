@@ -1,5 +1,5 @@
-from __future__ import annotations
 """Педагог: «Группы» — просмотр своих групп, управление составом."""
+from __future__ import annotations
 import logging
 import uuid
 
@@ -14,17 +14,13 @@ from bot.repositories import (
     StudentGroupRepository, TeacherRepository, UserRepository, StudentRequestRepository,
 )
 from bot.states import TeacherGroupAddStudentStates
-
-logger = logging.getLogger(__name__)
-
-
 from bot.handlers.access import is_teacher as _is_teacher
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
-
-
-
 from ._base import router, _owns_group, _normalize, _render_t_group_card
+
+logger = logging.getLogger(__name__)
+
 
 
 # ─── Добавить ученика (поиск или создать через заявку) ──────────────────────

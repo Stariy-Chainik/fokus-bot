@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 Педагог: FSM «Отметить занятие».
 Порядок: Дата → Тип (группа/пара/соло) → Длительность → ветка → создание.
@@ -6,6 +5,7 @@ from __future__ import annotations
 Соло: мульти-выбор учеников (включая тех, кто в паре — если пришли одни).
 Защита от двойного нажатия — InProgressGuard _confirming_lesson_ids по tg_id.
 """
+from __future__ import annotations
 import logging
 from datetime import date, timedelta
 

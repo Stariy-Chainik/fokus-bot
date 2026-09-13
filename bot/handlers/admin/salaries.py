@@ -15,12 +15,11 @@ from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
+from bot.handlers.access import is_admin as _is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_salaries")
 
-
-from bot.handlers.access import is_admin as _is_admin
 
 
 def _period_buttons(teacher_id: str, back_cb: str) -> InlineKeyboardMarkup:

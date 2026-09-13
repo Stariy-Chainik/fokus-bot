@@ -19,9 +19,9 @@ from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
 
 from ._base import router
+from ._base import _render_group_card
 
 logger = logging.getLogger(__name__)
-from ._base import _render_group_card
 
 
 # ─── Добавление ученика в группу (поиск или создание) ───────────────────────

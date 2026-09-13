@@ -10,12 +10,11 @@ from bot.repositories import StudentRepository
 from bot.screens.parent_menu import menu_rows
 from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.keyboards.admin import kb_back
+from bot.handlers.access import is_admin as _is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_client_requests")
 
-
-from bot.handlers.access import is_admin as _is_admin
 
 
 @router.callback_query(F.data.startswith("admin_child_ok:"))

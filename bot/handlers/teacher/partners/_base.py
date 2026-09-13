@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 Педагог: «Мои пары», «Мои ученики (соло)», карточка ученика
 и управление партнёром в рамках учеников своих групп.
@@ -6,6 +5,7 @@ from __future__ import annotations
 Видимость ученика педагогу — через TeacherVisibilityService
 (множество групп ученика пересекается с группами педагога).
 """
+from __future__ import annotations
 import logging
 
 from aiogram import Router

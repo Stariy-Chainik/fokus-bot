@@ -6,12 +6,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.services import DiagnosticsService
+from bot.handlers.access import is_admin as _is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_diagnostics")
 
-
-from bot.handlers.access import is_admin as _is_admin
 
 
 def _diag_menu() -> InlineKeyboardMarkup:
