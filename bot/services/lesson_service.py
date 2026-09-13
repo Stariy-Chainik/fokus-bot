@@ -201,6 +201,14 @@ class LessonService:
             logger.info("Удалено занятие %s", lesson_id)
         return deleted
 
+    # ─── Сдача периода ───────────────────────────────────────────────────
+
+    @staticmethod
+    def can_submit_period(today: date, period_month: str) -> bool:
+        """Сдать период можно с 25-го числа этого периода; прошлые месяцы — всегда."""
+        year, month = (int(p) for p in period_month.split("-"))
+        return today >= date(year, month, 25)
+
     # ─── Сводка периода ──────────────────────────────────────────────────
 
     async def preview_period(self, teacher_id: str, period_month: str) -> tuple[list[Lesson], Teacher, int]:

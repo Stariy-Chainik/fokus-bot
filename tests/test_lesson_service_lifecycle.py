@@ -1,4 +1,6 @@
 """LessonService: create() с датой/замком, delete() с замком, preview_period()."""
+from datetime import date
+
 import pytest
 
 from bot.models.enums import GroupBillingMode, LessonType
@@ -83,3 +85,10 @@ def test_add_guest_prices_and_duplicates():
     assert run(svc.add_guest(lesson, "STU-2", per_visit)) is None                       # уже отмечен
     assert run(svc.add_guest(lesson, "STU-3", mk_group("GRP-2"))) == "STU-1:60:850,STU-2:60:850,STU-3:60:0"
     assert run(svc.add_guest(mk_lesson("LES-2", t, "2026-09-02", 45, LessonType.GROUP, group_id="GRP-9"), "STU-1", None)) == "STU-1:45:0"
+
+
+def test_can_submit_period_from_25th():
+    assert LessonService.can_submit_period(date(2026, 9, 24), "2026-09") is False
+    assert LessonService.can_submit_period(date(2026, 9, 25), "2026-09") is True
+    assert LessonService.can_submit_period(date(2026, 9, 1), "2026-08") is True    # прошлый месяц — всегда
+    assert LessonService.can_submit_period(date(2026, 9, 30), "2026-10") is False

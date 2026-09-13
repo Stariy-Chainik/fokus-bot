@@ -27,13 +27,6 @@ _submitting = InProgressGuard()
 
 
 
-def _can_submit(today: date, period_month: str) -> bool:
-    """Сдать период можно с 25-го числа этого периода.
-    Для прошлых месяцев — всегда (они уже закончились)."""
-    year, month = (int(p) for p in period_month.split("-"))
-    return today >= date(year, month, 25)
-
-
 async def _period_breakdown(
     teacher_id: str, period_month: str, lesson_repo: LessonRepository,
 ) -> tuple[int, int, int, str, str]:
@@ -82,7 +75,7 @@ async def _show_confirm(
     await state.set_state(SubmitPeriodStates.confirming)
 
     today = date.today()
-    can_submit = _can_submit(today, period_month)
+    can_submit = LessonService.can_submit_period(today, period_month)
     rows = []
     if can_submit:
         rows.append([InlineKeyboardButton(text="💾 Подтвердить сдачу", callback_data="submit_confirm")])
