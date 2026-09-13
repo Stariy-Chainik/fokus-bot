@@ -11,6 +11,7 @@ _RESET = {
     "salary_duration_groups": "",
     "shift_groups": "",
     "hall_rent_per_lesson": "",
+    "hall_rent_since_period": "",
     "athlete_group_ids": "GRP-0001",
 }
 

@@ -149,6 +149,7 @@ def test_hall_rent_counts_direct_pay_individual_lessons(monkeypatch):
     row = calculate_teacher_profit(_teacher(), lessons)
     assert row.individual_lessons == 2
     assert row.rent == 1000                 # 2 × 500, длительность не влияет
+    assert row.rent_lessons == 2
     assert row.income == 1000 + 700         # аренда + сбор с группы
     assert row.salary == 500                # только за группу (500 × 45/45)
 
@@ -163,3 +164,16 @@ def test_hall_rent_not_applied_without_direct_pay(monkeypatch):
     row = calculate_teacher_profit(_teacher(), [_lesson("LES-000001", "2026-09-01")])
     assert row.rent == 0
     assert row.income == 900                # обычный счёт ученику
+
+
+def test_hall_rent_ignores_lessons_before_since_period(monkeypatch):
+    """HALL_RENT_SINCE_PERIOD: занятия до месяца отсечки аренду не дают."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    monkeypatch.setattr(settings, "hall_rent_since_period", "2026-08")
+
+    old_row = calculate_teacher_profit(_teacher(), [_lesson("LES-1", "2026-06-10")])
+    assert old_row is None                  # выручки нет — строки нет
+    new_row = calculate_teacher_profit(_teacher(), [_lesson("LES-2", "2026-08-10")])
+    assert new_row.rent == 500

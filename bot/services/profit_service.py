@@ -38,6 +38,7 @@ class TeacherProfitRow:
     group_lessons: int
     individual_lessons: int
     rent: int = 0  # часть выручки, полученная как аренда зала
+    rent_lessons: int = 0  # сколько занятий её дали
 
     @property
     def profit(self) -> int:
@@ -77,6 +78,10 @@ class ProfitSummary:
     @property
     def rent_income(self) -> int:
         return sum(row.rent for row in self.teacher_rows)
+
+    @property
+    def rent_lessons(self) -> int:
+        return sum(row.rent_lessons for row in self.teacher_rows)
 
     @property
     def manual_income(self) -> int:
@@ -145,6 +150,9 @@ def lesson_rent(lesson: Lesson) -> int:
         return 0
     if lesson.teacher_id not in settings.direct_pay_teacher_id_set:
         return 0
+    since = settings.hall_rent_since_period
+    if since and lesson.date[:7] < since:
+        return 0
     return settings.hall_rent_map.get(lesson.teacher_id, 0)
 
 
@@ -197,6 +205,7 @@ def calculate_teacher_profit(
         group_lessons=group_count,
         individual_lessons=len(billed_lessons) - group_count,
         rent=sum(row.rent for row in billed_lessons),
+        rent_lessons=sum(1 for row in billed_lessons if row.rent),
     )
 
 

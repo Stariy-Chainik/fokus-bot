@@ -57,10 +57,9 @@ def test_profit_shows_hall_rent_share():
         teacher_rows=(TeacherProfitRow(
             teacher_id="TCH-2", teacher_name="Клецова",
             income=6000, salary=0,
-            group_lessons=0, individual_lessons=12, rent=6000,
+            group_lessons=0, individual_lessons=12, rent=6000, rent_lessons=12,
         ),),
     )
     text = _format_profit("Прибыль за 09.2026", summary)
-    assert "🏟 в т.ч. аренда зала: 6000 ₽" in text
-    assert "в т.ч. аренда зала: 6000 ₽" in text
+    assert "🏟 в т.ч. аренда зала: 6000 ₽ (12 зан.)" in text
     assert "Прибыль:  6000 ₽" in text

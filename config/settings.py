@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     # школе фикс. сумму с каждого своего индивидуального занятия — это выручка
     # школы в «Прибыли». Формат: TCH-0002:500
     hall_rent_per_lesson: str = Field(default="", alias="HALL_RENT_PER_LESSON")
+    # Аренда считается только с этого месяца включительно (YYYY-MM); пусто — за всё время.
+    hall_rent_since_period: str = Field(default="", alias="HALL_RENT_SINCE_PERIOD")
 
     @property
     def hall_rent_map(self) -> dict:

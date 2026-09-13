@@ -57,7 +57,9 @@ def _format_profit(title: str, summary: ProfitSummary) -> str:
             f"  Выручка: {row.income} ₽  Зарплата: {row.salary} ₽"
         )
         if row.rent:
-            lines.append(f"  🏟 в т.ч. аренда зала: {row.rent} ₽")
+            lines.append(
+                f"  🏟 в т.ч. аренда зала: {row.rent} ₽ ({row.rent_lessons} зан.)"
+            )
         lines.append(
             f"  Прибыль: <b>{row.profit} ₽</b> ({row.margin_percent}%)"
         )
@@ -89,7 +91,10 @@ def _format_profit(title: str, summary: ProfitSummary) -> str:
         f"Выручка:    {summary.total_income} ₽",
     ]
     if summary.rent_income:
-        lines.append(f"  в т.ч. аренда зала: {summary.rent_income} ₽")
+        lines.append(
+            f"  в т.ч. аренда зала: {summary.rent_income} ₽"
+            f" ({summary.rent_lessons} зан.)"
+        )
     lines.append(f"Зарплата: {summary.salary} ₽")
     if summary.manual_expenses:
         lines.append(f"Расходы:   {summary.manual_expenses} ₽")
