@@ -1,6 +1,7 @@
 """PaymentService: подтверждения (одиночное / по педагогам / период), отметки занятий, платёж ЮКассы."""
 from types import SimpleNamespace
 
+from bot.services.payment_ledger import BillAggregate
 from bot.models.enums import PaymentStatus
 from bot.services import PaymentService
 from config.settings import settings
@@ -51,7 +52,7 @@ def _bill(lesson_id, date, amount, duration=45):
 
 
 def test_teacher_lesson_marks_and_missing_teacher():
-    bills = {"T1": {"name": "Река", "total": 3000, "items": [_bill("L2", "2026-09-05", 1500), _bill("L1", "2026-09-01", 1500)]}}
+    bills = {"T1": BillAggregate("Река", 3000, items=[_bill("L2", "2026-09-05", 1500), _bill("L1", "2026-09-01", 1500)])}
     svc, repo = _svc([mk_payment("PAY-1", "STU-1", "2026-09", "T1", 1500, PaymentStatus.PAID)])
 
     async def _bills(sid, period):

@@ -14,6 +14,15 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class BillAggregate:
+    """Начисление ученику за месяц по одному ключу: педагог (занятия) или абонемент группы."""
+    name: str
+    total: int = 0
+    items: list = field(default_factory=list)   # Billing-строки занятий; у абонемента пусто
+    subscription: bool = False
+
+
+@dataclass
 class TeacherLedger:
     teacher_id: str
     name: str

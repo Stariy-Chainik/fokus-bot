@@ -181,9 +181,9 @@ def test_subscription_billed_once_regardless_of_lesson_count():
     bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))
     assert list(bills) == ["SUB:GRP-0001"]
     agg = bills["SUB:GRP-0001"]
-    assert agg["total"] == 3000
-    assert agg["subscription"] is True
-    assert agg["name"] == "Абонемент"
+    assert agg.total == 3000
+    assert agg.subscription is True
+    assert agg.name == "Абонемент"
 
 
 def test_no_lessons_in_month_no_subscription():
@@ -205,8 +205,8 @@ def test_subscription_merges_with_individual_lessons():
         [("STU-A", "GRP-0001")],
     )
     bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))
-    assert bills["SUB:GRP-0001"]["total"] == 3000
-    assert bills["TCH-0001"]["total"] == 1000  # 1000 × 45/45
+    assert bills["SUB:GRP-0001"].total == 3000
+    assert bills["TCH-0001"].total == 1000  # 1000 × 45/45
 
 
 def test_debt_map_accrues_subscription_per_member():
@@ -261,7 +261,7 @@ def test_override_for_whole_group():
         overrides=[_override("GRP-0001", "2026-07", None, 2000)],
     )
     bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))
-    assert bills["SUB:GRP-0001"]["total"] == 2000
+    assert bills["SUB:GRP-0001"].total == 2000
     assert _run(svc.compute_debt_map(until_period="2026-07")) == {
         "STU-A": {"2026-07": 2000}, "STU-B": {"2026-07": 2000},
     }
@@ -278,8 +278,8 @@ def test_override_for_single_student_beats_group_override():
             _override("GRP-0001", "2026-07", "STU-A", 1500),
         ],
     )
-    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))["SUB:GRP-0001"]["total"] == 1500
-    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"]["total"] == 2000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07"))["SUB:GRP-0001"].total == 1500
+    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"].total == 2000
 
 
 def test_override_zero_exempts_student():
@@ -291,7 +291,7 @@ def test_override_zero_exempts_student():
         overrides=[_override("GRP-0001", "2026-07", "STU-A", 0)],
     )
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-07")) == {}
-    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-B", "2026-07"))["SUB:GRP-0001"].total == 3000
     assert _run(svc.compute_debt_map(until_period="2026-07")) == {"STU-B": {"2026-07": 3000}}
 
 
@@ -402,7 +402,7 @@ def test_school_holiday_month_is_billed():
         [_sub_group(price=3000)],
         [("STU-A", "GRP-0001")],
     )
-    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-10"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-10"))["SUB:GRP-0001"].total == 3000
     # а до старта группы — нет
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-06")) == {}
 
@@ -432,13 +432,13 @@ def test_joined_period_skips_months_before_joining():
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04")) == {}
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-05")) == {}
     bills = _run(svc.compute_bills_for_student_period("STU-A", "2026-06"))
-    assert bills["SUB:GRP-0001"]["total"] == 3000
+    assert bills["SUB:GRP-0001"].total == 3000
 
 
 def test_joined_period_empty_means_from_the_start():
     """Пустой месяц вступления — прежнее поведение: начисляем со всех месяцев группы."""
     svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")])
-    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"].total == 3000
 
 
 def test_debt_map_respects_joined_period():
@@ -475,7 +475,7 @@ def test_left_period_keeps_past_months_and_stops_future():
     """Ушёл с июня: апрель и май остаются в долге, июнь уже нет."""
     svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
                    left={("STU-A", "GRP-0001"): "2026-06"})
-    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"]["total"] == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"].total == 3000
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-06")) == {}
     assert _run(svc.compute_debt_map(until_period="2026-06")) == {
         "STU-A": {"2026-04": 3000, "2026-05": 3000}}

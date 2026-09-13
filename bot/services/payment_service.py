@@ -12,7 +12,7 @@ from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
 from .billing_service import build_billing_rows
-from .payment_ledger import StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons
+from .payment_ledger import BillAggregate, StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
 logger = logging.getLogger(__name__)
@@ -203,8 +203,8 @@ class PaymentService:
 
     async def _subscription_bills_for_student(
         self, student_id: str, period_month: str,
-    ) -> dict[str, dict]:
-        """Абонементные начисления ученика за период: {SUB:gid → agg}.
+    ) -> dict[str, BillAggregate]:
+        """Абонементные начисления ученика за период: {SUB:gid → BillAggregate}.
 
         Правило: группа с billing_mode=SUBSCRIPTION → фиксированная price_full
         ₽/месяц с ученика, НЕЗАВИСИМО от числа занятий; начисляется, только если
@@ -231,7 +231,7 @@ class PaymentService:
                 lesson_months.setdefault(ls.group_id, set()).add(ls.date[:7])
         overrides = await self._sub_override_map()
         membership = await self._student_group_repo.get_membership_map()
-        result: dict[str, dict] = {}
+        result: dict[str, BillAggregate] = {}
         for group in sub_groups:
             billable = subscription_billable_months(
                 lesson_months.get(group.group_id, set()), until=period_month,
@@ -247,24 +247,22 @@ class PaymentService:
             )
             if amount <= 0:  # 0 = освобождение в этом месяце
                 continue
-            result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = {
-                "name": "Абонемент",  # без названия группы — не влезает в счёт
-                "total": amount,
-                "items": [],
-                "subscription": True,
-            }
+            result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = BillAggregate(
+                name="Абонемент",  # без названия группы — не влезает в счёт
+                total=amount, subscription=True,
+            )
         return result
 
     async def compute_bills_for_student_period(
         self, student_id: str, period_month: str,
-    ) -> dict[str, dict]:
+    ) -> dict[str, BillAggregate]:
         """
         On-demand расчёт счёта ученика за период.
-        Возвращает dict[teacher_id] -> {name, total, items: list[Billing-like dicts]}.
+        Возвращает dict[teacher_id | SUB:gid] -> BillAggregate (имя, сумма, Billing-строки).
         """
         lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
         teachers_cache: dict[str, Teacher] = {}
-        result: dict[str, dict] = {}
+        result: dict[str, BillAggregate] = {}
         for ls in lessons:
             teacher = teachers_cache.get(ls.teacher_id)
             if teacher is None:
@@ -276,11 +274,9 @@ class PaymentService:
             for b in build_billing_rows(ls, teacher):
                 if b.student_id != student_id:
                     continue
-                agg = result.setdefault(b.teacher_id, {
-                    "name": b.teacher_name, "total": 0, "items": [],
-                })
-                agg["total"] += b.amount
-                agg["items"].append(b)
+                agg = result.setdefault(b.teacher_id, BillAggregate(name=b.teacher_name))
+                agg.total += b.amount
+                agg.items.append(b)
         result.update(await self._subscription_bills_for_student(student_id, period_month))
         return result
 
@@ -303,18 +299,18 @@ class PaymentService:
             paid_rows = [r for r in t_rows if r.status == PaymentStatus.PAID]
             pending = next((r for r in t_rows if r.status != PaymentStatus.PAID), None)
             paid = sum(r.total_amount for r in paid_rows)
-            remainder = max(agg["total"] - paid, 0)
+            remainder = max(agg.total - paid, 0)
             if pending is None:
                 if remainder > 0:
-                    pending = await self._create_invoice(student, period_month, teacher_id, agg["name"], remainder)
+                    pending = await self._create_invoice(student, period_month, teacher_id, agg.name, remainder)
             elif pending.total_amount != remainder:
                 logger.info("Остаток по %s изменился: %d → %d", pending.payment_id, pending.total_amount, remainder)
                 await self._payment_repo.update_amount(pending.payment_id, remainder)
                 pending.total_amount = remainder
             ledgers[teacher_id] = TeacherLedger(
-                teacher_id=teacher_id, name=agg["name"], accrued=agg["total"], paid=paid,
-                items=list(agg.get("items") or []), paid_rows=paid_rows, pending=pending,
-                subscription=bool(agg.get("subscription")),
+                teacher_id=teacher_id, name=agg.name, accrued=agg.total, paid=paid,
+                items=list(agg.items), paid_rows=paid_rows, pending=pending,
+                subscription=agg.subscription,
             )
         return ledgers
 

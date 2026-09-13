@@ -92,7 +92,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
     grand_total = 0
     grand_paid = 0
     for teacher_id, agg in bills.items():
-        subtotal = agg["total"]
+        subtotal = agg.total
         grand_total += subtotal
         paid = paid_by_teacher.get(teacher_id, 0)
         grand_paid += min(paid, subtotal)
@@ -104,8 +104,8 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
             status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
         else:
             status = f"⏳ Счёт не создан — {subtotal} руб."
-        lines.append(f"👨‍🏫 <b>{agg['name']}</b> — {subtotal} руб. — {status}")
-        items = sorted(agg["items"], key=lambda b: (b.date, b.lesson_id))
+        lines.append(f"👨‍🏫 <b>{agg.name}</b> — {subtotal} руб. — {status}")
+        items = sorted(agg.items, key=lambda b: (b.date, b.lesson_id))
         marks = lesson_paid_marks([b.amount for b in items], paid)
         paid_items = [b for b, is_paid in zip(items, marks, strict=False) if is_paid]
         unpaid_items = [b for b, is_paid in zip(items, marks, strict=False) if not is_paid]
@@ -124,7 +124,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
         # Неоплаченные уроки всегда сверху, оплаченные — ниже.
         _append_items("К оплате", "⬜", unpaid_items)
         _append_items("Оплачено", "✅", paid_items)
-        if agg.get("subscription") and not items:
+        if agg.subscription and not items:
             mark = "✅" if paid >= subtotal else "⬜"
             lines.append(f"  {mark} Фиксированная сумма за месяц")
         lines.append("")

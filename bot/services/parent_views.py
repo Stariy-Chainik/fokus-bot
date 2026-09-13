@@ -140,7 +140,7 @@ def qr_png(student_name: str, period_month: str, total: int) -> bytes | None:
 # ─── Сообщение админу о чеке / наличных ─────────────────────────────────────
 
 def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | None = None) -> list[str]:
-    """Разбивка для админа: педагог/абонемент — сумма и даты занятий.
+    """Разбивка для админа: педагог/абонемент — сумма и даты занятий (bills: {ключ → BillAggregate}).
     ledgers (teacher_id → TeacherLedger) — показать «оплачено / к доплате» при частичной оплате.
     Если не влезает в подпись Telegram — короткий вариант (число занятий)."""
     full, short = [], []
@@ -150,17 +150,17 @@ def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | N
             continue
         ledger = (ledgers or {}).get(tid)
         paid_part = f" (оплачено {ledger.paid}, к доплате {ledger.remainder})" if ledger is not None and ledger.paid else ""
-        items = sorted(agg.get("items") or [], key=lambda b: b.date)
-        if agg.get("subscription") or not items:
-            full.append(f"• {agg['name']} — {agg['total']} руб.{paid_part}")
+        items = sorted(agg.items, key=lambda b: b.date)
+        if agg.subscription or not items:
+            full.append(f"• {agg.name} — {agg.total} руб.{paid_part}")
             short.append(full[-1])
             continue
         dates = ", ".join(
             f"{b.date[8:10]}.{b.date[5:7]} ({b.duration_min}м{', группа' if b.lesson_type == 'group' else ''})"
             for b in items
         )
-        full.append(f"• {agg['name']} — {agg['total']} руб.{paid_part}: {dates}")
-        short.append(f"• {agg['name']} — {agg['total']} руб.{paid_part} ({len(items)} зан.)")
+        full.append(f"• {agg.name} — {agg.total} руб.{paid_part}: {dates}")
+        short.append(f"• {agg.name} — {agg.total} руб.{paid_part} ({len(items)} зан.)")
     return full if len("\n".join(full)) <= limit else short
 
 

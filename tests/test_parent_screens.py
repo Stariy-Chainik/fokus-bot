@@ -11,7 +11,7 @@ from bot.services.parent_views import (
     PeriodRow, BillDetail, bill_detail, breakdown_lines, admin_confirm_rows, receipt_caption, period_label,
     selected_from, selection_fsm_data,
 )
-from bot.services.payment_ledger import TeacherLedger
+from bot.services.payment_ledger import BillAggregate, TeacherLedger
 
 
 def _payloads(rows):
@@ -162,7 +162,7 @@ def test_admin_confirm_rows_and_caption():
 
 def test_breakdown_lines_short_when_too_long():
     items = [SimpleNamespace(date=f"2026-09-{d:02d}", duration_min=60, lesson_type="group") for d in range(1, 30)]
-    bills = {"T1": {"name": "Река", "total": 100, "items": items}}
+    bills = {"T1": BillAggregate("Река", 100, items=items)}
     full = breakdown_lines(bills, ["T1"], limit=10_000)
     short = breakdown_lines(bills, ["T1"], limit=50)
     assert full[0].startswith("• Река — 100 руб.: 01.09 (60м, группа)")

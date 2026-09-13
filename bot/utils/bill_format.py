@@ -4,7 +4,7 @@ from bot.utils.dates import display_period, format_date_short_with_wd
 
 
 def build_bill_text(
-    student_name: str, group_names: list[str], period_month: str, bills: dict,
+    student_name: str, group_names: list[str], period_month: str, bills: dict,  # {ключ → BillAggregate}
     paid: int = 0,
 ) -> tuple[str, int]:
     """Возвращает (text, grand_total) — текст счёта в родительском формате.
@@ -20,22 +20,22 @@ def build_bill_text(
     lines.append("")
     grand_total = 0
     for agg in bills.values():
-        grand_total += agg["total"]
-        if agg.get("subscription"):
+        grand_total += agg.total
+        if agg.subscription:
             # Абонемент: фикс-сумма за месяц, без разбивки по датам.
-            lines.append(f"💳 <b>{agg['name']}</b>")
+            lines.append(f"💳 <b>{agg.name}</b>")
             lines.append("    · фиксированная сумма за месяц")
-            lines.append(f"  <b>Сумма: {agg['total']} ₽</b>")
+            lines.append(f"  <b>Сумма: {agg.total} ₽</b>")
             lines.append("")
             continue
-        lines.append(f"👨‍🏫 <b>{agg['name']}</b>")
+        lines.append(f"👨‍🏫 <b>{agg.name}</b>")
         cur_date: str | None = None
-        for b in sorted(agg["items"], key=lambda x: x.date):
+        for b in sorted(agg.items, key=lambda x: x.date):
             if b.date != cur_date:
                 cur_date = b.date
                 lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
             lines.append(f"    · {b.duration_min} мин · {b.amount} ₽")
-        lines.append(f"  <b>Сумма: {agg['total']} ₽</b>")
+        lines.append(f"  <b>Сумма: {agg.total} ₽</b>")
         lines.append("")
     if paid > 0:
         lines.append(f"Начислено: {grand_total} ₽ · оплачено: {paid} ₽")

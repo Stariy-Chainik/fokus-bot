@@ -76,12 +76,12 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
                 to_pay = 0
                 for teacher_id, agg in bill_map.items():
                     paid_amount = paid_sums.get(teacher_id, 0)
-                    remainder = max(agg["total"] - paid_amount, 0)
+                    remainder = max(agg.total - paid_amount, 0)
                     to_pay += remainder
                     teachers.append({
                         "teacherId": teacher_id,
-                        "teacherName": agg["name"],
-                        "total": agg["total"],
+                        "teacherName": agg.name,
+                        "total": agg.total,
                         "paid": paid_amount,
                         "toPay": remainder,
                         "status": "PAID" if remainder == 0 else ("PARTIAL" if paid_amount else "UNPAID"),
@@ -91,7 +91,7 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
                     "studentName": student.name,
                     "period": period,
                     "teachers": teachers,
-                    "total": sum(agg["total"] for agg in bill_map.values()),
+                    "total": sum(agg.total for agg in bill_map.values()),
                     "toPay": to_pay,
                 })
         return _json({"bills": out})
@@ -123,7 +123,7 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
         paid_sums = payment_ledger.paid_sums(
             await payment_repo.get_by_student_and_period(student_id, period_month),
         )
-        total = sum(max(agg["total"] - paid_sums.get(tid, 0), 0) for tid, agg in bill_map.items())
+        total = sum(max(agg.total - paid_sums.get(tid, 0), 0) for tid, agg in bill_map.items())
         if total <= 0:
             return _json({"error": "nothing_to_pay"}, status=409)
 

@@ -2,6 +2,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from bot.services.payment_ledger import BillAggregate
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -36,8 +37,8 @@ class _PaymentService:
         if period != PERIOD:
             return {}
         return {
-            "TCH-0001": {"name": "Оплаченный", "total": 1000, "items": []},
-            "TCH-0009": {"name": "Контарева", "total": 700, "items": []},
+            "TCH-0001": BillAggregate("Оплаченный", 1000),
+            "TCH-0009": BillAggregate("Контарева", 700),
         }
 
     async def get_or_create_invoices_for_student_period(self, student, period):

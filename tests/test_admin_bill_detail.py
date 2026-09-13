@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from bot.handlers.admin.bills.helpers import _bill_detail_lines
 from bot.models.enums import PaymentStatus
+from bot.services.payment_ledger import BillAggregate
 
 
 def _lesson(lesson_id: str, date: str, amount: int, lesson_type: str = "individual"):
@@ -20,15 +21,11 @@ def _payment(amount: int, status: PaymentStatus, paid_at: str | None = None):
 
 def test_unpaid_lessons_are_listed_before_paid_lessons():
     bills = {
-        "T1": {
-            "name": "Мария Иванова",
-            "total": 3900,
-            "items": [
-                _lesson("LES-1", "2026-09-05", 1300),
-                _lesson("LES-2", "2026-09-12", 1300, "group"),
-                _lesson("LES-3", "2026-09-19", 1300),
-            ],
-        },
+        "T1": BillAggregate("Мария Иванова", 3900, items=[
+            _lesson("LES-1", "2026-09-05", 1300),
+            _lesson("LES-2", "2026-09-12", 1300, "group"),
+            _lesson("LES-3", "2026-09-19", 1300),
+        ]),
     }
     payments = [
         _payment(2600, PaymentStatus.PAID, "2026-09-12 12:00:00"),
@@ -48,14 +45,7 @@ def test_unpaid_lessons_are_listed_before_paid_lessons():
 
 
 def test_subscription_has_one_binary_status():
-    bills = {
-        "SUB:G1": {
-            "name": "Абонемент",
-            "total": 7000,
-            "items": [],
-            "subscription": True,
-        },
-    }
+    bills = {"SUB:G1": BillAggregate("Абонемент", 7000, subscription=True)}
     payments = [SimpleNamespace(
         teacher_id="SUB:G1", total_amount=7000, status=PaymentStatus.PENDING, paid_at=None,
     )]

@@ -302,7 +302,7 @@ async def on_receipt_photo(
         total, _ = await unpaid_for(student, period_month, payment_service)
     else:
         bills = await payment_service.compute_bills_for_student_period(student_id, period_month)
-        total = sum(agg["total"] for agg in bills.values())
+        total = sum(agg.total for agg in bills.values())
 
     bills_map = await payment_service.compute_bills_for_student_period(student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month) if student else {}
