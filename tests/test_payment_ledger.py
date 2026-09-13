@@ -221,3 +221,27 @@ def test_lesson_marks_without_payments_all_unpaid():
     marks = lesson_marks([_bill("LES-1", "2026-09-01", 800)], paid=0)
     assert marks == [{"lesson_id": "LES-1", "date": "2026-09-01", "duration_min": 45,
                       "amount": 800, "lesson_type": "individual", "paid": False}]
+
+
+# ── mark_student_lessons: экран «Занятия» родителя ───────────────────────────
+
+def test_mark_student_lessons_shares_and_cumulative_marks():
+    from bot.models.enums import LessonType
+    from bot.services.payment_ledger import mark_student_lessons
+    from tests.fakes import mk_lesson, mk_payment, mk_teacher
+    t1 = mk_teacher("TCH-0001", "Река", rate_for_student=2000)
+    t2 = mk_teacher("TCH-0002", "Никишин", rate_for_student=3000)
+    lessons = [
+        mk_lesson("L3", t1, "2026-09-09", 60, students=[("STU-1", "A"), ("STU-2", "B")]),   # доля STU-1: 1334
+        mk_lesson("L1", t1, "2026-09-02", 45, students=[("STU-1", "A")]),                     # 2000
+        mk_lesson("L2", t2, "2026-09-05", 90, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:90:800"),
+        mk_lesson("L4", t2, "2026-09-07", 90, LessonType.GROUP, group_id="GRP-1", attendees=None),  # абонемент → 0
+        mk_lesson("L5", mk_teacher("TCH-0404", "Нет"), "2026-09-08", 45, students=[("STU-1", "A")]),  # педагог не найден
+    ]
+    rows = [mk_payment("P1", "STU-1", "2026-09", "TCH-0001", 2000, PaymentStatus.PAID),
+            mk_payment("P2", "STU-1", "2026-09", "TCH-0002", 100, PaymentStatus.PENDING)]
+    month = mark_student_lessons("STU-1", lessons, {t.teacher_id: t for t in (t1, t2)}, rows)
+    assert [ls.lesson_id for ls in month.lessons] == ["L1", "L2", "L4", "L5", "L3"]
+    assert {k: (m.amount, m.paid) for k, m in month.marks.items()} == {
+        "L1": (2000, True), "L3": (1334, False), "L2": (800, False), "L4": (0, False), "L5": (0, False)}
+    assert month.mark("L404") == month.mark("L4")

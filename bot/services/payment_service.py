@@ -11,7 +11,7 @@ from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
 from .billing_service import build_billing_rows
-from .payment_ledger import TeacherLedger, lesson_marks
+from .payment_ledger import StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
 logger = logging.getLogger(__name__)
@@ -301,6 +301,13 @@ class PaymentService:
         logger.info("Создан счёт %s student=%s teacher=%s период=%s сумма=%d",
                     payment.payment_id, student.student_id, teacher_id, period_month, amount)
         return payment
+
+    async def student_lesson_marks(self, student_id: str, period_month: str) -> StudentMonthLessons:
+        """Занятия ученика за месяц с долей ученика и отметкой оплаты — экран «Занятия» родителя."""
+        lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
+        teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
+        rows = await self._payment_repo.get_by_student_and_period(student_id, period_month)
+        return mark_student_lessons(student_id, lessons, teachers, rows)
 
     async def teacher_lesson_marks(
         self, student, period_month: str, teacher_id: str,

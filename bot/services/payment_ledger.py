@@ -87,3 +87,56 @@ def lesson_marks(items: list, paid: int) -> list[dict]:
          "amount": b.amount, "lesson_type": b.lesson_type, "paid": ok}
         for b, ok in zip(ordered, marks, strict=False)
     ]
+
+
+@dataclass(frozen=True)
+class LessonPaymentMark:
+    amount: int   # доля ученика в занятии (0 — не тарифицируется: абонемент / NONE)
+    paid: bool    # закрыто накопительными оплатами месяца по этому педагогу
+
+
+@dataclass
+class StudentMonthLessons:
+    """Занятия ученика за месяц (по дате) и отметка оплаты каждого — экран «Занятия» родителя."""
+    lessons: list
+    marks: dict[str, LessonPaymentMark] = field(default_factory=dict)
+
+    def mark(self, lesson_id: str) -> LessonPaymentMark:
+        return self.marks.get(lesson_id, LessonPaymentMark(0, False))
+
+
+def mark_student_lessons(
+    student_id: str, month_lessons: list, teachers_by_id: dict, payment_rows: list,
+) -> StudentMonthLessons:
+    """Доля ученика в каждом занятии (build_billing_rows) и накопительная отметка оплаты.
+
+    Оплаты месяца складываются по педагогу; занятия педагога идут по дате, галочка
+    ставится, пока хватает оплаченной суммы (любой платёж закрывает самые ранние уроки).
+    Занятие педагога, которого нет в справочнике, суммы не получает.
+    """
+    from bot.services.billing_service import build_billing_rows
+
+    ordered = sorted(month_lessons, key=lambda ls: ls.date)
+    paid_by = paid_sums(payment_rows)
+    amounts: dict[str, int] = {}
+    for ls in ordered:
+        teacher = teachers_by_id.get(ls.teacher_id)
+        if teacher:
+            amounts[ls.lesson_id] = sum(
+                row.amount for row in build_billing_rows(ls, teacher) if row.student_id == student_id
+            )
+    by_teacher: dict[str, list] = {}
+    for ls in ordered:
+        if amounts.get(ls.lesson_id, 0) > 0:
+            by_teacher.setdefault(ls.teacher_id, []).append(ls)
+    paid_mark: dict[str, bool] = {}
+    for teacher_id, group in by_teacher.items():
+        chrono = sorted(group, key=lambda x: (x.date, x.lesson_id))
+        marks = lesson_paid_marks([amounts[x.lesson_id] for x in chrono], paid_by.get(teacher_id, 0))
+        for ls, ok in zip(chrono, marks, strict=False):
+            paid_mark[ls.lesson_id] = ok
+    return StudentMonthLessons(
+        lessons=ordered,
+        marks={ls.lesson_id: LessonPaymentMark(amounts.get(ls.lesson_id, 0), paid_mark.get(ls.lesson_id, False))
+               for ls in ordered},
+    )

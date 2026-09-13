@@ -4,7 +4,7 @@
 """
 from bot.models import StudentGroup
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
-from bot.services import StudentService, TeacherVisibilityService
+from bot.services import PaymentService, StudentService, TeacherVisibilityService
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
@@ -174,33 +174,33 @@ def _parent_world():
         mk_lesson("LES-000007", T1, "2026-09-02", 45, students=[("STU-0002", "Петрова Анна")]),                     # другой ребёнок
     ]
     payments = [mk_payment("PAY-1", "STU-0001", "2026-09", "TCH-0001", 2000, PaymentStatus.PAID, teacher_name="Река Станислав")]
-    return w, LessonRepoFake(lessons), PaymentRepoFake(payments)
+    return w, PaymentService(PaymentRepoFake(payments), LessonRepoFake(lessons), w["teacher_repo"])
 
 
 def test_parent_lessons_month_and_day(monkeypatch):
     from bot.handlers.client.my_lessons import _show_lessons
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0002")
     monkeypatch.setattr(settings, "revenue_share_groups", "GRP-0020:50")
-    w, lesson_repo, payment_repo = _parent_world()
+    w, svc = _parent_world()
 
     cb = FakeCallbackQuery("cl_month:STU-0001:2026-09", user_id=100)
-    run(_show_lessons(cb, w["student_repo"], lesson_repo, w["teacher_repo"], payment_repo, "2026-09", "STU-0001"))
+    run(_show_lessons(cb, w["student_repo"], svc, "2026-09", "STU-0001"))
     assert_golden("parent_lessons_month", screen_dump(*cb.message.last))
 
     cb = FakeCallbackQuery("cl_month_t:STU-0001:2026-09:TCH-0001", user_id=100)
-    run(_show_lessons(cb, w["student_repo"], lesson_repo, w["teacher_repo"], payment_repo, "2026-09", "STU-0001", "TCH-0001"))
+    run(_show_lessons(cb, w["student_repo"], svc, "2026-09", "STU-0001", "TCH-0001"))
     assert_golden("parent_lessons_month_teacher_filter", screen_dump(*cb.message.last))
 
     cb = FakeCallbackQuery("cl_date:all:2026-09-02", user_id=100)
-    run(_show_lessons(cb, w["student_repo"], lesson_repo, w["teacher_repo"], payment_repo, "2026-09-02", "all"))
+    run(_show_lessons(cb, w["student_repo"], svc, "2026-09-02", "all"))
     assert_golden("parent_lessons_day_all_children", screen_dump(*cb.message.last))
 
     cb = FakeCallbackQuery("cl_date:STU-0001:2026-09-03", user_id=100)
-    run(_show_lessons(cb, w["student_repo"], lesson_repo, w["teacher_repo"], payment_repo, "2026-09-03", "STU-0001"))
+    run(_show_lessons(cb, w["student_repo"], svc, "2026-09-03", "STU-0001"))
     assert_golden("parent_lessons_day_empty", screen_dump(*cb.message.last))
 
     cb = FakeCallbackQuery("cl_month:STU-0001:2026-09", user_id=999)
-    run(_show_lessons(cb, w["student_repo"], lesson_repo, w["teacher_repo"], payment_repo, "2026-09", "STU-0001"))
+    run(_show_lessons(cb, w["student_repo"], svc, "2026-09", "STU-0001"))
     assert cb.alerts == [("Нет доступа", True)]
 
 
