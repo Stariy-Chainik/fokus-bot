@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import MaybeInaccessibleMessage, InlineKeyboardMarkup, InlineKeyboardButton
 
 
 from bot.models.enums import GroupBillingMode
@@ -47,7 +47,7 @@ def _kb_group_card(group_id: str, branch_id: str, students: list,
 
 
 async def _render_group_card(
-    message: Message, group_id: str,
+    message: MaybeInaccessibleMessage | None, group_id: str,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository,

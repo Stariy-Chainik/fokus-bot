@@ -51,7 +51,7 @@ async def cb_rating(callback: CallbackQuery, diary_service: DiaryService) -> Non
     if student is None:
         return
     this, prev = periods()
-    period, key = parse_rating_cb(callback.data, this)
+    period, key = parse_rating_cb(callback.data or "", this)
     topic = topic_by_key(key)
     rows = await diary_service.leaderboard(period, topic)
     my_topics = await diary_service.topics_for(student)

@@ -47,15 +47,17 @@ def parse_shift_groups(raw: str) -> dict[str, tuple[int, int]]:
 def shift_minutes(present: set[str], shift_map: dict[str, tuple[int, int]]) -> int:
     """Длина объединения интервалов групп, у которых были занятия."""
     spans = sorted(shift_map[g] for g in present if g in shift_map)
-    total, cur_start, cur_end = 0, None, None
+    total = 0
+    cur_start: int | None = None
+    cur_end: int | None = None
     for a, b in spans:
         if cur_end is None or a > cur_end:
-            if cur_end is not None:
+            if cur_end is not None and cur_start is not None:
                 total += cur_end - cur_start
             cur_start, cur_end = a, b
         else:
             cur_end = max(cur_end, b)
-    if cur_end is not None:
+    if cur_end is not None and cur_start is not None:
         total += cur_end - cur_start
     return total
 

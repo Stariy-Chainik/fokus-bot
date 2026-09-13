@@ -16,9 +16,11 @@ def client_welcome_text(students: list) -> str:
 
 def kb_client_menu(can_switch_athlete: bool = False) -> InlineKeyboardMarkup:
     from config.settings import settings
-    return to_aiogram_markup(menu_rows(
+    markup = to_aiogram_markup(menu_rows(
         can_switch_athlete, receipt_email=settings.parent_receipt_email,
     ))
+    assert markup is not None  # меню всегда содержит кнопки
+    return markup
 
 
 def kb_admin_approve_child(parent_tg_id, student_id: str) -> InlineKeyboardMarkup:
@@ -139,7 +141,9 @@ def kb_bill_detail(payment_ids: list[str], can_pay: bool, period_month: str, stu
 
 
 def kb_bill_back(student_id: str, period_month: str) -> InlineKeyboardMarkup:
-    return to_aiogram_markup(bill_back_rows(student_id, period_month))
+    markup = to_aiogram_markup(bill_back_rows(student_id, period_month))
+    assert markup is not None  # ряд «назад» всегда есть
+    return markup
 
 
 def kb_payment_method(

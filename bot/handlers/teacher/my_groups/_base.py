@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import MaybeInaccessibleMessage, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models.enums import GroupBillingMode
 from bot.utils.groups import hide_service_groups
@@ -47,7 +47,7 @@ def _kb_t_group_card(group, students: list) -> InlineKeyboardMarkup:
 
 
 async def _render_t_group_card(
-    message: Message, group_id: str,
+    message: MaybeInaccessibleMessage | None, group_id: str,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,

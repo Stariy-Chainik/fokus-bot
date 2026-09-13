@@ -203,6 +203,7 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     from aiohttp import web
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
+    assert settings.webhook_url, "WEBHOOK_URL пуст — режим webhook невозможен"
     webhook_path = f"/webhook/{settings.bot_token}"
     webhook_url = f"{settings.webhook_url.rstrip('/')}{webhook_path}"
 

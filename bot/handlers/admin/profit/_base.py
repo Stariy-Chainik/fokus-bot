@@ -66,9 +66,9 @@ def _format_profit(title: str, summary: ProfitSummary) -> str:
         lines.append("")
     if summary.subscription_rows:
         lines.append("💳 <b>Абонементы</b>")
-        for row in summary.subscription_rows:
+        for sub_row in summary.subscription_rows:
             lines.append(
-                f"  {row.group_name}: {row.income} ₽ ({row.billed_students} уч.)"
+                f"  {sub_row.group_name}: {sub_row.income} ₽ ({sub_row.billed_students} уч.)"
             )
         lines.append(
             f"  <b>Итого абонементы: {summary.subscription_income} ₽</b>"

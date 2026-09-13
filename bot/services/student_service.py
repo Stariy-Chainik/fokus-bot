@@ -126,7 +126,7 @@ class StudentService:
         member_ids = set(await self._student_group_repo.get_students_for_group(group_id))
         grp_students = [s for s in all_students if s.student_id in member_ids]
         by_id = {s.student_id: s for s in all_students}
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, ...]] = set()
         pairs: list[tuple[Student, Student]] = []
         for s in grp_students:
             if not s.partner_id:

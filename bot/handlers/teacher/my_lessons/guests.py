@@ -4,7 +4,7 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.models import GroupBillingMode, User
+from bot.models import GroupBillingMode, Student, User
 from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository,
@@ -44,7 +44,7 @@ async def cb_lesson_guest_list(
         hide_service_groups(await teacher_group_repo.get_groups_for_teacher(lesson.teacher_id))
     )
     all_students = await student_repo.get_all()
-    candidates_by_id: dict[str, object] = {}
+    candidates_by_id: dict[str, Student] = {}
     for group_id in sorted(group_ids):
         member_ids = set(
             await student_group_repo.get_students_for_group(group_id)

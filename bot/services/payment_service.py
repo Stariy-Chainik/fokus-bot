@@ -1,8 +1,9 @@
 from __future__ import annotations
 import logging
 import uuid
+from typing import Any
 
-from bot.models import StudentPeriodPayment, Student
+from bot.models import StudentPeriodPayment, Student, Teacher
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
 from bot.utils import generate_payment_id, now_str
 from bot.utils.dates import last_periods
@@ -230,7 +231,7 @@ class PaymentService:
         Возвращает dict[teacher_id] -> {name, total, items: list[Billing-like dicts]}.
         """
         lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
-        teachers_cache: dict[str, object] = {}
+        teachers_cache: dict[str, Teacher] = {}
         result: dict[str, dict] = {}
         for ls in lessons:
             teacher = teachers_cache.get(ls.teacher_id)
@@ -303,7 +304,7 @@ class PaymentService:
 
     async def teacher_lesson_marks(
         self, student, period_month: str, teacher_id: str,
-    ) -> tuple[list[dict], object]:
+    ) -> tuple[list[dict], TeacherLedger | None]:
         """(занятия педагога с отметками оплаты, TeacherLedger) — для экрана выбора занятий."""
         ledgers = await self.ledger_for(student, period_month)
         ledger = ledgers.get(teacher_id)
@@ -514,7 +515,7 @@ class PaymentService:
         from config.settings import settings
         Configuration.configure(settings.yookassa_shop_id, settings.yookassa_secret_key)
         idempotency_key = str(uuid.uuid4())
-        extra = {"payment_method_data": {"type": "sbp"}} if sbp else {}
+        extra: dict[str, Any] = {"payment_method_data": {"type": "sbp"}} if sbp else {}
         # Чек — только на почту: email клиента, иначе служебный email школы.
         # Телефон не используем (СМС от ОФД платные) — решение 2026-09-08.
         customer = {}

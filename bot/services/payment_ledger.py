@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from bot.models import StudentPeriodPayment
 
 
 @dataclass
@@ -18,7 +21,7 @@ class TeacherLedger:
     paid: int                         # сумма подтверждённых оплат
     items: list = field(default_factory=list)       # Billing-строки занятий (для абонемента пусто)
     paid_rows: list = field(default_factory=list)   # StudentPeriodPayment со статусом paid
-    pending: Optional[object] = None                # строка-остаток (status pending) или None
+    pending: Optional[StudentPeriodPayment] = None  # строка-остаток (status pending) или None
     subscription: bool = False
 
     @property

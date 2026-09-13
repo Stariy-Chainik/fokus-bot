@@ -44,7 +44,7 @@ async def cb_pairs_soloists_branches(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    mode = "pairs" if "pairs" in callback.data else "soloists"
+    mode = "pairs" if "pairs" in (callback.data or "") else "soloists"
     branches = await branch_repo.get_all()
     if not branches:
         await callback.message.edit_text("Филиалов нет.", reply_markup=kb_back("admin:students"))

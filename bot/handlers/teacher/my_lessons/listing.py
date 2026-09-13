@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.keyboards.calendar import kb_calendar
 from bot.keyboards.teacher import kb_lesson_list
+from bot.handlers.access import TeacherUser
 from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, TeacherGroupRepository
@@ -56,7 +57,7 @@ def _filter_lessons(
 
 
 async def _lessons_for_list(
-    user: User,
+    user: TeacherUser,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     state: FSMContext,
@@ -92,7 +93,7 @@ async def _hide_type_filter(user: User, teacher_group_repo) -> bool:
 
 async def _show_lessons(
     callback: CallbackQuery,
-    user: User,
+    user: TeacherUser,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo,

@@ -10,22 +10,33 @@
 """
 from __future__ import annotations
 
+from typing import TypeGuard
+
 from bot.models import User
 from config.settings import settings
 
 
-def is_admin(user: User | None) -> bool:
+class TeacherUser(User):
+    """Только для типизации: User, у которого гард is_teacher() гарантировал teacher_id.
+
+    Экземпляры не создаются — класс нужен, чтобы после `if not is_teacher(user): return`
+    mypy считал `user.teacher_id` строкой, а не Optional.
+    """
+    teacher_id: str  # type: ignore[assignment]
+
+
+def is_admin(user: User | None) -> TypeGuard[User]:
     return user is not None and user.is_admin
 
 
-def can_teacher_bill(user: User | None) -> bool:
+def can_teacher_bill(user: User | None) -> TypeGuard[TeacherUser]:
     """Педагог из BILLING_TEACHER_IDS: выставление счетов ученикам своих групп."""
     return is_teacher(user) and user.teacher_id in settings.billing_teacher_id_set
 
 
-def is_teacher(user: User | None) -> bool:
+def is_teacher(user: User | None) -> TypeGuard[TeacherUser]:
     return user is not None and user.teacher_id is not None
 
 
-def is_teacher_or_admin(user: User | None) -> bool:
+def is_teacher_or_admin(user: User | None) -> TypeGuard[User]:
     return user is not None and (user.teacher_id is not None or user.is_admin)

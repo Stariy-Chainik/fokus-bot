@@ -13,7 +13,7 @@ from bot.keyboards.teacher import (
     kb_my_student_card, kb_my_pair_card,
 )
 from bot.handlers.common import show_card
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.access import TeacherUser, is_teacher as _is_teacher
 
 from ._base import router
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ─── Карточка ученика / пары ─────────────────────────────────────────────────
 
 async def _render_student_card(
-    callback: CallbackQuery, student_id: str, user: User,
+    callback: CallbackQuery, student_id: str, user: TeacherUser,
     student_repo: StudentRepository, visibility: TeacherVisibilityService,
     back_to_pairs: bool = False,
 ) -> None:

@@ -17,7 +17,7 @@ from bot.utils import generate_submission_id, now_str
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown
 from bot.utils.locks import InProgressGuard
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.access import TeacherUser, is_teacher as _is_teacher
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_submit_period")
@@ -57,7 +57,7 @@ async def _open_periods(
 
 
 async def _show_confirm(
-    callback: CallbackQuery, state: FSMContext, user: User,
+    callback: CallbackQuery, state: FSMContext, user: TeacherUser,
     period_month: str, lesson_repo: LessonRepository,
     open_periods: list[str],
 ) -> None:

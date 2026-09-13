@@ -143,7 +143,7 @@ async def cb_my_pairs_list(
 
     grp_students = [s for s in mine if group_id in s.group_ids]
     by_id = {s.student_id: s for s in mine}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, ...]] = set()
     pairs = []
     for s in grp_students:
         if not s.partner_id or s.partner_id not in mine_ids:
@@ -194,7 +194,7 @@ async def cb_pair_clear_pick(
         return
     mine = await visibility.students_for_teacher(user.teacher_id)
     mine_ids = {s.student_id for s in mine}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, ...]] = set()
     pairs = []
     by_id = {s.student_id: s for s in mine}
     for s in mine:

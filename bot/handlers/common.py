@@ -4,7 +4,7 @@ import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command, ExceptionTypeFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ErrorEvent
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ErrorEvent, MaybeInaccessibleMessage
 from aiogram.exceptions import TelegramBadRequest
 
 from bot.models import User
@@ -19,7 +19,7 @@ router = Router(name="common")
 
 
 async def show_card(
-    event: CallbackQuery | Message,
+    event: CallbackQuery | MaybeInaccessibleMessage | None,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
 ) -> None:

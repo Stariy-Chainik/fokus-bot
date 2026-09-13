@@ -4,6 +4,8 @@ import logging
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
+from typing import cast
+
 from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import (
@@ -218,11 +220,11 @@ async def _finalize(
         if kind == "group":
             done = await _finalize_group(*branch_args, group_repo)
         elif kind == "pair":
-            done = await _finalize_pair(*branch_args, student_repo)
+            done = await _finalize_pair(*branch_args, cast(StudentRepository, student_repo))
         elif kind == "shared":
-            done = await _finalize_shared(*branch_args, student_repo)
+            done = await _finalize_shared(*branch_args, cast(StudentRepository, student_repo))
         elif kind == "soloist":
-            done = await _finalize_soloist(*branch_args, student_repo)
+            done = await _finalize_soloist(*branch_args, cast(StudentRepository, student_repo))
         else:
             await state.clear()
             await callback.message.edit_text(

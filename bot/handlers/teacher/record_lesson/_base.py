@@ -12,6 +12,8 @@ from datetime import date, timedelta
 from aiogram import Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from typing import cast
+
 from bot.models import User
 from bot.repositories import (
     StudentGroupRepository,
@@ -30,9 +32,13 @@ _KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло
 
 
 
-def _tid(user: User, data: dict) -> str | None:
-    """Эффективный teacher_id: proxy (запись от имени) или собственный."""
-    return data.get("proxy_teacher_id") or user.teacher_id
+def _tid(user: User | None, data: dict) -> str:
+    """Эффективный teacher_id: proxy (запись от имени) или собственный.
+
+    В teacher-флоу он всегда есть: у педагога свой, у админа — proxy_teacher_id
+    (ставится входной точкой admin_rl_tch). cast — без изменения рантайма.
+    """
+    return cast(str, data.get("proxy_teacher_id") or user.teacher_id)  # type: ignore[union-attr]
 
 
 def _menu_kb(user: User | None, data: dict) -> InlineKeyboardMarkup:

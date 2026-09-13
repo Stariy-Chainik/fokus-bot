@@ -12,6 +12,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config.settings import settings
+from typing import cast
+
 from bot.models import User
 from bot.repositories import StudentRepository, UserRepository
 from bot.services import DiaryService
@@ -48,7 +50,7 @@ async def cmd_start_athlete_link(
         await message.answer("Ссылка недействительна или устарела. Попросите у педагога новую.")
         return
     await state.clear()
-    tg_id = message.from_user.id
+    tg_id = cast(int, message.from_user.id)
     if student.athlete_tg_id == tg_id:
         parents = await student_repo.get_by_parent_tg_id(tg_id)
         await message.answer(athlete_welcome_text(student), reply_markup=kb_athlete_menu(bool(parents)))

@@ -22,7 +22,7 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
-from bot.handlers.access import can_teacher_bill
+from bot.handlers.access import TeacherUser, can_teacher_bill
 from bot.handlers.admin.bills._base import _sending_in_progress, _group_sending
 from bot.handlers.admin.bills.helpers import (
     _send_bill_to_parents, _student_group_names, _periods_only_buttons,
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="teacher_bills")
 
 
-async def _own_group_ids(user: User, teacher_group_repo: TeacherGroupRepository) -> set[str]:
+async def _own_group_ids(user: TeacherUser, teacher_group_repo: TeacherGroupRepository) -> set[str]:
     return set(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
 
 

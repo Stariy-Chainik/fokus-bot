@@ -329,7 +329,7 @@ async def _detail_lines(
         if ln.kind in ("shift", "override"):
             day_lines.append((dd, ln.label, ln.amount))
             continue
-        ls = lessons.get(ln.lesson_id)
+        ls = lessons.get(ln.lesson_id or "")
         if ls is None:
             continue
         if ls.type == LessonType.GROUP:

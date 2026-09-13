@@ -11,6 +11,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, BufferedInputFile
 
+from typing import cast
+
 from bot.models import User
 from bot.models.enums import PaymentStatus
 from bot.repositories import StudentRepository, ClientRepository, UserRepository
@@ -602,6 +604,6 @@ async def cb_receipt_pick(
         return
     total, _ = await unpaid_for(student, period_month, payment_service)
     await _send_unbound_receipt(callback.bot, user_repo, payment_service,
-                                student, period_month, total, kind, file_id, callback.from_user.id)
+                                student, period_month, total, cast(str, kind), file_id, callback.from_user.id)
     await _edit(callback, receipt_sent_screen(student_id, period_month))
     await callback.answer()

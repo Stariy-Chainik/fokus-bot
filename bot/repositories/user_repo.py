@@ -24,7 +24,7 @@ def _parse_tg_id(value) -> Optional[int]:
 def _row_to_user(row: dict) -> User:
     return User(
         user_id=str(row["user_id"]),
-        tg_id=_parse_tg_id(row["tg_id"]),
+        tg_id=_parse_tg_id(row["tg_id"]),  # type: ignore[arg-type]  # битая ячейка → None (как и раньше)
         is_admin=_to_bool(row.get("is_admin", False)),
         teacher_id=str(row["teacher_id"]) if row.get("teacher_id") else None,
     )

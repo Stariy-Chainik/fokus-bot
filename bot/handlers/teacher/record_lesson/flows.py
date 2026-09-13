@@ -29,7 +29,7 @@ async def _collect_pairs(teacher_id: str, visibility: TeacherVisibilityService):
     mine = await visibility.students_for_teacher(teacher_id)
     mine_ids = {s.student_id for s in mine}
     by_id = {s.student_id: s for s in mine}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, ...]] = set()
     pairs = []
     for s in mine:
         if not s.partner_id or s.partner_id not in mine_ids:
@@ -240,7 +240,7 @@ async def _show_group_roster(
 
 
 async def _rshare_branches(
-    data: dict, user: User,
+    data: dict, user: User | None,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository,
 ) -> list:
@@ -259,7 +259,7 @@ async def _rshare_branches(
 
 
 async def _show_rshare_branch_picker(
-    callback: CallbackQuery, state: FSMContext, user: User,
+    callback: CallbackQuery, state: FSMContext, user: User | None,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
@@ -289,7 +289,7 @@ async def _show_rshare_branch_picker(
 
 
 async def _rshare_groups_in_branch(
-    data: dict, user: User, branch_id: str,
+    data: dict, user: User | None, branch_id: str,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> list:
     gids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
@@ -303,7 +303,7 @@ async def _rshare_groups_in_branch(
 
 
 async def _show_rshare_group_picker(
-    callback: CallbackQuery, state: FSMContext, branch_id: str, user: User,
+    callback: CallbackQuery, state: FSMContext, branch_id: str, user: User | None,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
@@ -334,7 +334,7 @@ async def _show_rshare_group_picker(
 
 
 async def _show_rshare_pool(
-    callback: CallbackQuery, state: FSMContext, group_id: str, user: User,
+    callback: CallbackQuery, state: FSMContext, group_id: str, user: User | None,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:

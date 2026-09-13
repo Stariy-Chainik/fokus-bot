@@ -74,7 +74,7 @@ async def cb_grade_value(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 async def _finish(
-    target, user: User, state: FSMContext, diary_service: DiaryService,
+    target, user: User | None, state: FSMContext, diary_service: DiaryService,
     teacher_repo: TeacherRepository, comment: str,
 ) -> None:
     data = await state.get_data()

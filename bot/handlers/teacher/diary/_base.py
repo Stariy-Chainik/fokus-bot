@@ -24,7 +24,7 @@ def actor(user: User | None) -> tuple[bool, Optional[str], bool]:
     return True, user.teacher_id, is_admin(user)
 
 
-def grader_id(user: User, tg_id: int) -> str:
+def grader_id(user: User | None, tg_id: int) -> str:
     return user.teacher_id or f"ADM:{tg_id}"
 
 
@@ -34,7 +34,7 @@ def periods() -> tuple[str, str]:
 
 
 async def visible_athlete(
-    student_id: str, user: User, diary_service: DiaryService,
+    student_id: str, user: User | None, diary_service: DiaryService,
 ) -> Optional[Student]:
     """Спортсмен виден педагогу (общие группы) или админу; иначе None."""
     _, teacher_id, admin = actor(user)

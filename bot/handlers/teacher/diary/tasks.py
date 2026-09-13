@@ -6,6 +6,8 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
+from typing import cast
+
 from bot.models import User
 from bot.repositories import TeacherRepository
 from bot.services import DiaryService
@@ -158,7 +160,7 @@ async def on_task_minutes_text(message: Message, state: FSMContext) -> None:
     await _ask_comment(message, state)
 
 
-async def _save(target, user: User, state: FSMContext, diary_service: DiaryService,
+async def _save(target, user: User | None, state: FSMContext, diary_service: DiaryService,
                 teacher_repo: TeacherRepository, comment: str) -> None:
     data = await state.get_data()
     from bot.handlers.common import _clear_state_preserve_role
@@ -170,7 +172,7 @@ async def _save(target, user: User, state: FSMContext, diary_service: DiaryServi
         await msg.answer("Не удалось сохранить задание: начните заново.")
         return
     teacher_id = user.teacher_id or f"ADM:{target.from_user.id}"
-    task = await diary_service.create_task(student_id, teacher_id, exercise, int(minutes), comment)
+    task = await diary_service.create_task(cast(str, student_id), teacher_id, exercise, int(minutes), comment)
     teacher = await teacher_repo.get_by_id(user.teacher_id) if user.teacher_id else None
     who = teacher.name if teacher else "Администратор"
     note = f"\n💬 {comment}" if comment else ""

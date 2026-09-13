@@ -19,6 +19,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
+    MaybeInaccessibleMessage,
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
 )
@@ -346,7 +347,7 @@ async def on_contact_skip(message: Message, state: FSMContext) -> None:
     await _ask_email(message, state, None)
 
 
-async def _ask_email(message: Message, state: FSMContext, client_id: str | None) -> None:
+async def _ask_email(message: MaybeInaccessibleMessage | None, state: FSMContext, client_id: str | None) -> None:
     """Необязательный шаг: email для фискальных чеков об оплате.
 
     При PARENT_RECEIPT_EMAIL=false шаг пропускается — сразу меню.
