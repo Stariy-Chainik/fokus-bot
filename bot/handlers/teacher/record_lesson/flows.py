@@ -247,9 +247,10 @@ async def _rshare_branches(
     """Филиалы, где у педагога есть группы (кроме технической revenue-share)."""
     gids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
     gids.discard(data.get("rshare_gid") or "")
+    groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
     branch_ids = set()
     for gid in gids:
-        g = await group_repo.get_by_id(gid)
+        g = groups_by_id.get(gid)
         if g:
             branch_ids.add(g.branch_id)
     return sorted(
@@ -294,9 +295,10 @@ async def _rshare_groups_in_branch(
 ) -> list:
     gids = set(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
     gids.discard(data.get("rshare_gid") or "")
+    groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
     groups = []
     for gid in gids:
-        g = await group_repo.get_by_id(gid)
+        g = groups_by_id.get(gid)
         if g and g.branch_id == branch_id:
             groups.append(g)
     return sorted(groups, key=lambda g: g.name)

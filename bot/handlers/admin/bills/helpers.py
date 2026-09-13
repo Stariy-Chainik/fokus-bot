@@ -65,9 +65,10 @@ async def _student_group_names(
     student_group_repo: StudentGroupRepository, group_repo: GroupRepository,
 ) -> list[str]:
     """Названия всех групп ученика — для шапки счёта."""
+    groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
     names: list[str] = []
     for gid in await student_group_repo.get_groups_for_student(student_id):
-        g = await group_repo.get_by_id(gid)
+        g = groups_by_id.get(gid)
         if g:
             names.append(g.name)
     return names

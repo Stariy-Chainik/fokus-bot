@@ -82,8 +82,9 @@ async def cb_lesson_detail(
         if entries:
             lines.extend(["", f"<b>Присутствовали ({len(entries)}):</b>"])
             total = 0
+            students_by_id = {s.student_id: s for s in await student_repo.get_all()}
             for entry in entries:
-                student = await student_repo.get_by_id(entry.student_id)
+                student = students_by_id.get(entry.student_id)
                 name = student.name if student else entry.student_id
                 if entry.amount > 0:
                     lines.append(

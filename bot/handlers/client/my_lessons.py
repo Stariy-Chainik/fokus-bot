@@ -73,6 +73,7 @@ async def _show_lessons(
     total_lessons = 0
     unpaid_total = 0
     seen_teachers: dict[str, str] = {}  # педагоги платных занятий — для фильтра
+    teachers_by_id = {t.teacher_id: t for t in await teacher_repo.get_all()}
 
     for student in students:
         # Отметки оплаты считаются по всему месяцу (оплаты накопительные), даже если показываем день
@@ -95,7 +96,7 @@ async def _show_lessons(
         # Суммы занятий (только этого ученика) и накопительные отметки оплаты — по всему месяцу
         amounts: dict[str, int] = {}
         for ls in month_lessons:
-            teacher = await teacher_repo.get_by_id(ls.teacher_id)
+            teacher = teachers_by_id.get(ls.teacher_id)
             if teacher:
                 amounts[ls.lesson_id] = sum(
                     row.amount for row in build_billing_rows(ls, teacher)

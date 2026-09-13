@@ -128,12 +128,13 @@ async def cb_student_groups_remove_list(
     if not gids:
         await callback.answer("У ученика нет групп", show_alert=True)
         return
+    groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+    branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
     rows: list = []
     for gid in gids:
-        g = await group_repo.get_by_id(gid)
+        g = groups_by_id.get(gid)
         if g:
-            branch = await branch_repo.get_by_id(g.branch_id)
-            bname = branch.name if branch else "—"
+            bname = branches.get(g.branch_id, "—")
             label = f"{g.name} ({bname})"
         else:
             label = gid

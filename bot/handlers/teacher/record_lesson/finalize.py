@@ -83,11 +83,12 @@ async def _finalize_pair(
     keys = list(data.get("selected_ids", []))
     pairs_data: list[tuple[str, str, str, str]] = []
     pair_labels: list[str] = []
+    by_id = {s.student_id: s for s in await student_repo.get_all()}
     for a_id in keys:
-        a = await student_repo.get_by_id(a_id)
+        a = by_id.get(a_id)
         if not a or not a.partner_id:
             continue
-        b = await student_repo.get_by_id(a.partner_id)
+        b = by_id.get(a.partner_id)
         if not b:
             continue
         pairs_data.append((a.student_id, a.name, b.student_id, b.name))
@@ -119,9 +120,10 @@ async def _finalize_shared(
     if not (2 <= len(keys) <= 4):
         await callback.answer("Нужно от 2 до 4 солистов", show_alert=True)
         return False
+    by_id = {s.student_id: s for s in await student_repo.get_all()}
     students = []
     for sid in keys:
-        st = await student_repo.get_by_id(sid)
+        st = by_id.get(sid)
         if st:
             students.append(st)
     if not students:
@@ -154,9 +156,10 @@ async def _finalize_soloist(
     lesson_service: LessonService, student_repo: StudentRepository,
 ) -> bool:
     ids = list(data.get("selected_ids", []))
+    by_id = {s.student_id: s for s in await student_repo.get_all()}
     students = []
     for sid in ids:
-        s = await student_repo.get_by_id(sid)
+        s = by_id.get(sid)
         if s:
             students.append((s.student_id, s.name))
     lessons = await lesson_service.create_soloist_batch(

@@ -261,10 +261,10 @@ async def cb_subovr_list(
         await callback.answer("Переопределений нет", show_alert=True)
         return
     rows = []
+    names = {s.student_id: s.name for s in await student_repo.get_all()}
     for o in overrides:
         if o.student_id:
-            student = await student_repo.get_by_id(o.student_id)
-            who = student.name if student else o.student_id
+            who = names.get(o.student_id, o.student_id)
         else:
             who = "вся группа"
         amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
