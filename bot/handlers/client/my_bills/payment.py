@@ -35,6 +35,17 @@ from bot.screens.parent_bills import (
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
 from config.settings import settings
+from bot.utils.callbacks import (
+    CashNotifyCb,
+    ClientPayCb,
+    PayMethodCb,
+    PaySelectToggleCb,
+    ReceiptConfirmCb,
+    ReceiptConfirmPartialCb,
+    ReceiptPickCb,
+    ReceiptRejectCb,
+    ReceiptUploadCb,
+)
 from ._base import router
 
 logger = logging.getLogger(__name__)
@@ -96,12 +107,13 @@ async def cb_client_pay(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
-    parts = callback.data.split(":", 3)
-    if len(parts) < 3:
+    try:
+        cb = ClientPayCb.unpack(callback.data)
+    except ValueError:
         await callback.answer("Ошибка данных", show_alert=True)
         return
-    student_id, period_month = parts[1], parts[2]
-    preselect = parts[3] if len(parts) > 3 else ""  # client_pay:{sid}:{period}:{teacher_id} — из «Занятий»
+    student_id, period_month = cb.student_id, cb.period_month
+    preselect = cb.teacher_id  # client_pay:{sid}:{period}:{teacher_id} — из «Занятий»
     result = await _get_student_and_total(callback, student_repo, payment_service, student_id, period_month)
     if result is None:
         return
@@ -120,7 +132,7 @@ async def cb_client_pay(
 
 @router.callback_query(F.data.startswith("pselt:"))
 async def cb_pay_select_toggle(callback: CallbackQuery, state: FSMContext) -> None:
-    idx = int(callback.data.split(":", 1)[1])
+    idx = PaySelectToggleCb.unpack(callback.data).idx
     data = await state.get_data()
     unpaid = data.get("pay_unpaid") or []
     key = data.get("pay_sel_key") or ""
@@ -155,11 +167,12 @@ async def cb_pay_method(
     student_repo: StudentRepository, payment_service: PaymentService,
     client_repo: ClientRepository, user_repo: UserRepository,
 ) -> None:
-    parts = callback.data.split(":", 3)
-    if len(parts) < 4:
+    try:
+        cb = PayMethodCb.unpack(callback.data)
+    except ValueError:
         await callback.answer("Ошибка данных", show_alert=True)
         return
-    _, method, student_id, period_month = parts
+    method, student_id, period_month = cb.method, cb.student_id, cb.period_month
     result = await _get_student_and_total(callback, student_repo, payment_service, student_id, period_month)
     if result is None:
         return
@@ -217,7 +230,8 @@ async def cb_cash_notify(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
 ) -> None:
-    _, student_id, period_month = callback.data.split(":", 2)
+    cb = CashNotifyCb.unpack(callback.data)
+    student_id, period_month = cb.student_id, cb.period_month
     result = await _get_student_and_total(callback, student_repo, payment_service, student_id, period_month)
     if result is None:
         return
@@ -247,11 +261,12 @@ async def cb_cash_notify(
 async def cb_receipt_upload(
     callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository,
 ) -> None:
-    parts = callback.data.split(":", 3)
-    if len(parts) < 4:
+    try:
+        cb = ReceiptUploadCb.unpack(callback.data)
+    except ValueError:
         await callback.answer("Ошибка данных", show_alert=True)
         return
-    _, method, student_id, period_month = parts
+    method, student_id, period_month = cb.method, cb.student_id, cb.period_month
     all_students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not any(s.student_id == student_id for s in all_students):
         await callback.answer("Нет доступа", show_alert=True)
@@ -320,7 +335,8 @@ async def cb_receipt_reject(
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, student_id, period_month, parent_raw = callback.data.split(":", 3)
+    cb = ReceiptRejectCb.unpack(callback.data)
+    student_id, period_month, parent_raw = cb.student_id, cb.period_month, cb.parent_raw
     student = await student_repo.get_by_id(student_id)
     student_name = student.name if student else student_id
 
@@ -360,12 +376,10 @@ async def cb_receipt_confirm_partial(
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    parts = callback.data.split(":")
-    student_id, period_month, pids_raw = parts[1], parts[2], parts[3]
-    has_amount = len(parts) > 4 and parts[4].isdigit()
-    claimed = int(parts[4]) if has_amount else None  # сумма из чека
-    method_idx = 5 if has_amount else 4
-    payment_method = from_callback_code(parts[method_idx] if len(parts) > method_idx else "")
+    cb = ReceiptConfirmPartialCb.unpack(callback.data)
+    student_id, period_month, pids_raw = cb.student_id, cb.period_month, cb.pids
+    claimed = cb.claimed  # сумма из чека
+    payment_method = from_callback_code(cb.method_code)
     payment_ids = [f"PAY-{int(p):06d}" for p in pids_raw.split(".") if p.isdigit()]
     if not payment_ids:
         await callback.answer("Ошибка данных", show_alert=True)
@@ -434,12 +448,10 @@ async def cb_receipt_confirm(
     if not user or not user.is_admin:
         await callback.answer("Нет доступа", show_alert=True)
         return
-    parts = callback.data.split(":")
-    student_id, period_month = parts[1], parts[2]
-    has_amount = len(parts) > 3 and parts[3].isdigit()
-    claimed = int(parts[3]) if has_amount else None  # сумма из чека
-    method_idx = 4 if has_amount else 3
-    payment_method = from_callback_code(parts[method_idx] if len(parts) > method_idx else "")
+    cb = ReceiptConfirmCb.unpack(callback.data)
+    student_id, period_month = cb.student_id, cb.period_month
+    claimed = cb.claimed  # сумма из чека
+    payment_method = from_callback_code(cb.method_code)
 
     # Получаем сумму к подтверждению до confirm (после — статус уже PAID)
     student = await student_repo.get_by_id(student_id)
@@ -593,7 +605,8 @@ async def cb_receipt_pick(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
 ) -> None:
-    _, student_id, period_month = callback.data.split(":", 2)
+    cb = ReceiptPickCb.unpack(callback.data)
+    student_id, period_month = cb.student_id, cb.period_month
     data = await state.get_data()
     await state.clear()
     kind, file_id = data.get("rc_kind"), data.get("rc_file_id")
