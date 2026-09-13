@@ -117,7 +117,7 @@ async def group_billing_price_short(message: Message, state: FSMContext) -> None
     await state.update_data(price_short=v)
     await state.set_state(GroupBillingStates.entering_duration_full)
     await message.answer(
-        f"<b>Шаг 3/4</b>\n\n"
+        "<b>Шаг 3/4</b>\n\n"
         "Введите длительность полного тарифа в минутах (например, 60):",
     )
 

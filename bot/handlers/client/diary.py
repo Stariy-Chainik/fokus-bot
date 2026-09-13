@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.repositories import StudentRepository, TeacherRepository
 from bot.services import DiaryService
 from bot.keyboards.athlete import kb_period_toggle
-from bot.utils.dates import last_periods, display_period, format_date_display
+from bot.utils.dates import last_periods, format_date_display
 from bot.utils.diary_format import stats_text, tasks_text, stars, leaderboard_text
 
 router = Router(name="client_diary")

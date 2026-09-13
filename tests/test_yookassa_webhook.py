@@ -22,7 +22,10 @@ class _FakePaymentService:
         self.confirmed.append((student_id, period_month))
         return 1
 
-    async def record_payment(self, student_id, student_name, period_month, amount, confirmed_by_tg_id, teacher_ids=None, comment=None, payment_method=""):
+    async def record_payment(
+        self, student_id, student_name, period_month, amount, confirmed_by_tg_id,
+        teacher_ids=None, comment=None, payment_method="",
+    ):
         self.payment_methods.append(payment_method)
         n = await self.confirm_period(student_id, period_month, confirmed_by_tg_id)
         return amount, n

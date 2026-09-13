@@ -49,7 +49,9 @@ async def bills_periods(students: list, payment_service, show_older: bool = Fals
         for student in students:
             ledgers = await payment_service.ledger_for(student, period_month)
             a, p_, r = ledger_totals(ledgers)
-            accrued += a; paid += p_; remainder += r
+            accrued += a
+            paid += p_
+            remainder += r
         label = period_label(period_month)
         if period_month == periods[0]:
             icon = "📅"
@@ -95,19 +97,19 @@ async def bill_detail(students: list, period_month: str, payment_service) -> Bil
             continue
         if len(students) > 1:
             d.lines.append(f"<b>{student.name}:</b>")
-        for teacher_id, l in ledgers.items():
-            if l.pending is not None:
-                d.payment_ids.append(l.pending.payment_id)
-            if l.subscription:
-                status_mark = "✅" if l.fully_paid else "⬜"
-                d.lines.append(f"<b>💳 {l.name} {status_mark}</b>")
+        for _teacher_id, ledger in ledgers.items():
+            if ledger.pending is not None:
+                d.payment_ids.append(ledger.pending.payment_id)
+            if ledger.subscription:
+                status_mark = "✅" if ledger.fully_paid else "⬜"
+                d.lines.append(f"<b>💳 {ledger.name} {status_mark}</b>")
                 d.lines.append("  фиксированная сумма за месяц")
             else:
-                d.lines.append(f"<b>Педагог: {l.name}</b>")
-                items = sorted(l.items, key=lambda b: (b.date, b.lesson_id))
-                marks = lesson_paid_marks([item.amount for item in items], l.paid)
-                paid_items = [item for item, paid in zip(items, marks) if paid]
-                unpaid_items = [item for item, paid in zip(items, marks) if not paid]
+                d.lines.append(f"<b>Педагог: {ledger.name}</b>")
+                items = sorted(ledger.items, key=lambda b: (b.date, b.lesson_id))
+                marks = lesson_paid_marks([item.amount for item in items], ledger.paid)
+                paid_items = [item for item, paid in zip(items, marks, strict=False) if paid]
+                unpaid_items = [item for item, paid in zip(items, marks, strict=False) if not paid]
 
                 # Неоплаченные занятия сразу видны сверху; оплаченные собраны ниже.
                 # Статус бинарный: без отдельного статуса «частично оплачено».
@@ -125,18 +127,18 @@ async def bill_detail(students: list, period_month: str, payment_service) -> Bil
                             f"    ✅ {format_date_display(item.date)}  {item.duration_min} мин"
                             f"  — {item.amount} руб."
                         )
-            if l.fully_paid:
-                d.lines.append(f"  <i>Итого: {l.accrued} руб. — оплачено</i>\n")
-            elif l.paid:
-                d.lines.append(f"  <i>Итого: {l.accrued} руб. — оплачено {l.paid}, к доплате {l.remainder}</i>\n")
+            if ledger.fully_paid:
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено</i>\n")
+            elif ledger.paid:
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено {ledger.paid}, к доплате {ledger.remainder}</i>\n")
             else:
-                d.lines.append(f"  <i>Итого: {l.accrued} руб.</i>\n")
-            if l.overpaid:
-                d.lines.append(f"  <i>переплата {l.overpaid} руб. — учтём в следующем месяце</i>\n")
-            d.grand_total += l.accrued
-            d.paid_total += l.paid
-            d.unpaid_total += l.remainder
-            d.overpaid_total += l.overpaid
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб.</i>\n")
+            if ledger.overpaid:
+                d.lines.append(f"  <i>переплата {ledger.overpaid} руб. — учтём в следующем месяце</i>\n")
+            d.grand_total += ledger.accrued
+            d.paid_total += ledger.paid
+            d.unpaid_total += ledger.remainder
+            d.overpaid_total += ledger.overpaid
     if d.grand_total == 0:
         d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
     elif d.unpaid_total > 0:
@@ -155,8 +157,8 @@ async def unpaid_for(student, period_month: str, payment_service) -> tuple[int, 
     pid — числовая часть PAY-id строки-остатка (для коротких callback)."""
     ledgers = await payment_service.ledger_for(student, period_month)
     unpaid = sorted(
-        [{"tid": tid, "name": l.name, "amount": l.remainder, "pid": l.pending_pid}
-         for tid, l in ledgers.items() if l.remainder > 0],
+        [{"tid": tid, "name": ledger.name, "amount": ledger.remainder, "pid": ledger.pending_pid}
+         for tid, ledger in ledgers.items() if ledger.remainder > 0],
         key=lambda x: x["name"],
     )
     return sum(u["amount"] for u in unpaid), unpaid
@@ -222,8 +224,8 @@ def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | N
         agg = bills.get(tid)
         if not agg:
             continue
-        l = (ledgers or {}).get(tid)
-        paid_part = f" (оплачено {l.paid}, к доплате {l.remainder})" if l is not None and l.paid else ""
+        ledger = (ledgers or {}).get(tid)
+        paid_part = f" (оплачено {ledger.paid}, к доплате {ledger.remainder})" if ledger is not None and ledger.paid else ""
         items = sorted(agg.get("items") or [], key=lambda b: b.date)
         if agg.get("subscription") or not items:
             full.append(f"• {agg['name']} — {agg['total']} руб.{paid_part}")

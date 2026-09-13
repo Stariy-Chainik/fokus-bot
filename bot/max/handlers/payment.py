@@ -224,7 +224,9 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     students = await student_repo.get_by_parent_max_id(max_uid)
     student = next((s for s in students if s.student_id == student_id), None)
     student_name = student.name if student else student_id
-    sel_total, sel_pids, sel_partial = data.get("receipt_sel_total"), data.get("receipt_sel_pids") or "", bool(data.get("receipt_sel_partial"))
+    sel_total = data.get("receipt_sel_total")
+    sel_pids = data.get("receipt_sel_pids") or ""
+    sel_partial = bool(data.get("receipt_sel_partial"))
     if sel_total is not None:
         total = sel_total
     elif student:

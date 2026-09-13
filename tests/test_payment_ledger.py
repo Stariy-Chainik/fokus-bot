@@ -26,11 +26,11 @@ def test_paid_sums_ignores_pending():
 
 def test_teacher_ledger_properties():
     row = SimpleNamespace(payment_id="PAY-000042")
-    l = TeacherLedger("T1", "Река", accrued=3900, paid=2600, pending=row)
-    assert (l.remainder, l.overpaid, l.fully_paid, l.pending_pid) == (1300, 0, False, 42)
+    ledger = TeacherLedger("T1", "Река", accrued=3900, paid=2600, pending=row)
+    assert (ledger.remainder, ledger.overpaid, ledger.fully_paid, ledger.pending_pid) == (1300, 0, False, 42)
     l2 = TeacherLedger("T1", "Река", accrued=1000, paid=1200)
     assert (l2.remainder, l2.overpaid, l2.fully_paid, l2.pending_pid) == (0, 200, True, 0)
-    assert ledger_totals({"a": l, "b": l2}) == (4900, 3800, 1300)
+    assert ledger_totals({"a": ledger, "b": l2}) == (4900, 3800, 1300)
 
 
 # ── ledger_for: синхронизация строки-остатка ─────────────────────────────────
@@ -57,7 +57,9 @@ class _PayRepo:
         return [r.payment_id for r in self.rows]
 
     async def add(self, p):
-        self.rows.append(p); self.added.append(p); return p
+        self.rows.append(p)
+        self.added.append(p)
+        return p
 
     async def update_amount(self, pid, amount):
         self.updated.append((pid, amount))
@@ -84,9 +86,9 @@ def test_ledger_creates_remainder_after_partial_payment():
     bills = {"T1": {"name": "Река", "total": 3900, "items": []}}
     svc = _service([_row("PAY-000001", "T1", 2600, PaymentStatus.PAID)], bills)
     ledgers = asyncio.run(svc.ledger_for(_student(), "2026-09"))
-    l = ledgers["T1"]
-    assert (l.paid, l.remainder) == (2600, 1300)
-    assert l.pending is not None and l.pending.total_amount == 1300 and l.pending.status == PaymentStatus.PENDING
+    ledger = ledgers["T1"]
+    assert (ledger.paid, ledger.remainder) == (2600, 1300)
+    assert ledger.pending is not None and ledger.pending.total_amount == 1300 and ledger.pending.status == PaymentStatus.PENDING
     assert len(svc._payment_repo.added) == 1  # создана новая строка-остаток, оплаченная не тронута
 
 
@@ -95,24 +97,27 @@ def test_ledger_updates_existing_remainder_and_sums_many_payments():
     rows = [_row("PAY-000001", "T1", 1300, PaymentStatus.PAID), _row("PAY-000002", "T1", 1300, PaymentStatus.PAID),
             _row("PAY-000003", "T1", 999, PaymentStatus.PENDING)]
     svc = _service(rows, bills)
-    l = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
-    assert (l.paid, l.remainder, l.pending.payment_id, l.pending.total_amount) == (2600, 2600, "PAY-000003", 2600)
+    ledger = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
+    assert (ledger.paid, ledger.remainder, ledger.pending.payment_id, ledger.pending.total_amount) == (2600, 2600, "PAY-000003", 2600)
     assert svc._payment_repo.updated == [("PAY-000003", 2600)] and not svc._payment_repo.added
 
 
 def test_ledger_fully_paid_sets_remainder_zero_and_no_new_rows():
     bills = {"T1": {"name": "Река", "total": 2600, "items": []}}
     svc = _service([_row("PAY-000001", "T1", 2600, PaymentStatus.PAID)], bills)
-    l = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
-    assert l.fully_paid and l.pending is None and not svc._payment_repo.added
+    ledger = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
+    assert ledger.fully_paid and ledger.pending is None and not svc._payment_repo.added
     # переплата после удаления урока
     bills["T1"]["total"] = 2000
-    l = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
-    assert (l.remainder, l.overpaid) == (0, 600)
+    ledger = asyncio.run(svc.ledger_for(_student(), "2026-09"))["T1"]
+    assert (ledger.remainder, ledger.overpaid) == (0, 600)
 
 
 def test_get_or_create_returns_paid_rows_and_remainder():
-    bills = {"T1": {"name": "Река", "total": 3000, "items": []}, "SUB:G": {"name": "Абонемент", "total": 7000, "items": [], "subscription": True}}
+    bills = {
+        "T1": {"name": "Река", "total": 3000, "items": []},
+        "SUB:G": {"name": "Абонемент", "total": 7000, "items": [], "subscription": True},
+    }
     svc = _service([_row("PAY-000001", "T1", 1000, PaymentStatus.PAID)], bills)
     rows = asyncio.run(svc.get_or_create_invoices_for_student_period(_student(), "2026-09"))
     kinds = sorted((r.teacher_id, r.status.value, r.total_amount) for r in rows)
@@ -123,7 +128,8 @@ def test_get_or_create_returns_paid_rows_and_remainder():
 
 class _PayRepo2(_PayRepo):
     def __init__(self, rows):
-        super().__init__(rows); self.confirmed = []
+        super().__init__(rows)
+        self.confirmed = []
 
     async def confirm(self, pid, by, payment_method="admin_manual"):
         self.confirmed.append((pid, payment_method))
@@ -167,7 +173,10 @@ def test_record_payment_partial_splits_row_and_keeps_remainder():
 
 
 def test_record_payment_allocates_in_teacher_order_and_overpays_to_first():
-    bills = {"T1": {"name": "Река", "total": 1000, "items": []}, "T2": {"name": "Абонемент", "total": 7000, "items": [], "subscription": True}}
+    bills = {
+        "T1": {"name": "Река", "total": 1000, "items": []},
+        "T2": {"name": "Абонемент", "total": 7000, "items": [], "subscription": True},
+    }
     svc = _service2([_row("PAY-000001", "T1", 1000, PaymentStatus.PENDING), _row("PAY-000002", "T2", 7000, PaymentStatus.PENDING)], bills)
     # выбраны оба, сумма 8500 → 1000 + 7000 закрыты целиком, 500 — переплата на первого (T1)
     credited, rows = asyncio.run(svc.record_payment("STU-1", "Иванов", "2026-09", 8500, 7, ["T1", "T2"]))

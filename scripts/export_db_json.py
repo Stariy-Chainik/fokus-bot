@@ -42,7 +42,7 @@ def main() -> None:
     for ws in sc._spreadsheet.worksheets():
         values = ws.get_all_values()
         header = values[0] if values else []
-        records = [dict(zip(header, row)) for row in values[1:]]
+        records = [dict(zip(header, row, strict=False)) for row in values[1:]]
         fname = _safe_name(ws.title) + ".json"
         (OUT_DIR / fname).write_text(
             json.dumps(records, ensure_ascii=False, indent=1), encoding="utf-8",

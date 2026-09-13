@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from typing import Optional
 
 from bot.models.entities import TeacherPayout
 from bot.utils.ids import generate_payout_id

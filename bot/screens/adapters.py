@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from .types import Btn
 
 
 def to_aiogram_markup(rows) -> InlineKeyboardMarkup | None:

@@ -9,7 +9,11 @@
 Запуск:  .venv/bin/python scripts/sync_yakovleva_attendance.py [YYYY-MM]  (по умолчанию — текущий месяц)
 """
 from __future__ import annotations
-import asyncio, json, os, re, sys
+import asyncio
+import json
+import os
+import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -104,22 +108,28 @@ async def main() -> None:
         nonlocal changes
         s = by_key.get(_key(name))
         if s is None:
-            s = await stu.add(name); by_key[_key(name)] = s; by_id[s.student_id] = s; changes += 1
+            s = await stu.add(name)
+            by_key[_key(name)] = s
+            by_id[s.student_id] = s
+            changes += 1
             print("  + ученик", s.student_id, name)
         return s
 
-    existing = {(l.date, l.group_id): l for l in await les.get_by_teacher_and_period(TEACHER[0], month)}
+    existing = {(lsn.date, lsn.group_id): lsn for lsn in await les.get_by_teacher_and_period(TEACHER[0], month)}
     ids = await les.get_existing_ids()
 
     async def add_lesson(day: int, gid: str, dur: int, att: str):
         nonlocal changes
         date_s = f"{month}-{day:02d}"
-        lid = generate_lesson_id(ids); ids.append(lid)
+        lid = generate_lesson_id(ids)
+        ids.append(lid)
         lesson = Lesson(lesson_id=lid, teacher_id=TEACHER[0], teacher_name=TEACHER[1], type=LessonType.GROUP,
                         student_1_id=None, student_1_name=None, student_2_id=None, student_2_name=None,
                         date=date_s, duration_min=dur, earned=0, recorded_at=now_str(), updated_at=now_str(),
                         attendees=att, group_id=gid)
-        await les.add(lesson); existing[(date_s, gid)] = lesson; changes += 1
+        await les.add(lesson)
+        existing[(date_s, gid)] = lesson
+        changes += 1
         print(f"  + занятие {lid} {date_s} {gid} {dur}мин: {att.count(':') // 2} чел.")
 
     # ── групповые ──
@@ -144,16 +154,18 @@ async def main() -> None:
         # Состав = список из таблицы (Боброво: без пробных — иначе начислится абонемент)
         wanted = {(await ensure(n)).student_id for n in roster if mode == "per_visit" or n not in trial_only}
         for sid in sorted(wanted - members):
-            await sg.add(sid, gid, joined_period=month); changes += 1
+            await sg.add(sid, gid, joined_period=month)
+            changes += 1
             print(f"  → {by_id[sid].name} → {gid}")
         for sid in sorted(members - wanted):
-            await sg.remove(sid, gid); changes += 1
+            await sg.remove(sid, gid)
+            changes += 1
             print(f"  ← {by_id.get(sid, sid) and by_id[sid].name} убран из {gid}")
         group_rosters[gid] = set(wanted)
         for day in sorted(marks):
             date_s = f"{month}-{day:02d}"
-            l = existing.get((date_s, gid))
-            prev = {e.split(":")[0]: e for e in (l.attendees or "").split(",") if e} if l else {}
+            lsn = existing.get((date_s, gid))
+            prev = {e.split(":")[0]: e for e in (lsn.attendees or "").split(",") if e} if lsn else {}
             entries = []
             for name, v in marks[day]:
                 s = await ensure(name)
@@ -163,18 +175,21 @@ async def main() -> None:
                     elif v in ("35", "60"):
                         amt, mins = PER_VISIT_SHORT if v == "35" else PER_VISIT_FULL
                     elif s.student_id in prev:
-                        entries.append(prev[s.student_id]); continue  # «1»: тариф уже выбран в боте — сохраняем
+                        entries.append(prev[s.student_id])
+                        continue  # «1»: тариф уже выбран в боте — сохраняем
                     else:
                         amt, mins = PER_VISIT_FULL
                 else:
                     amt, mins = 0, dur
                 entries.append(f"{s.student_id}:{mins}:{amt}")
             att = ",".join(entries)
-            if l is None:
+            if lsn is None:
                 await add_lesson(day, gid, dur, att)
-            elif (l.attendees or "") != att:
-                await les.update_attendees(l.lesson_id, att); l.attendees = att; changes += 1
-                print(f"  ~ {l.lesson_id} {date_s} {gid}: состав приведён к таблице ({len(entries)} чел.)")
+            elif (lsn.attendees or "") != att:
+                await les.update_attendees(lsn.lesson_id, att)
+                lsn.attendees = att
+                changes += 1
+                print(f"  ~ {lsn.lesson_id} {date_s} {gid}: состав приведён к таблице ({len(entries)} чел.)")
 
     # ── индивидуальные ──
     rows2 = src.worksheet("Индивидуальные занятия Яковлева ").get_all_values()
@@ -184,23 +199,27 @@ async def main() -> None:
             for name, v in marks[day]:
                 s = await ensure(name)
                 n = int(v) if v.isdigit() else 1
-                have = [l for (d, g), l in existing.items() if d == date_s and g == INDIVIDUAL_GROUP
-                        and s.student_id in (l.attendees or "")]
+                have = [lsn for (d, g), lsn in existing.items() if d == date_s and g == INDIVIDUAL_GROUP
+                        and s.student_id in (lsn.attendees or "")]
                 # одно занятие в день с несколькими девочками: добавляем участницу в существующее
-                same_day = [l for (d, g), l in existing.items() if d == date_s and g == INDIVIDUAL_GROUP]
+                same_day = [lsn for (d, g), lsn in existing.items() if d == date_s and g == INDIVIDUAL_GROUP]
                 if not have and same_day:
-                    l = same_day[0]
-                    await les.update_attendees(l.lesson_id, f"{l.attendees},{s.student_id}:60:{INDIVIDUAL_PRICE}")
-                    l.attendees = f"{l.attendees},{s.student_id}:60:{INDIVIDUAL_PRICE}"; changes += 1
-                    print(f"  ~ индивидуальное {l.lesson_id} {date_s}: +{name}")
-                    have = [l]
+                    lsn = same_day[0]
+                    await les.update_attendees(lsn.lesson_id, f"{lsn.attendees},{s.student_id}:60:{INDIVIDUAL_PRICE}")
+                    lsn.attendees = f"{lsn.attendees},{s.student_id}:60:{INDIVIDUAL_PRICE}"
+                    changes += 1
+                    print(f"  ~ индивидуальное {lsn.lesson_id} {date_s}: +{name}")
+                    have = [lsn]
                 for _ in range(n - len(have)):
-                    lid = generate_lesson_id(ids); ids.append(lid)
+                    lid = generate_lesson_id(ids)
+                    ids.append(lid)
                     lesson = Lesson(lesson_id=lid, teacher_id=TEACHER[0], teacher_name=TEACHER[1], type=LessonType.GROUP,
                                     student_1_id=None, student_1_name=None, student_2_id=None, student_2_name=None,
                                     date=date_s, duration_min=60, earned=0, recorded_at=now_str(), updated_at=now_str(),
                                     attendees=f"{s.student_id}:60:{INDIVIDUAL_PRICE}", group_id=INDIVIDUAL_GROUP)
-                    await les.add(lesson); existing[(date_s, INDIVIDUAL_GROUP)] = lesson; changes += 1
+                    await les.add(lesson)
+                    existing[(date_s, INDIVIDUAL_GROUP)] = lesson
+                    changes += 1
                     print(f"  + индивидуальное {lid} {date_s} {name}")
     print(f"готово: изменений {changes}")
 

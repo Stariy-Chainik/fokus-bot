@@ -66,9 +66,9 @@ def paid_sums(rows) -> dict[str, int]:
 
 def ledger_totals(ledgers: dict) -> tuple[int, int, int]:
     """(начислено, оплачено, к доплате) по всем педагогам."""
-    accrued = sum(l.accrued for l in ledgers.values())
-    paid = sum(l.paid for l in ledgers.values())
-    remainder = sum(l.remainder for l in ledgers.values())
+    accrued = sum(ledger.accrued for ledger in ledgers.values())
+    paid = sum(ledger.paid for ledger in ledgers.values())
+    remainder = sum(ledger.remainder for ledger in ledgers.values())
     return accrued, paid, remainder
 
 
@@ -82,5 +82,5 @@ def lesson_marks(items: list, paid: int) -> list[dict]:
     return [
         {"lesson_id": b.lesson_id, "date": b.date, "duration_min": b.duration_min,
          "amount": b.amount, "lesson_type": b.lesson_type, "paid": ok}
-        for b, ok in zip(ordered, marks)
+        for b, ok in zip(ordered, marks, strict=False)
     ]

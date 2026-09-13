@@ -86,7 +86,7 @@ async def cb_partner_pick(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    lines = [f"<b>Назначить партнёрами:</b>", f"• {a.name}", f"• {b.name}"]
+    lines = ["<b>Назначить партнёрами:</b>", f"• {a.name}", f"• {b.name}"]
     # Предупреждения о разрыве старых связей.
     old_links = []
     if a.partner_id and a.partner_id != partner_id:

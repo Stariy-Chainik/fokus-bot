@@ -6,7 +6,7 @@ from datetime import date
 from aiogram import Router
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.access import is_admin as _is_admin  # noqa: F401 — реэкспорт для под-модулей пакета
 from bot.repositories import LessonRepository, TeacherRepository
 from bot.services import ProfitService, ProfitSummary, TeacherProfitRow
 from bot.utils.dates import display_period, last_periods

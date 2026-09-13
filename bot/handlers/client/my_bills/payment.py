@@ -32,7 +32,6 @@ from bot.screens.parent_bills import (
 )
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
-from bot.keyboards.client import kb_bill_back
 from config.settings import settings
 from ._base import router
 
@@ -445,7 +444,7 @@ async def cb_receipt_confirm(
     pending_total = 0
     if student:
         ledgers = await payment_service.ledger_for(student, period_month)
-        pending_total = sum(l.remainder for l in ledgers.values())
+        pending_total = sum(ledger.remainder for ledger in ledgers.values())
 
     if claimed:
         pending_total, count = await payment_service.record_payment(

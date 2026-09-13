@@ -25,8 +25,8 @@ async def _send_bill_to_parents(
 ) -> tuple[int, int, int]:
     """Отправить счёт родителям ученика. Возвращает (recipients_total, sent_to, sent_invoices)."""
     ledgers = await payment_service.ledger_for(student, period)
-    invoices = [r for l in ledgers.values() for r in ([*l.paid_rows] + ([l.pending] if l.pending else []))]
-    paid_total = sum(l.paid for l in ledgers.values())
+    invoices = [r for ledger in ledgers.values() for r in ([*ledger.paid_rows] + ([ledger.pending] if ledger.pending else []))]
+    paid_total = sum(ledger.paid for ledger in ledgers.values())
     bill_text, _ = build_bill_text(student.name, group_names, period, bills, paid=paid_total)
 
     client = await client_repo.get_by_id(student.client_id) if student.client_id else None
@@ -106,8 +106,8 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
         lines.append(f"👨‍🏫 <b>{agg['name']}</b> — {subtotal} руб. — {status}")
         items = sorted(agg["items"], key=lambda b: (b.date, b.lesson_id))
         marks = lesson_paid_marks([b.amount for b in items], paid)
-        paid_items = [b for b, is_paid in zip(items, marks) if is_paid]
-        unpaid_items = [b for b, is_paid in zip(items, marks) if not is_paid]
+        paid_items = [b for b, is_paid in zip(items, marks, strict=False) if is_paid]
+        unpaid_items = [b for b, is_paid in zip(items, marks, strict=False) if not is_paid]
 
         def _append_items(title: str, mark: str, selected: list) -> None:
             if not selected:

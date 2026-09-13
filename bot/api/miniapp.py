@@ -17,7 +17,6 @@ import logging
 from aiohttp import web
 
 from config.settings import settings
-from bot.models.enums import PaymentStatus
 from bot.services import payment_ledger
 from bot.utils.dates import last_periods
 from bot.utils.telegram_auth import verify_init_data

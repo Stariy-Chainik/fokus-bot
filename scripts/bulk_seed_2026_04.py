@@ -133,7 +133,8 @@ def main(apply: bool):
             if (tid, sid) not in existing_pairs:
                 new_bindings.append([tid, sid])
 
-    print(f"\n[teacher_students] добавить: {len(new_bindings)}; пропущено (уже есть): {sum(len(v) for v in BINDINGS.values()) - len(new_bindings) - len(missing_students)}")
+    skipped = sum(len(v) for v in BINDINGS.values()) - len(new_bindings) - len(missing_students)
+    print(f"\n[teacher_students] добавить: {len(new_bindings)}; пропущено (уже есть): {skipped}")
     if missing_students:
         print("  ВНИМАНИЕ — ученики не найдены:")
         for tid, name in missing_students:

@@ -10,7 +10,7 @@ from bot.keyboards.calendar import kb_calendar
 from bot.keyboards.teacher import kb_lesson_list
 from bot.models import User
 from bot.models.enums import LessonType
-from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
+from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, TeacherGroupRepository
 from bot.utils.constants import PAGE_SIZE
 from bot.utils.dates import format_date_display
 

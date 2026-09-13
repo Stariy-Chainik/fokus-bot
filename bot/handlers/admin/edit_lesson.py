@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.models.enums import LessonType
-from bot.repositories import LessonRepository, TeacherRepository
+from bot.repositories import LessonRepository, TeacherRepository, TeacherGroupRepository
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.teacher import kb_lesson_list
 from bot.keyboards.calendar import kb_calendar

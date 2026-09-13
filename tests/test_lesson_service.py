@@ -81,7 +81,7 @@ def test_shared_respects_period_lock():
             _teacher(), "2026-07-01", 60,
             students=[("STU-1", "Азов"), ("STU-2", "Бобров")],
         ))
-        assert False, "ожидался PermissionError"
+        raise AssertionError("ожидался PermissionError")
     except PermissionError:
         pass
 
@@ -120,7 +120,7 @@ def test_solo_twice_same_day_blocked():
     _solo(svc, "STU-1", "Азов")
     try:
         _solo(svc, "STU-1", "Азов")
-        assert False, "ожидался ValueError (дубль соло)"
+        raise AssertionError("ожидался ValueError (дубль соло)")
     except ValueError:
         pass
 

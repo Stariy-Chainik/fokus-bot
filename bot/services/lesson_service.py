@@ -8,7 +8,6 @@ from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.utils import generate_lesson_id, now_str, period_month_from_date
-from .billing_service import calc_earned
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User
 from bot.repositories import StudentRepository, UserRepository
-from bot.keyboards.client import client_welcome_text, kb_client_menu, kb_admin_approve_child
+from bot.keyboards.client import kb_client_menu, kb_admin_approve_child
 from bot.states import ClientRegStates
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ async def handle_add_child_surname(
         await message.answer(f"Нашли: <b>{s.name}</b>\n\nОтправить заявку администратору?", reply_markup=kb)
     else:
         await message.answer(
-            f"Найдено несколько учеников. Выберите нужного:",
+            "Найдено несколько учеников. Выберите нужного:",
             reply_markup=_student_buttons(matches, "client_add_req"),
         )
 
@@ -195,7 +195,7 @@ async def cb_add_child_request(
 
     logger.info("Запрос на добавление: tg_id=%s → student_id=%s", tg_id, student_id)
     await callback.message.edit_text(
-        f"✅ Заявка отправлена администратору.\n\nОжидайте подтверждения.",
+        "✅ Заявка отправлена администратору.\n\nОжидайте подтверждения.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
         ]),

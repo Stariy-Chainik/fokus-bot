@@ -4,4 +4,4 @@ from . import overview         # noqa: F401  — регистрирует хен
 from . import finance_entries  # noqa: F401
 from . import daily            # noqa: F401
 
-__all__ = ["router"]
+__all__ = ["router", "_format_profit"]

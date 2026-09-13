@@ -98,7 +98,7 @@ async def _show_lessons(
                 by_key.setdefault((ls.date[:7], ls.teacher_id), []).append(ls)
         for key, group in by_key.items():
             ordered = sorted(group, key=lambda x: (x.date, x.lesson_id))
-            for ls, mark in zip(ordered, lesson_paid_marks([amounts[x.lesson_id] for x in ordered], paid_by.get(key, 0))):
+            for ls, mark in zip(ordered, lesson_paid_marks([amounts[x.lesson_id] for x in ordered], paid_by.get(key, 0)), strict=False):
                 paid_mark[ls.lesson_id] = mark
 
         lines.append(f"\n<b>{student.name}:</b>")

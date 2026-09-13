@@ -11,6 +11,9 @@ from aiogram import Router
 client_router = Router(name="client")
 # group_link — раньше start: его CommandStart(deep_link=True) и contact-состояние
 # должны срабатывать до catch-all F.text регистрации по фамилии.
-client_router.include_routers(group_link_router, receipt_email_router, start_router, bills_router, lessons_router, payments_router, diary_router)
+client_router.include_routers(
+    group_link_router, receipt_email_router, start_router, bills_router,
+    lessons_router, payments_router, diary_router,
+)
 
 __all__ = ["client_router"]

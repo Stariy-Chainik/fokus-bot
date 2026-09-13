@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from aiogram import Router
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.handlers.access import (
+from bot.handlers.access import (  # noqa: F401 — реэкспорт для под-модулей пакета
     is_teacher as _is_teacher,
     is_teacher_or_admin as _is_teacher_or_admin,
 )

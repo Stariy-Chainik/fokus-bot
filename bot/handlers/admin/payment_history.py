@@ -18,7 +18,7 @@ from bot.repositories import (
 )
 from bot.states import PaymentHistoryStates
 from bot.keyboards.admin import kb_back
-from bot.utils.dates import display_period, month_name_ru
+from bot.utils.dates import month_name_ru
 from bot.handlers.access import is_admin as _is_admin
 from bot.services.payment_methods import label as payment_method_label
 

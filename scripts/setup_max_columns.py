@@ -36,7 +36,8 @@ def ensure_column(ws, name: str, expected_idx: int) -> None:
     if ws.col_count < idx:
         ws.add_cols(idx - ws.col_count)
     ws.update_cell(1, idx, name)
-    print(f"{ws.title}.{name}: добавлена колонка {idx}" + ("" if idx == expected_idx else f" (ожидалась {expected_idx} — поправьте константу в репозитории)"))
+    note = "" if idx == expected_idx else f" (ожидалась {expected_idx} — поправьте константу в репозитории)"
+    print(f"{ws.title}.{name}: добавлена колонка {idx}" + note)
 
 
 def main() -> None:
