@@ -4,7 +4,7 @@ from aiogram.exceptions import TelegramBadRequest
 from bot.models.enums import LessonType
 from bot.utils.groups import hide_service_groups
 from bot.utils.lesson_stats import format_lesson_breakdown
-from bot.utils.notify import notify
+from bot.utils.notify import notify, notify_safely
 from config.settings import settings
 from tests.fakes import mk_lesson, mk_teacher, run
 
@@ -45,3 +45,16 @@ def test_notify_dedups_skips_none_and_survives_delivery_errors():
     sent = run(notify(bot, [1, None, 2, 1, 3, 2], "привет"))
     assert sent == 2
     assert bot.sent == [(1, "привет"), (2, "привет")]
+
+
+def test_notify_safely_swallows_any_error(caplog):
+    async def ok():
+        return "sent"
+
+    async def boom():
+        raise RuntimeError("network down")
+
+    assert run(notify_safely(ok(), "не должно логироваться: %s")) is True
+    with caplog.at_level("ERROR"):
+        assert run(notify_safely(boom(), "Не удалось уведомить педагога: %s")) is False
+    assert "Не удалось уведомить педагога: network down" in caplog.text

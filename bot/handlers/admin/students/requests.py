@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.exceptions import TelegramAPIError
 
 from bot.models import User, Student, StudentRequest
+from bot.utils.notify import notify_safely
 from bot.repositories import (
     StudentRepository,
     GroupRepository, BranchRepository, StudentRequestRepository,
@@ -55,14 +56,14 @@ async def _notify_other_admins(
 
 
 async def _notify_teacher_student_created(bot, req: StudentRequest, student_name: str) -> None:
-    try:
-        await bot.send_message(
+    await notify_safely(
+        bot.send_message(
             req.teacher_tg_id,
             f"✅ Ученик <b>{student_name}</b> создан. "
             f"Он появится в ваших списках после обновления кэша групп.",
-        )
-    except Exception as exc:
-        logger.error("Не удалось уведомить педагога о создании ученика: %s", exc)
+        ),
+        "Не удалось уведомить педагога о создании ученика: %s",
+    )
 
 
 async def _group_toast(
@@ -192,23 +193,23 @@ async def cb_link_existing_student_request(
     if outcome is None:
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    try:
-        if outcome is LinkExistingOutcome.ALREADY_IN_GROUP:
-            teacher_note = (
-                f"✅ Ученик <b>{student.name}</b> уже в вашей группе — пользуйтесь."
-            )
-        elif outcome is LinkExistingOutcome.ADDED_TO_GROUP:
-            teacher_note = (
-                f"✅ Ученик <b>{student.name}</b> добавлен в вашу группу — пользуйтесь."
-            )
-        else:
-            teacher_note = (
-                f"ℹ️ По вашей заявке админ выбрал существующего ученика "
-                f"<b>{student.name}</b>."
-            )
-        await callback.bot.send_message(req.teacher_tg_id, teacher_note)
-    except Exception as exc:
-        logger.error("Не удалось уведомить педагога о привязке ученика: %s", exc)
+    if outcome is LinkExistingOutcome.ALREADY_IN_GROUP:
+        teacher_note = (
+            f"✅ Ученик <b>{student.name}</b> уже в вашей группе — пользуйтесь."
+        )
+    elif outcome is LinkExistingOutcome.ADDED_TO_GROUP:
+        teacher_note = (
+            f"✅ Ученик <b>{student.name}</b> добавлен в вашу группу — пользуйтесь."
+        )
+    else:
+        teacher_note = (
+            f"ℹ️ По вашей заявке админ выбрал существующего ученика "
+            f"<b>{student.name}</b>."
+        )
+    await notify_safely(
+        callback.bot.send_message(req.teacher_tg_id, teacher_note),
+        "Не удалось уведомить педагога о привязке ученика: %s",
+    )
     if outcome is LinkExistingOutcome.ALREADY_IN_GROUP:
         admin_note = "Ученик уже состоит в этой группе — педагог его видит."
     elif outcome is LinkExistingOutcome.ADDED_TO_GROUP:
@@ -244,14 +245,14 @@ async def cb_reject_student_request(
     ):
         await callback.answer("Заявка уже обработана.", show_alert=True)
         return
-    try:
-        await callback.bot.send_message(
+    await notify_safely(
+        callback.bot.send_message(
             req.teacher_tg_id,
             f"❌ Заявка на создание ученика <b>{req.student_name}</b> отклонена.\n"
             "Свяжитесь с администратором лично.",
-        )
-    except Exception as exc:
-        logger.error("Не удалось уведомить педагога об отклонении заявки: %s", exc)
+        ),
+        "Не удалось уведомить педагога об отклонении заявки: %s",
+    )
     await callback.message.edit_text(
         f"❌ Заявка от <b>{req.teacher_name}</b> на <b>{req.student_name}</b> отклонена.",
         reply_markup=kb_back("admin:menu"),
