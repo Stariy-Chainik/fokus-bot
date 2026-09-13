@@ -553,3 +553,64 @@ def assert_golden(name: str, content: str) -> None:
     assert content == expected, (
         f"Экран отличается от снимка {path.name}.\n--- снимок ---\n{expected}\n--- сейчас ---\n{content}"
     )
+
+
+# ─── Google Sheets в памяти (для тестов репозиториев) ────────────────────────
+
+class FakeWorksheet:
+    """gspread.Worksheet: строка 1 — заголовки, данные с 2; значения хранятся как переданы."""
+
+    def __init__(self, headers: list[str], rows: list[list]) -> None:
+        self.headers = list(headers)
+        self.rows = [list(r) for r in rows]
+        self.calls: list[tuple] = []
+
+    def _pad(self, row: list) -> list:
+        return list(row) + [None] * (len(self.headers) - len(row))
+
+    def get_all_records(self, default_blank=None):
+        self.calls.append(("get_all_records",))
+        return [{h: (v if v not in (None, "") else default_blank) for h, v in zip(self.headers, self._pad(r), strict=False)}
+                for r in self.rows]
+
+    def row_values(self, index: int):
+        self.calls.append(("row_values", index))
+        if index == 1:
+            return list(self.headers)
+        if index - 2 >= len(self.rows):
+            return []
+        return ["" if v is None else str(v) for v in self.rows[index - 2]]
+
+    def update_cell(self, row: int, col: int, value):
+        self.calls.append(("update_cell", row, col, value))
+        padded = self._pad(self.rows[row - 2])
+        padded[col - 1] = value
+        self.rows[row - 2] = padded
+
+    def update(self, range_name: str, values):
+        self.calls.append(("update", range_name))
+        self.rows[int(range_name[1:]) - 2] = list(values[0])
+
+    def delete_rows(self, index: int):
+        self.calls.append(("delete_rows", index))
+        del self.rows[index - 2]
+
+    def append_row(self, values, value_input_option=None):
+        self.calls.append(("append_row", list(values)))
+        self.rows.append(list(values))
+
+    def insert_row(self, values, index: int):
+        """Внешняя правка листа (руками / скриптом) — кеш репозитория об этом не знает."""
+        self.rows.insert(index - 2, list(values))
+
+    def by_key(self, col: str, value) -> list | None:
+        i = self.headers.index(col)
+        return next((self._pad(r) for r in self.rows if str(r[i]) == str(value)), None)
+
+
+class FakeSheetsClient:
+    def __init__(self, ws: FakeWorksheet) -> None:
+        self.ws = ws
+
+    def get_worksheet(self, sheet_name: str) -> FakeWorksheet:
+        return self.ws

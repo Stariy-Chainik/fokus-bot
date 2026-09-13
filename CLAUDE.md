@@ -141,6 +141,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 - **TTL cache** (300 s) on every read; any write to that sheet invalidates the cache for that sheet.
 - **Retry**: 3 attempts with exponential backoff on HTTP 429 / 503 / network errors.
 - 1-based row indexing (row 1 = header, row 2+ = data).
+- **Запись по ключу** (`async with self._locked_row(group_id=gid) as row_idx:`): per-sheet `asyncio.Lock` на «найти строку → записать/удалить» + перед записью ключевые ячейки строки перечитываются с живого листа (`row_values`, +1 API-вызов); при расхождении кеш сбрасывается и поиск повторяется, после второго промаха запись отменяется (`logger.error`). `_delete_all_where(**key)` — удаление всех строк по ключу. Тесты — `tests/test_repository_writes.py` (`FakeWorksheet` из `tests/fakes.py`).
 
 | Repo class | Google Sheets tab | Purpose |
 |---|---|---|

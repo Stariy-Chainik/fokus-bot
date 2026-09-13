@@ -82,37 +82,37 @@ class StudentRepository(BaseRepository):
         return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])
 
     async def update_name(self, student_id: str, name: str) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, 2, name)
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 2, name)
+            return True
 
     async def update_tier(self, student_id: str, tier: StudentGroupTier) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _TIER_COL, tier.value)
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _TIER_COL, tier.value)
+            return True
 
     async def delete(self, student_id: str) -> bool:
         # Перед удалением — разорвать пару, чтобы у бывшего партнёра
         # не осталась висячая ссылка partner_id на удалённого.
         await self.clear_partner(student_id)
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
 
     # ─── Управление партнёрами ────────────────────────────────────────────────
 
     async def _write_partner(self, student_id: str, partner_id: str) -> None:
         """Низкоуровневая запись: ставит partner_id в ячейке конкретного ученика."""
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            raise ValueError(f"Student {student_id} not found")
-        await self._update_cell(row_idx, _PARTNER_COL, partner_id)
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                raise ValueError(f"Student {student_id} not found")
+            await self._update_cell(row_idx, _PARTNER_COL, partner_id)
 
     async def set_partner(self, student_id: str, partner_id: str) -> None:
         """
@@ -163,11 +163,11 @@ class StudentRepository(BaseRepository):
             raise
 
     async def set_client_id(self, student_id: str, client_id: str) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _CLIENT_ID_COL, client_id)
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _CLIENT_ID_COL, client_id)
+            return True
 
     async def get_by_parent_tg_id(self, tg_id: int) -> list[Student]:
         return [s for s in await self.get_all() if tg_id in s.parent_tg_ids]
@@ -178,11 +178,11 @@ class StudentRepository(BaseRepository):
         return [s for s in await self.get_all() if max_id in s.parent_max_ids]
 
     async def _write_parent_max_ids(self, student_id: str, ids: list[int]) -> bool:
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _PARENT_MAX_IDS_COL, "|".join(str(i) for i in ids))
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _PARENT_MAX_IDS_COL, "|".join(str(i) for i in ids))
+            return True
 
     async def add_parent_max_id(self, student_id: str, max_id: int) -> bool:
         student = await self.get_by_id(student_id)
@@ -227,11 +227,11 @@ class StudentRepository(BaseRepository):
     async def set_athlete_tg_id(self, student_id: str, tg_id: Optional[int]) -> bool:
         """Привязывает (или отвязывает при None) Telegram спортсмена к ученику.
         Требует заголовок athlete_tg_id в 9-й колонке листа (scripts/setup_diary_sheets.py)."""
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _ATHLETE_TG_ID_COL, tg_id if tg_id else "")
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _ATHLETE_TG_ID_COL, tg_id if tg_id else "")
+            return True
 
     async def add_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
         student = await self.get_by_id(student_id)
@@ -239,24 +239,24 @@ class StudentRepository(BaseRepository):
             return False
         if tg_id in student.parent_tg_ids:
             return True
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        new_ids = student.parent_tg_ids + [tg_id]
-        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            new_ids = student.parent_tg_ids + [tg_id]
+            await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
+            return True
 
     async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
         """Отвязывает родителя от ученика (отмена ошибочной привязки)."""
         student = await self.get_by_id(student_id)
         if student is None or tg_id not in student.parent_tg_ids:
             return False
-        row_idx = await self._find_row_index("student_id", student_id)
-        if row_idx is None:
-            return False
-        new_ids = [i for i in student.parent_tg_ids if i != tg_id]
-        await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
-        return True
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            new_ids = [i for i in student.parent_tg_ids if i != tg_id]
+            await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
+            return True
 
     async def clear_partner(self, student_id: str) -> None:
         """Разрывает связь с обеих сторон. Безопасно вызывать для солиста."""

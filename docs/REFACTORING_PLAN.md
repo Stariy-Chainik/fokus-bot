@@ -24,14 +24,14 @@
 | 3.3 карточки | частично | `screens/cards.py`: карточка ученика админа + общий `partner_label`; карточки групп — текст оставлен в хендлерах (разные экраны, общих блоков нет) |
 | 3.4 DTO | частично | `BillAggregate` (10 потребителей), `DebtorRow`, `StudentMonthLessons`; `unpaid_for`/`lesson_marks` остаются dict (FSM / экран выбора) |
 | 3.5 bill_detail → screens | ✅ | + `period_label` в utils.dates (4 копии) |
-| 4.1 I1 (гонка записи) | ⏸ | ждёт ответа на Q2 |
+| 4.1 I1 (гонка записи) | ✅ | `BaseRepository._locked_row`: per-sheet `asyncio.Lock` + проверка ключевых ячеек по живому листу (`row_values`, +1 вызов на запись); все 18 репозиториев; `tests/test_repository_writes.py` (сдвиг строк, конкурентное удаление+обновление) |
 | D верификация и документация | ✅ | `test_di_wiring`, CLAUDE.md, README.md, AGENTS.md |
 
 ## 0. Что уже хорошо (не трогаем)
 
 - Слои `handlers → services → repositories → models` в целом соблюдены: **gspread нигде, кроме
   `bot/repositories/`** (в `scripts/` — намеренно, это утилиты вне бота); приватные методы
-  `BaseRepository` (`_all_records`, `_find_row_index`, …) снаружи репозиториев не вызываются.
+  `BaseRepository` (`_all_records`, `_locked_row`, …) снаружи репозиториев не вызываются.
 - Деньги живут в сервисах: `billing_service` (чистые функции), `payment_service`,
   `payment_ledger`, `salary_service`, `profit_service` — и покрыты тестами (см. §4).
 - Гарды доступа уже сведены в один модуль [bot/handlers/access.py](../bot/handlers/access.py)

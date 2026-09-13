@@ -104,42 +104,42 @@ class LessonRepository(BaseRepository):
         return lesson
 
     async def delete(self, lesson_id: str) -> bool:
-        row_idx = await self._find_row_index("lesson_id", lesson_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(lesson_id=lesson_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
 
     async def update_attendees(self, lesson_id: str, attendees: str) -> bool:
-        row_idx = await self._find_row_index("lesson_id", lesson_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, 14, attendees)
-        return True
+        async with self._locked_row(lesson_id=lesson_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 14, attendees)
+            return True
 
     async def update(self, lesson: Lesson) -> bool:
-        row_idx = await self._find_row_index("lesson_id", lesson.lesson_id)
-        if row_idx is None:
-            return False
-        await self._update_row(row_idx, [
-            lesson.lesson_id,
-            lesson.teacher_id,
-            lesson.teacher_name,
-            lesson.type.value,
-            lesson.student_1_id or "",
-            lesson.student_1_name or "",
-            lesson.student_2_id or "",
-            lesson.student_2_name or "",
-            lesson.date,
-            lesson.duration_min,
-            lesson.earned,
-            lesson.recorded_at,
-            lesson.updated_at,
-            lesson.attendees or "",
-            lesson.group_id or "",
-            lesson.student_3_id or "",
-            lesson.student_3_name or "",
-            lesson.student_4_id or "",
-            lesson.student_4_name or "",
-        ])
-        return True
+        async with self._locked_row(lesson_id=lesson.lesson_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_row(row_idx, [
+                lesson.lesson_id,
+                lesson.teacher_id,
+                lesson.teacher_name,
+                lesson.type.value,
+                lesson.student_1_id or "",
+                lesson.student_1_name or "",
+                lesson.student_2_id or "",
+                lesson.student_2_name or "",
+                lesson.date,
+                lesson.duration_min,
+                lesson.earned,
+                lesson.recorded_at,
+                lesson.updated_at,
+                lesson.attendees or "",
+                lesson.group_id or "",
+                lesson.student_3_id or "",
+                lesson.student_3_name or "",
+                lesson.student_4_id or "",
+                lesson.student_4_name or "",
+            ])
+            return True

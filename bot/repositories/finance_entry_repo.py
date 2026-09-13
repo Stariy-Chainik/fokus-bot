@@ -38,8 +38,8 @@ class FinanceEntryRepository(BaseRepository):
         return entry
 
     async def delete(self, entry_id: str) -> bool:
-        row_idx = await self._find_row_index("entry_id", entry_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(entry_id=entry_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True

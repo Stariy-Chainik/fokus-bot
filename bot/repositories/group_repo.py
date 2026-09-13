@@ -87,14 +87,12 @@ class GroupRepository(BaseRepository):
         )
 
     async def update_name(self, group_id: str, name: str) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if str(row.get("group_id")) == group_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 3, name)
-                await self._update_cell(row_idx, 5, now_str())
-                return True
-        return False
+        async with self._locked_row(group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 3, name)
+            await self._update_cell(row_idx, 5, now_str())
+            return True
 
     async def update_billing(
         self, group_id: str,
@@ -102,29 +100,29 @@ class GroupRepository(BaseRepository):
         price_short: int, duration_short: int,
         price_full: int, duration_full: int,
     ) -> bool:
-        row_idx = await self._find_row_index("group_id", group_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _BILLING_MODE_COL, billing_mode.value)
-        await self._update_cell(row_idx, _PRICE_SHORT_COL, price_short)
-        await self._update_cell(row_idx, _DUR_SHORT_COL, duration_short)
-        await self._update_cell(row_idx, _PRICE_FULL_COL, price_full)
-        await self._update_cell(row_idx, _DUR_FULL_COL, duration_full)
-        await self._update_cell(row_idx, 5, now_str())
-        return True
+        async with self._locked_row(group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _BILLING_MODE_COL, billing_mode.value)
+            await self._update_cell(row_idx, _PRICE_SHORT_COL, price_short)
+            await self._update_cell(row_idx, _DUR_SHORT_COL, duration_short)
+            await self._update_cell(row_idx, _PRICE_FULL_COL, price_full)
+            await self._update_cell(row_idx, _DUR_FULL_COL, duration_full)
+            await self._update_cell(row_idx, 5, now_str())
+            return True
 
     async def set_archived(self, group_id: str, archived: bool) -> bool:
         """В архив / из архива. Строку не удаляет — история занятий и оплат цела."""
-        row_idx = await self._find_row_index("group_id", group_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _ARCHIVED_COL, "1" if archived else "")
-        await self._update_cell(row_idx, 5, now_str())
-        return True
+        async with self._locked_row(group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _ARCHIVED_COL, "1" if archived else "")
+            await self._update_cell(row_idx, 5, now_str())
+            return True
 
     async def delete(self, group_id: str) -> bool:
-        row_idx = await self._find_row_index("group_id", group_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True

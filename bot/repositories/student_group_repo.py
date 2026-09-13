@@ -71,37 +71,21 @@ class StudentGroupRepository(BaseRepository):
         return await self._set_cell(student_id, group_id, _LEFT_COL, left_period)
 
     async def _set_cell(self, student_id: str, group_id: str, col: int, value: str) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if (str(row.get("student_id")) == student_id
-                    and str(row.get("group_id")) == group_id):
-                await self._update_cell(i + 2, col, value)
-                return True
-        return False
+        async with self._locked_row(student_id=student_id, group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, col, value)
+            return True
 
     async def remove(self, student_id: str, group_id: str) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if (str(row.get("student_id")) == student_id
-                    and str(row.get("group_id")) == group_id):
-                await self._delete_row(i + 2)
-                return True
-        return False
+        async with self._locked_row(student_id=student_id, group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
 
     async def remove_all_for_student(self, student_id: str) -> int:
-        records = await self._all_records()
-        deleted = 0
-        for i in range(len(records) - 1, -1, -1):
-            if str(records[i].get("student_id")) == student_id:
-                await self._delete_row(i + 2)
-                deleted += 1
-        return deleted
+        return await self._delete_all_where(student_id=student_id)
 
     async def remove_all_for_group(self, group_id: str) -> int:
-        records = await self._all_records()
-        deleted = 0
-        for i in range(len(records) - 1, -1, -1):
-            if str(records[i].get("group_id")) == group_id:
-                await self._delete_row(i + 2)
-                deleted += 1
-        return deleted
+        return await self._delete_all_where(group_id=group_id)

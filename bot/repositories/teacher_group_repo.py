@@ -31,28 +31,14 @@ class TeacherGroupRepository(BaseRepository):
         return TeacherGroup(teacher_id=teacher_id, group_id=group_id)
 
     async def remove(self, teacher_id: str, group_id: str) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if (str(row.get("teacher_id")) == teacher_id
-                    and str(row.get("group_id")) == group_id):
-                await self._delete_row(i + 2)
-                return True
-        return False
+        async with self._locked_row(teacher_id=teacher_id, group_id=group_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
 
     async def remove_all_for_group(self, group_id: str) -> int:
-        records = await self._all_records()
-        deleted = 0
-        for i in range(len(records) - 1, -1, -1):
-            if str(records[i].get("group_id")) == group_id:
-                await self._delete_row(i + 2)
-                deleted += 1
-        return deleted
+        return await self._delete_all_where(group_id=group_id)
 
     async def remove_all_for_teacher(self, teacher_id: str) -> int:
-        records = await self._all_records()
-        deleted = 0
-        for i in range(len(records) - 1, -1, -1):
-            if str(records[i].get("teacher_id")) == teacher_id:
-                await self._delete_row(i + 2)
-                deleted += 1
-        return deleted
+        return await self._delete_all_where(teacher_id=teacher_id)

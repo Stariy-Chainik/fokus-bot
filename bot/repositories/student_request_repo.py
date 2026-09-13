@@ -74,17 +74,17 @@ class StudentRequestRepository(BaseRepository):
         Возвращает False если заявка не найдена или уже обработана.
         """
         self._invalidate_cache()
-        row_idx = await self._find_row_index("request_id", request_id)
-        if row_idx is None:
-            return False
-        req = await self.get_by_id(request_id)
-        if req is None or req.status != RequestStatus.PENDING:
-            return False
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        await self._update_cell(row_idx, _STATUS_COL, status.value)
-        await self._update_cell(row_idx, _RESOLVED_AT_COL, now)
-        await self._update_cell(row_idx, _RESOLVED_BY_COL, resolved_by_tg_id)
-        return True
+        async with self._locked_row(request_id=request_id) as row_idx:
+            if row_idx is None:
+                return False
+            req = await self.get_by_id(request_id)
+            if req is None or req.status != RequestStatus.PENDING:
+                return False
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await self._update_cell(row_idx, _STATUS_COL, status.value)
+            await self._update_cell(row_idx, _RESOLVED_AT_COL, now)
+            await self._update_cell(row_idx, _RESOLVED_BY_COL, resolved_by_tg_id)
+            return True
 
     @staticmethod
     def parse_admin_msgs(req: StudentRequest) -> list[tuple[int, int]]:

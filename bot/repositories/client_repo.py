@@ -76,29 +76,29 @@ class ClientRepository(BaseRepository):
         )
 
     async def set_max_id(self, client_id: str, max_id: Optional[int]) -> bool:
-        row_idx = await self._find_row_index("client_id", client_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _MAX_ID_COL, max_id or "")
-        return True
+        async with self._locked_row(client_id=client_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _MAX_ID_COL, max_id or "")
+            return True
 
     async def update_email(self, client_id: str, email: str) -> bool:
-        row_idx = await self._find_row_index("client_id", client_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _EMAIL_COL, email)
-        return True
+        async with self._locked_row(client_id=client_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _EMAIL_COL, email)
+            return True
 
     async def update_phone(self, client_id: str, phone: str) -> bool:
-        row_idx = await self._find_row_index("client_id", client_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _PHONE_COL, phone)
-        return True
+        async with self._locked_row(client_id=client_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _PHONE_COL, phone)
+            return True
 
     async def clear_tg_id(self, client_id: str) -> bool:
-        row_idx = await self._find_row_index("client_id", client_id)
-        if row_idx is None:
-            return False
-        await self._update_cell(row_idx, _TG_ID_COL, "")
-        return True
+        async with self._locked_row(client_id=client_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _TG_ID_COL, "")
+            return True

@@ -32,18 +32,16 @@ class BranchRepository(BaseRepository):
         return Branch(branch_id=branch_id, name=name, created_at=now, updated_at=now)
 
     async def update_name(self, branch_id: str, name: str) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if str(row.get("branch_id")) == branch_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 2, name)
-                await self._update_cell(row_idx, 4, now_str())
-                return True
-        return False
+        async with self._locked_row(branch_id=branch_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 2, name)
+            await self._update_cell(row_idx, 4, now_str())
+            return True
 
     async def delete(self, branch_id: str) -> bool:
-        row_idx = await self._find_row_index("branch_id", branch_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(branch_id=branch_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True

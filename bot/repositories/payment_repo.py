@@ -88,16 +88,14 @@ class PaymentRepository(BaseRepository):
         return payment
 
     async def update_amount(self, payment_id: str, new_amount: int) -> bool:
-        records = await self._all_records()
         ts_now = now_str()
-        for i, row in enumerate(records):
-            if str(row.get("payment_id")) == payment_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 5, new_amount)   # total_amount
-                await self._update_cell(row_idx, 11, ts_now)      # updated_at
-                self._invalidate_cache()
-                return True
-        return False
+        async with self._locked_row(payment_id=payment_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 5, new_amount)   # total_amount
+            await self._update_cell(row_idx, 11, ts_now)      # updated_at
+            self._invalidate_cache()
+            return True
 
     async def confirm_all_for_period(
         self, student_id: str, period_month: str, confirmed_by_tg_id: int,
@@ -107,19 +105,23 @@ class PaymentRepository(BaseRepository):
         records = await self._all_records()
         ts_now = now_str()
         count = 0
-        for i, row in enumerate(records):
-            if (str(row.get("student_id")) != student_id
+        pending_ids = [
+            str(row.get("payment_id")) for row in records
+            if not (str(row.get("student_id")) != student_id
                     or str(row.get("period_month")) != period_month
                     or str(row.get("status") or "pending") == PaymentStatus.PAID.value
-                    or int(float(row.get("total_amount") or 0)) <= 0):  # остаток 0 — платить нечего
-                continue
-            row_idx = i + 2
-            await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)
-            await self._update_cell(row_idx, 7, ts_now)
-            await self._update_cell(row_idx, 8, confirmed_by_tg_id)
-            await self._update_cell(row_idx, 11, ts_now)
-            await self._update_cell(row_idx, 14, payment_method)
-            count += 1
+                    or int(float(row.get("total_amount") or 0)) <= 0)  # остаток 0 — платить нечего
+        ]
+        for payment_id in pending_ids:
+            async with self._locked_row(payment_id=payment_id) as row_idx:
+                if row_idx is None:
+                    continue
+                await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)
+                await self._update_cell(row_idx, 7, ts_now)
+                await self._update_cell(row_idx, 8, confirmed_by_tg_id)
+                await self._update_cell(row_idx, 11, ts_now)
+                await self._update_cell(row_idx, 14, payment_method)
+                count += 1
         if count:
             self._invalidate_cache()
         return count
@@ -129,15 +131,13 @@ class PaymentRepository(BaseRepository):
         payment_method: str = "admin_manual",
     ) -> bool:
         """Подтверждает оплату и фиксирует её точный способ."""
-        records = await self._all_records()
         ts_now = now_str()
-        for i, row in enumerate(records):
-            if str(row.get("payment_id")) == payment_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)  # status
-                await self._update_cell(row_idx, 7, ts_now)                     # paid_at
-                await self._update_cell(row_idx, 8, confirmed_by_tg_id)         # confirmed_by_tg_id
-                await self._update_cell(row_idx, 11, ts_now)                    # updated_at
-                await self._update_cell(row_idx, 14, payment_method)             # payment_method
-                return True
-        return False
+        async with self._locked_row(payment_id=payment_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)  # status
+            await self._update_cell(row_idx, 7, ts_now)                     # paid_at
+            await self._update_cell(row_idx, 8, confirmed_by_tg_id)         # confirmed_by_tg_id
+            await self._update_cell(row_idx, 11, ts_now)                    # updated_at
+            await self._update_cell(row_idx, 14, payment_method)             # payment_method
+            return True

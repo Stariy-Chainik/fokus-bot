@@ -50,28 +50,22 @@ class UserRepository(BaseRepository):
 
     async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:
         """Привязывает teacher_id к пользователю по его tg_id."""
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if _parse_tg_id(row.get("tg_id")) == tg_id:
-                row_idx = i + 2
-                # колонка teacher_id — 4-я (user_id, tg_id, is_admin, teacher_id)
-                await self._update_cell(row_idx, 4, teacher_id)
-                return True
-        return False
+        async with self._locked_row(tg_id=tg_id) as row_idx:
+            if row_idx is None:
+                return False
+            # колонка teacher_id — 4-я (user_id, tg_id, is_admin, teacher_id)
+            await self._update_cell(row_idx, 4, teacher_id)
+            return True
 
     async def get_admins(self) -> list[User]:
         return [u for u in await self.get_all() if u.is_admin]
 
     async def delete_by_teacher_id(self, teacher_id: str) -> bool:
         """Удаляет пользователя из таблицы при удалении педагога."""
-        records = await self._all_records()
-        logger.info("delete_by_teacher_id: ищем teacher_id=%r в %d строках", teacher_id, len(records))
-        for i, row in enumerate(records):
-            val = row.get("teacher_id")
-            logger.info("  строка %d: teacher_id=%r", i + 2, val)
-            if str(val or "").strip() == teacher_id:
-                await self._delete_row(i + 2)
-                logger.info("  → удалена строка %d", i + 2)
-                return True
-        logger.warning("delete_by_teacher_id: строка с teacher_id=%r не найдена", teacher_id)
-        return False
+        async with self._locked_row(teacher_id=teacher_id) as row_idx:
+            if row_idx is None:
+                logger.warning("delete_by_teacher_id: строка с teacher_id=%r не найдена", teacher_id)
+                return False
+            await self._delete_row(row_idx)
+            logger.info("delete_by_teacher_id: удалена строка %d (teacher_id=%r)", row_idx, teacher_id)
+            return True

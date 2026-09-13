@@ -2,7 +2,12 @@ import asyncio
 
 from bot.models import StudentPeriodPayment
 from bot.models.enums import PaymentStatus
+from bot.repositories.base import BaseRepository
 from bot.repositories.payment_repo import PaymentRepository, _row_to_payment
+from tests.fakes import FakeSheetsClient, FakeWorksheet
+
+HEADERS = ["payment_id", "student_id", "student_name", "period_month", "total_amount", "status", "paid_at",
+           "confirmed_by_tg_id", "comment", "created_at", "updated_at", "teacher_id", "teacher_name", "payment_method"]
 
 
 def _payment(method: str = "cash") -> StudentPeriodPayment:
@@ -16,22 +21,21 @@ def _payment(method: str = "cash") -> StudentPeriodPayment:
 
 
 class _Repo(PaymentRepository):
+    """PaymentRepository поверх листа в памяти; rows — словари по заголовкам HEADERS."""
+
     def __init__(self, rows=None):
-        self.rows = rows or []
-        self.appended = []
-        self.updated = []
+        BaseRepository._cache.pop("student_payments", None)
+        BaseRepository._headers.pop("student_payments", None)
+        self.ws = FakeWorksheet(HEADERS, [[r.get(h) for h in HEADERS] for r in (rows or [])])
+        super().__init__(FakeSheetsClient(self.ws), "student_payments")
 
-    async def _all_records(self):
-        return self.rows
+    @property
+    def appended(self):
+        return [c[1] for c in self.ws.calls if c[0] == "append_row"]
 
-    async def _append_row(self, values):
-        self.appended.append(values)
-
-    async def _update_cell(self, row, col, value):
-        self.updated.append((row, col, value))
-
-    def _invalidate_cache(self):
-        pass
+    @property
+    def updated(self):
+        return [(c[1], c[2], c[3]) for c in self.ws.calls if c[0] == "update_cell"]
 
 
 def test_row_parser_reads_method_and_legacy_blank():
@@ -71,7 +75,7 @@ def test_confirm_writes_method_to_column_14():
 
 def test_confirm_period_writes_method_to_each_paid_row():
     repo = _Repo([{
-        "student_id": "STU-1", "period_month": "2026-09", "status": "pending",
+        "payment_id": "PAY-000001", "student_id": "STU-1", "period_month": "2026-09", "status": "pending",
         "total_amount": 1300,
     }])
     count = asyncio.run(repo.confirm_all_for_period("STU-1", "2026-09", 7, "receipt_bank"))

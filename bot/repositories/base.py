@@ -7,11 +7,14 @@
 - TTL-кеш (300 сек / 5 мин, см. _CACHE_TTL) на get_all_records: снижает
   нагрузку на Sheets API (лимит 60 req/min). Инвалидируется при любой записи.
 - Retry с backoff для HTTP 429 / 503: временные сбои API не долетают до пользователя.
+- Запись по ключу (`_locked_row`): под замком листа, индекс строки проверяется по живому
+  листу перед записью — конкурентные удаления/вставки не сдвигают запись в чужую строку (I1).
 """
 from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 import gspread
@@ -63,9 +66,21 @@ def _with_retry(func, *args, **kwargs):
                 raise
 
 
+def _norm(value: Any) -> str:
+    """Значение ключа как строка: None → '', целые из float-ячеек ('850.0') → '850'."""
+    s = "" if value is None else str(value).strip()
+    if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
+        return s[:-2]
+    return s
+
+
 class BaseRepository:
     # Кеш разделяется между всеми инстансами: sheet_name → (records, timestamp)
     _cache: dict[str, tuple[list, float]] = {}
+    # Замок на лист: «найти строку → записать» не перемешивается между корутинами
+    _locks: dict[str, asyncio.Lock] = {}
+    # Заголовки листов (строка 1) — для проверки ключевой ячейки по живому листу
+    _headers: dict[str, list[str]] = {}
 
     def __init__(self, client: SheetsClient, sheet_name: str) -> None:
         self._client = client
@@ -130,6 +145,66 @@ class BaseRepository:
                 row_index, col, self._sheet_name, exc,
             )
             raise
+
+    def _sync_row_values(self, row_index: int) -> list:
+        return _with_retry(self._ws.row_values, row_index)
+
+    # ── Запись по ключу (I1) ──────────────────────────────────────────────────
+
+    def _sheet_lock(self) -> asyncio.Lock:
+        return BaseRepository._locks.setdefault(self._sheet_name, asyncio.Lock())
+
+    async def _headers_of(self) -> list[str]:
+        headers = BaseRepository._headers.get(self._sheet_name)
+        if headers is None:
+            headers = [str(h) for h in await asyncio.to_thread(self._sync_row_values, 1)]
+            BaseRepository._headers[self._sheet_name] = headers
+        return headers
+
+    @staticmethod
+    def _matches(row: dict, key: dict) -> bool:
+        return all(_norm(row.get(col)) == _norm(value) for col, value in key.items())
+
+    async def _verified_row_index(self, key: dict) -> int | None:
+        """Индекс строки по ключу: из кеша, но перед возвратом ключевые ячейки перечитываются
+        с живого листа. Не совпало (лист сдвинулся) — кеш сбрасывается и поиск повторяется."""
+        for attempt in (1, 2):
+            records = await self._all_records()
+            idx = next((i + 2 for i, row in enumerate(records) if self._matches(row, key)), None)
+            if idx is None:
+                return None
+            headers = await self._headers_of()
+            live = await asyncio.to_thread(self._sync_row_values, idx)
+            live_row = {h: (live[i] if i < len(live) else "") for i, h in enumerate(headers)}
+            if self._matches(live_row, key):
+                return idx
+            logger.warning("SHEETS %s: строка %d не совпала с ключом %s — лист изменился, перечитываю (%d/2)",
+                           self._sheet_name, idx, key, attempt)
+            self._invalidate_cache()
+            BaseRepository._headers.pop(self._sheet_name, None)
+        logger.error("SHEETS %s: строка по ключу %s не найдена после перечитывания — запись отменена",
+                     self._sheet_name, key)
+        return None
+
+    @asynccontextmanager
+    async def _locked_row(self, **key):
+        """`async with self._locked_row(group_id=gid) as row_idx:` — строка для записи.
+
+        Держит замок листа на время блока, так что «найти → записать» атомарно относительно
+        других корутин; row_idx = None — строки нет (лист не трогаем).
+        """
+        async with self._sheet_lock():
+            yield await self._verified_row_index(key)
+
+    async def _delete_all_where(self, **key) -> int:
+        """Удалить все строки по ключу (каждая — заново найдена и проверена)."""
+        deleted = 0
+        while True:
+            async with self._locked_row(**key) as row_idx:
+                if row_idx is None:
+                    return deleted
+                await self._delete_row(row_idx)
+                deleted += 1
 
     # ── Инвалидация кеша ──────────────────────────────────────────────────────
 

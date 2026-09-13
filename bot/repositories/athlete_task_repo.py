@@ -80,9 +80,9 @@ class AthleteTaskRepository(BaseRepository):
         task = await self.get_by_id(task_id)
         if task is None:
             return None
-        row_idx = await self._find_row_index("task_id", task_id)
-        if row_idx is None:
-            return None
-        task.status, task.closed_at = "closed", now_str()
-        await self._update_row(row_idx, _task_to_row(task))
-        return task
+        async with self._locked_row(task_id=task_id) as row_idx:
+            if row_idx is None:
+                return None
+            task.status, task.closed_at = "closed", now_str()
+            await self._update_row(row_idx, _task_to_row(task))
+            return task

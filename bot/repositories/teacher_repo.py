@@ -59,11 +59,11 @@ class TeacherRepository(BaseRepository):
         )
 
     async def delete(self, teacher_id: str) -> bool:
-        row_idx = await self._find_row_index("teacher_id", teacher_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(teacher_id=teacher_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
 
     async def update_rates(
         self,
@@ -72,12 +72,10 @@ class TeacherRepository(BaseRepository):
         rate_for_teacher: int,
         rate_for_student: int,
     ) -> bool:
-        records = await self._all_records()
-        for i, row in enumerate(records):
-            if str(row.get("teacher_id")) == teacher_id:
-                row_idx = i + 2
-                await self._update_cell(row_idx, 4, rate_group)
-                await self._update_cell(row_idx, 5, rate_for_teacher)
-                await self._update_cell(row_idx, 6, rate_for_student)
-                return True
-        return False
+        async with self._locked_row(teacher_id=teacher_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 4, rate_group)
+            await self._update_cell(row_idx, 5, rate_for_teacher)
+            await self._update_cell(row_idx, 6, rate_for_student)
+            return True

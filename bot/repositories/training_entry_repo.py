@@ -90,18 +90,18 @@ class TrainingEntryRepository(BaseRepository):
         entry = await self.get_by_id(entry_id)
         if entry is None:
             return None
-        row_idx = await self._find_row_index("entry_id", entry_id)
-        if row_idx is None:
-            return None
-        entry.grade, entry.grade_comment = grade, grade_comment
-        entry.graded_by, entry.graded_at = graded_by, now_str()
-        await self._update_row(row_idx, _entry_to_row(entry))
-        logger.info("Оценка %s: %d (%s)", entry_id, grade, graded_by)
-        return entry
+        async with self._locked_row(entry_id=entry_id) as row_idx:
+            if row_idx is None:
+                return None
+            entry.grade, entry.grade_comment = grade, grade_comment
+            entry.graded_by, entry.graded_at = graded_by, now_str()
+            await self._update_row(row_idx, _entry_to_row(entry))
+            logger.info("Оценка %s: %d (%s)", entry_id, grade, graded_by)
+            return entry
 
     async def delete(self, entry_id: str) -> bool:
-        row_idx = await self._find_row_index("entry_id", entry_id)
-        if row_idx is None:
-            return False
-        await self._delete_row(row_idx)
-        return True
+        async with self._locked_row(entry_id=entry_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True

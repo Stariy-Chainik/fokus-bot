@@ -55,8 +55,8 @@ class SalaryOverrideRepository(BaseRepository):
         return o
 
     async def delete(self, override_id: str) -> bool:
-        idx = await self._find_row_index("override_id", override_id)
-        if idx is None:
-            return False
-        await self._delete_row(idx)
-        return True
+        async with self._locked_row(override_id=override_id) as idx:
+            if idx is None:
+                return False
+            await self._delete_row(idx)
+            return True
