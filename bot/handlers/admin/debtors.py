@@ -16,6 +16,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.repositories import StudentRepository
 from bot.services import PaymentService
+from bot.services.payment_service import DebtorRow, build_debtor_rows
 from bot.services.parent_notifier import resolve_notifier
 from bot.utils.dates import display_period
 from bot.keyboards.common import nav_row
@@ -38,48 +39,25 @@ def _current_period() -> str:
 
 async def _collect_debtors(
     payment_service: PaymentService, student_repo: StudentRepository,
-) -> list[dict]:
-    """Список должников, отсортированный по убыванию долга.
-
-    Элемент: {student, periods: {period → ₽}, total, closed_total, has_parent}.
-    closed_total — долг только за закрытые (прошедшие) месяцы.
-    Учёт ведётся с DEBTORS_SINCE_PERIOD (если задан) — ранние месяцы не долг.
-    """
+) -> list[DebtorRow]:
+    """Должники по убыванию долга; учёт с DEBTORS_SINCE_PERIOD (если задан)."""
     debt_map = await payment_service.compute_debt_map(
         since_period=settings.debtors_since_period or None,
     )
     if not debt_map:
         return []
     students = {s.student_id: s for s in await student_repo.get_all()}
-    current = _current_period()
-
-    debtors: list[dict] = []
-    for sid, periods in debt_map.items():
-        student = students.get(sid)
-        if student is None:
-            logger.warning("Должник %s не найден в students — пропускаем", sid)
-            continue
-        total = sum(periods.values())
-        closed_total = sum(amt for p, amt in periods.items() if p < current)
-        debtors.append({
-            "student": student,
-            "periods": dict(sorted(periods.items())),
-            "total": total,
-            "closed_total": closed_total,
-            "has_parent": bool(student.parent_addrs),
-        })
-    debtors.sort(key=lambda d: d["total"], reverse=True)
-    return debtors
+    return build_debtor_rows(debt_map, students, _current_period())
 
 
-def _format_line(idx: int, d: dict, current: str) -> str:
+def _format_line(idx: int, d: DebtorRow, current: str) -> str:
     parts = []
-    for period, amt in d["periods"].items():
+    for period, amt in d.periods.items():
         mark = "*" if period == current else ""
         parts.append(f"{display_period(period)}{mark}: {amt}")
     detail = "; ".join(parts)
-    no_bot = "" if d["has_parent"] else " 🔕"
-    return f"{idx}. <b>{d['student'].name}</b> — {d['total']} ₽{no_bot}\n   {detail}"
+    no_bot = "" if d.has_parent else " 🔕"
+    return f"{idx}. <b>{d.student.name}</b> — {d.total} ₽{no_bot}\n   {detail}"
 
 
 def _kb_debtors(pg: Page, can_remind: bool) -> InlineKeyboardMarkup:
@@ -112,9 +90,9 @@ async def _render_debtors(
 
     pg = paginate(debtors, page, DEBTORS_PAGE_SIZE, clamp=True)
 
-    grand_total = sum(d["total"] for d in debtors)
-    closed_grand = sum(d["closed_total"] for d in debtors)
-    remind_targets = sum(1 for d in debtors if d["closed_total"] > 0 and d["has_parent"])
+    grand_total = sum(d.total for d in debtors)
+    closed_grand = sum(d.closed_total for d in debtors)
+    remind_targets = sum(1 for d in debtors if d.closed_total > 0 and d.has_parent)
 
     since = settings.debtors_since_period
     lines = [
@@ -162,12 +140,12 @@ async def cb_debtors_remind_confirm(
     payment_service: PaymentService, student_repo: StudentRepository,
 ) -> None:
     debtors = await _collect_debtors(payment_service, student_repo)
-    targets = [d for d in debtors if d["closed_total"] > 0 and d["has_parent"]]
-    skipped = sum(1 for d in debtors if d["closed_total"] > 0 and not d["has_parent"])
+    targets = [d for d in debtors if d.closed_total > 0 and d.has_parent]
+    skipped = sum(1 for d in debtors if d.closed_total > 0 and not d.has_parent)
     if not targets:
         await callback.answer("Некому напоминать: нет должников с доступом к боту", show_alert=True)
         return
-    total = sum(d["closed_total"] for d in targets)
+    total = sum(d.closed_total for d in targets)
     text = (
         "📤 <b>Напомнить всем должникам?</b>\n\n"
         f"Родителям будет отправлено напоминание о долге за <b>закрытые месяцы</b>.\n\n"
@@ -194,7 +172,7 @@ async def cb_debtors_remind_go(
     _reminding.add(lock_key)
     try:
         debtors = await _collect_debtors(payment_service, student_repo)
-        targets = [d for d in debtors if d["closed_total"] > 0 and d["has_parent"]]
+        targets = [d for d in debtors if d.closed_total > 0 and d.has_parent]
         current = _current_period()
 
         sent_parents = 0
@@ -202,17 +180,17 @@ async def cb_debtors_remind_go(
         for d in targets:
             period_lines = [
                 f"  • {display_period(p)}: {amt} ₽"
-                for p, amt in d["periods"].items() if p < current
+                for p, amt in d.periods.items() if p < current
             ]
             text = (
                 "🔔 <b>Напоминание об оплате</b>\n\n"
-                f"Ученик: <b>{d['student'].name}</b>\n"
-                f"Задолженность: <b>{d['closed_total']} ₽</b>\n"
+                f"Ученик: <b>{d.student.name}</b>\n"
+                f"Задолженность: <b>{d.closed_total} ₽</b>\n"
                 + "\n".join(period_lines)
                 + "\n\nДетали и оплата — в разделе «💳 Мои счета»."
             )
             delivered = await resolve_notifier(callback.bot).send_many(
-                d["student"].parent_addrs, text,
+                d.student.parent_addrs, text,
             ) > 0
             if delivered:
                 sent_parents += 1

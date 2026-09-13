@@ -177,3 +177,21 @@ def test_since_period_empty_means_all_time():
         [_teacher()], [],
     )
     assert _run(svc.compute_debt_map(since_period=None)) == {"STU-A": {"2026-05": 1000}}
+
+
+def test_build_debtor_rows_sorts_and_skips_unknown_students(caplog):
+    from bot.models import Student
+    from bot.services.payment_service import build_debtor_rows
+    students = {
+        "STU-1": Student("STU-1", "Иванов", parent_tg_ids=[100]),
+        "STU-2": Student("STU-2", "Петров"),
+    }
+    debt_map = {"STU-2": {"2026-09": 800, "2026-07": 7000}, "STU-1": {"2026-09": 2667}, "STU-404": {"2026-08": 1}}
+    with caplog.at_level("WARNING"):
+        rows = build_debtor_rows(debt_map, students, "2026-09")
+    assert [(r.student.student_id, r.total, r.closed_total, r.has_parent, list(r.periods)) for r in rows] == [
+        ("STU-2", 7800, 7000, False, ["2026-07", "2026-09"]),
+        ("STU-1", 2667, 0, True, ["2026-09"]),
+    ]
+    assert "STU-404" in caplog.text
+    assert build_debtor_rows({}, students, "2026-09") == []

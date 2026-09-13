@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from bot.models import StudentPeriodPayment, Student, Teacher
@@ -43,6 +44,37 @@ def subscription_billable_months(lesson_months: set, until: str) -> set:
         if month > 12:
             year, month = year + 1, 1
     return out
+
+
+@dataclass
+class DebtorRow:
+    """Строка экрана «Должники»: долг ученика по месяцам (см. PaymentService.compute_debt_map)."""
+    student: Student
+    periods: dict[str, int]   # период → ₽, по возрастанию
+    total: int
+    closed_total: int         # только закрытые (прошедшие) месяцы — идёт в напоминание
+    has_parent: bool          # у родителя есть адрес в Telegram или MAX
+
+
+def build_debtor_rows(
+    debt_map: dict[str, dict[str, int]], students_by_id: dict[str, Student], current_period: str,
+) -> list[DebtorRow]:
+    """Карта долгов → строки по убыванию долга; ученики, которых нет в справочнике, пропускаются."""
+    rows: list[DebtorRow] = []
+    for sid, periods in debt_map.items():
+        student = students_by_id.get(sid)
+        if student is None:
+            logger.warning("Должник %s не найден в students — пропускаем", sid)
+            continue
+        rows.append(DebtorRow(
+            student=student,
+            periods=dict(sorted(periods.items())),
+            total=sum(periods.values()),
+            closed_total=sum(amt for p, amt in periods.items() if p < current_period),
+            has_parent=bool(student.parent_addrs),
+        ))
+    rows.sort(key=lambda d: d.total, reverse=True)
+    return rows
 
 
 class PaymentService:
