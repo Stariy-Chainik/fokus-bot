@@ -17,6 +17,17 @@ from bot.handlers.access import is_admin as _is_admin
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 
+from bot.utils.callbacks import (
+    DoConfirmPaymentCb,
+    PayConfirmBranchCb,
+    PayConfirmGroupCb,
+    PayConfirmPeriodCb,
+    PayConfirmStudentCb,
+    PayInvoiceCb,
+    PaySelectApplyCb,
+    PaySelectLessonToggleCb,
+    PaySelectLessonsCb,
+)
 from ._base import (
     router, _confirming_in_progress,
 )
@@ -50,7 +61,7 @@ async def cb_confirm_payment_choose_branch(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    period = callback.data.split(":", 1)[1]
+    period = PayConfirmPeriodCb.unpack(callback.data).period
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     students = await student_repo.get_all()
     sg_map = await student_group_repo.get_map_by_student()
@@ -87,7 +98,8 @@ async def cb_confirm_payment_choose_group(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, period, branch_id = callback.data.split(":", 2)
+    cb = PayConfirmBranchCb.unpack(callback.data)
+    period, branch_id = cb.period, cb.branch_id
 
     if branch_id == "none":
         sg_map = await student_group_repo.get_map_by_student()
@@ -141,7 +153,8 @@ async def cb_confirm_payment_choose_student(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, period, group_id = callback.data.split(":", 2)
+    cb = PayConfirmGroupCb.unpack(callback.data)
+    period, group_id = cb.period, cb.group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
@@ -180,7 +193,8 @@ async def cb_pay_pick_invoice(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, period_month, group_id, student_id = callback.data.split(":", 3)
+    cb = PayConfirmStudentCb.unpack(callback.data)
+    period_month, group_id, student_id = cb.period_month, cb.group_id, cb.student_id
     back_cb = (
         f"pcpb:{period_month}:none" if group_id == "none"
         else f"pcpg:{period_month}:{group_id}"
@@ -240,10 +254,8 @@ async def cb_pay_confirm(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    parts = callback.data.split(":")
-    # pay_invoice:{payment_id}[:{group_id}]
-    payment_id = parts[1]
-    group_id = parts[2] if len(parts) > 2 else "none"
+    cb = PayInvoiceCb.unpack(callback.data)  # pay_invoice:{payment_id}[:{group_id}]
+    payment_id, group_id = cb.payment_id, cb.group_id
     payment = next(
         (p for p in await payment_repo.get_all() if p.payment_id == payment_id), None,
     )
@@ -281,9 +293,8 @@ async def cb_do_confirm_payment(
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    parts = callback.data.split(":")
-    payment_id = parts[1]
-    group_id = parts[2] if len(parts) > 2 else "none"
+    cb = DoConfirmPaymentCb.unpack(callback.data)
+    payment_id, group_id = cb.payment_id, cb.group_id
     payment = next(
         (p for p in await payment_repo.get_all() if p.payment_id == payment_id), None,
     )
@@ -368,7 +379,8 @@ async def cb_pay_select_lessons(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, payment_id, group_id = callback.data.split(":", 2)
+    cb = PaySelectLessonsCb.unpack(callback.data)
+    payment_id, group_id = cb.payment_id, cb.group_id
     payment = await payment_repo.get_by_id(payment_id)
     if payment is None:
         await callback.answer("Счёт не найден", show_alert=True)
@@ -393,7 +405,7 @@ async def cb_pay_select_toggle(
     if not data.get("psel_student"):
         await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
         return
-    idx = int(callback.data.split(":", 1)[1])
+    idx = PaySelectLessonToggleCb.unpack(callback.data).idx
     student = await student_repo.get_by_id(data["psel_student"])
     marks, _ = await payment_service.teacher_lesson_marks(
         student, data["psel_period"], data["psel_teacher"],
@@ -457,7 +469,7 @@ async def cb_pay_select_apply(
     if not data.get("psel_student"):
         await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
         return
-    amount = int(callback.data.split(":", 1)[1])
+    amount = PaySelectApplyCb.unpack(callback.data).amount
     student_id, period = data["psel_student"], data["psel_period"]
     teacher_id, group_id = data["psel_teacher"], data["psel_group"]
     guard_key = f"{student_id}:{period}:{teacher_id}"
