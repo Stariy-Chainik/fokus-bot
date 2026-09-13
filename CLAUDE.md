@@ -255,7 +255,7 @@ Human-readable sequential strings; never autoincrement integers. See `bot/utils/
 (`test_billing_service`, `test_payment_ledger`, `test_debt_map`, `test_subscription_billing`, `test_profit_*`);
 инварианты: `test_callback_wiring` (у кнопки есть хендлер), `test_callbacks` (roundtrip строк), `test_guards_static`
 (роль у каждого admin/teacher callback), `test_di_wiring` (снимок DI). Открытые дефекты зафиксированы как текущее
-поведение в `tests/test_known_bugs.py` (B2, B8) — при исправлении тест переписывается осознанно.
+поведение в `tests/test_known_bugs.py` (B2) — при исправлении тест переписывается осознанно.
 
 ## Billing formulas
 

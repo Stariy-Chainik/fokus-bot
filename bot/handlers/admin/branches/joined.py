@@ -15,6 +15,8 @@ from bot.repositories import GroupRepository, StudentRepository, StudentGroupRep
 from bot.utils.dates import display_period, last_periods
 from bot.handlers.filters import AdminOnly
 
+from bot.services.rosters import BY_NAME_CI, group_members
+
 from ._base import router
 
 logger = logging.getLogger(__name__)
@@ -39,9 +41,8 @@ async def _render_joined(
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
     group = await group_repo.get_by_id(group_id)
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted((s for s in await student_repo.get_all() if s.student_id in member_ids),
-                      key=lambda s: s.name.lower())
+    membership = await student_group_repo.get_membership_map()
+    students = await group_members(student_repo, student_group_repo, group_id, key=BY_NAME_CI)
     rows = [[InlineKeyboardButton(
         text=f"{s.name} — {_label(membership.get((s.student_id, group_id)))}",
         callback_data=f"gjset:{group_id}:{s.student_id}",

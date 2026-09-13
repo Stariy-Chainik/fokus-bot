@@ -61,7 +61,7 @@
 - **Почему:** цена гостя считается в хендлере отдельной формулой без тарифа.
 - **Репро:** детсадовская группа ЮБ/БП, ученик SHORT → «➕ добавить» в занятие → в `attendees` 850 вместо цены short.
 
-## B8. Экран «📅 Месяцы членства» падает с NameError — 🔴 ОТКРЫТ (найден линтером 2026-09-13)
+## B8. Экран «📅 Месяцы членства» падает с NameError — ✅ ИСПРАВЛЕН (2026-09-13)
 - **Где:** [admin/branches/joined.py](../bot/handlers/admin/branches/joined.py) — `_render_joined`, переменная `membership`.
 - **Симптом:** нажатие «📅 Месяцы членства» в карточке абонементной группы (и подтверждение `gjdo:`/`gldo:`)
   завершается `NameError: name 'membership' is not defined` — экран не открывается.
@@ -69,4 +69,5 @@
   `membership = await student_group_repo.get_membership_map()`.
 - **Зафиксировано:** `tests/test_known_bugs.py::test_b8_joined_screen_raises_name_error`; ruff (F821) и mypy
   показывают эту находку как единственную оставшуюся.
-- **Исправление:** одна строка перед сборкой кнопок; вносится отдельным коммитом после согласования.
+- **Исправлено:** `membership = await student_group_repo.get_membership_map()` перед сборкой кнопок;
+  тест переписан на golden-снимок экрана (`tests/golden/joined_screen.txt`).
