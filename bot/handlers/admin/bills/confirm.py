@@ -28,6 +28,7 @@ from bot.utils.callbacks import (
     PaySelectLessonToggleCb,
     PaySelectLessonsCb,
 )
+from bot.services.rosters import group_members
 from ._base import (
     router, _confirming_in_progress,
 )
@@ -159,11 +160,7 @@ async def cb_confirm_payment_choose_student(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    students = await group_members(student_repo, student_group_repo, group_id)
     if not students:
         await callback.message.edit_text(
             "В группе нет учеников.",

@@ -9,6 +9,7 @@ from config.settings import settings
 from bot.screens import cb
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_menu import menu_rows
+from bot.services.rosters import BY_NAME_CI, group_members
 from bot.services.parent_notifier import resolve_notifier, fmt_addr, max_addr
 from bot.utils.group_links import parse_start_payload
 from bot.keyboards.client import kb_admin_approve_child
@@ -36,8 +37,7 @@ async def _group_screen(group_id: str, student_repo, student_group_repo, group_r
     if group is None:
         return None
     branch = await branch_repo.get_by_id(group.branch_id)
-    ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted((s for s in await student_repo.get_all() if s.student_id in ids), key=lambda s: s.name.lower())
+    students = await group_members(student_repo, student_group_repo, group_id, key=BY_NAME_CI)
     rows = [[cb(s.name, f"glink:{group_id}:{s.student_id}")] for s in students]
     rows.append([cb("❌ Моего ребёнка нет в списке", f"glink_none:{group_id}")])
     branch_line = f"\nФилиал: {branch.name}" if branch else ""

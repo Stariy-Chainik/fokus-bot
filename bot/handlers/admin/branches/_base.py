@@ -13,6 +13,7 @@ from bot.repositories import (
 from bot.keyboards.admin import kb_back
 from bot.handlers.common import show_card
 
+from bot.services.rosters import group_members
 logger = logging.getLogger(__name__)
 router = Router(name="admin_branches")
 
@@ -65,9 +66,7 @@ async def _render_group_card(
     teachers_map = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
     teachers_list = ", ".join(teachers_map.get(tid, tid) for tid in teacher_ids) or "—"
 
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
-    students.sort(key=lambda s: s.name)
+    students = await group_members(student_repo, student_group_repo, group_id)
 
     text = (
         f"{'📦' if group.archived else '💃'} <b>{group.name}</b>\n"

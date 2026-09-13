@@ -13,6 +13,7 @@ from bot.repositories import (
     StudentRepository, TeacherRepository, GroupRepository,
     BranchRepository, StudentGroupRepository, ClientRepository,
 )
+from .rosters import group_members
 from .visibility import TeacherVisibilityService
 
 
@@ -145,12 +146,8 @@ class StudentService:
 
     async def soloists_in_group(self, group_id: str) -> list[Student]:
         """Солисты группы (члены без партнёра), по имени."""
-        member_ids = set(await self._student_group_repo.get_students_for_group(group_id))
-        return sorted(
-            [s for s in await self._student_repo.get_all()
-             if s.student_id in member_ids and not s.partner_id],
-            key=lambda s: s.name,
-        )
+        members = await group_members(self._student_repo, self._student_group_repo, group_id)
+        return [s for s in members if not s.partner_id]
 
     async def partner_candidates(self, student: Student) -> list[tuple[Student, bool]] | None:
         """Кандидаты в партнёры: ученики хотя бы с одной общей группой.

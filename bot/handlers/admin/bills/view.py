@@ -15,6 +15,7 @@ from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.services.rosters import group_members
 from ._base import (
     router, _group_sending,
 )
@@ -145,11 +146,7 @@ async def cb_bills_choose_student(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    students = await group_members(student_repo, student_group_repo, group_id)
     if not students:
         await callback.message.edit_text(
             "В группе нет учеников.",
@@ -198,8 +195,7 @@ async def cb_bill_group_send(
         return
     _group_sending.add(lock_key)
     try:
-        member_ids = set(await student_group_repo.get_students_for_group(gid))
-        students = [s for s in await student_repo.get_all() if s.student_id in member_ids]
+        students = await group_members(student_repo, student_group_repo, gid, key=None)
 
         sent_students = 0
         no_parent_students = 0

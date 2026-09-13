@@ -24,6 +24,7 @@ from bot.keyboards.teacher import (
 from bot.keyboards.admin import kb_admin_menu
 from bot.utils.dates import format_date_display
 
+from bot.services.rosters import group_members
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_record_lesson")
 
@@ -53,10 +54,7 @@ async def _all_students_in_group(
     group_id: str, student_repo, student_group_repo: StudentGroupRepository,
 ):
     """Все ученики группы (без фильтра по педагогу) — для отметки присутствующих."""
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    members = [s for s in await student_repo.get_all() if s.student_id in member_ids]
-    members.sort(key=lambda s: s.name)
-    return members
+    return await group_members(student_repo, student_group_repo, group_id)
 
 
 def _date_picker_kb() -> InlineKeyboardMarkup:

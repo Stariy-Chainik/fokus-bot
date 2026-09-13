@@ -13,6 +13,7 @@ from bot.repositories import (
 )
 from bot.handlers.common import show_card
 
+from bot.services.rosters import group_members
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_groups")
 
@@ -58,11 +59,7 @@ async def _render_t_group_card(
         return
     branch = await branch_repo.get_by_id(group.branch_id)
     branch_name = branch.name if branch else "—"
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    members = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    members = await group_members(student_repo, student_group_repo, group_id)
     text = (
         f"<b>🏢 {branch_name} / {group.name}</b>\n\n"
         f"Учеников: {len(members)}"

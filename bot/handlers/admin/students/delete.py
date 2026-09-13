@@ -18,6 +18,7 @@ from bot.keyboards.admin import (
 )
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.services.rosters import group_members
 from ._base import router
 
 logger = logging.getLogger(__name__)
@@ -94,11 +95,7 @@ async def cb_delete_student_group(
     group_name = group.name if group else group_id
     back_cb = f"del_st_brn:{group.branch_id}" if group else "students:delete"
 
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    grp_students = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    grp_students = await group_members(student_repo, student_group_repo, group_id)
     if not grp_students:
         await callback.message.edit_text(
             f"В группе «{group_name}» нет учеников.",

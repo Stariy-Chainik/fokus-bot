@@ -17,6 +17,7 @@ from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.services.rosters import group_members
 from ._base import router
 from .billing_shared import (
     _billing_view, _override_periods, _parse_positive_int, _parse_non_negative_int,
@@ -173,11 +174,7 @@ async def cb_subovr_pick_target(
         await callback.answer()
         return
 
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    students = await group_members(student_repo, student_group_repo, group_id)
     if not students:
         await callback.answer("В группе нет учеников", show_alert=True)
         return

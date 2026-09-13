@@ -17,6 +17,7 @@ from bot.states import TeacherGroupAddStudentStates
 from bot.handlers.access import is_teacher as _is_teacher
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
+from bot.services.rosters import group_members
 from ._base import router, _owns_group, _normalize, _render_t_group_card
 
 logger = logging.getLogger(__name__)
@@ -269,11 +270,7 @@ async def cb_t_grp_rm(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    members = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    members = await group_members(student_repo, student_group_repo, group_id)
     if not members:
         await callback.answer("В группе нет учеников", show_alert=True)
         return

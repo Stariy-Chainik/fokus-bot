@@ -18,6 +18,7 @@ from bot.handlers.access import is_admin as _is_admin
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
 
+from bot.services.rosters import group_members
 from ._base import router
 from ._base import _render_group_card
 
@@ -204,11 +205,7 @@ async def cb_group_rm_student(
     if not group:
         await callback.answer("Группа не найдена", show_alert=True)
         return
-    member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    members = sorted(
-        [s for s in await student_repo.get_all() if s.student_id in member_ids],
-        key=lambda s: s.name,
-    )
+    members = await group_members(student_repo, student_group_repo, group_id)
     if not members:
         await callback.answer("В группе нет учеников", show_alert=True)
         return

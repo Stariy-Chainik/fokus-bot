@@ -22,6 +22,7 @@ from bot.utils.dates import month_name_ru
 from bot.handlers.access import is_admin as _is_admin
 from bot.services.payment_methods import label as payment_method_label
 
+from bot.services.rosters import BY_NAME_CI, group_members
 logger = logging.getLogger(__name__)
 router = Router(name="admin_payment_history")
 
@@ -104,7 +105,7 @@ async def cb_payhist_group(
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     member_ids = set(await student_group_repo.get_students_for_group(group_id))
-    students = sorted((s for s in await student_repo.get_all() if s.student_id in member_ids), key=lambda s: s.name.lower())
+    students = await group_members(student_repo, student_group_repo, group_id, key=BY_NAME_CI)
     paid_by_student: dict[str, int] = {}
     pending_by_student: dict[str, int] = {}
     for p in await payment_repo.get_all():
