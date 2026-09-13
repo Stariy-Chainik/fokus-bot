@@ -27,3 +27,9 @@ def test_month_name_ru_is_1_based():
     assert month_name_ru(1) == "Январь"
     assert month_name_ru(4) == "Апрель"
     assert month_name_ru(12) == "Декабрь"
+
+
+def test_period_label_words():
+    from bot.utils.dates import period_label
+    assert period_label("2026-09") == "Сентябрь 2026"
+    assert period_label("2025-01") == "Январь 2025"

@@ -6,20 +6,16 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from io import BytesIO
 
-from bot.utils.dates import display_period, last_periods, month_name_ru
+from bot.utils.dates import display_period, last_periods, period_label
 from bot.services.parent_notifier import fmt_addr
-from bot.services.payment_ledger import ledger_totals, lesson_paid_marks
+from bot.screens.parent_bills import BillDetail, render_bill_detail  # noqa: F401 — BillDetail реэкспорт
+from bot.services.payment_ledger import ledger_totals
 from bot.services.payment_methods import callback_code
 
 logger = logging.getLogger(__name__)
-
-
-def period_label(period_month: str) -> str:
-    year, month = period_month.split("-")
-    return f"{month_name_ru(int(month))} {year}"
 
 
 METHOD_LABELS = {
@@ -72,82 +68,10 @@ async def bills_periods(students: list, payment_service, show_older: bool = Fals
 
 # ─── Детализация счёта ───────────────────────────────────────────────────────
 
-@dataclass
-class BillDetail:
-    lines: list = field(default_factory=list)
-    grand_total: int = 0
-    paid_total: int = 0
-    unpaid_total: int = 0
-    overpaid_total: int = 0
-    payment_ids: list = field(default_factory=list)
-
-    @property
-    def can_pay(self) -> bool:
-        return self.unpaid_total > 0
-
-
 async def bill_detail(students: list, period_month: str, payment_service) -> BillDetail:
-    from bot.utils.dates import format_date_display
-    d = BillDetail()
-    title_who = f" — {students[0].name}" if len(students) == 1 else " — все дети"
-    d.lines.append(f"<b>📋 {period_label(period_month)}{title_who}</b>\n")
-    for student in students:
-        ledgers = await payment_service.ledger_for(student, period_month)
-        if not ledgers:
-            continue
-        if len(students) > 1:
-            d.lines.append(f"<b>{student.name}:</b>")
-        for _teacher_id, ledger in ledgers.items():
-            if ledger.pending is not None:
-                d.payment_ids.append(ledger.pending.payment_id)
-            if ledger.subscription:
-                status_mark = "✅" if ledger.fully_paid else "⬜"
-                d.lines.append(f"<b>💳 {ledger.name} {status_mark}</b>")
-                d.lines.append("  фиксированная сумма за месяц")
-            else:
-                d.lines.append(f"<b>Педагог: {ledger.name}</b>")
-                items = sorted(ledger.items, key=lambda b: (b.date, b.lesson_id))
-                marks = lesson_paid_marks([item.amount for item in items], ledger.paid)
-                paid_items = [item for item, paid in zip(items, marks, strict=False) if paid]
-                unpaid_items = [item for item, paid in zip(items, marks, strict=False) if not paid]
-
-                # Неоплаченные занятия сразу видны сверху; оплаченные собраны ниже.
-                # Статус бинарный: без отдельного статуса «частично оплачено».
-                if unpaid_items:
-                    d.lines.append("  <b>⬜ К оплате:</b>")
-                    for item in unpaid_items:
-                        d.lines.append(
-                            f"    ⬜ {format_date_display(item.date)}  {item.duration_min} мин"
-                            f"  — {item.amount} руб."
-                        )
-                if paid_items:
-                    d.lines.append("  <b>✅ Оплачено:</b>")
-                    for item in paid_items:
-                        d.lines.append(
-                            f"    ✅ {format_date_display(item.date)}  {item.duration_min} мин"
-                            f"  — {item.amount} руб."
-                        )
-            if ledger.fully_paid:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено</i>\n")
-            elif ledger.paid:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено {ledger.paid}, к доплате {ledger.remainder}</i>\n")
-            else:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб.</i>\n")
-            if ledger.overpaid:
-                d.lines.append(f"  <i>переплата {ledger.overpaid} руб. — учтём в следующем месяце</i>\n")
-            d.grand_total += ledger.accrued
-            d.paid_total += ledger.paid
-            d.unpaid_total += ledger.remainder
-            d.overpaid_total += ledger.overpaid
-    if d.grand_total == 0:
-        d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
-    elif d.unpaid_total > 0:
-        if d.paid_total:
-            d.lines.append(f"Оплачено: {d.paid_total} руб.")
-        d.lines.append(f"<b>К оплате: {d.unpaid_total} руб.</b>")
-    else:
-        d.lines.append("✅ Период полностью оплачен")
-    return d
+    """Счета по педагогам за месяц (с синхронизацией остатков) → экран из bot/screens."""
+    ledgers_by_student = [(student, await payment_service.ledger_for(student, period_month)) for student in students]
+    return render_bill_detail(period_month, ledgers_by_student)
 
 
 # ─── Оплата ──────────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@ from bot.repositories import (
 )
 from bot.states import PaymentHistoryStates
 from bot.keyboards.admin import kb_back
-from bot.utils.dates import month_name_ru
+from bot.utils.dates import period_label as _period_label
 from bot.handlers.access import is_admin as _is_admin
 from bot.handlers.filters import AdminOnly
 from bot.services.payment_methods import label as payment_method_label
@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_payment_history")
 
 _PROMPT = "📜 <b>История оплат</b>\n\nВведите фамилию ученика:"
-
-
-def _period_label(period_month: str) -> str:
-    year, month = period_month.split("-")
-    return f"{month_name_ru(int(month))} {year}"
 
 
 def _method(p) -> str:

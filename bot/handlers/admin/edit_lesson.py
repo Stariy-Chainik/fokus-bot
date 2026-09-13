@@ -12,7 +12,7 @@ from bot.repositories import LessonRepository, TeacherRepository, TeacherGroupRe
 from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.teacher import kb_lesson_list
 from bot.keyboards.calendar import kb_calendar
-from bot.utils.dates import format_date_display, month_name_ru
+from bot.utils.dates import format_date_display, period_label as _month_label
 from bot.utils.constants import PAGE_SIZE
 from bot.handlers.filters import AdminOnly
 
@@ -33,11 +33,6 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_edit_lesson")
 
 
-
-
-def _month_label(ym: str) -> str:
-    y, m = ym.split("-")
-    return f"{month_name_ru(int(m))} {y}"
 
 
 def _shift_month(y: int, m: int, delta: int) -> tuple[int, int]:

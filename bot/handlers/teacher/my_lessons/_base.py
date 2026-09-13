@@ -12,7 +12,7 @@ from bot.handlers.access import (  # noqa: F401 — реэкспорт для п
 )
 from bot.models import User
 from bot.repositories import TeacherPeriodSubmissionRepository
-from bot.utils.dates import month_name_ru
+from bot.utils.dates import period_label as _month_label  # noqa: F401 — реэкспорт для под-модулей пакета
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
@@ -24,11 +24,6 @@ def _can_view_lesson(user: User | None, lesson) -> bool:
     if user.is_admin:
         return True
     return user.teacher_id is not None and lesson.teacher_id == user.teacher_id
-
-
-def _month_label(ym: str) -> str:
-    year, month = ym.split("-")
-    return f"{month_name_ru(int(month))} {year}"
 
 
 def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:

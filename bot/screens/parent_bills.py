@@ -5,10 +5,91 @@
 """
 from __future__ import annotations
 
-from bot.services.parent_views import period_label
+from dataclasses import dataclass, field
+
+from bot.services.payment_ledger import lesson_paid_marks
+from bot.utils.dates import format_date_display, period_label
 from .types import cb, url
 
 HOME = "go:home"
+
+
+@dataclass
+class BillDetail:
+    lines: list = field(default_factory=list)
+    grand_total: int = 0
+    paid_total: int = 0
+    unpaid_total: int = 0
+    overpaid_total: int = 0
+    payment_ids: list = field(default_factory=list)
+
+    @property
+    def can_pay(self) -> bool:
+        return self.unpaid_total > 0
+
+
+def render_bill_detail(period_month: str, ledgers_by_student: list) -> BillDetail:
+    """ledgers_by_student — [(student, {teacher_id: TeacherLedger})]; чистая сборка текста счёта."""
+    students = [student for student, _ in ledgers_by_student]
+    d = BillDetail()
+    title_who = f" — {students[0].name}" if len(students) == 1 else " — все дети"
+    d.lines.append(f"<b>📋 {period_label(period_month)}{title_who}</b>\n")
+    for student, ledgers in ledgers_by_student:
+        if not ledgers:
+            continue
+        if len(students) > 1:
+            d.lines.append(f"<b>{student.name}:</b>")
+        for _teacher_id, ledger in ledgers.items():
+            if ledger.pending is not None:
+                d.payment_ids.append(ledger.pending.payment_id)
+            if ledger.subscription:
+                status_mark = "✅" if ledger.fully_paid else "⬜"
+                d.lines.append(f"<b>💳 {ledger.name} {status_mark}</b>")
+                d.lines.append("  фиксированная сумма за месяц")
+            else:
+                d.lines.append(f"<b>Педагог: {ledger.name}</b>")
+                items = sorted(ledger.items, key=lambda b: (b.date, b.lesson_id))
+                marks = lesson_paid_marks([item.amount for item in items], ledger.paid)
+                paid_items = [item for item, paid in zip(items, marks, strict=False) if paid]
+                unpaid_items = [item for item, paid in zip(items, marks, strict=False) if not paid]
+
+                # Неоплаченные занятия сразу видны сверху; оплаченные собраны ниже.
+                # Статус бинарный: без отдельного статуса «частично оплачено».
+                if unpaid_items:
+                    d.lines.append("  <b>⬜ К оплате:</b>")
+                    for item in unpaid_items:
+                        d.lines.append(
+                            f"    ⬜ {format_date_display(item.date)}  {item.duration_min} мин"
+                            f"  — {item.amount} руб."
+                        )
+                if paid_items:
+                    d.lines.append("  <b>✅ Оплачено:</b>")
+                    for item in paid_items:
+                        d.lines.append(
+                            f"    ✅ {format_date_display(item.date)}  {item.duration_min} мин"
+                            f"  — {item.amount} руб."
+                        )
+            if ledger.fully_paid:
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено</i>\n")
+            elif ledger.paid:
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено {ledger.paid}, к доплате {ledger.remainder}</i>\n")
+            else:
+                d.lines.append(f"  <i>Итого: {ledger.accrued} руб.</i>\n")
+            if ledger.overpaid:
+                d.lines.append(f"  <i>переплата {ledger.overpaid} руб. — учтём в следующем месяце</i>\n")
+            d.grand_total += ledger.accrued
+            d.paid_total += ledger.paid
+            d.unpaid_total += ledger.remainder
+            d.overpaid_total += ledger.overpaid
+    if d.grand_total == 0:
+        d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
+    elif d.unpaid_total > 0:
+        if d.paid_total:
+            d.lines.append(f"Оплачено: {d.paid_total} руб.")
+        d.lines.append(f"<b>К оплате: {d.unpaid_total} руб.</b>")
+    else:
+        d.lines.append("✅ Период полностью оплачен")
+    return d
 
 
 def bill_back_rows(student_id: str, period_month: str, home_cb: str = HOME) -> list:

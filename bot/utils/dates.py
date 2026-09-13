@@ -73,3 +73,9 @@ def last_periods(n: int) -> list[str]:
     from datetime import date as _date
     today = _date.today()
     return [(today - relativedelta(months=i)).strftime("%Y-%m") for i in range(n)]
+
+
+def period_label(period_month: str) -> str:
+    """«Сентябрь 2026» — подпись месяца словами (экраны родителя, история оплат, списки занятий)."""
+    year, month = period_month.split("-")
+    return f"{month_name_ru(int(month))} {year}"
