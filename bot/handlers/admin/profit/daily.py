@@ -183,7 +183,8 @@ async def cb_profit_detail(
             f"{format_date_short_with_wd(row.date)}  " if not is_day else ""
         )
         kind = "👥" if row.lesson_type == LessonType.GROUP else "👤"
-        lines.append(f"{date_prefix}{kind} {row.duration_min}мин")
+        rent_mark = "  🏟 аренда" if row.rent else ""
+        lines.append(f"{date_prefix}{kind} {row.duration_min}мин{rent_mark}")
         lines.append(
             f"  {row.income} ₽ − {row.salary} ₽ = <b>{row.profit} ₽</b>"
         )

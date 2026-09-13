@@ -22,6 +22,7 @@ class ProfitLessonRow:
     duration_min: int
     income: int
     salary: int
+    rent: int = 0  # выручка — аренда зала, а не оплата ученика
 
     @property
     def profit(self) -> int:
@@ -36,6 +37,7 @@ class TeacherProfitRow:
     salary: int
     group_lessons: int
     individual_lessons: int
+    rent: int = 0  # часть выручки, полученная как аренда зала
 
     @property
     def profit(self) -> int:
@@ -71,6 +73,10 @@ class ProfitSummary:
     @property
     def subscription_income(self) -> int:
         return sum(row.income for row in self.subscription_rows)
+
+    @property
+    def rent_income(self) -> int:
+        return sum(row.rent for row in self.teacher_rows)
 
     @property
     def manual_income(self) -> int:
@@ -127,6 +133,21 @@ class TeacherProfitDetail:
         return round(self.profit / self.income * 100) if self.income else 0
 
 
+def lesson_rent(lesson: Lesson) -> int:
+    """Аренда зала за индивидуальное занятие педагога с прямой оплатой.
+
+    Родители платят такому педагогу напрямую (DIRECT_PAY_TEACHER_IDS), а он
+    перечисляет школе фиксированную сумму за зал с каждого урока
+    (HALL_RENT_PER_LESSON) — независимо от длительности и числа учеников.
+    """
+    from config.settings import settings
+    if lesson.type != LessonType.INDIVIDUAL:
+        return 0
+    if lesson.teacher_id not in settings.direct_pay_teacher_id_set:
+        return 0
+    return settings.hall_rent_map.get(lesson.teacher_id, 0)
+
+
 def calculate_profit_lesson(
     lesson: Lesson,
     teacher: Teacher,
@@ -135,17 +156,21 @@ def calculate_profit_lesson(
 
     Зарплата экрана «Прибыль» учитывается только у занятия с ненулевой
     клиентской выручкой — это зафиксированное текущее правило экрана.
+    Занятие без выручки от ученика попадает в расчёт, если приносит школе
+    аренду зала (``lesson_rent``).
     """
     income = sum(row.amount for row in build_billing_rows(lesson, teacher))
-    if income == 0:
+    rent = lesson_rent(lesson) if income == 0 else 0
+    if income == 0 and rent == 0:
         return None
     return ProfitLessonRow(
         lesson_id=lesson.lesson_id,
         date=lesson.date,
         lesson_type=lesson.type,
         duration_min=lesson.duration_min,
-        income=income,
+        income=income or rent,
         salary=calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date[:7]),
+        rent=rent,
     )
 
 
@@ -171,6 +196,7 @@ def calculate_teacher_profit(
         salary=sum(row.salary for row in billed_lessons) + extra_salary,
         group_lessons=group_count,
         individual_lessons=len(billed_lessons) - group_count,
+        rent=sum(row.rent for row in billed_lessons),
     )
 
 

@@ -92,6 +92,21 @@ class Settings(BaseSettings):
     def direct_pay_teacher_id_set(self) -> set:
         return {t.strip() for t in self.direct_pay_teacher_ids.replace("|", ",").split(",") if t.strip()}
 
+    # Аренда зала: педагог с прямой оплатой (DIRECT_PAY_TEACHER_IDS) перечисляет
+    # школе фикс. сумму с каждого своего индивидуального занятия — это выручка
+    # школы в «Прибыли». Формат: TCH-0002:500
+    hall_rent_per_lesson: str = Field(default="", alias="HALL_RENT_PER_LESSON")
+
+    @property
+    def hall_rent_map(self) -> dict:
+        out = {}
+        for chunk in self.hall_rent_per_lesson.replace("|", ",").split(","):
+            if ":" in chunk:
+                tid, amount = chunk.split(":", 1)
+                if tid.strip() and amount.strip().isdigit():
+                    out[tid.strip()] = int(amount.strip())
+        return out
+
     # Группы, где зарплата педагога = процент от сбора с учеников за занятие
     # (а не ставка × время). Формат: GRP-0020:50,GRP-0021:40
     revenue_share_groups: str = Field(default="", alias="REVENUE_SHARE_GROUPS")

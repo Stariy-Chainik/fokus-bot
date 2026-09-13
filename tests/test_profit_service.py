@@ -127,3 +127,39 @@ def test_profit_summary_combines_all_income_and_expenses():
     assert summary.total_income == 9900
     assert summary.total_expenses == 3800
     assert summary.profit == 6100
+
+
+def test_hall_rent_counts_direct_pay_individual_lessons(monkeypatch):
+    """Клецова: родители платят ей напрямую, школе идёт аренда зала с урока."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+
+    lessons = [
+        _lesson("LES-000001", "2026-09-01"),                    # 45 мин
+        _lesson("LES-000002", "2026-09-02", duration_min=60),   # 60 мин — та же аренда
+        _lesson(                                                 # группа — считается как обычно
+            "LES-000003", "2026-09-03",
+            type=LessonType.GROUP,
+            student_1_id=None, student_1_name=None,
+            attendees="STU-0001:60:700",
+            group_id="GRP-0001",
+        ),
+    ]
+    row = calculate_teacher_profit(_teacher(), lessons)
+    assert row.individual_lessons == 2
+    assert row.rent == 1000                 # 2 × 500, длительность не влияет
+    assert row.income == 1000 + 700         # аренда + сбор с группы
+    assert row.salary == 500                # только за группу (500 × 45/45)
+
+    detail = build_teacher_profit_detail(_teacher(), lessons, "2026-09")
+    assert [r.rent for r in detail.lessons] == [500, 500, 0]
+
+
+def test_hall_rent_not_applied_without_direct_pay(monkeypatch):
+    """Без DIRECT_PAY аренда не начисляется: занятие оплачивает ученик."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    row = calculate_teacher_profit(_teacher(), [_lesson("LES-000001", "2026-09-01")])
+    assert row.rent == 0
+    assert row.income == 900                # обычный счёт ученику

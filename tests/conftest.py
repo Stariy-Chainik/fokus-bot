@@ -10,6 +10,7 @@ _RESET = {
     "revenue_share_groups": "",
     "salary_duration_groups": "",
     "shift_groups": "",
+    "hall_rent_per_lesson": "",
     "athlete_group_ids": "GRP-0001",
 }
 
