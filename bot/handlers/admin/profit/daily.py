@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.handlers.filters import AdminOnly
 from bot.keyboards.calendar import kb_calendar
 from bot.models import User
 from bot.models.enums import LessonType
@@ -14,21 +15,17 @@ from bot.utils.dates import display_period, format_date_short_with_wd
 
 from ._base import (
     _format_profit,
-    _is_admin,
     _lesson_dates_all,
     _profit_keyboard,
     router,
 )
 
 
-@router.callback_query(F.data == "profit_day_picker")
+@router.callback_query(F.data == "profit_day_picker", AdminOnly())
 async def cb_profit_day_picker(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     today = date.today()
     yesterday = today - timedelta(days=1)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -50,16 +47,13 @@ async def cb_profit_day_picker(
     await callback.answer()
 
 
-@router.callback_query(F.data == "profit_dday_open")
+@router.callback_query(F.data == "profit_dday_open", AdminOnly())
 async def cb_profit_dday_open(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     today = date.today()
     highlights = await _lesson_dates_all(
         lesson_repo,
@@ -80,16 +74,13 @@ async def cb_profit_dday_open(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("profit_dday_nav:"))
+@router.callback_query(F.data.startswith("profit_dday_nav:"), AdminOnly())
 async def cb_profit_dday_nav(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = callback.data.split(":", 1)[1]
     year, month = (int(value) for value in period.split("-"))
     highlights = await _lesson_dates_all(
@@ -110,29 +101,23 @@ async def cb_profit_dday_nav(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("profit_dday_pick:"))
+@router.callback_query(F.data.startswith("profit_dday_pick:"), AdminOnly())
 async def cb_profit_dday_pick(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     profit_service: ProfitService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     date_string = callback.data.split(":", 1)[1]
     await _show_day_profit(callback, date_string, profit_service)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("profit_day_show:"))
+@router.callback_query(F.data.startswith("profit_day_show:"), AdminOnly())
 async def cb_profit_day_show(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     profit_service: ProfitService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     date_string = callback.data.split(":", 1)[1]
     await _show_day_profit(callback, date_string, profit_service)
     await callback.answer()
@@ -155,15 +140,12 @@ async def _show_day_profit(
     )
 
 
-@router.callback_query(F.data.startswith("profit_detail:"))
+@router.callback_query(F.data.startswith("profit_detail:"), AdminOnly())
 async def cb_profit_detail(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     profit_service: ProfitService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, period = callback.data.split(":", 2)
     detail = await profit_service.get_teacher_detail(teacher_id, period)
     if detail is None:

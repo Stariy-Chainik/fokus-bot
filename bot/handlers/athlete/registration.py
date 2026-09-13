@@ -22,7 +22,7 @@ from bot.keyboards.common import kb_welcome_choice
 from bot.keyboards.athlete import kb_athlete_menu, athlete_welcome_text
 from bot.utils.notify import notify
 from bot.services.parent_notifier import resolve_notifier
-from bot.handlers.access import is_admin, is_teacher_or_admin
+from bot.handlers.filters import AdminOnly, TeacherOrAdmin
 from bot.utils.group_links import build_athlete_payload, parse_athlete_payload
 from ._base import router
 
@@ -66,14 +66,11 @@ async def cmd_start_athlete_link(
     )
 
 
-@router.callback_query(F.data.startswith("athreg:link:"))
+@router.callback_query(F.data.startswith("athreg:link:"), TeacherOrAdmin())
 async def cb_athlete_link(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
     """Админ/педагог: показать персональную ссылку спортсмена (из карточки ученика)."""
-    if not is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 2)[2]
     student = await student_repo.get_by_id(student_id)
     if student is None:
@@ -252,13 +249,10 @@ async def cb_reg_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("athreg:unlink:"))
+@router.callback_query(F.data.startswith("athreg:unlink:"), AdminOnly())
 async def cb_reg_unlink(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
-    if not is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, student_id, tg_raw = callback.data.split(":", 3)
     tg_id = int(tg_raw)
     student = await student_repo.get_by_id(student_id)

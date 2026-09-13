@@ -18,7 +18,7 @@ from bot.handlers.common import show_card
 
 
 
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -75,16 +75,13 @@ async def _render_teacher_card(
     await show_card(callback, text, reply_markup=kb_teacher_card(teacher_id))
 
 
-@router.callback_query(F.data.startswith("t_edit_groups:"))
+@router.callback_query(F.data.startswith("t_edit_groups:"), AdminOnly())
 async def cb_t_edit_groups(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
@@ -111,14 +108,11 @@ async def cb_t_edit_groups(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("teg_toggle:"))
+@router.callback_query(F.data.startswith("teg_toggle:"), AdminOnly())
 async def cb_teg_toggle(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, group_id = callback.data.split(":", 2)
     data = await state.get_data()
     draft = set(data.get("teg_draft", []))
@@ -138,16 +132,13 @@ async def cb_teg_toggle(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("teg_confirm:"))
+@router.callback_query(F.data.startswith("teg_confirm:"), AdminOnly())
 async def cb_teg_confirm(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
     original = set(data.get("teg_original", []))
@@ -166,16 +157,13 @@ async def cb_teg_confirm(
     )
 
 
-@router.callback_query(F.data.startswith("teg_cancel:"))
+@router.callback_query(F.data.startswith("teg_cancel:"), AdminOnly())
 async def cb_teg_cancel(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     await state.clear()
     await callback.answer("Отменено")
@@ -184,13 +172,10 @@ async def cb_teg_cancel(
     )
 
 
-@router.callback_query(F.data.startswith("card_edit_rates:"))
+@router.callback_query(F.data.startswith("card_edit_rates:"), AdminOnly())
 async def cb_card_edit_rates(
-    callback: CallbackQuery, user: User | None, state: FSMContext, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User, state: FSMContext, teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:

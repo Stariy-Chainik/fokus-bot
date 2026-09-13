@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from bot.keyboards.calendar import kb_calendar
 from bot.keyboards.teacher import kb_lesson_list
 from bot.handlers.access import TeacherUser
+from bot.handlers.filters import TeacherOnly
 from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository, TeacherGroupRepository
@@ -17,7 +18,6 @@ from bot.utils.dates import format_date_display
 
 from ._base import (
     _date_filter_kb,
-    _is_teacher,
     _locked_ids,
     _month_label,
     _month_picker_kb,
@@ -170,15 +170,12 @@ def _parse_filter_tag(tag: str) -> tuple[str | None, str | None]:
     return tag, None
 
 
-@router.callback_query(F.data == "teacher:my_lessons")
+@router.callback_query(F.data == "teacher:my_lessons", TeacherOnly())
 async def cb_my_lessons(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     await callback.message.edit_text(
         "<b>Мои занятия</b>",
@@ -192,15 +189,12 @@ async def cb_my_lessons(
     await callback.answer()
 
 
-@router.callback_query(F.data == "teacher:lesson_view")
+@router.callback_query(F.data == "teacher:lesson_view", TeacherOnly())
 async def cb_lesson_view(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     await state.update_data(lm_mode="view")
     await callback.message.edit_text(
@@ -210,15 +204,12 @@ async def cb_lesson_view(
     await callback.answer()
 
 
-@router.callback_query(F.data == "teacher:lesson_delete")
+@router.callback_query(F.data == "teacher:lesson_delete", TeacherOnly())
 async def cb_lesson_delete(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     await state.update_data(lm_mode="delete")
     await callback.message.edit_text(
@@ -230,18 +221,15 @@ async def cb_lesson_delete(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("my_lessons_date:"))
+@router.callback_query(F.data.startswith("my_lessons_date:"), TeacherOnly())
 async def cb_my_lessons_date(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     value = callback.data.split(":", 1)[1]
     if value == "manual":
         today = date.today()
@@ -275,18 +263,15 @@ async def cb_my_lessons_date(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("my_lessons_month:"))
+@router.callback_query(F.data.startswith("my_lessons_month:"), TeacherOnly())
 async def cb_my_lessons_month(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = callback.data.split(":", 1)[1]
     await _show_lessons(
         callback,
@@ -300,11 +285,8 @@ async def cb_my_lessons_month(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lv_nav:"))
-async def cb_lv_nav(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("lv_nav:"), TeacherOnly())
+async def cb_lv_nav(callback: CallbackQuery, user: TeacherUser) -> None:
     period = callback.data.split(":", 1)[1]
     year, month = (int(value) for value in period.split("-"))
     await callback.message.edit_reply_markup(
@@ -318,18 +300,15 @@ async def cb_lv_nav(callback: CallbackQuery, user: User | None) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lv_pick:"))
+@router.callback_query(F.data.startswith("lv_pick:"), TeacherOnly())
 async def cb_lv_pick(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     filter_date = callback.data.split(":", 1)[1]
     await _show_lessons(
         callback,
@@ -343,18 +322,15 @@ async def cb_lv_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lessons_page:"))
+@router.callback_query(F.data.startswith("lessons_page:"), TeacherOnly())
 async def cb_lessons_page(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     parts = callback.data.split(":")
     page = int(parts[1])
     tag = parts[2] if len(parts) > 2 else "all"
@@ -386,18 +362,15 @@ async def cb_lessons_page(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lessons_type:"))
+@router.callback_query(F.data.startswith("lessons_type:"), TeacherOnly())
 async def cb_lessons_type(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, type_code, tag = callback.data.split(":", 2)
     filter_type = _parse_type_code(type_code)
     filter_date, filter_month = _parse_filter_tag(tag)

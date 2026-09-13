@@ -3,6 +3,7 @@ from __future__ import annotations
 from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.handlers.filters import TeacherOrAdmin
 from bot.keyboards.admin import kb_back
 from bot.keyboards.teacher import kb_teacher_menu
 from bot.models import User
@@ -12,22 +13,18 @@ from bot.utils.dates import format_date_display
 
 from ._base import (
     _can_view_lesson,
-    _is_teacher_or_admin,
     _submitted_periods,
     router,
 )
 
 
-@router.callback_query(F.data.startswith("delete_lesson:"))
+@router.callback_query(F.data.startswith("delete_lesson:"), TeacherOrAdmin())
 async def cb_delete_lesson_confirm(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     lesson_id = callback.data.split(":", 1)[1]
     lesson = await lesson_repo.get_by_id(lesson_id)
     if not lesson or not _can_view_lesson(user, lesson):
@@ -57,16 +54,13 @@ async def cb_delete_lesson_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_delete_lesson:"))
+@router.callback_query(F.data.startswith("confirm_delete_lesson:"), TeacherOrAdmin())
 async def cb_delete_lesson_do(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     lesson_service: LessonService,
 ) -> None:
-    if not _is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     lesson_id = callback.data.split(":", 1)[1]
     lesson = await lesson_repo.get_by_id(lesson_id)
     if lesson and not _can_view_lesson(user, lesson):

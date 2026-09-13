@@ -12,7 +12,7 @@ from bot.repositories import (
 )
 from bot.states import GroupBillingStates
 from bot.keyboards.admin import kb_back
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 from .billing_shared import (
@@ -22,15 +22,12 @@ from .billing_shared import (
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data.startswith("group_billing:"))
+@router.callback_query(F.data.startswith("group_billing:"), AdminOnly())
 async def cb_group_billing(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
     subscription_override_repo: SubscriptionOverrideRepository,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -41,13 +38,10 @@ async def cb_group_billing(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("group_billing_off:"))
+@router.callback_query(F.data.startswith("group_billing_off:"), AdminOnly())
 async def cb_group_billing_off(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -69,14 +63,11 @@ async def cb_group_billing_off(
     await callback.answer("Биллинг отключён")
 
 
-@router.callback_query(F.data.startswith("group_billing_edit:"))
+@router.callback_query(F.data.startswith("group_billing_edit:"), AdminOnly())
 async def cb_group_billing_edit(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:

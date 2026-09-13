@@ -4,6 +4,7 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.handlers.filters import TeacherOrAdmin
 from bot.models import GroupBillingMode, Student, User
 from bot.utils.groups import hide_service_groups
 from bot.repositories import (
@@ -16,13 +17,13 @@ from bot.repositories import (
 )
 from bot.utils import AttendeeEntry, attendee_ids, parse_attendees, serialize_attendees
 
-from ._base import _is_teacher_or_admin, _submitted_periods, router
+from ._base import _submitted_periods, router
 
 
-@router.callback_query(F.data.startswith("lesson_guest_list:"))
+@router.callback_query(F.data.startswith("lesson_guest_list:"), TeacherOrAdmin())
 async def cb_lesson_guest_list(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     group_repo: GroupRepository,
     student_repo: StudentRepository,
@@ -30,9 +31,6 @@ async def cb_lesson_guest_list(
     student_group_repo: StudentGroupRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     lesson_id = callback.data.split(":", 1)[1]
     lesson = await lesson_repo.get_by_id(lesson_id)
     if not lesson:
@@ -76,19 +74,16 @@ async def cb_lesson_guest_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lesson_guest_pick:"))
+@router.callback_query(F.data.startswith("lesson_guest_pick:"), TeacherOrAdmin())
 async def cb_lesson_guest_pick(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     group_repo: GroupRepository,
     student_repo: StudentRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     state: FSMContext,
 ) -> None:
-    if not _is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, lesson_id, student_id = callback.data.split(":", 2)
     lesson = await lesson_repo.get_by_id(lesson_id)
     if not lesson:

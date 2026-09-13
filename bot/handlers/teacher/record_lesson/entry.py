@@ -21,16 +21,13 @@ from bot.keyboards.admin import kb_admin_menu
 from ._base import router
 from ._base import _date_picker_kb, _header
 from .flows import _start_group_flow, _show_pair_list
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data == "teacher:record_lesson")
-async def cb_record_lesson_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "teacher:record_lesson", TeacherOrAdmin())
+async def cb_record_lesson_start(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(RecordLessonStates.choosing_date)
     await callback.message.edit_text(
@@ -56,17 +53,14 @@ async def cb_cancel_lesson(callback: CallbackQuery, state: FSMContext, user: Use
 
 # ─── Назад на шаг ────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("lesson_back:"))
+@router.callback_query(F.data.startswith("lesson_back:"), TeacherOrAdmin())
 async def cb_lesson_back(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository, student_group_repo: StudentGroupRepository,
     teacher_repo: TeacherRepository, lesson_service: LessonService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     target = callback.data.split(":", 1)[1]
     data = await state.get_data()
 

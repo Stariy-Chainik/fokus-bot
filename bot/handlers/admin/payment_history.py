@@ -20,6 +20,7 @@ from bot.states import PaymentHistoryStates
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import month_name_ru
 from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 from bot.services.payment_methods import label as payment_method_label
 
 from bot.services.rosters import BY_NAME_CI, group_members
@@ -48,14 +49,11 @@ def _fmt_date(value: str | None) -> str:
     return f"{d[8:10]}.{d[5:7]}.{d[:4]}" if len(d) == 10 else d
 
 
-@router.callback_query(F.data == "admin:payhist")
+@router.callback_query(F.data == "admin:payhist", AdminOnly())
 async def cb_payhist_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, state: FSMContext, branch_repo: BranchRepository,
 ) -> None:
     """Старт: филиалы кнопками или ввод фамилии (состояние поиска включено сразу)."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.set_state(PaymentHistoryStates.searching)
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     rows = [[InlineKeyboardButton(text=f"🏢 {b.name}", callback_data=f"payhist_br:{b.branch_id}")] for b in branches]
@@ -68,14 +66,11 @@ async def cb_payhist_start(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("payhist_br:"))
+@router.callback_query(F.data.startswith("payhist_br:"), AdminOnly())
 async def cb_payhist_branch(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     branch_repo: BranchRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     branch_id = callback.data.split(":", 1)[1]
     branch = await branch_repo.get_by_id(branch_id)
@@ -93,15 +88,12 @@ async def cb_payhist_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("payhist_g:"))
+@router.callback_query(F.data.startswith("payhist_g:"), AdminOnly())
 async def cb_payhist_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository, payment_repo: PaymentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     member_ids = set(await student_group_repo.get_students_for_group(group_id))
@@ -176,14 +168,11 @@ async def _render_periods(callback: CallbackQuery, student, payment_repo: Paymen
     await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-@router.callback_query(F.data.startswith("payhist_stu:"))
+@router.callback_query(F.data.startswith("payhist_stu:"), AdminOnly())
 async def cb_payhist_student(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, payment_repo: PaymentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     student = await student_repo.get_by_id(callback.data.split(":", 1)[1])
     if student is None:
@@ -193,14 +182,11 @@ async def cb_payhist_student(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("payhist_p:"))
+@router.callback_query(F.data.startswith("payhist_p:"), AdminOnly())
 async def cb_payhist_period(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, payment_repo: PaymentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, period = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     if student is None:

@@ -6,6 +6,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
+from bot.handlers.filters import AdminOnly
 from bot.models import User
 from bot.repositories import TeacherRepository
 from bot.keyboards.admin import kb_teacher_list
@@ -34,16 +35,13 @@ def _date_picker_kb() -> InlineKeyboardMarkup:
     ])
 
 
-@router.callback_query(F.data == "admin:record_lesson")
+@router.callback_query(F.data == "admin:record_lesson", AdminOnly())
 async def cb_admin_record_lesson(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     state: FSMContext,
     teacher_repo: TeacherRepository,
 ) -> None:
-    if not user or not user.is_admin:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teachers = await teacher_repo.get_all()
     if not teachers:
         await callback.answer("Нет педагогов", show_alert=True)
@@ -56,15 +54,12 @@ async def cb_admin_record_lesson(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_rl_tch:"))
+@router.callback_query(F.data.startswith("admin_rl_tch:"), AdminOnly())
 async def cb_admin_rl_teacher(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     state: FSMContext,
 ) -> None:
-    if not user or not user.is_admin:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     await state.clear()
     await state.update_data(proxy_teacher_id=teacher_id)

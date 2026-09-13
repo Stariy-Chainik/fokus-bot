@@ -25,7 +25,7 @@ from .flows import (
     _start_group_flow, _show_pair_list, _proceed_to_kind, _show_shared_group_picker,
     _show_rshare_branch_picker, _show_rshare_group_picker, _show_rshare_pool,
 )
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -125,17 +125,14 @@ async def cb_kind_any(
 
 # ─── Длительность → ветка ────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("duration:"), RecordLessonStates.choosing_duration)
+@router.callback_query(F.data.startswith("duration:"), RecordLessonStates.choosing_duration, TeacherOrAdmin())
 async def cb_duration(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     branch_repo: BranchRepository, student_group_repo: StudentGroupRepository,
     teacher_repo: TeacherRepository, lesson_service: LessonService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     duration = int(callback.data.split(":", 1)[1])
     await state.update_data(duration_min=duration)
     data = await state.get_data()
@@ -169,15 +166,12 @@ async def cb_duration(
 
 # ─── Индивидуальные (revenue-share): выбор филиала ──────────────────────────
 
-@router.callback_query(F.data.startswith("rshb:"), RecordLessonStates.choosing_group_branch)
+@router.callback_query(F.data.startswith("rshb:"), RecordLessonStates.choosing_group_branch, TeacherOrAdmin())
 async def cb_rshare_branch(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     await _show_rshare_group_picker(
         callback, state, branch_id, user,
@@ -186,15 +180,12 @@ async def cb_rshare_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("rshg:"), RecordLessonStates.choosing_group)
+@router.callback_query(F.data.startswith("rshg:"), RecordLessonStates.choosing_group, TeacherOrAdmin())
 async def cb_rshare_group(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     await _show_rshare_pool(
         callback, state, group_id, user,

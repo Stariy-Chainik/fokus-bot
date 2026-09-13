@@ -15,7 +15,7 @@ from bot.keyboards.admin import kb_teacher_list, kb_back
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import display_period, format_date_short_with_wd, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.utils.callbacks import (
     SalaryDayCalNavCb,
@@ -42,13 +42,10 @@ def _period_buttons(teacher_id: str, back_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-@router.callback_query(F.data == "salaries:view")
+@router.callback_query(F.data == "salaries:view", AdminOnly())
 async def cb_salaries_choose_teacher(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User, teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teachers = await teacher_repo.get_all()
     if not teachers:
         await callback.message.edit_text("Педагогов нет.", reply_markup=kb_back("admin:menu"))
@@ -61,14 +58,11 @@ async def cb_salaries_choose_teacher(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("salary_teacher:"))
+@router.callback_query(F.data.startswith("salary_teacher:"), AdminOnly())
 async def cb_salary_choose_period(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
     """Вход из salaries:view — back ведёт в список педагогов."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = SalaryTeacherCb.unpack(callback.data).teacher_id
     await state.update_data(salary_back_cb="salaries:view")
     await callback.message.edit_text(
@@ -78,14 +72,11 @@ async def cb_salary_choose_period(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tc_salary:"))
+@router.callback_query(F.data.startswith("tc_salary:"), AdminOnly())
 async def cb_salary_from_card(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
     """Вход из карточки педагога — back ведёт обратно в карточку."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = TeacherCardSalaryCb.unpack(callback.data).teacher_id
     back_cb = f"teacher_card:{teacher_id}"
     await state.update_data(salary_back_cb=back_cb)
@@ -96,19 +87,16 @@ async def cb_salary_from_card(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("salary_period:"))
+@router.callback_query(F.data.startswith("salary_period:"), AdminOnly())
 async def cb_salary_show(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     state: FSMContext,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     salary_service: SalaryService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = SalaryPeriodCb.unpack(callback.data)
     teacher_id, period_month = cb.teacher_id, cb.period_month
     teacher = await teacher_repo.get_by_id(teacher_id)
@@ -189,13 +177,10 @@ async def _show_day_salary(
     await callback.message.edit_text("\n".join(lines), reply_markup=back_kb)
 
 
-@router.callback_query(F.data.startswith("salary_day:"))
+@router.callback_query(F.data.startswith("salary_day:"), AdminOnly())
 async def cb_salary_day(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = SalaryDayCb.unpack(callback.data).teacher_id
     await state.update_data(salary_day_teacher_id=teacher_id)
     today = date.today()
@@ -228,14 +213,11 @@ async def _lesson_dates(lesson_repo: LessonRepository, teacher_id: str, year: in
     return result
 
 
-@router.callback_query(F.data.startswith("salary_dday_cal:"))
+@router.callback_query(F.data.startswith("salary_dday_cal:"), AdminOnly())
 async def cb_salary_dday_cal(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     lesson_repo: LessonRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = SalaryDayCalendarCb.unpack(callback.data).teacher_id
     await state.update_data(salary_day_teacher_id=teacher_id)
     today = date.today()
@@ -249,14 +231,11 @@ async def cb_salary_dday_cal(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("salary_dday_nav:"))
+@router.callback_query(F.data.startswith("salary_dday_nav:"), AdminOnly())
 async def cb_salary_dday_nav(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     lesson_repo: LessonRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     ym = SalaryDayCalNavCb.unpack(callback.data).ym
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
@@ -270,18 +249,15 @@ async def cb_salary_dday_nav(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("salary_dday_pick:"))
+@router.callback_query(F.data.startswith("salary_dday_pick:"), AdminOnly())
 async def cb_salary_dday_pick(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     state: FSMContext,
     salary_service: SalaryService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     date_str = SalaryDayCalPickCb.unpack(callback.data).date
     data = await state.get_data()
     teacher_id = data.get("salary_day_teacher_id", "")
@@ -289,17 +265,14 @@ async def cb_salary_dday_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("salary_day_show:"))
+@router.callback_query(F.data.startswith("salary_day_show:"), AdminOnly())
 async def cb_salary_day_show(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     teacher_repo: TeacherRepository,
     lesson_repo: LessonRepository,
     salary_service: SalaryService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = SalaryDayShowCb.unpack(callback.data)
     teacher_id, date_str = cb.teacher_id, cb.date_str
     await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)

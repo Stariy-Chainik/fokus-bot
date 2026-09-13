@@ -18,18 +18,15 @@ from bot.keyboards.admin import (
     kb_students_menu,
     kb_partner_candidates, kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data == "admin:students")
-async def cb_students_menu(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "admin:students", AdminOnly())
+async def cb_students_menu(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("<b>Управление учениками:</b>", reply_markup=kb_students_menu())
     await callback.answer()
@@ -37,13 +34,10 @@ async def cb_students_menu(callback: CallbackQuery, user: User | None, state: FS
 
 # ─── Пары и солисты: филиал → группа → список ───────────────────────────────
 
-@router.callback_query(F.data.in_({"students:pairs", "students:soloists"}))
+@router.callback_query(F.data.in_({"students:pairs", "students:soloists"}), AdminOnly())
 async def cb_pairs_soloists_branches(
-    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     mode = "pairs" if "pairs" in (callback.data or "") else "soloists"
     branches = await branch_repo.get_all()
     if not branches:
@@ -63,13 +57,10 @@ async def cb_pairs_soloists_branches(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sp_brn:"))
+@router.callback_query(F.data.startswith("sp_brn:"), AdminOnly())
 async def cb_pairs_soloists_groups(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, mode, branch_id = callback.data.split(":")
     groups = sorted([g for g in await group_repo.get_all() if g.branch_id == branch_id], key=lambda g: (g.sort_order, g.name))
     if not groups:
@@ -92,15 +83,12 @@ async def cb_pairs_soloists_groups(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sp_grp:"))
+@router.callback_query(F.data.startswith("sp_grp:"), AdminOnly())
 async def cb_pairs_soloists_list(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, mode, group_id = callback.data.split(":")
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
@@ -157,17 +145,14 @@ async def cb_pairs_soloists_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_create_pair:"))
+@router.callback_query(F.data.startswith("admin_create_pair:"), AdminOnly())
 async def cb_admin_create_pair(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_service: StudentService,
 ) -> None:
     """Админ: выбор первого ученика для новой пары (из солистов группы).
     Дальше — стандартный поток partner_assign:<id>."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
@@ -194,16 +179,13 @@ async def cb_admin_create_pair(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_pair_lead:"))
+@router.callback_query(F.data.startswith("admin_pair_lead:"), AdminOnly())
 async def cb_admin_pair_lead(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository,
     student_service: StudentService,
 ) -> None:
     """Админ: выбор лидера через «Создать пару» — как partner_assign, но помнит группу."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":")
     back_cb = f"sp_grp:pairs:{group_id}"
     student = await student_repo.get_by_id(student_id)

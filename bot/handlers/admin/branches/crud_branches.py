@@ -15,7 +15,7 @@ from bot.states import (
 )
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.handlers.common import show_card
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -57,13 +57,10 @@ def _kb_branch_card(branch_id: str, groups: list, has_groups: bool) -> InlineKey
 
 # ─── Список филиалов ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "admin:branches")
+@router.callback_query(F.data == "admin:branches", AdminOnly())
 async def cb_branches_menu(
-    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     text = "<b>🏢 Филиалы и группы</b>\n\n"
     text += f"Всего филиалов: {len(branches)}" if branches else "Филиалов пока нет."
@@ -73,13 +70,10 @@ async def cb_branches_menu(
 
 # ─── Создание филиала ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "branch:add")
+@router.callback_query(F.data == "branch:add", AdminOnly())
 async def cb_branch_add_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.set_state(AddBranchStates.entering_name)
     await callback.message.edit_text(
         "<b>Новый филиал</b>\nВведите название:",
@@ -105,14 +99,11 @@ async def branch_add_name(
 
 # ─── Карточка филиала ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("branch_card:"))
+@router.callback_query(F.data.startswith("branch_card:"), AdminOnly())
 async def cb_branch_card(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     branch_repo: BranchRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     branch = await branch_repo.get_by_id(branch_id)
     if not branch:
@@ -138,13 +129,10 @@ async def cb_branch_card(
 
 # ─── Переименование филиала ──────────────────────────────────────────────────
 
-@router.callback_query(F.data == "branch:rename_pick")
+@router.callback_query(F.data == "branch:rename_pick", AdminOnly())
 async def cb_branch_rename_pick(
-    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     buttons = [
         [InlineKeyboardButton(text=b.name, callback_data=f"branch:edit_name:{b.branch_id}")]
@@ -158,13 +146,10 @@ async def cb_branch_rename_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("branch:edit_name:"))
+@router.callback_query(F.data.startswith("branch:edit_name:"), AdminOnly())
 async def cb_branch_edit_name_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 2)[2]
     await state.set_state(EditBranchNameStates.entering_name)
     await state.update_data(branch_id=branch_id)
@@ -193,14 +178,11 @@ async def branch_edit_name_save(
 
 # ─── Удаление филиала ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("branch:del:"))
+@router.callback_query(F.data.startswith("branch:del:"), AdminOnly())
 async def cb_branch_del_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     branch_repo: BranchRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 2)[2]
     branch = await branch_repo.get_by_id(branch_id)
     if not branch:
@@ -220,13 +202,10 @@ async def cb_branch_del_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_del_branch:"))
+@router.callback_query(F.data.startswith("confirm_del_branch:"), AdminOnly())
 async def cb_branch_del_do(
-    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     ok = await branch_repo.delete(branch_id)
     text = "Филиал удалён." if ok else "Филиал не найден."

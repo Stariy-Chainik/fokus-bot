@@ -16,7 +16,7 @@ from bot.utils.dates import display_period
 
 
 
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -25,15 +25,12 @@ logger = logging.getLogger(__name__)
 
 # ─── Открытие (сброс) сданного периода ───────────────────────────────────────
 
-@router.callback_query(F.data.startswith("open_period_list:"))
+@router.callback_query(F.data.startswith("open_period_list:"), AdminOnly())
 async def cb_open_period_list(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
@@ -62,14 +59,11 @@ async def cb_open_period_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("open_period_confirm:"))
+@router.callback_query(F.data.startswith("open_period_confirm:"), AdminOnly())
 async def cb_open_period_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, period_month = callback.data.split(":", 2)
     teacher = await teacher_repo.get_by_id(teacher_id)
     name = teacher.name if teacher else teacher_id
@@ -85,14 +79,11 @@ async def cb_open_period_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("open_period_do:"))
+@router.callback_query(F.data.startswith("open_period_do:"), AdminOnly())
 async def cb_open_period_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, period_month = callback.data.split(":", 2)
     ok = await submission_repo.delete_by_teacher_and_period(teacher_id, period_month)
     if ok:

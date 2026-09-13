@@ -4,7 +4,6 @@ import logging
 from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.repositories import (
     StudentRepository,
 )
@@ -13,7 +12,8 @@ from bot.keyboards.teacher import (
     kb_my_student_card, kb_my_pair_card,
 )
 from bot.handlers.common import show_card
-from bot.handlers.access import TeacherUser, is_teacher as _is_teacher
+from bot.handlers.access import TeacherUser
+from bot.handlers.filters import TeacherOnly
 
 from ._base import router
 
@@ -87,26 +87,20 @@ async def _render_student_card(
     await show_card(callback, text, reply_markup=kb)
 
 
-@router.callback_query(F.data.startswith("t_student_card:"))
+@router.callback_query(F.data.startswith("t_student_card:"), TeacherOnly())
 async def cb_student_card(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     student_repo: StudentRepository, visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     await _render_student_card(callback, student_id, user, student_repo, visibility, back_to_pairs=False)
 
 
-@router.callback_query(F.data.startswith("t_pair_card:"))
+@router.callback_query(F.data.startswith("t_pair_card:"), TeacherOnly())
 async def cb_pair_card(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     student_repo: StudentRepository, visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     await _render_student_card(callback, student_id, user, student_repo, visibility, back_to_pairs=True)
 

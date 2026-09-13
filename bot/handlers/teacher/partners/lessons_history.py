@@ -5,12 +5,12 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.repositories import (
     StudentRepository, LessonRepository,
     TeacherPeriodSubmissionRepository,
 )
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 
 from ._base import router
 
@@ -34,14 +34,11 @@ def _stu_ids(lesson) -> set[str]:
     return ids
 
 
-@router.callback_query(F.data.startswith("t_stu_les:"))
+@router.callback_query(F.data.startswith("t_stu_les:"), TeacherOnly())
 async def cb_t_stu_lessons_months(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     lesson_repo: LessonRepository, student_repo: StudentRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -73,15 +70,12 @@ async def cb_t_stu_lessons_months(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_stu_les_m:"))
+@router.callback_query(F.data.startswith("t_stu_les_m:"), TeacherOnly())
 async def cb_t_stu_lessons_list(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository, student_repo: StudentRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, ym = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     student_name = student.name if student else student_id
@@ -138,14 +132,11 @@ async def cb_t_stu_lessons_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_pair_les:"))
+@router.callback_query(F.data.startswith("t_pair_les:"), TeacherOnly())
 async def cb_t_pair_lessons_months(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     lesson_repo: LessonRepository, student_repo: StudentRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, partner_id = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     partner = await student_repo.get_by_id(partner_id)
@@ -179,15 +170,12 @@ async def cb_t_pair_lessons_months(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_pair_les_m:"))
+@router.callback_query(F.data.startswith("t_pair_les_m:"), TeacherOnly())
 async def cb_t_pair_lessons_list(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository, student_repo: StudentRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, partner_id, ym = callback.data.split(":", 3)
     student = await student_repo.get_by_id(student_id)
     partner = await student_repo.get_by_id(partner_id)

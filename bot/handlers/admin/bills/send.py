@@ -11,7 +11,7 @@ from bot.repositories import (
 )
 from bot.services import PaymentService
 from bot.utils.bill_format import build_bill_text
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import (
     router, _sending_in_progress,
@@ -25,18 +25,15 @@ logger = logging.getLogger(__name__)
 
 # ─── Отправка родителю ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("bill_send:"))
+@router.callback_query(F.data.startswith("bill_send:"), AdminOnly())
 async def cb_bill_send(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository,
     group_repo: GroupRepository,
     payment_service: PaymentService,
     student_group_repo: StudentGroupRepository,
     client_repo: ClientRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     parts = callback.data.split(":")
     student_id = parts[1]
     period_month = parts[2]

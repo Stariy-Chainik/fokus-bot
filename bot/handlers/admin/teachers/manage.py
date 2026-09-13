@@ -18,6 +18,7 @@ from bot.keyboards.admin import kb_confirm, kb_back
 
 
 from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -26,11 +27,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Добавление педагога ──────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "teachers:add")
-async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "teachers:add", AdminOnly())
+async def cb_add_teacher_start(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     await state.set_state(AddTeacherStates.entering_tg_id)
     await callback.message.edit_text(
         "<b>Добавление педагога</b>\n"
@@ -41,11 +39,8 @@ async def cb_add_teacher_start(callback: CallbackQuery, user: User | None, state
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("add_teacher_prefill:"))
-async def cb_add_teacher_prefill(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("add_teacher_prefill:"), AdminOnly())
+async def cb_add_teacher_prefill(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     try:
         tg_id = int(callback.data.split(":", 1)[1])
     except ValueError:
@@ -162,13 +157,10 @@ async def add_teacher_rate_student(
 
 # ─── Удаление педагога ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("del_teacher:"))
+@router.callback_query(F.data.startswith("del_teacher:"), AdminOnly())
 async def cb_delete_teacher_confirm(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User, teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
@@ -184,15 +176,12 @@ async def cb_delete_teacher_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_del_teacher:"))
+@router.callback_query(F.data.startswith("confirm_del_teacher:"), AdminOnly())
 async def cb_delete_teacher_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, user_repo,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     await teacher_group_repo.remove_all_for_teacher(teacher_id)
     ok = await teacher_repo.delete(teacher_id)

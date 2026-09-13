@@ -6,7 +6,6 @@ from collections import defaultdict
 from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.models.enums import LessonType
 from bot.repositories import (
     StudentRepository, GroupRepository, TeacherGroupRepository, StudentGroupRepository,
@@ -14,7 +13,8 @@ from bot.repositories import (
 )
 from bot.utils.attendees import attendee_ids
 from bot.utils.dates import month_name_ru, last_periods
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 from ._base import router, _owns_group
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,13 @@ logger = logging.getLogger(__name__)
 
 # ─── Посещаемость группы ─────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_grp_attendance:"))
+@router.callback_query(F.data.startswith("t_grp_attendance:"), TeacherOnly())
 async def cb_t_grp_attendance(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     group_repo: GroupRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
@@ -59,19 +56,16 @@ async def cb_t_grp_attendance(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_grp_att_m:"))
+@router.callback_query(F.data.startswith("t_grp_att_m:"), TeacherOnly())
 async def cb_t_grp_att_month(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     group_repo: GroupRepository,
     teacher_group_repo: TeacherGroupRepository,
     student_group_repo: StudentGroupRepository,
     student_repo: StudentRepository,
     lesson_repo: LessonRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, period_month = callback.data.split(":", 2)
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)

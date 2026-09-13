@@ -22,7 +22,7 @@ from bot.utils.dates import display_period
 
 
 
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -45,15 +45,12 @@ def _kb_teachers_list_with_status(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data == "teachers:list")
+@router.callback_query(F.data == "teachers:list", AdminOnly())
 async def cb_teachers_list(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     teachers = await teacher_repo.get_all()
     if not teachers:
@@ -79,15 +76,12 @@ async def cb_teachers_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("teacher_card:"))
+@router.callback_query(F.data.startswith("teacher_card:"), AdminOnly())
 async def cb_teacher_card(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User, teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = callback.data.split(":", 1)[1]
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:

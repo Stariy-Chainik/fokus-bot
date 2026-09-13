@@ -15,6 +15,7 @@ from bot.states import (
     GroupAddStudentStates,
 )
 from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
 
@@ -52,14 +53,11 @@ def _kb_group_add_results(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data.startswith("group_add_student:"))
+@router.callback_query(F.data.startswith("group_add_student:"), AdminOnly())
 async def cb_group_add_student(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -129,18 +127,15 @@ async def msg_group_add_search(
     )
 
 
-@router.callback_query(F.data.startswith("grp_add_pick:"), GroupAddStudentStates.searching)
+@router.callback_query(F.data.startswith("grp_add_pick:"), GroupAddStudentStates.searching, AdminOnly())
 async def cb_group_add_pick_existing(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_group_repo: StudentGroupRepository,
     student_repo: StudentRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -159,17 +154,14 @@ async def cb_group_add_pick_existing(
     )
 
 
-@router.callback_query(F.data.startswith("grp_add_new:"), GroupAddStudentStates.searching)
+@router.callback_query(F.data.startswith("grp_add_new:"), GroupAddStudentStates.searching, AdminOnly())
 async def cb_group_add_new(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
     query = str(data.get("query") or "").strip()
@@ -191,15 +183,12 @@ async def cb_group_add_new(
 
 # ─── Удаление ученика из группы ─────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group_rm_student:"))
+@router.callback_query(F.data.startswith("group_rm_student:"), AdminOnly())
 async def cb_group_rm_student(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -222,17 +211,14 @@ async def cb_group_rm_student(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("grp_rm_do:"))
+@router.callback_query(F.data.startswith("grp_rm_do:"), AdminOnly())
 async def cb_group_rm_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     parts = callback.data.split(":")
     group_id, student_id = parts[1], parts[2]
     left_period = parts[3] if len(parts) > 3 else ""

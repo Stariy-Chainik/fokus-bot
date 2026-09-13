@@ -9,26 +9,24 @@ from aiogram.types import (
     Message,
 )
 
+from bot.handlers.filters import AdminOnly
 from bot.models import User
 from bot.repositories import FinanceEntryRepository
 from bot.services import ProfitService
 from bot.states import FinanceEntryStates
 from bot.utils.dates import display_period
 
-from ._base import _is_admin, _period_view, logger, router
+from ._base import _period_view, logger, router
 
 _FIN_KIND_LABELS = {"income": "доход", "expense": "расход"}
 
 
-@router.callback_query(F.data.startswith("fin:add:"))
+@router.callback_query(F.data.startswith("fin:add:"), AdminOnly())
 async def cb_fin_add(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, kind, period = callback.data.split(":", 3)
     await state.set_state(FinanceEntryStates.entering_title)
     await state.update_data(fin_kind=kind, fin_period=period)
@@ -90,15 +88,12 @@ async def fin_amount_entered(
     await message.answer(text, reply_markup=keyboard)
 
 
-@router.callback_query(F.data.startswith("fin:list:"))
+@router.callback_query(F.data.startswith("fin:list:"), AdminOnly())
 async def cb_fin_list(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     finance_entry_repo: FinanceEntryRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = callback.data.split(":", 2)[2]
     entries = await finance_entry_repo.get_by_period(period)
     if not entries:
@@ -125,16 +120,13 @@ async def cb_fin_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("fin:del:"))
+@router.callback_query(F.data.startswith("fin:del:"), AdminOnly())
 async def cb_fin_delete(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     profit_service: ProfitService,
     finance_entry_repo: FinanceEntryRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, entry_id, period = callback.data.split(":", 3)
     deleted = await finance_entry_repo.delete(entry_id)
     text, keyboard = await _period_view(period, profit_service)

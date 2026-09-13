@@ -4,13 +4,13 @@ import logging
 from aiogram import F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository, TeacherGroupRepository,
 )
 from bot.services import TeacherVisibilityService
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 
 from ._base import router
 
@@ -19,16 +19,13 @@ logger = logging.getLogger(__name__)
 
 # ─── Мои солисты: выбор группы → список ──────────────────────────────────────
 
-@router.callback_query(F.data == "teacher:my_soloists")
+@router.callback_query(F.data == "teacher:my_soloists", TeacherOnly())
 async def cb_my_soloists_groups(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
     groups = sorted(
         [g for g in await group_repo.get_all() if g.group_id in gids],
@@ -54,16 +51,13 @@ async def cb_my_soloists_groups(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_solo_grp:"))
+@router.callback_query(F.data.startswith("t_solo_grp:"), TeacherOnly())
 async def cb_my_soloists_list(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
@@ -90,16 +84,13 @@ async def cb_my_soloists_list(
 
 # ─── Мои пары: выбор группы → список ─────────────────────────────────────────
 
-@router.callback_query(F.data == "teacher:my_pairs")
+@router.callback_query(F.data == "teacher:my_pairs", TeacherOnly())
 async def cb_my_pairs_groups(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     gids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(user.teacher_id))
     groups = sorted(
         [g for g in await group_repo.get_all() if g.group_id in gids],
@@ -125,16 +116,13 @@ async def cb_my_pairs_groups(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_pairs_grp:"))
+@router.callback_query(F.data.startswith("t_pairs_grp:"), TeacherOnly())
 async def cb_my_pairs_list(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     visibility: TeacherVisibilityService,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
@@ -184,14 +172,11 @@ async def cb_my_pairs_list(
     await callback.answer()
 
 
-@router.callback_query(F.data == "teacher:pair_clear_pick")
+@router.callback_query(F.data == "teacher:pair_clear_pick", TeacherOnly())
 async def cb_pair_clear_pick(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     mine = await visibility.students_for_teacher(user.teacher_id)
     mine_ids = {s.student_id for s in mine}
     seen: set[tuple[str, ...]] = set()
@@ -224,18 +209,15 @@ async def cb_pair_clear_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data == "teacher:create_pair")
+@router.callback_query(F.data == "teacher:create_pair", TeacherOnly())
 async def cb_create_pair_start(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     visibility: TeacherVisibilityService,
 ) -> None:
     """Шаг 1 «Создать пару»: выбор первого ученика из видимых педагогу.
     Вторым шагом переиспользуется существующий t_partner_assign:<id>.
     """
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     mine = await visibility.students_for_teacher(user.teacher_id)
     mine_ids = {s.student_id for s in mine}
     # Кандидаты-лидеры: солисты и те, у кого партнёр тоже видим педагогу

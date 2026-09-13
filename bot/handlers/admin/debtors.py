@@ -23,7 +23,7 @@ from bot.utils.constants import DEBTORS_PAGE_SIZE
 from bot.utils.locks import InProgressGuard
 from bot.utils.paging import Page, paginate
 from config.settings import settings
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_debtors")
@@ -139,37 +139,28 @@ async def _render_debtors(
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin:debtors")
+@router.callback_query(F.data == "admin:debtors", AdminOnly())
 async def cb_debtors(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     payment_service: PaymentService, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await _render_debtors(callback, 0, payment_service, student_repo)
 
 
-@router.callback_query(F.data.startswith("debtors:p:"))
+@router.callback_query(F.data.startswith("debtors:p:"), AdminOnly())
 async def cb_debtors_page(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     payment_service: PaymentService, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     page = int(callback.data.rsplit(":", 1)[1])
     await _render_debtors(callback, page, payment_service, student_repo)
 
 
-@router.callback_query(F.data == "debtors:remind")
+@router.callback_query(F.data == "debtors:remind", AdminOnly())
 async def cb_debtors_remind_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     payment_service: PaymentService, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     debtors = await _collect_debtors(payment_service, student_repo)
     targets = [d for d in debtors if d["closed_total"] > 0 and d["has_parent"]]
     skipped = sum(1 for d in debtors if d["closed_total"] > 0 and not d["has_parent"])
@@ -191,14 +182,11 @@ async def cb_debtors_remind_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data == "debtors:remind_go")
+@router.callback_query(F.data == "debtors:remind_go", AdminOnly())
 async def cb_debtors_remind_go(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     payment_service: PaymentService, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     lock_key = str(callback.from_user.id)
     if lock_key in _reminding:
         await callback.answer("Рассылка уже идёт, подождите.", show_alert=True)

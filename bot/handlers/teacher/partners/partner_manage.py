@@ -5,7 +5,6 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.repositories import (
     StudentRepository,
 )
@@ -14,7 +13,8 @@ from bot.states import PartnerAssignStates, TeacherRenameStudentStates
 from bot.keyboards.teacher import (
     kb_t_partner_candidates, kb_t_confirm,
 )
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 
 from ._base import router
 
@@ -23,17 +23,14 @@ logger = logging.getLogger(__name__)
 
 # ─── Назначение партнёра (педагог) ───────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_partner_assign:") | F.data.startswith("t_cp_lead:"))
+@router.callback_query(F.data.startswith("t_partner_assign:") | F.data.startswith("t_cp_lead:"), TeacherOnly())
 async def cb_partner_assign_start(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     state: FSMContext,
     student_repo: StudentRepository,
     visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     from_create_pair = callback.data.startswith("t_cp_lead:")
     student_id = callback.data.split(":", 1)[1]
     cancel_cb = "teacher:my_pairs" if from_create_pair else f"t_student_card:{student_id}"
@@ -126,14 +123,11 @@ async def cb_partner_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data == "t_confirm_partner", PartnerAssignStates.confirming)
+@router.callback_query(F.data == "t_confirm_partner", PartnerAssignStates.confirming, TeacherOnly())
 async def cb_partner_confirm(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: TeacherUser,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     await state.clear()
     student_id = data.get("t_student_id", "")
@@ -166,14 +160,11 @@ async def cb_partner_confirm(
 
 # ─── Снятие партнёра (педагог) ────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_partner_clear:"))
+@router.callback_query(F.data.startswith("t_partner_clear:"), TeacherOnly())
 async def cb_partner_clear_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     student_repo: StudentRepository, visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student or not student.partner_id:
@@ -201,13 +192,10 @@ async def cb_partner_clear_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_confirm_partner_clear:"))
+@router.callback_query(F.data.startswith("t_confirm_partner_clear:"), TeacherOnly())
 async def cb_partner_clear_do(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: TeacherUser, student_repo: StudentRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     try:
         await student_repo.clear_partner(student_id)
@@ -230,14 +218,11 @@ async def cb_partner_clear_do(
 
 # ─── Переименование ученика (педагог) ─────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_rename_student:"))
+@router.callback_query(F.data.startswith("t_rename_student:"), TeacherOnly())
 async def cb_rename_student_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     student_repo: StudentRepository, visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     if not await visibility.is_visible(user.teacher_id, student_id):
         await callback.answer("Ученик не в вашей группе", show_alert=True)

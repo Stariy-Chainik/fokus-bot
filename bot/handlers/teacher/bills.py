@@ -14,7 +14,6 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.repositories import (
     StudentRepository, PaymentRepository, GroupRepository,
     TeacherGroupRepository, StudentGroupRepository, ClientRepository,
@@ -22,7 +21,8 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
-from bot.handlers.access import TeacherUser, can_teacher_bill
+from bot.handlers.access import TeacherUser
+from bot.handlers.filters import BillingTeacherOnly
 from bot.handlers.admin.bills._base import _sending_in_progress, _group_sending
 from bot.handlers.admin.bills.helpers import (
     _send_bill_to_parents, _student_group_names, _periods_only_buttons,
@@ -40,11 +40,8 @@ async def _own_group_ids(user: TeacherUser, teacher_group_repo: TeacherGroupRepo
 
 # ─── Период → группа → ученик ────────────────────────────────────────────────
 
-@router.callback_query(F.data == "teacher:bills")
-async def cb_tbills_choose_period(callback: CallbackQuery, user: User | None) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "teacher:bills", BillingTeacherOnly())
+async def cb_tbills_choose_period(callback: CallbackQuery, user: TeacherUser) -> None:
     await callback.message.edit_text(
         "<b>Счета моих групп — выберите период:</b>",
         reply_markup=_periods_only_buttons("tblp", back_cb="teacher:menu"),
@@ -52,14 +49,11 @@ async def cb_tbills_choose_period(callback: CallbackQuery, user: User | None) ->
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tblp:"))
+@router.callback_query(F.data.startswith("tblp:"), BillingTeacherOnly())
 async def cb_tbills_choose_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = callback.data.split(":", 1)[1]
     own_ids = await _own_group_ids(user, teacher_group_repo)
     groups = sorted(
@@ -84,15 +78,12 @@ async def cb_tbills_choose_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tblg:"))
+@router.callback_query(F.data.startswith("tblg:"), BillingTeacherOnly())
 async def cb_tbills_choose_student(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, group_id = callback.data.split(":", 2)
     if group_id not in await _own_group_ids(user, teacher_group_repo):
         await callback.answer("Это не ваша группа", show_alert=True)
@@ -129,16 +120,13 @@ async def cb_tbills_choose_student(
 
 # ─── Счёт ученика ────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tbls:"))
+@router.callback_query(F.data.startswith("tbls:"), BillingTeacherOnly())
 async def cb_tbills_show(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     payment_repo: PaymentRepository, payment_service: PaymentService,
 ) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, group_id, student_id = callback.data.split(":", 3)
     if group_id not in await _own_group_ids(user, teacher_group_repo):
         await callback.answer("Это не ваша группа", show_alert=True)
@@ -178,17 +166,14 @@ async def cb_tbills_show(
 
 # ─── Отправка ────────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("tbls_send:"))
+@router.callback_query(F.data.startswith("tbls_send:"), BillingTeacherOnly())
 async def cb_tbills_send(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, period, group_id = callback.data.split(":", 3)
     if group_id not in await _own_group_ids(user, teacher_group_repo):
         await callback.answer("Это не ваша группа", show_alert=True)
@@ -250,16 +235,13 @@ async def cb_tbills_send(
         _sending_in_progress.discard(lock_key)
 
 
-@router.callback_query(F.data.startswith("tblg_send:"))
+@router.callback_query(F.data.startswith("tblg_send:"), BillingTeacherOnly())
 async def cb_tbills_group_send(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> None:
-    if not can_teacher_bill(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, group_id = callback.data.split(":", 2)
     if group_id not in await _own_group_ids(user, teacher_group_repo):
         await callback.answer("Это не ваша группа", show_alert=True)

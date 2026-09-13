@@ -4,6 +4,7 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
+from bot.handlers.filters import TeacherOrAdmin
 from bot.handlers.common import show_card
 from bot.keyboards.teacher import kb_lesson_detail
 from bot.models import User
@@ -19,26 +20,22 @@ from bot.utils.dates import format_date_display
 
 from ._base import (
     _can_view_lesson,
-    _is_teacher_or_admin,
     _submitted_periods,
     logger,
     router,
 )
 
 
-@router.callback_query(F.data.startswith("lesson_detail:"))
+@router.callback_query(F.data.startswith("lesson_detail:"), TeacherOrAdmin())
 async def cb_lesson_detail(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     group_repo: GroupRepository,
     student_repo: StudentRepository,
     state: FSMContext,
 ) -> None:
-    if not _is_teacher_or_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     lesson_id = callback.data.split(":", 1)[1]
     lesson = await lesson_repo.get_by_id(lesson_id)
     if not lesson or not _can_view_lesson(user, lesson):

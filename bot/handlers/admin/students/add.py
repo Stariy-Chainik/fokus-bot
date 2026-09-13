@@ -18,7 +18,7 @@ from bot.keyboards.admin import (
     kb_confirm,
     kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -27,11 +27,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Добавление ученика ───────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "students:add")
-async def cb_add_student_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "students:add", AdminOnly())
+async def cb_add_student_start(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     await state.set_state(AddStudentStates.entering_name)
     await callback.message.edit_text(
         "<b>Добавление ученика</b>\nВведите Фамилию Имя ученика:",
@@ -74,14 +71,11 @@ async def add_student_name(
     )
 
 
-@router.callback_query(F.data == "add_st_pick_branch")
+@router.callback_query(F.data == "add_st_pick_branch", AdminOnly())
 async def cb_add_student_pick_branch(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     name = data.get("name") or ""
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
@@ -98,14 +92,11 @@ async def cb_add_student_pick_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("add_st_branch:"), AddStudentStates.choosing_branch)
+@router.callback_query(F.data.startswith("add_st_branch:"), AddStudentStates.choosing_branch, AdminOnly())
 async def cb_add_student_branch(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     if not groups:
@@ -128,13 +119,10 @@ async def cb_add_student_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("add_st_group:"), AddStudentStates.choosing_group)
+@router.callback_query(F.data.startswith("add_st_group:"), AddStudentStates.choosing_group, AdminOnly())
 async def cb_add_student_group(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     await state.update_data(group_id=group_id)
     data = await state.get_data()
@@ -146,14 +134,11 @@ async def cb_add_student_group(
     await callback.answer()
 
 
-@router.callback_query(F.data == "confirm_add_student")
+@router.callback_query(F.data == "confirm_add_student", AdminOnly())
 async def cb_confirm_add_student(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     await state.clear()
     try:

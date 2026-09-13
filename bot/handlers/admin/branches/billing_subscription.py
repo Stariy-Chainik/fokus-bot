@@ -15,7 +15,7 @@ from bot.services import PaymentService
 from bot.states import GroupBillingStates
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.services.rosters import group_members
 from ._base import router
@@ -28,14 +28,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Абонемент (SUBSCRIPTION): фикс-сумма в месяц ────────────────────────────
 
-@router.callback_query(F.data.startswith("group_billing_sub:"))
+@router.callback_query(F.data.startswith("group_billing_sub:"), AdminOnly())
 async def cb_group_billing_sub(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -90,17 +87,14 @@ async def group_billing_sub_price(
     )
 
 
-@router.callback_query(F.data.startswith("subeff:"))
+@router.callback_query(F.data.startswith("subeff:"), AdminOnly())
 async def cb_sub_effective(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     payment_service: PaymentService,
     subscription_override_repo: SubscriptionOverrideRepository,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, period, price_str = callback.data.split(":", 3)
     new_price = int(price_str)
     group = await group_repo.get_by_id(group_id)
@@ -131,11 +125,8 @@ async def cb_sub_effective(
 
 # ─── Переопределение цены абонемента на месяц (ученик / вся группа) ──────────
 
-@router.callback_query(F.data.startswith("subovr:m:"))
-async def cb_subovr_pick_month(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("subovr:m:"), AdminOnly())
+async def cb_subovr_pick_month(callback: CallbackQuery, user: User) -> None:
     _, _, group_id, scope = callback.data.split(":", 3)
     label = "всей группы" if scope == "g" else "ученика"
     rows = [
@@ -152,14 +143,11 @@ async def cb_subovr_pick_month(callback: CallbackQuery, user: User | None) -> No
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("subovr:p:"))
+@router.callback_query(F.data.startswith("subovr:p:"), AdminOnly())
 async def cb_subovr_pick_target(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, group_id, scope, period = callback.data.split(":", 4)
 
     if scope == "g":
@@ -192,14 +180,11 @@ async def cb_subovr_pick_target(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("subovr:st:"))
+@router.callback_query(F.data.startswith("subovr:st:"), AdminOnly())
 async def cb_subovr_pick_student(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, group_id, period, student_id = callback.data.split(":", 4)
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -243,15 +228,12 @@ async def subovr_amount_entered(
     await message.answer(text, reply_markup=kb)
 
 
-@router.callback_query(F.data.startswith("subovr:list:"))
+@router.callback_query(F.data.startswith("subovr:list:"), AdminOnly())
 async def cb_subovr_list(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     subscription_override_repo: SubscriptionOverrideRepository,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 2)[2]
     overrides = sorted(
         await subscription_override_repo.get_for_group(group_id),
@@ -281,16 +263,13 @@ async def cb_subovr_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("subovr:del:"))
+@router.callback_query(F.data.startswith("subovr:del:"), AdminOnly())
 async def cb_subovr_delete(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     subscription_override_repo: SubscriptionOverrideRepository,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, _, group_id, period, sid_part = callback.data.split(":", 4)
     student_id = None if sid_part == "-" else sid_part
     ok = await subscription_override_repo.delete(group_id, period, student_id)

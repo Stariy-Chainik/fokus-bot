@@ -21,21 +21,18 @@ from ._base import router
 from ._base import _tid, _header
 from .flows import _after_group_pick, _show_group_roster
 from .finalize import _finalize
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Group: выбор филиала/группы ────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group_branch:"), RecordLessonStates.choosing_group_branch)
+@router.callback_query(F.data.startswith("group_branch:"), RecordLessonStates.choosing_group_branch, TeacherOrAdmin())
 async def cb_group_branch(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
     my_group_ids = hide_service_groups(await teacher_group_repo.get_groups_for_teacher(_tid(user, data)))
@@ -54,16 +51,13 @@ async def cb_group_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("group_pick:"), RecordLessonStates.choosing_group)
+@router.callback_query(F.data.startswith("group_pick:"), RecordLessonStates.choosing_group, TeacherOrAdmin())
 async def cb_group_pick(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository,
     teacher_repo: TeacherRepository, lesson_service: LessonService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     await _after_group_pick(
         callback, state, group_id, user, visibility, student_repo, group_repo,
@@ -84,16 +78,13 @@ async def cb_attendance_no(
     await _finalize(callback, state, user, teacher_repo, None, lesson_service, group_repo)
 
 
-@router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance)
+@router.callback_query(F.data == "attendance:yes", RecordLessonStates.asking_attendance, TeacherOrAdmin())
 async def cb_attendance_yes(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     gid = data.get("selected_group_id")
     if not gid:

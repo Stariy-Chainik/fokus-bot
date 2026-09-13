@@ -15,7 +15,7 @@ from bot.services import (
 from bot.keyboards.admin import (
     kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
 
@@ -27,14 +27,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Управление группами ученика ─────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("student_groups_add:"))
+@router.callback_query(F.data.startswith("student_groups_add:"), AdminOnly())
 async def cb_student_groups_add_branches(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     if not branches:
@@ -58,15 +55,12 @@ async def cb_student_groups_add_branches(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sg_add_brn:"))
+@router.callback_query(F.data.startswith("sg_add_brn:"), AdminOnly())
 async def cb_student_groups_add_pick_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, branch_id = callback.data.split(":", 2)
     groups = sorted(
         [g for g in await group_repo.get_all() if g.branch_id == branch_id],
@@ -96,16 +90,13 @@ async def cb_student_groups_add_pick_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sg_add_do:"))
+@router.callback_query(F.data.startswith("sg_add_do:"), AdminOnly())
 async def cb_student_groups_add_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, student_id, group_id = callback.data.split(":", 2)
     await student_group_repo.add(student_id, group_id)
     group = await group_repo.get_by_id(group_id)
@@ -114,15 +105,12 @@ async def cb_student_groups_add_do(
     await _render_student_card(callback, student_id, "students:list", student_service)
 
 
-@router.callback_query(F.data.startswith("student_groups_remove:"))
+@router.callback_query(F.data.startswith("student_groups_remove:"), AdminOnly())
 async def cb_student_groups_remove_list(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     gids = await student_group_repo.get_groups_for_student(student_id)
     if not gids:
@@ -149,16 +137,13 @@ async def cb_student_groups_remove_list(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("sg_rm_do:"))
+@router.callback_query(F.data.startswith("sg_rm_do:"), AdminOnly())
 async def cb_student_groups_remove_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     parts = callback.data.split(":")
     student_id, group_id = parts[1], parts[2]
     left_period = parts[3] if len(parts) > 3 else ""

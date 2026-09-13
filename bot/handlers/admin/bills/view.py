@@ -13,7 +13,7 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back
 from bot.utils.dates import display_period
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.services.rosters import group_members
 from ._base import (
@@ -29,11 +29,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Просмотр счёта: период → филиал → группа → ученик → счёт ────────────────
 
-@router.callback_query(F.data == "bills:view")
-async def cb_bills_choose_period(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "bills:view", AdminOnly())
+async def cb_bills_choose_period(callback: CallbackQuery, user: User) -> None:
     await callback.message.edit_text(
         "<b>Выберите период:</b>",
         reply_markup=_periods_only_buttons("bvp", back_cb="admin:menu"),
@@ -41,15 +38,12 @@ async def cb_bills_choose_period(callback: CallbackQuery, user: User | None) -> 
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("bvp:"))
+@router.callback_query(F.data.startswith("bvp:"), AdminOnly())
 async def cb_bills_choose_branch(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     branch_repo: BranchRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = callback.data.split(":", 1)[1]
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     students = await student_repo.get_all()
@@ -78,15 +72,12 @@ async def cb_bills_choose_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("bvb:"))
+@router.callback_query(F.data.startswith("bvb:"), AdminOnly())
 async def cb_bills_choose_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, branch_id = callback.data.split(":", 2)
 
     if branch_id == "none":
@@ -132,15 +123,12 @@ async def cb_bills_choose_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("bvg:"))
+@router.callback_query(F.data.startswith("bvg:"), AdminOnly())
 async def cb_bills_choose_student(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, group_id = callback.data.split(":", 2)
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -173,16 +161,13 @@ async def cb_bills_choose_student(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("bill_group_send:"))
+@router.callback_query(F.data.startswith("bill_group_send:"), AdminOnly())
 async def cb_bill_group_send(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     payment_service: PaymentService, client_repo: ClientRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period, gid = callback.data.split(":", 2)
     group = await group_repo.get_by_id(gid)
     if not group:
@@ -241,17 +226,14 @@ async def cb_bill_group_send(
         _group_sending.discard(lock_key)
 
 
-@router.callback_query(F.data.startswith("bvs:"))
+@router.callback_query(F.data.startswith("bvs:"), AdminOnly())
 async def cb_bills_show(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
     payment_repo: PaymentRepository,
     payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, period_month, group_id, student_id = callback.data.split(":", 3)
     back_cb = (
         f"bvb:{period_month}:none" if group_id == "none"

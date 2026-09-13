@@ -13,7 +13,7 @@ from bot.repositories import (
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period, format_date_short_with_wd
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 
@@ -41,11 +41,8 @@ logger = logging.getLogger(__name__)
 
 # ─── Подтверждение оплаты: период → филиал → группа → ученик → счета ─────────
 
-@router.callback_query(F.data == "bills:confirm_payment")
-async def cb_confirm_payment_start(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "bills:confirm_payment", AdminOnly())
+async def cb_confirm_payment_start(callback: CallbackQuery, user: User) -> None:
     await callback.message.edit_text(
         "<b>Подтвердить оплату — выберите период:</b>",
         reply_markup=_periods_only_buttons("pcp", back_cb="admin:menu"),
@@ -53,15 +50,12 @@ async def cb_confirm_payment_start(callback: CallbackQuery, user: User | None) -
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pcp:"))
+@router.callback_query(F.data.startswith("pcp:"), AdminOnly())
 async def cb_confirm_payment_choose_branch(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     branch_repo: BranchRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period = PayConfirmPeriodCb.unpack(callback.data).period
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     students = await student_repo.get_all()
@@ -90,15 +84,12 @@ async def cb_confirm_payment_choose_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pcpb:"))
+@router.callback_query(F.data.startswith("pcpb:"), AdminOnly())
 async def cb_confirm_payment_choose_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = PayConfirmBranchCb.unpack(callback.data)
     period, branch_id = cb.period, cb.branch_id
 
@@ -145,15 +136,12 @@ async def cb_confirm_payment_choose_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pcpg:"))
+@router.callback_query(F.data.startswith("pcpg:"), AdminOnly())
 async def cb_confirm_payment_choose_student(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = PayConfirmGroupCb.unpack(callback.data)
     period, group_id = cb.period, cb.group_id
     group = await group_repo.get_by_id(group_id)
@@ -180,16 +168,13 @@ async def cb_confirm_payment_choose_student(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pcps:"))
+@router.callback_query(F.data.startswith("pcps:"), AdminOnly())
 async def cb_pay_pick_invoice(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
     payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = PayConfirmStudentCb.unpack(callback.data)
     period_month, group_id, student_id = cb.period_month, cb.group_id, cb.student_id
     back_cb = (
@@ -243,14 +228,11 @@ async def cb_pay_pick_invoice(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pay_invoice:"))
+@router.callback_query(F.data.startswith("pay_invoice:"), AdminOnly())
 async def cb_pay_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     payment_repo: PaymentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = PayInvoiceCb.unpack(callback.data)  # pay_invoice:{payment_id}[:{group_id}]
     payment_id, group_id = cb.payment_id, cb.group_id
     payment = next(
@@ -281,14 +263,11 @@ async def cb_pay_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("do_confirm_payment:"))
+@router.callback_query(F.data.startswith("do_confirm_payment:"), AdminOnly())
 async def cb_do_confirm_payment(
-    callback: CallbackQuery, user: User | None, payment_service: PaymentService,
+    callback: CallbackQuery, user: User, payment_service: PaymentService,
     payment_repo: PaymentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
 
     cb = DoConfirmPaymentCb.unpack(callback.data)
     payment_id, group_id = cb.payment_id, cb.group_id
@@ -367,15 +346,12 @@ async def _render_selection(callback: CallbackQuery, state: FSMContext,
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-@router.callback_query(F.data.startswith("paysel:"))
+@router.callback_query(F.data.startswith("paysel:"), AdminOnly())
 async def cb_pay_select_lessons(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, payment_repo: PaymentRepository,
     payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = PaySelectLessonsCb.unpack(callback.data)
     payment_id, group_id = cb.payment_id, cb.group_id
     payment = await payment_repo.get_by_id(payment_id)
@@ -390,14 +366,11 @@ async def cb_pay_select_lessons(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pslt:"))
+@router.callback_query(F.data.startswith("pslt:"), AdminOnly())
 async def cb_pay_select_toggle(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     if not data.get("psel_student"):
         await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
@@ -417,14 +390,11 @@ async def cb_pay_select_toggle(
     await callback.answer()
 
 
-@router.callback_query(F.data == "pslgo")
+@router.callback_query(F.data == "pslgo", AdminOnly())
 async def cb_pay_select_confirm(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     if not data.get("psel_student"):
         await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
@@ -454,14 +424,11 @@ async def cb_pay_select_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pslok:"))
+@router.callback_query(F.data.startswith("pslok:"), AdminOnly())
 async def cb_pay_select_apply(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     if not data.get("psel_student"):
         await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)

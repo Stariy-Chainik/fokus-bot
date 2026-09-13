@@ -17,7 +17,7 @@ from bot.keyboards.admin import (
     kb_partner_candidates,
     kb_confirm, kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -26,17 +26,14 @@ logger = logging.getLogger(__name__)
 
 # ─── Управление партнёром ученика ────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("partner_assign:"))
+@router.callback_query(F.data.startswith("partner_assign:"), AdminOnly())
 async def cb_partner_assign_start(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     state: FSMContext,
     student_repo: StudentRepository,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -115,16 +112,13 @@ async def cb_partner_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data == "confirm_partner", PartnerAssignStates.confirming)
+@router.callback_query(F.data == "confirm_partner", PartnerAssignStates.confirming, AdminOnly())
 async def cb_partner_confirm(
     callback: CallbackQuery,
     state: FSMContext,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     await state.clear()
     student_id = data.get("student_id", "")
@@ -152,13 +146,10 @@ async def cb_partner_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("partner_clear:"))
+@router.callback_query(F.data.startswith("partner_clear:"), AdminOnly())
 async def cb_partner_clear_confirm(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student or not student.partner_id:
@@ -176,13 +167,10 @@ async def cb_partner_clear_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_partner_clear:"))
+@router.callback_query(F.data.startswith("confirm_partner_clear:"), AdminOnly())
 async def cb_partner_clear_do(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     try:
         await student_repo.clear_partner(student_id)

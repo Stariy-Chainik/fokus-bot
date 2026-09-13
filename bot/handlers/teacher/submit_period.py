@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User, TeacherPeriodSubmission
+from bot.models import TeacherPeriodSubmission
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.services import LessonService
 from bot.repositories import TeacherRepository  # noqa: F401  (DI hint)
@@ -17,7 +17,8 @@ from bot.utils import generate_submission_id, now_str
 from bot.utils.dates import display_period
 from bot.utils.lesson_stats import format_lesson_breakdown
 from bot.utils.locks import InProgressGuard
-from bot.handlers.access import TeacherUser, is_teacher as _is_teacher
+from bot.handlers.access import TeacherUser
+from bot.handlers.filters import TeacherOnly
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_submit_period")
@@ -104,15 +105,12 @@ async def _show_confirm(
     )
 
 
-@router.callback_query(F.data == "teacher:submit_period")
+@router.callback_query(F.data == "teacher:submit_period", TeacherOnly())
 async def cb_submit_period_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
 
     open_periods, _counts = await _open_periods(user.teacher_id, lesson_repo, submission_repo)
@@ -155,15 +153,12 @@ async def _show_period_list(
     )
 
 
-@router.callback_query(F.data == "submit_pick_other")
+@router.callback_query(F.data == "submit_pick_other", TeacherOnly())
 async def cb_submit_pick_other(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     open_periods, counts = await _open_periods(user.teacher_id, lesson_repo, submission_repo)
     if not open_periods:
         await callback.message.edit_text(
@@ -175,15 +170,12 @@ async def cb_submit_pick_other(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("submit_pick:"), SubmitPeriodStates.choosing_month)
+@router.callback_query(F.data.startswith("submit_pick:"), SubmitPeriodStates.choosing_month, TeacherOnly())
 async def cb_submit_pick(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     period_month = callback.data.split(":", 1)[1]
 
     if await submission_repo.get_by_teacher_and_period(user.teacher_id, period_month):
@@ -195,16 +187,13 @@ async def cb_submit_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data == "submit_confirm", SubmitPeriodStates.confirming)
+@router.callback_query(F.data == "submit_confirm", SubmitPeriodStates.confirming, TeacherOnly())
 async def cb_submit_confirm(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
     lesson_service: LessonService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
 
     if date.today().day < 25:
         await callback.answer("Период можно сдать не раньше 25-го числа.", show_alert=True)

@@ -14,7 +14,7 @@ from bot.keyboards.teacher import kb_lesson_list
 from bot.keyboards.calendar import kb_calendar
 from bot.utils.dates import format_date_display, month_name_ru
 from bot.utils.constants import PAGE_SIZE
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.utils.callbacks import (
     AdminLessonsAllCb,
@@ -142,14 +142,11 @@ async def _show_lessons(
     )
 
 
-@router.callback_query(F.data == "admin:edit_lesson")
+@router.callback_query(F.data == "admin:edit_lesson", AdminOnly())
 async def cb_edit_lesson_choose_teacher(
-    callback: CallbackQuery, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, user: User, teacher_repo: TeacherRepository,
     state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     teachers = await teacher_repo.get_all()
     if not teachers:
@@ -163,13 +160,10 @@ async def cb_edit_lesson_choose_teacher(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_t:"))
+@router.callback_query(F.data.startswith("aedl_t:"), AdminOnly())
 async def cb_admin_lessons_dates(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = AdminLessonsTeacherCb.unpack(callback.data).teacher_id
     await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb="admin:edit_lesson")
     await callback.message.edit_text(
@@ -179,14 +173,11 @@ async def cb_admin_lessons_dates(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tc_lessons:"))
+@router.callback_query(F.data.startswith("tc_lessons:"), AdminOnly())
 async def cb_admin_lessons_from_card(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
     """Вход из карточки педагога — back ведёт обратно в карточку."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = TeacherCardLessonsCb.unpack(callback.data).teacher_id
     back_cb = f"teacher_card:{teacher_id}"
     await state.update_data(aedl_teacher_id=teacher_id, aedl_back_cb=back_cb)
@@ -197,13 +188,10 @@ async def cb_admin_lessons_from_card(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_dates:"))
+@router.callback_query(F.data.startswith("aedl_dates:"), AdminOnly())
 async def cb_admin_lessons_dates_back(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = AdminLessonsDatesCb.unpack(callback.data).teacher_id
     data = await state.get_data()
     back_cb = data.get("aedl_back_cb", "admin:edit_lesson")
@@ -215,40 +203,31 @@ async def cb_admin_lessons_dates_back(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_pick:"))
+@router.callback_query(F.data.startswith("aedl_pick:"), AdminOnly())
 async def cb_admin_lessons_pick(
-    callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    callback: CallbackQuery, user: User, lesson_repo: LessonRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = AdminLessonsPickDayCb.unpack(callback.data)
     teacher_id, day = cb.teacher_id, cb.day
     await _show_lessons(callback, lesson_repo, teacher_id, filter_date=day, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_all:"))
+@router.callback_query(F.data.startswith("aedl_all:"), AdminOnly())
 async def cb_admin_lessons_all(
-    callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    callback: CallbackQuery, user: User, lesson_repo: LessonRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = AdminLessonsAllCb.unpack(callback.data).teacher_id
     await _show_lessons(callback, lesson_repo, teacher_id, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_month_pick:"))
+@router.callback_query(F.data.startswith("aedl_month_pick:"), AdminOnly())
 async def cb_admin_lessons_month_pick(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = AdminLessonsMonthPickCb.unpack(callback.data).teacher_id
     await callback.message.edit_text(
         "Выберите месяц:", reply_markup=_month_picker_kb(teacher_id),
@@ -256,27 +235,21 @@ async def cb_admin_lessons_month_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_month:"))
+@router.callback_query(F.data.startswith("aedl_month:"), AdminOnly())
 async def cb_admin_lessons_month(
-    callback: CallbackQuery, user: User | None, lesson_repo: LessonRepository,
+    callback: CallbackQuery, user: User, lesson_repo: LessonRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = AdminLessonsMonthCb.unpack(callback.data)
     teacher_id, ym = cb.teacher_id, cb.ym
     await _show_lessons(callback, lesson_repo, teacher_id, filter_month=ym, teacher_group_repo=teacher_group_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_manual:"))
+@router.callback_query(F.data.startswith("aedl_manual:"), AdminOnly())
 async def cb_admin_lessons_calendar(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     teacher_id = AdminLessonsCalendarCb.unpack(callback.data).teacher_id
     await state.update_data(aedl_teacher_id=teacher_id)
     today = date.today()
@@ -290,13 +263,10 @@ async def cb_admin_lessons_calendar(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedlc_nav:"))
+@router.callback_query(F.data.startswith("aedlc_nav:"), AdminOnly())
 async def cb_admin_lessons_cal_nav(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     ym = AdminLessonsCalNavCb.unpack(callback.data).ym
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
@@ -310,15 +280,12 @@ async def cb_admin_lessons_cal_nav(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedlc_pick:"))
+@router.callback_query(F.data.startswith("aedlc_pick:"), AdminOnly())
 async def cb_admin_lessons_cal_pick(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     lesson_repo: LessonRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     day = AdminLessonsCalPickCb.unpack(callback.data).day
     data = await state.get_data()
     teacher_id = data.get("aedl_teacher_id")
@@ -329,15 +296,12 @@ async def cb_admin_lessons_cal_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("aedl_type:"))
+@router.callback_query(F.data.startswith("aedl_type:"), AdminOnly())
 async def cb_admin_lessons_type(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     lesson_repo: LessonRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = AdminLessonsTypeCb.unpack(callback.data)
     teacher_id, type_code, tag = cb.teacher_id, cb.type_code, cb.tag
     filter_type = {"g": "group", "i": "individual"}.get(type_code)

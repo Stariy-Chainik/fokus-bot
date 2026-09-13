@@ -310,30 +310,7 @@ def test_student_search_paging():
     assert (pg.items, pg.total) == ([], 0)
 
 
-# ─── «Нет доступа» по ролям ───────────────────────────────────────────────────
-
-def test_access_denied_admin_handler():
-    from bot.handlers.admin.debtors import cb_debtors
-    for user in (None, mk_user(7, teacher_id="TCH-0001")):
-        cb = FakeCallbackQuery("admin:debtors")
-        run(cb_debtors(cb, user, None, None))
-        assert cb.alerts == [("Нет доступа", True)] and not cb.message.screens
-
-
-def test_access_denied_teacher_handler():
-    from bot.handlers.teacher.my_stats import cb_my_stats
-    for user in (None, mk_user(1, is_admin=True)):
-        cb = FakeCallbackQuery("teacher:my_stats")
-        run(cb_my_stats(cb, user))
-        assert cb.alerts == [("Нет доступа", True)] and not cb.message.screens
-
-
-def test_access_denied_teacher_or_admin_handler():
-    from bot.handlers.teacher.my_lessons.detail import cb_lesson_detail
-    cb = FakeCallbackQuery("lesson_detail:LES-1")
-    run(cb_lesson_detail(cb, None, None, None, None, None, FakeState()))
-    assert cb.alerts == [("Нет доступа", True)] and not cb.message.screens
-
+# ─── «Нет доступа» — роли admin/teacher проверяют фильтры (tests/test_filters.py) ──
 
 def test_access_denied_parent_handler():
     from bot.handlers.client.my_lessons import cb_client_lessons

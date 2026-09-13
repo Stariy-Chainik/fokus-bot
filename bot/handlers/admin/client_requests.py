@@ -10,22 +10,19 @@ from bot.repositories import StudentRepository
 from bot.screens.parent_menu import menu_rows
 from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.keyboards.admin import kb_back
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_client_requests")
 
 
 
-@router.callback_query(F.data.startswith("admin_child_ok:"))
+@router.callback_query(F.data.startswith("admin_child_ok:"), AdminOnly())
 async def cb_admin_child_ok(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
 
     _, parent_raw, student_id = callback.data.split(":", 2)
     parent_addr = parse_addr(parent_raw)
@@ -51,15 +48,12 @@ async def cb_admin_child_ok(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_child_no:"))
+@router.callback_query(F.data.startswith("admin_child_no:"), AdminOnly())
 async def cb_admin_child_no(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
 
     _, parent_raw, student_id = callback.data.split(":", 2)
     parent_addr = parse_addr(parent_raw)

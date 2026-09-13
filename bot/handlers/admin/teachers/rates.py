@@ -16,7 +16,7 @@ from bot.keyboards.admin import kb_confirm, kb_back
 
 
 
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -75,13 +75,10 @@ async def edit_rate_value(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data == "confirm_edit_rates")
+@router.callback_query(F.data == "confirm_edit_rates", AdminOnly())
 async def cb_confirm_edit_rates(
-    callback: CallbackQuery, state: FSMContext, user: User | None, teacher_repo: TeacherRepository,
+    callback: CallbackQuery, state: FSMContext, user: User, teacher_repo: TeacherRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     await state.clear()
     teacher_id = data["teacher_id"]

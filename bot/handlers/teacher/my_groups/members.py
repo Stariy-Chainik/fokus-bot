@@ -15,6 +15,8 @@ from bot.repositories import (
 )
 from bot.states import TeacherGroupAddStudentStates
 from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 from bot.services.membership import is_subscription, leave_group, leave_options
 from bot.utils.dates import current_period
 from bot.services.rosters import group_members
@@ -46,14 +48,11 @@ def _kb_t_add_results(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data.startswith("t_grp_add:"))
+@router.callback_query(F.data.startswith("t_grp_add:"), TeacherOnly())
 async def cb_t_grp_add(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     group_repo: GroupRepository, teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
@@ -123,17 +122,14 @@ async def msg_t_grp_add_search(
     )
 
 
-@router.callback_query(F.data.startswith("t_grp_pick:"), TeacherGroupAddStudentStates.searching)
+@router.callback_query(F.data.startswith("t_grp_pick:"), TeacherGroupAddStudentStates.searching, TeacherOnly())
 async def cb_t_grp_pick(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     student_group_repo: StudentGroupRepository,
     student_repo: StudentRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":", 2)
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
@@ -153,9 +149,9 @@ async def cb_t_grp_pick(
     )
 
 
-@router.callback_query(F.data.startswith("t_grp_new:"), TeacherGroupAddStudentStates.searching)
+@router.callback_query(F.data.startswith("t_grp_new:"), TeacherGroupAddStudentStates.searching, TeacherOnly())
 async def cb_t_grp_new(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     teacher_repo: TeacherRepository, user_repo: UserRepository,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
@@ -163,9 +159,6 @@ async def cb_t_grp_new(
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
@@ -252,16 +245,13 @@ async def cb_t_grp_new(
 
 # ─── Убрать ученика ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("t_grp_rm:"))
+@router.callback_query(F.data.startswith("t_grp_rm:"), TeacherOnly())
 async def cb_t_grp_rm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     if not await _owns_group(user.teacher_id, group_id, teacher_group_repo):
         await callback.answer("Эта группа не ваша", show_alert=True)
@@ -286,16 +276,13 @@ async def cb_t_grp_rm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("t_grp_rm_do:"))
+@router.callback_query(F.data.startswith("t_grp_rm_do:"), TeacherOnly())
 async def cb_t_grp_rm_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: TeacherUser,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     parts = callback.data.split(":")
     group_id, student_id = parts[1], parts[2]
     left_period = parts[3] if len(parts) > 3 else ""

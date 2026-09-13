@@ -21,21 +21,18 @@ from ._base import router
 from ._base import _tid, _all_students_in_group, _header
 from .flows import _refresh_multi_select
 from .finalize import _finalize
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data.startswith("ms_toggle:"))
+@router.callback_query(F.data.startswith("ms_toggle:"), TeacherOrAdmin())
 async def cb_ms_toggle(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cur = await state.get_state()
     if cur not in (RecordLessonStates.selecting_attendees.state, RecordLessonStates.selecting_soloists.state):
         await callback.answer()
@@ -55,16 +52,13 @@ async def cb_ms_toggle(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("ms_tier:"))
+@router.callback_query(F.data.startswith("ms_tier:"), TeacherOrAdmin())
 async def cb_ms_tier(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cur = await state.get_state()
     if cur != RecordLessonStates.selecting_attendees.state:
         await callback.answer()
@@ -85,16 +79,13 @@ async def cb_ms_tier(
     await callback.answer(f"Тариф на это занятие: {'короткий' if new_tier == 'short' else 'полный'}")
 
 
-@router.callback_query(F.data == "ms_all")
+@router.callback_query(F.data == "ms_all", TeacherOrAdmin())
 async def cb_ms_all(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cur = await state.get_state()
     if cur not in (RecordLessonStates.selecting_attendees.state, RecordLessonStates.selecting_soloists.state):
         await callback.answer()
@@ -143,14 +134,11 @@ async def cb_ms_confirm(
 
 # ─── Добавление учеников из других групп педагога ───────────────────────────
 
-@router.callback_query(F.data == "ms_add_other", RecordLessonStates.selecting_attendees)
+@router.callback_query(F.data == "ms_add_other", RecordLessonStates.selecting_attendees, TeacherOrAdmin())
 async def cb_ms_add_other(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     main_gid = data.get("selected_group_id")
     teacher_id = _tid(user, data)
@@ -172,15 +160,12 @@ async def cb_ms_add_other(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("ms_other_group:"), RecordLessonStates.selecting_attendees)
+@router.callback_query(F.data.startswith("ms_other_group:"), RecordLessonStates.selecting_attendees, TeacherOrAdmin())
 async def cb_ms_other_group(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     other_gid = callback.data.split(":", 1)[1]
     data = await state.get_data()
     main_gid = data.get("selected_group_id")
@@ -205,15 +190,12 @@ async def cb_ms_other_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("ms_other_pick:"), RecordLessonStates.selecting_attendees)
+@router.callback_query(F.data.startswith("ms_other_pick:"), RecordLessonStates.selecting_attendees, TeacherOrAdmin())
 async def cb_ms_other_pick(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
     other_gid = data.get("extra_pick_group_id")
@@ -239,15 +221,12 @@ async def cb_ms_other_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data == "ms_other_confirm", RecordLessonStates.selecting_attendees)
+@router.callback_query(F.data == "ms_other_confirm", RecordLessonStates.selecting_attendees, TeacherOrAdmin())
 async def cb_ms_other_confirm(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     data = await state.get_data()
     other_gid = data.get("extra_pick_group_id")
     picked = set(data.get("extra_pick_ids") or [])
@@ -303,15 +282,12 @@ async def cb_ms_other_confirm(
     await callback.answer("Добавлено" if picked else "Без изменений")
 
 
-@router.callback_query(F.data == "ms_other_cancel", RecordLessonStates.selecting_attendees)
+@router.callback_query(F.data == "ms_other_cancel", RecordLessonStates.selecting_attendees, TeacherOrAdmin())
 async def cb_ms_other_cancel(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, student_repo: StudentRepository,
     group_repo: GroupRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.update_data(extra_pick_group_id=None, extra_pick_ids=[])
     # Возвращаемся в основной ростер
     data = await state.get_data()

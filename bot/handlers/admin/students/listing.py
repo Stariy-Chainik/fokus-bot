@@ -19,7 +19,7 @@ from bot.keyboards.admin import (
 )
 from bot.utils.constants import STUDENT_PAGE_SIZE
 from bot.utils.paging import Page, paginate
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 from ._base import _render_student_card
@@ -37,11 +37,8 @@ def _filter_and_page(students: list, query: str, page: int) -> Page:
     return paginate(filtered, page, STUDENT_PAGE_SIZE)
 
 
-@router.callback_query(F.data == "students:list")
-async def cb_students_list(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "students:list", AdminOnly())
+async def cb_students_list(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     await state.set_state(StudentListStates.searching)
     await state.update_data(student_query="")
     await callback.message.edit_text(
@@ -73,14 +70,11 @@ async def handle_student_search(
     )
 
 
-@router.callback_query(F.data.startswith("spage:"))
+@router.callback_query(F.data.startswith("spage:"), AdminOnly())
 async def cb_student_page(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     try:
         page = int(callback.data.split(":", 1)[1])
     except ValueError:
@@ -105,14 +99,11 @@ _TIER_TOGGLE_ALERTS = {
 }
 
 
-@router.callback_query(F.data.startswith("student_tier_toggle:"))
+@router.callback_query(F.data.startswith("student_tier_toggle:"), AdminOnly())
 async def cb_student_tier_toggle(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     error = await student_service.toggle_tier(student_id)
     if error is not None:
@@ -121,26 +112,20 @@ async def cb_student_tier_toggle(
     await _render_student_card(callback, student_id, "students:list", student_service)
 
 
-@router.callback_query(F.data.startswith("student_card:"))
+@router.callback_query(F.data.startswith("student_card:"), AdminOnly())
 async def cb_student_card(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     await _render_student_card(callback, student_id, "students:list", student_service)
 
 
-@router.callback_query(F.data.startswith("student_card_sp:"))
+@router.callback_query(F.data.startswith("student_card_sp:"), AdminOnly())
 async def cb_student_card_from_sp(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, mode, group_id, student_id = callback.data.split(":", 3)
     back_cb = f"sp_grp:{mode}:{group_id}"
     await _render_student_card(callback, student_id, back_cb, student_service)

@@ -19,21 +19,18 @@ from ._base import router
 from ._base import _tid
 from .flows import _collect_pairs
 from .finalize import _finalize
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Pair: мульти-выбор пар ──────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("pair_toggle:"), RecordLessonStates.choosing_pair)
+@router.callback_query(F.data.startswith("pair_toggle:"), RecordLessonStates.choosing_pair, TeacherOrAdmin())
 async def cb_pair_toggle(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     key = callback.data.split(":", 1)[1]
     data = await state.get_data()
     selected = list(data.get("selected_ids", []))

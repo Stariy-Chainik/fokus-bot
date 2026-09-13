@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.services import DiagnosticsService
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_diagnostics")
@@ -20,22 +20,16 @@ def _diag_menu() -> InlineKeyboardMarkup:
     ])
 
 
-@router.callback_query(F.data == "admin:diagnostics")
-async def cb_diagnostics_menu(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "admin:diagnostics", AdminOnly())
+async def cb_diagnostics_menu(callback: CallbackQuery, user: User) -> None:
     await callback.message.edit_text("<b>Диагностика:</b>", reply_markup=_diag_menu())
     await callback.answer()
 
 
-@router.callback_query(F.data == "diag:check")
+@router.callback_query(F.data == "diag:check", AdminOnly())
 async def cb_check(
-    callback: CallbackQuery, user: User | None, diagnostics_service: DiagnosticsService,
+    callback: CallbackQuery, user: User, diagnostics_service: DiagnosticsService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await callback.answer("Выполняю проверку...")
     try:
         report = await diagnostics_service.run_consistency_check()

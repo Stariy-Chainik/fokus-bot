@@ -15,7 +15,7 @@ from bot.states import (
     AddGroupStates, EditGroupNameStates,
 )
 from bot.keyboards.admin import kb_back, kb_confirm
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.utils.callbacks import (
     ConfirmDelGroupCb,
@@ -49,13 +49,10 @@ def _kb_group_teachers(group_id: str, teachers: list, assigned: set[str]) -> Inl
 
 # ─── Создание группы ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group:add:"))
+@router.callback_query(F.data.startswith("group:add:"), AdminOnly())
 async def cb_group_add_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = GroupAddCb.unpack(callback.data).branch_id
     await state.set_state(AddGroupStates.entering_name)
     await state.update_data(branch_id=branch_id)
@@ -84,17 +81,14 @@ async def group_add_name(
     )
 
 
-@router.callback_query(F.data.startswith("group_card:"))
+@router.callback_query(F.data.startswith("group_card:"), AdminOnly())
 async def cb_group_card(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = GroupCardCb.unpack(callback.data).group_id
     await _render_group_card(
         callback.message, group_id,
@@ -104,18 +98,15 @@ async def cb_group_card(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("group_arch:"))
+@router.callback_query(F.data.startswith("group_arch:"), AdminOnly())
 async def cb_group_archive(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     teacher_repo: TeacherRepository, student_repo: StudentRepository,
     teacher_group_repo: TeacherGroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
     """В архив / из архива. Строка группы остаётся — история занятий и оплат цела."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = GroupArchiveCb.unpack(callback.data)
     action, group_id = cb.action, cb.group_id
     archived = action == "on"
@@ -135,13 +126,10 @@ async def cb_group_archive(
 
 # ─── Переименование группы ───────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group:rename_pick:"))
+@router.callback_query(F.data.startswith("group:rename_pick:"), AdminOnly())
 async def cb_group_rename_pick(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = GroupRenamePickCb.unpack(callback.data).branch_id
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     buttons = [
@@ -156,13 +144,10 @@ async def cb_group_rename_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("group:edit_name:"))
+@router.callback_query(F.data.startswith("group:edit_name:"), AdminOnly())
 async def cb_group_edit_name_start(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = GroupEditNameCb.unpack(callback.data)
     branch_id, group_id = cb.branch_id, cb.group_id
     await state.set_state(EditGroupNameStates.entering_name)
@@ -192,13 +177,10 @@ async def group_edit_name_save(
 
 # ─── Удаление группы ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group:del_pick:"))
+@router.callback_query(F.data.startswith("group:del_pick:"), AdminOnly())
 async def cb_group_del_pick(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = GroupDelPickCb.unpack(callback.data).branch_id
     groups = sorted(await group_repo.get_by_branch(branch_id), key=lambda g: (g.sort_order, g.name))
     buttons = [
@@ -213,13 +195,10 @@ async def cb_group_del_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("group:del:"))
+@router.callback_query(F.data.startswith("group:del:"), AdminOnly())
 async def cb_group_del_confirm(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = GroupDelCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -237,15 +216,12 @@ async def cb_group_del_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_del_group:"))
+@router.callback_query(F.data.startswith("confirm_del_group:"), AdminOnly())
 async def cb_group_del_do(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, teacher_group_repo: TeacherGroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = ConfirmDelGroupCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -266,15 +242,12 @@ async def cb_group_del_do(
 
 # ─── Педагоги группы (чекбоксы) ──────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("group_teachers:"))
+@router.callback_query(F.data.startswith("group_teachers:"), AdminOnly())
 async def cb_group_teachers(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, teacher_group_repo: TeacherGroupRepository,
     group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = GroupTeachersCb.unpack(callback.data).group_id
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -289,14 +262,11 @@ async def cb_group_teachers(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("gt_toggle:"))
+@router.callback_query(F.data.startswith("gt_toggle:"), AdminOnly())
 async def cb_gt_toggle(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = GroupTeacherToggleCb.unpack(callback.data)
     group_id, teacher_id = cb.group_id, cb.teacher_id
     if await teacher_group_repo.exists(teacher_id, group_id):

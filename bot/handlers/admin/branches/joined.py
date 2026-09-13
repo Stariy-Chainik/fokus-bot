@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.models import User
 from bot.repositories import GroupRepository, StudentRepository, StudentGroupRepository
 from bot.utils.dates import display_period, last_periods
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -55,28 +55,22 @@ async def _render_joined(
     )
 
 
-@router.callback_query(F.data.startswith("group_joined:"))
+@router.callback_query(F.data.startswith("group_joined:"), AdminOnly())
 async def cb_group_joined(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     group_repo: GroupRepository, student_repo: StudentRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     await _render_joined(callback.message, group_id, group_repo, student_repo, student_group_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("gjset:"))
+@router.callback_query(F.data.startswith("gjset:"), AdminOnly())
 async def cb_joined_pick_month(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     row = (await student_group_repo.get_membership_map()).get((student_id, group_id))
@@ -108,15 +102,12 @@ async def cb_joined_pick_month(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("gjdo:"))
+@router.callback_query(F.data.startswith("gjdo:"), AdminOnly())
 async def cb_joined_apply(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id, period = callback.data.split(":", 3)
     value = "" if period == "-" else period
     ok = await student_group_repo.set_joined_period(student_id, group_id, value)
@@ -130,16 +121,13 @@ async def cb_joined_apply(
     await _render_joined(callback.message, group_id, group_repo, student_repo, student_group_repo)
 
 
-@router.callback_query(F.data.startswith("gldo:"))
+@router.callback_query(F.data.startswith("gldo:"), AdminOnly())
 async def cb_left_apply(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
     """Пометить уход из группы или вернуть обратно (значение «-» снимает пометку)."""
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id, period = callback.data.split(":", 3)
     value = "" if period == "-" else period
     ok = await student_group_repo.set_left_period(student_id, group_id, value)

@@ -23,6 +23,7 @@ from bot.services.salary_service import SalaryService
 from bot.states.admin_states import PayoutStates
 from bot.utils.dates import display_period, last_periods
 from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_payouts")
@@ -36,11 +37,8 @@ def _kb(rows) -> InlineKeyboardMarkup:
 
 # ─── Месяц → педагоги ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "admin:payouts")
-async def cb_payouts_periods(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "admin:payouts", AdminOnly())
+async def cb_payouts_periods(callback: CallbackQuery, user: User) -> None:
     rows = [[InlineKeyboardButton(text=display_period(p), callback_data=f"payout_p:{p}")]
             for p in last_periods(4)]
     rows.append([InlineKeyboardButton(text="« Меню", callback_data="admin:menu")])
@@ -77,14 +75,11 @@ async def _render_period(
     )
 
 
-@router.callback_query(F.data.startswith("payout_p:"))
+@router.callback_query(F.data.startswith("payout_p:"), AdminOnly())
 async def cb_payout_period(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService, payout_repo: TeacherPayoutRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await _render_period(callback, callback.data.split(":", 1)[1], teacher_repo, salary_service, payout_repo)
     await callback.answer()
 
@@ -138,30 +133,24 @@ async def _render_teacher(
     await target.edit_text("\n".join(lines), reply_markup=_kb(rows))
 
 
-@router.callback_query(F.data.startswith("payout_t:"))
+@router.callback_query(F.data.startswith("payout_t:"), AdminOnly())
 async def cb_payout_teacher(
-    callback: CallbackQuery, user: User | None, state: FSMContext,
+    callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     _, teacher_id, period = callback.data.split(":", 2)
     await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("payout_all:"))
+@router.callback_query(F.data.startswith("payout_all:"), AdminOnly())
 async def cb_payout_all(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, period = callback.data.split(":", 2)
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
@@ -178,11 +167,8 @@ async def cb_payout_all(
     await callback.answer(f"Выплата {rest} ₽ записана")
 
 
-@router.callback_query(F.data.startswith("payout_custom:"))
-async def cb_payout_custom(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("payout_custom:"), AdminOnly())
+async def cb_payout_custom(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     _, teacher_id, period = callback.data.split(":", 2)
     await state.set_state(PayoutStates.waiting_amount)
     await state.update_data(payout_teacher_id=teacher_id, payout_period=period)
@@ -218,11 +204,8 @@ async def on_payout_amount(
 
 # ─── Нестандартный день (корректировка минут смены) ─────────────────────────
 
-@router.callback_query(F.data.startswith("payout_ovr:"))
-async def cb_payout_override_start(callback: CallbackQuery, user: User | None, state: FSMContext) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("payout_ovr:"), AdminOnly())
+async def cb_payout_override_start(callback: CallbackQuery, user: User, state: FSMContext) -> None:
     _, teacher_id, period = callback.data.split(":", 2)
     await state.set_state(PayoutStates.waiting_ovr_date)
     await state.update_data(ovr_teacher_id=teacher_id, ovr_period=period)
@@ -295,15 +278,12 @@ async def on_override_comment(
     await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
 
 
-@router.callback_query(F.data.startswith("payout_ovr_del:"))
+@router.callback_query(F.data.startswith("payout_ovr_del:"), AdminOnly())
 async def cb_override_delete(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, override_id, teacher_id, period = callback.data.split(":", 3)
     await salary_override_repo.delete(override_id)
     await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
@@ -364,15 +344,12 @@ async def _detail_lines(
     return out
 
 
-@router.callback_query(F.data.startswith("payout_detail:"))
+@router.callback_query(F.data.startswith("payout_detail:"), AdminOnly())
 async def cb_payout_detail(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService, lesson_repo: LessonRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, teacher_id, period, page_raw = callback.data.split(":", 3)
     page = int(page_raw) if page_raw.isdigit() else 0
     teacher = await teacher_repo.get_by_id(teacher_id)

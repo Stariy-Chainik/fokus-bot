@@ -20,20 +20,17 @@ from ._base import router
 from ._base import _tid, _header
 from .flows import _show_shared_group_picker
 from .finalize import _finalize
-from bot.handlers.access import is_teacher_or_admin as _is_teacher
+from bot.handlers.filters import TeacherOrAdmin
 
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data.startswith("shared_group:"), RecordLessonStates.choosing_shared_group)
+@router.callback_query(F.data.startswith("shared_group:"), RecordLessonStates.choosing_shared_group, TeacherOrAdmin())
 async def cb_shared_group_pick(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, group_repo: GroupRepository,
     teacher_group_repo: TeacherGroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     if not group:
@@ -65,14 +62,11 @@ async def cb_shared_group_pick(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pso_toggle:"), RecordLessonStates.picking_shared_in_group)
+@router.callback_query(F.data.startswith("pso_toggle:"), RecordLessonStates.picking_shared_in_group, TeacherOrAdmin())
 async def cb_shared_student_toggle(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     visibility: TeacherVisibilityService, group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     sid = callback.data.split(":", 1)[1]
     data = await state.get_data()
     selected: list = list(data.get("selected_ids") or [])
@@ -109,26 +103,20 @@ async def cb_shared_student_toggle(
     await callback.answer()
 
 
-@router.callback_query(F.data == "pso_confirm", RecordLessonStates.picking_shared_in_group)
+@router.callback_query(F.data == "pso_confirm", RecordLessonStates.picking_shared_in_group, TeacherOrAdmin())
 async def cb_shared_pso_done(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await _show_shared_group_picker(callback, state, user, teacher_group_repo, group_repo)
     await callback.answer()
 
 
-@router.callback_query(F.data == "shared_back_to_groups")
+@router.callback_query(F.data == "shared_back_to_groups", TeacherOrAdmin())
 async def cb_shared_back_to_groups(
-    callback: CallbackQuery, state: FSMContext, user: User | None,
+    callback: CallbackQuery, state: FSMContext, user: User,
     teacher_group_repo: TeacherGroupRepository, group_repo: GroupRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await _show_shared_group_picker(callback, state, user, teacher_group_repo, group_repo)
     await callback.answer()
 

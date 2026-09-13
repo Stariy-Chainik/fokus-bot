@@ -20,7 +20,7 @@ from bot.keyboards.admin import (
     kb_confirm,
     kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 from ._base import _render_student_card
@@ -30,15 +30,12 @@ logger = logging.getLogger(__name__)
 
 # ─── Управление клиентом ученика ─────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("student_client_create:"))
+@router.callback_query(F.data.startswith("student_client_create:"), AdminOnly())
 async def cb_student_client_create(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     state: FSMContext,
     student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -89,15 +86,12 @@ async def handle_client_phone(
     )
 
 
-@router.callback_query(F.data.startswith("student_client_unbind:"))
+@router.callback_query(F.data.startswith("student_client_unbind:"), AdminOnly())
 async def cb_student_client_unbind(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository,
     client_repo: ClientRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student or not student.client_id:
@@ -117,15 +111,12 @@ async def cb_student_client_unbind(
     )
 
 
-@router.callback_query(F.data.startswith("confirm_student_client_unbind:"))
+@router.callback_query(F.data.startswith("confirm_student_client_unbind:"), AdminOnly())
 async def cb_student_client_unbind_confirm(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, client_repo: ClientRepository,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if not student or not student.client_id:

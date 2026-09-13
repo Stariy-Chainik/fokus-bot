@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, Message, BufferedInputFile
 
 from typing import cast
 
+from bot.handlers.filters import AdminOnly
 from bot.models import User
 from bot.models.enums import PaymentStatus
 from bot.repositories import StudentRepository, ClientRepository, UserRepository
@@ -325,16 +326,13 @@ async def on_receipt_photo(
     await message.answer(text, reply_markup=to_aiogram_markup(rows))
 
 
-@router.callback_query(F.data.startswith("rcpt_no:"))
+@router.callback_query(F.data.startswith("rcpt_no:"), AdminOnly())
 async def cb_receipt_reject(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_repo: StudentRepository,
 ) -> None:
     """Админ не подтверждает оплату: счёт остаётся неоплаченным, родителю — уведомление."""
-    if not user or not user.is_admin:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = ReceiptRejectCb.unpack(callback.data)
     student_id, period_month, parent_raw = cb.student_id, cb.period_month, cb.parent_raw
     student = await student_repo.get_by_id(student_id)
@@ -363,19 +361,16 @@ async def cb_receipt_reject(
     await callback.answer("Оплата не подтверждена")
 
 
-@router.callback_query(F.data.startswith("rcpp:"))
+@router.callback_query(F.data.startswith("rcpp:"), AdminOnly())
 async def cb_receipt_confirm_partial(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     payment_service: PaymentService,
     student_repo: StudentRepository,
     client_repo: ClientRepository,
     cloudkassir_service: CloudKassirService,
 ) -> None:
     """Подтверждение выборочной оплаты: только перечисленные счета PAY-…"""
-    if not user or not user.is_admin:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = ReceiptConfirmPartialCb.unpack(callback.data)
     student_id, period_month, pids_raw = cb.student_id, cb.period_month, cb.pids
     claimed = cb.claimed  # сумма из чека
@@ -436,18 +431,15 @@ async def cb_receipt_confirm_partial(
             )
 
 
-@router.callback_query(F.data.startswith("receipt_confirm:"))
+@router.callback_query(F.data.startswith("receipt_confirm:"), AdminOnly())
 async def cb_receipt_confirm(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     payment_service: PaymentService,
     student_repo: StudentRepository,
     client_repo: ClientRepository,
     cloudkassir_service: CloudKassirService,
 ) -> None:
-    if not user or not user.is_admin:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     cb = ReceiptConfirmCb.unpack(callback.data)
     student_id, period_month = cb.student_id, cb.period_month
     claimed = cb.claimed  # сумма из чека

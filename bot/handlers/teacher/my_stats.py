@@ -4,11 +4,11 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.models import User
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.utils.dates import display_period, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
-from bot.handlers.access import is_teacher as _is_teacher
+from bot.handlers.filters import TeacherOnly
+from bot.handlers.access import TeacherUser
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_stats")
@@ -25,27 +25,21 @@ def _period_buttons() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-@router.callback_query(F.data == "teacher:my_stats")
-async def cb_my_stats(callback: CallbackQuery, user: User | None) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
+@router.callback_query(F.data == "teacher:my_stats", TeacherOnly())
+async def cb_my_stats(callback: CallbackQuery, user: TeacherUser) -> None:
     await callback.message.edit_text(
         "<b>Моя статистика</b>\nВыберите период:", reply_markup=_period_buttons(),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("stats_period:"))
+@router.callback_query(F.data.startswith("stats_period:"), TeacherOnly())
 async def cb_stats_period(
     callback: CallbackQuery,
-    user: User | None,
+    user: TeacherUser,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
-    if not _is_teacher(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
 
     period_month = callback.data.split(":", 1)[1]
     teacher_id = user.teacher_id

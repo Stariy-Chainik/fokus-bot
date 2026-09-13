@@ -18,7 +18,7 @@ from bot.models.enums import RequestStatus
 from bot.keyboards.admin import (
     kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from ._base import router
 
@@ -98,17 +98,14 @@ async def _finish_created_request(
     await callback.answer(toast, show_alert=True)
 
 
-@router.callback_query(F.data.startswith("req_approve:"))
+@router.callback_query(F.data.startswith("req_approve:"), AdminOnly())
 async def cb_approve_student_request(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     student_request_service: StudentRequestService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     req_id = callback.data.split(":", 1)[1]
     req = await student_request_repo.get_by_id(req_id)
     if not req or req.status != RequestStatus.PENDING:
@@ -146,16 +143,13 @@ async def cb_approve_student_request(
     await _finish_created_request(callback, req, student, group_repo, branch_repo)
 
 
-@router.callback_query(F.data.startswith("req_create_new:"))
+@router.callback_query(F.data.startswith("req_create_new:"), AdminOnly())
 async def cb_create_new_student_request(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_request_repo: StudentRequestRepository,
     group_repo: GroupRepository, branch_repo: BranchRepository,
     student_request_service: StudentRequestService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     req_id = callback.data.split(":", 1)[1]
     req = await student_request_repo.get_by_id(req_id)
     if not req or req.status != RequestStatus.PENDING:
@@ -168,16 +162,13 @@ async def cb_create_new_student_request(
     await _finish_created_request(callback, req, student, group_repo, branch_repo)
 
 
-@router.callback_query(F.data.startswith("req_link_existing:"))
+@router.callback_query(F.data.startswith("req_link_existing:"), AdminOnly())
 async def cb_link_existing_student_request(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository,
     student_request_repo: StudentRequestRepository,
     student_request_service: StudentRequestService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, req_id, student_id = callback.data.split(":", 2)
     req = await student_request_repo.get_by_id(req_id)
     if not req or req.status != RequestStatus.PENDING:
@@ -227,14 +218,11 @@ async def cb_link_existing_student_request(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("req_reject:"))
+@router.callback_query(F.data.startswith("req_reject:"), AdminOnly())
 async def cb_reject_student_request(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_request_repo: StudentRequestRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     req_id = callback.data.split(":", 1)[1]
     req = await student_request_repo.get_by_id(req_id)
     if not req or req.status != RequestStatus.PENDING:
@@ -266,14 +254,11 @@ async def cb_reject_student_request(
 
 # ─── Список ожидающих заявок ─────────────────────────────────────────────────
 
-@router.callback_query(F.data == "admin:requests")
+@router.callback_query(F.data == "admin:requests", AdminOnly())
 async def cb_requests_list(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_request_repo: StudentRequestRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     pending = await student_request_repo.get_pending()
     if not pending:
         await callback.message.edit_text(

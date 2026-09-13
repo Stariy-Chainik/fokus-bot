@@ -16,7 +16,7 @@ from bot.keyboards.admin import (
     kb_confirm,
     kb_back,
 )
-from bot.handlers.access import is_admin as _is_admin
+from bot.handlers.filters import AdminOnly
 
 from bot.services.rosters import group_members
 from ._base import router
@@ -26,13 +26,10 @@ logger = logging.getLogger(__name__)
 
 # ─── Удаление ученика ─────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "students:delete")
+@router.callback_query(F.data == "students:delete", AdminOnly())
 async def cb_delete_student_start(
-    callback: CallbackQuery, user: User | None, branch_repo: BranchRepository,
+    callback: CallbackQuery, user: User, branch_repo: BranchRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
     if not branches:
         await callback.message.edit_text("Филиалов нет.", reply_markup=kb_back("admin:students"))
@@ -50,13 +47,10 @@ async def cb_delete_student_start(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("del_st_brn:"))
+@router.callback_query(F.data.startswith("del_st_brn:"), AdminOnly())
 async def cb_delete_student_branch(
-    callback: CallbackQuery, user: User | None, group_repo: GroupRepository,
+    callback: CallbackQuery, user: User, group_repo: GroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     branch_id = callback.data.split(":", 1)[1]
     groups = sorted(
         [g for g in await group_repo.get_all() if g.branch_id == branch_id],
@@ -81,15 +75,12 @@ async def cb_delete_student_branch(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("del_st_grp:"))
+@router.callback_query(F.data.startswith("del_st_grp:"), AdminOnly())
 async def cb_delete_student_group(
-    callback: CallbackQuery, user: User | None,
+    callback: CallbackQuery, user: User,
     student_repo: StudentRepository, group_repo: GroupRepository,
     student_group_repo: StudentGroupRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
     group_name = group.name if group else group_id
@@ -118,13 +109,10 @@ async def cb_delete_student_group(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("del_student:"))
+@router.callback_query(F.data.startswith("del_student:"), AdminOnly())
 async def cb_delete_student_confirm(
-    callback: CallbackQuery, user: User | None, student_repo: StudentRepository,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     if not student:
@@ -141,15 +129,12 @@ async def cb_delete_student_confirm(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("confirm_del_student:"))
+@router.callback_query(F.data.startswith("confirm_del_student:"), AdminOnly())
 async def cb_delete_student_do(
     callback: CallbackQuery,
-    user: User | None,
+    user: User,
     student_service: StudentService,
 ) -> None:
-    if not _is_admin(user):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     _, group_id, student_id = callback.data.split(":", 2)
     ok = await student_service.delete_student(student_id)
     text = f"Ученик {student_id} удалён." if ok else "Ученик не найден."
