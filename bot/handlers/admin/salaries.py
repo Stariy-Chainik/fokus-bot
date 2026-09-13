@@ -17,6 +17,16 @@ from bot.utils.dates import display_period, format_date_short_with_wd, last_peri
 from bot.utils.lesson_stats import format_lesson_breakdown
 from bot.handlers.access import is_admin as _is_admin
 
+from bot.utils.callbacks import (
+    SalaryDayCalNavCb,
+    SalaryDayCalPickCb,
+    SalaryDayCalendarCb,
+    SalaryDayCb,
+    SalaryDayShowCb,
+    SalaryPeriodCb,
+    SalaryTeacherCb,
+    TeacherCardSalaryCb,
+)
 logger = logging.getLogger(__name__)
 router = Router(name="admin_salaries")
 
@@ -59,7 +69,7 @@ async def cb_salary_choose_period(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = SalaryTeacherCb.unpack(callback.data).teacher_id
     await state.update_data(salary_back_cb="salaries:view")
     await callback.message.edit_text(
         f"<b>Выберите период для педагога {teacher_id}:</b>",
@@ -76,7 +86,7 @@ async def cb_salary_from_card(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = TeacherCardSalaryCb.unpack(callback.data).teacher_id
     back_cb = f"teacher_card:{teacher_id}"
     await state.update_data(salary_back_cb=back_cb)
     await callback.message.edit_text(
@@ -99,7 +109,8 @@ async def cb_salary_show(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, teacher_id, period_month = callback.data.split(":", 2)
+    cb = SalaryPeriodCb.unpack(callback.data)
+    teacher_id, period_month = cb.teacher_id, cb.period_month
     teacher = await teacher_repo.get_by_id(teacher_id)
     data = await state.get_data()
     # «Назад» из счёта периода ведёт обратно к выбору периода. Кэшированный
@@ -185,7 +196,7 @@ async def cb_salary_day(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = SalaryDayCb.unpack(callback.data).teacher_id
     await state.update_data(salary_day_teacher_id=teacher_id)
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -225,7 +236,7 @@ async def cb_salary_dday_cal(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    teacher_id = callback.data.split(":", 1)[1]
+    teacher_id = SalaryDayCalendarCb.unpack(callback.data).teacher_id
     await state.update_data(salary_day_teacher_id=teacher_id)
     today = date.today()
     highlights = await _lesson_dates(lesson_repo, teacher_id, today.year, today.month)
@@ -246,7 +257,7 @@ async def cb_salary_dday_nav(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    ym = callback.data.split(":", 1)[1]
+    ym = SalaryDayCalNavCb.unpack(callback.data).ym
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
     teacher_id = data.get("salary_day_teacher_id", "")
@@ -271,7 +282,7 @@ async def cb_salary_dday_pick(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    date_str = callback.data.split(":", 1)[1]
+    date_str = SalaryDayCalPickCb.unpack(callback.data).date
     data = await state.get_data()
     teacher_id = data.get("salary_day_teacher_id", "")
     await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)
@@ -289,6 +300,7 @@ async def cb_salary_day_show(
     if not _is_admin(user):
         await callback.answer("Нет доступа", show_alert=True)
         return
-    _, teacher_id, date_str = callback.data.split(":", 2)
+    cb = SalaryDayShowCb.unpack(callback.data)
+    teacher_id, date_str = cb.teacher_id, cb.date_str
     await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)
     await callback.answer()
