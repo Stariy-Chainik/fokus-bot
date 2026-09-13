@@ -18,7 +18,10 @@ from bot.repositories import StudentRepository
 from bot.services import PaymentService
 from bot.services.parent_notifier import resolve_notifier
 from bot.utils.dates import display_period
+from bot.keyboards.common import nav_row
+from bot.utils.constants import DEBTORS_PAGE_SIZE
 from bot.utils.locks import InProgressGuard
+from bot.utils.paging import Page, paginate
 from config.settings import settings
 from bot.handlers.access import is_admin as _is_admin
 
@@ -26,7 +29,6 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_debtors")
 
 
-_PAGE_SIZE = 25
 _reminding = InProgressGuard()
 
 
@@ -80,16 +82,10 @@ def _format_line(idx: int, d: dict, current: str) -> str:
     return f"{idx}. <b>{d['student'].name}</b> — {d['total']} ₽{no_bot}\n   {detail}"
 
 
-def _kb_debtors(page: int, pages: int, can_remind: bool) -> InlineKeyboardMarkup:
+def _kb_debtors(pg: Page, can_remind: bool) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if pages > 1:
-        nav = []
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="«", callback_data=f"debtors:p:{page - 1}"))
-        nav.append(InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="noop"))
-        if page < pages - 1:
-            nav.append(InlineKeyboardButton(text="»", callback_data=f"debtors:p:{page + 1}"))
-        rows.append(nav)
+    if pg.pages > 1:
+        rows.append(nav_row(pg, lambda n: f"debtors:p:{n}", prev_text="«", next_text="»", counter=True))
     if can_remind:
         rows.append([InlineKeyboardButton(
             text="📤 Напомнить всем (закрытые месяцы)", callback_data="debtors:remind",
@@ -109,14 +105,12 @@ async def _render_debtors(
     if not debtors:
         await callback.message.edit_text(
             "⚠️ <b>Должники</b>\n\nДолгов нет — все начисления оплачены 🎉",
-            reply_markup=_kb_debtors(0, 1, can_remind=False),
+            reply_markup=_kb_debtors(paginate([], 0, DEBTORS_PAGE_SIZE, clamp=True), can_remind=False),
         )
         await callback.answer()
         return
 
-    pages = (len(debtors) + _PAGE_SIZE - 1) // _PAGE_SIZE
-    page = max(0, min(page, pages - 1))
-    chunk = debtors[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
+    pg = paginate(debtors, page, DEBTORS_PAGE_SIZE, clamp=True)
 
     grand_total = sum(d["total"] for d in debtors)
     closed_grand = sum(d["closed_total"] for d in debtors)
@@ -130,7 +124,7 @@ async def _render_debtors(
         f"(закрытые месяцы: {closed_grand} ₽)",
         "",
     ]
-    for i, d in enumerate(chunk, start=page * _PAGE_SIZE + 1):
+    for i, d in enumerate(pg.items, start=pg.offset + 1):
         lines.append(_format_line(i, d, current))
     lines += [
         "",
@@ -140,7 +134,7 @@ async def _render_debtors(
 
     await callback.message.edit_text(
         "\n".join(lines),
-        reply_markup=_kb_debtors(page, pages, can_remind=remind_targets > 0),
+        reply_markup=_kb_debtors(pg, can_remind=remind_targets > 0),
     )
     await callback.answer()
 

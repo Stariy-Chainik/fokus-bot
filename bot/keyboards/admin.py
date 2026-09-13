@@ -1,6 +1,9 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from bot.keyboards.common import nav_row
+from bot.utils.paging import Page
+
 
 def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
     rows = [
@@ -35,23 +38,16 @@ def kb_students_menu() -> InlineKeyboardMarkup:
     ])
 
 
-_STUDENT_PAGE_SIZE = 20
-
-
-def kb_student_paged(students: list, page: int, total: int) -> InlineKeyboardMarkup:
+def kb_student_paged(pg: Page) -> InlineKeyboardMarkup:
     """Пагинация поискового списка учеников.
     Сам запрос хранится в FSM-state, а не в callback_data — иначе символы
     вроде ':' / '_' ломают декодирование.
     """
     buttons = [
         [InlineKeyboardButton(text=s.name, callback_data=f"student_card:{s.student_id}")]
-        for s in students
+        for s in pg.items
     ]
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="← Пред.", callback_data=f"spage:{page - 1}"))
-    if (page + 1) * _STUDENT_PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton(text="След. →", callback_data=f"spage:{page + 1}"))
+    nav = nav_row(pg, lambda n: f"spage:{n}")
     if nav:
         buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="students:list")])

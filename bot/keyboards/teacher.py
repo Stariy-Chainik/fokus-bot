@@ -1,6 +1,9 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from bot.keyboards.common import nav_row
+from bot.utils.paging import paginate
+
 from config.settings import settings
 
 
@@ -386,8 +389,8 @@ def kb_lesson_list(
     "aedl_type:{teacher_id}" для админа)."""
     from bot.utils.dates import format_date_display, format_date_short_with_wd
     locked_ids = locked_ids or set()
-    start = page * page_size
-    page_lessons = lessons[start: start + page_size]
+    pg = paginate(lessons, page, page_size)
+    page_lessons = pg.items
     if filter_date:
         filter_tag = filter_date
     elif filter_month:
@@ -446,17 +449,9 @@ def kb_lesson_list(
             label = f"{lock_icon}{format_date_display(ls.date)} · {dur_part}{who}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"lesson_detail:{ls.lesson_id}")])
 
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(
-            text="← Пред.", callback_data=f"lessons_page:{page - 1}:{filter_tag}:{type_code}",
-        ))
-    if start + page_size < len(lessons):
-        nav_row.append(InlineKeyboardButton(
-            text="След. →", callback_data=f"lessons_page:{page + 1}:{filter_tag}:{type_code}",
-        ))
-    if nav_row:
-        buttons.append(nav_row)
+    nav = nav_row(pg, lambda n: f"lessons_page:{n}:{filter_tag}:{type_code}")
+    if nav:
+        buttons.append(nav)
 
     buttons.append([InlineKeyboardButton(text="« Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -5,6 +5,7 @@ from bot.keyboards.client import kb_lessons_month_filter
 from bot.keyboards.teacher import kb_lesson_detail, kb_lesson_list
 from bot.models.enums import LessonType
 from config.settings import settings
+from bot.utils.paging import paginate
 from tests.fakes import assert_golden, markup_dump, mk_lesson, mk_student, mk_teacher
 
 
@@ -43,15 +44,16 @@ def test_kb_lesson_list_single_day_admin_variant():
 
 def test_kb_student_paged_navigation():
     students = [mk_student(f"STU-{i:04d}", f"Ученик {i:02d}") for i in range(1, 46)]
-    assert_golden("kb_student_paged_p0", markup_dump(kb_student_paged(students[:20], 0, 45)))
-    assert_golden("kb_student_paged_p1", markup_dump(kb_student_paged(students[20:40], 1, 45)))
-    assert_golden("kb_student_paged_p2", markup_dump(kb_student_paged(students[40:], 2, 45)))
+    assert_golden("kb_student_paged_p0", markup_dump(kb_student_paged(paginate(students, 0, 20))))
+    assert_golden("kb_student_paged_p1", markup_dump(kb_student_paged(paginate(students, 1, 20))))
+    assert_golden("kb_student_paged_p2", markup_dump(kb_student_paged(paginate(students, 2, 20))))
 
 
 def test_kb_debtors_pages():
-    assert_golden("kb_debtors_single_page", markup_dump(_kb_debtors(0, 1, can_remind=True)))
-    assert_golden("kb_debtors_middle_page", markup_dump(_kb_debtors(1, 3, can_remind=False)))
-    assert_golden("kb_debtors_last_page", markup_dump(_kb_debtors(2, 3, can_remind=True)))
+    rows = list(range(60))
+    assert_golden("kb_debtors_single_page", markup_dump(_kb_debtors(paginate(rows[:10], 0, 25, clamp=True), can_remind=True)))
+    assert_golden("kb_debtors_middle_page", markup_dump(_kb_debtors(paginate(rows, 1, 25, clamp=True), can_remind=False)))
+    assert_golden("kb_debtors_last_page", markup_dump(_kb_debtors(paginate(rows, 2, 25, clamp=True), can_remind=True)))
 
 
 def test_kb_student_card_variants():

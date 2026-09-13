@@ -15,8 +15,10 @@ from bot.services import (
 from bot.states import StudentListStates
 from bot.keyboards.admin import (
     kb_student_paged,
-    kb_back, _STUDENT_PAGE_SIZE,
+    kb_back,
 )
+from bot.utils.constants import STUDENT_PAGE_SIZE
+from bot.utils.paging import Page, paginate
 from bot.handlers.access import is_admin as _is_admin
 
 from ._base import router
@@ -27,13 +29,12 @@ logger = logging.getLogger(__name__)
 
 # ─── Список учеников с поиском ───────────────────────────────────────────────
 
-def _filter_and_page(students: list, query: str, page: int):
+def _filter_and_page(students: list, query: str, page: int) -> Page:
     if query:
         filtered = [s for s in students if query.lower() in s.name.lower()]
     else:
         filtered = students
-    start = page * _STUDENT_PAGE_SIZE
-    return filtered[start:start + _STUDENT_PAGE_SIZE], len(filtered)
+    return paginate(filtered, page, STUDENT_PAGE_SIZE)
 
 
 @router.callback_query(F.data == "students:list")
@@ -61,14 +62,14 @@ async def handle_student_search(
         query = ""
     await state.update_data(student_query=query)
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    page_students, total = _filter_and_page(all_students, query, 0)
-    if not page_students:
+    pg = _filter_and_page(all_students, query, 0)
+    if not pg.items:
         await message.answer("Ничего не найдено. Попробуйте другой запрос.")
         return
-    label = f"Найдено: {total}" if query else f"Всего учеников: {total}"
+    label = f"Найдено: {pg.total}" if query else f"Всего учеников: {pg.total}"
     await message.answer(
         f"<b>{label}. Страница 1:</b>",
-        reply_markup=kb_student_paged(page_students, 0, total),
+        reply_markup=kb_student_paged(pg),
     )
 
 
@@ -88,10 +89,10 @@ async def cb_student_page(
     data = await state.get_data()
     query = data.get("student_query", "")
     all_students = sorted(await student_repo.get_all(), key=lambda s: s.name)
-    page_students, total = _filter_and_page(all_students, query, page)
+    pg = _filter_and_page(all_students, query, page)
     await callback.message.edit_text(
         f"<b>Страница {page + 1}:</b>",
-        reply_markup=kb_student_paged(page_students, page, total),
+        reply_markup=kb_student_paged(pg),
     )
     await callback.answer()
 

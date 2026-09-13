@@ -302,11 +302,12 @@ def test_student_search_paging():
     students = sorted([mk_student(f"STU-{i:04d}", f"Ученик {i:02d}") for i in range(1, 24)]
                       + [mk_student("STU-0100", "Иванов Иван"), mk_student("STU-0101", "Иванова Ира")],
                       key=lambda s: s.name)
-    page, total = _filter_and_page(students, "ИВА", 0)
-    assert ([s.student_id for s in page], total) == (["STU-0100", "STU-0101"], 2)
-    page, total = _filter_and_page(students, "", 1)
-    assert ([s.name for s in page], total) == (["Ученик 19", "Ученик 20", "Ученик 21", "Ученик 22", "Ученик 23"], 25)
-    assert _filter_and_page(students, "zzz", 0) == ([], 0)
+    pg = _filter_and_page(students, "ИВА", 0)
+    assert ([s.student_id for s in pg.items], pg.total) == (["STU-0100", "STU-0101"], 2)
+    pg = _filter_and_page(students, "", 1)
+    assert ([s.name for s in pg.items], pg.total) == (["Ученик 19", "Ученик 20", "Ученик 21", "Ученик 22", "Ученик 23"], 25)
+    pg = _filter_and_page(students, "zzz", 0)
+    assert (pg.items, pg.total) == ([], 0)
 
 
 # ─── «Нет доступа» по ролям ───────────────────────────────────────────────────
