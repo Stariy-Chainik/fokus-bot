@@ -97,14 +97,14 @@ class FinanceEntry:
 
 @dataclass
 class SubscriptionOverride:
-    """Переопределение цены абонемента на конкретный месяц.
+    """Переопределение цены абонемента на месяц или бессрочно.
 
     student_id пуст (None) — для всей группы; задан — для одного ученика.
-    Приоритет при начислении: ученик → группа → group.price_full.
-    amount = 0 — в этом месяце не начислять (освобождение).
+    period_month = "*" — постоянное персональное переопределение; конкретный месяц имеет приоритет.
+    amount = 0 — не начислять (освобождение).
     """
     group_id: str
-    period_month: str          # YYYY-MM
+    period_month: str          # YYYY-MM | * (бессрочно для ученика)
     student_id: Optional[str]
     amount: int                # рублей
     created_at: str = ""

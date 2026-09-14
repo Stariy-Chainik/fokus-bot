@@ -114,7 +114,8 @@ async def _overrides_block(
         else:
             who = "вся группа"
         amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
-        lines.append(f"  • {display_period(o.period_month)} · {who} — {amount}")
+        period = "постоянно" if o.period_month == "*" else display_period(o.period_month)
+        lines.append(f"  • {period} · {who} — {amount}")
     return "\n".join(lines)
 
 

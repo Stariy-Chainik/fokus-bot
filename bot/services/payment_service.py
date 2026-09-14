@@ -96,7 +96,11 @@ class PaymentService:
         self._sub_override_repo = subscription_override_repo
 
     async def _sub_override_map(self) -> dict[tuple[str, str, str], int]:
-        """(group_id, period, student_id|'') → amount. Пустой student_id = вся группа."""
+        """(group_id, period|'*', student_id|'') → amount.
+
+        ``period='*'`` — бессрочное персональное переопределение;
+        пустой student_id — вся группа.
+        """
         if self._sub_override_repo is None:
             return {}
         return {
@@ -192,10 +196,13 @@ class PaymentService:
         overrides: dict[tuple[str, str, str], int],
         group_id: str, period: str, student_id: str, default: int,
     ) -> int:
-        """Цена абонемента месяца: override ученика → override группы → price_full."""
+        """Цена абонемента: ученик/месяц → ученик навсегда → группа/месяц → price_full."""
         key_student = (group_id, period, student_id)
         if key_student in overrides:
             return overrides[key_student]
+        key_student_permanent = (group_id, "*", student_id)
+        if key_student_permanent in overrides:
+            return overrides[key_student_permanent]
         key_group = (group_id, period, "")
         if key_group in overrides:
             return overrides[key_group]

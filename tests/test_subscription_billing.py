@@ -295,6 +295,28 @@ def test_override_zero_exempts_student():
     assert _run(svc.compute_debt_map(until_period="2026-07")) == {"STU-B": {"2026-07": 3000}}
 
 
+def test_permanent_zero_override_exempts_student_in_future_months():
+    """period='*' сохраняет членство, но бессрочно отменяет абонемент."""
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-09-03")],
+        [_sub_group(price=3000)],
+        [("STU-A", "GRP-0001"), ("STU-B", "GRP-0001")],
+        overrides=[_override("GRP-0001", "*", "STU-A", 0)],
+    )
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2027-06")) == {}
+    assert _run(svc.compute_bills_for_student_period("STU-B", "2027-06"))["SUB:GRP-0001"].total == 3000
+
+
+def test_month_override_beats_permanent_student_override():
+    """На фоне бессрочного освобождения можно задать цену отдельного месяца."""
+    overrides = {
+        ("GRP-0001", "*", "STU-A"): 0,
+        ("GRP-0001", "2026-09", "STU-A"): 1500,
+    }
+    assert PaymentService._sub_amount(overrides, "GRP-0001", "2026-09", "STU-A", 3000) == 1500
+    assert PaymentService._sub_amount(overrides, "GRP-0001", "2026-10", "STU-A", 3000) == 0
+
+
 def test_override_applies_only_to_its_month():
     """Переопределение на июль не влияет на июнь."""
     svc = _service(

@@ -19,6 +19,7 @@ class SubscriptionOverrideRepository(BaseRepository):
     """Переопределения цены абонемента: (group_id, period_month, student_id?) → amount.
 
     student_id пуст = вся группа. Ключ уникален (upsert по ключу).
+    period_month="*" = бессрочное персональное переопределение.
     """
 
     async def get_all(self) -> list[SubscriptionOverride]:

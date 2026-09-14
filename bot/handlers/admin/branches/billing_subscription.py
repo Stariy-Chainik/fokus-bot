@@ -251,8 +251,9 @@ async def cb_subovr_list(
             who = "вся группа"
         amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
         sid_part = o.student_id or "-"
+        period_label = "постоянно" if o.period_month == "*" else display_period(o.period_month)
         rows.append([InlineKeyboardButton(
-            text=f"✖ {display_period(o.period_month)} · {who} — {amount}",
+            text=f"✖ {period_label} · {who} — {amount}",
             callback_data=f"subovr:del:{group_id}:{o.period_month}:{sid_part}",
         )])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data=f"group_billing:{group_id}")])
