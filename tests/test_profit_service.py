@@ -177,3 +177,41 @@ def test_hall_rent_ignores_lessons_before_since_period(monkeypatch):
     assert old_row is None                  # выручки нет — строки нет
     new_row = calculate_teacher_profit(_teacher(), [_lesson("LES-2", "2026-08-10")])
     assert new_row.rent == 500
+
+
+def test_owner_salary_stays_in_profit(monkeypatch):
+    """Руководитель (OWNER_TEACHER_IDS): его зарплата — не расход, а часть прибыли."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "owner_teacher_ids", "TCH-0001")
+
+    lessons = [
+        _lesson("LES-000001", "2026-09-01"),                    # инд. 45 мин: выручка 900, «зарплата» 800
+        _lesson(
+            "LES-000002", "2026-09-03",
+            type=LessonType.GROUP,
+            student_1_id=None, student_1_name=None,
+            attendees="STU-0001:60:700",
+            group_id="GRP-0001",
+        ),                                                       # группа: выручка 700, «зарплата» 500
+    ]
+    row = calculate_teacher_profit(_teacher(), lessons, extra_salary=300)
+    assert row.owner is True
+    assert row.income == 1600
+    assert row.salary == 0
+    assert row.owner_income == 800 + 500 + 300
+    assert row.profit == 1600 and row.margin_percent == 100
+
+    summary = ProfitSummary(period="2026-09", teacher_rows=(row,))
+    assert summary.salary == 0 and summary.owner_income == 1600 and summary.profit == 1600
+
+    detail = build_teacher_profit_detail(_teacher(), lessons, "2026-09")
+    assert detail.owner is True
+    assert [(r.salary, r.owner_income) for r in detail.lessons] == [(0, 800), (0, 500)]
+    assert detail.salary == 0 and detail.owner_income == 1300
+
+
+def test_non_owner_teacher_unchanged_when_owner_configured(monkeypatch):
+    from config.settings import settings
+    monkeypatch.setattr(settings, "owner_teacher_ids", "TCH-0099")
+    row = calculate_teacher_profit(_teacher(), [_lesson("LES-000001", "2026-09-01")])
+    assert row.owner is False and row.salary == 800 and row.owner_income == 0

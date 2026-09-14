@@ -160,6 +160,8 @@ async def cb_profit_detail(
         f"profit_day_show:{period}" if is_day else f"profit_period:{period}"
     )
     lines = [f"<b>{detail.teacher_name} — {period_label}</b>", ""]
+    if detail.owner:
+        lines += ["👑 Руководитель: зарплата не вычитается, остаётся в прибыли", ""]
     for row in detail.lessons:
         date_prefix = (
             f"{format_date_short_with_wd(row.date)}  " if not is_day else ""
@@ -178,8 +180,10 @@ async def cb_profit_detail(
             "",
             "──────────────",
             f"Выручка: {detail.income} ₽  Зарплата: {detail.salary} ₽",
-            f"<b>Прибыль: {detail.profit} ₽ ({detail.margin_percent}%)</b>",
         ]
+        if detail.owner:
+            lines.append(f"👑 в т.ч. работа руководителя: {detail.owner_income} ₽")
+        lines.append(f"<b>Прибыль: {detail.profit} ₽ ({detail.margin_percent}%)</b>")
 
     await callback.message.edit_text(
         "\n".join(lines),

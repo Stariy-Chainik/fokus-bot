@@ -23,6 +23,7 @@ class ProfitLessonRow:
     income: int
     salary: int
     rent: int = 0  # выручка — аренда зала, а не оплата ученика
+    owner_income: int = 0  # «зарплата» руководителя: не расход, остаётся в прибыли
 
     @property
     def profit(self) -> int:
@@ -39,6 +40,8 @@ class TeacherProfitRow:
     individual_lessons: int
     rent: int = 0  # часть выручки, полученная как аренда зала
     rent_lessons: int = 0  # сколько занятий её дали
+    owner: bool = False  # руководитель: salary = 0, его заработок — в owner_income
+    owner_income: int = 0
 
     @property
     def profit(self) -> int:
@@ -84,6 +87,10 @@ class ProfitSummary:
         return sum(row.rent_lessons for row in self.teacher_rows)
 
     @property
+    def owner_income(self) -> int:
+        return sum(row.owner_income for row in self.teacher_rows)
+
+    @property
     def manual_income(self) -> int:
         return sum(
             entry.amount for entry in self.finance_entries
@@ -120,6 +127,7 @@ class TeacherProfitDetail:
     teacher_name: str
     period: str
     lessons: tuple[ProfitLessonRow, ...]
+    owner: bool = False
 
     @property
     def income(self) -> int:
@@ -128,6 +136,10 @@ class TeacherProfitDetail:
     @property
     def salary(self) -> int:
         return sum(row.salary for row in self.lessons)
+
+    @property
+    def owner_income(self) -> int:
+        return sum(row.owner_income for row in self.lessons)
 
     @property
     def profit(self) -> int:
@@ -156,6 +168,12 @@ def lesson_rent(lesson: Lesson) -> int:
     return settings.hall_rent_map.get(lesson.teacher_id, 0)
 
 
+def is_owner(teacher_id: str) -> bool:
+    """Руководитель школы (OWNER_TEACHER_IDS): его зарплата — не расход, а часть прибыли."""
+    from config.settings import settings
+    return teacher_id in settings.owner_teacher_id_set
+
+
 def calculate_profit_lesson(
     lesson: Lesson,
     teacher: Teacher,
@@ -171,14 +189,17 @@ def calculate_profit_lesson(
     rent = lesson_rent(lesson) if income == 0 else 0
     if income == 0 and rent == 0:
         return None
+    earned = calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date[:7])
+    owner = is_owner(teacher.teacher_id)
     return ProfitLessonRow(
         lesson_id=lesson.lesson_id,
         date=lesson.date,
         lesson_type=lesson.type,
         duration_min=lesson.duration_min,
         income=income or rent,
-        salary=calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date[:7]),
+        salary=0 if owner else earned,
         rent=rent,
+        owner_income=earned if owner else 0,
     )
 
 
@@ -197,15 +218,18 @@ def calculate_teacher_profit(
     group_count = sum(
         1 for row in billed_lessons if row.lesson_type == LessonType.GROUP
     )
+    owner = is_owner(teacher.teacher_id)
     return TeacherProfitRow(
         teacher_id=teacher.teacher_id,
         teacher_name=teacher.name,
         income=sum(row.income for row in billed_lessons),
-        salary=sum(row.salary for row in billed_lessons) + extra_salary,
+        salary=0 if owner else sum(row.salary for row in billed_lessons) + extra_salary,
         group_lessons=group_count,
         individual_lessons=len(billed_lessons) - group_count,
         rent=sum(row.rent for row in billed_lessons),
         rent_lessons=sum(1 for row in billed_lessons if row.rent),
+        owner=owner,
+        owner_income=sum(row.owner_income for row in billed_lessons) + extra_salary if owner else 0,
     )
 
 
@@ -223,6 +247,7 @@ def build_teacher_profit_detail(
         teacher_name=teacher.name,
         period=period,
         lessons=billed_lessons,
+        owner=is_owner(teacher.teacher_id),
     )
 
 

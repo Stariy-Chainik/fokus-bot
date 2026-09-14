@@ -63,3 +63,22 @@ def test_profit_shows_hall_rent_share():
     text = _format_profit("Прибыль за 09.2026", summary)
     assert "🏟 в т.ч. аренда зала: 6000 ₽ (12 зан.)" in text
     assert "Прибыль:  6000 ₽" in text
+
+
+def test_profit_shows_owner_salary_kept_in_profit():
+    summary = ProfitSummary(
+        period="2026-09",
+        teacher_rows=(
+            TeacherProfitRow(
+                teacher_id="TCH-1", teacher_name="Река",
+                income=50000, salary=0, group_lessons=1, individual_lessons=9,
+                owner=True, owner_income=50000,
+            ),
+            _teacher_row(),
+        ),
+    )
+    text = _format_profit("Прибыль за 09.2026", summary)
+    assert "  Выручка: 50000 ₽  Зарплата: 0 ₽" in text
+    assert "  👑 руководитель: 50000 ₽ остаются в прибыли" in text
+    assert "Зарплата: 4000 ₽\n  👑 руководитель в прибыли: 50000 ₽" in text
+    assert "Прибыль:  56000 ₽" in text                # 60000 − 4000

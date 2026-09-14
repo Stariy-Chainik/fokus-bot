@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     def direct_pay_teacher_id_set(self) -> set:
         return {t.strip() for t in self.direct_pay_teacher_ids.replace("|", ",").split(",") if t.strip()}
 
+    # Руководитель школы, ведущий занятия как педагог: его зарплата в «Прибыли»
+    # не вычитается из выручки, а остаётся в прибыли (показывается отдельной строкой).
+    owner_teacher_ids: str = Field(default="", alias="OWNER_TEACHER_IDS")
+
+    @property
+    def owner_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.owner_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
     # Аренда зала: педагог с прямой оплатой (DIRECT_PAY_TEACHER_IDS) перечисляет
     # школе фикс. сумму с каждого своего индивидуального занятия — это выручка
     # школы в «Прибыли». Формат: TCH-0002:500
