@@ -104,7 +104,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
             status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
         else:
             status = f"⏳ Счёт не создан — {subtotal} руб."
-        lines.append(f"👨‍🏫 <b>{agg.name}</b> — {subtotal} руб. — {status}")
+        lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b> — {subtotal} руб. — {status}")
         items = sorted(agg.items, key=lambda b: (b.date, b.lesson_id))
         marks = lesson_paid_marks([b.amount for b in items], paid)
         paid_items = [b for b, is_paid in zip(items, marks, strict=False) if is_paid]

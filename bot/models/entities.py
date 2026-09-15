@@ -171,6 +171,7 @@ class Billing:
     created_at: str
     updated_at: str
     lesson_type: Optional[str] = None  # "pair" | "soloist" | "group" — для отображения
+    group_id: Optional[str] = None     # группа занятия (для подписи счёта названием группы)
 
 
 @dataclass

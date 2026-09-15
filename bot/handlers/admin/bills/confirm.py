@@ -186,9 +186,9 @@ async def cb_pay_pick_invoice(
         await callback.answer("Ученик не найден", show_alert=True)
         return
 
-    invoices = await payment_service.get_or_create_invoices_for_student_period(
-        student, period_month,
-    )
+    ledgers = await payment_service.ledger_for(student, period_month)
+    invoices = [r for ledger in ledgers.values() for r in ([*ledger.paid_rows] + ([ledger.pending] if ledger.pending else []))]
+    labels = {tid: ledger.name for tid, ledger in ledgers.items()}  # групповые позиции — названием группы
     if not invoices:
         await callback.message.edit_text(
             f"У {student.name} за {display_period(period_month)} нет занятий.",
@@ -198,14 +198,15 @@ async def cb_pay_pick_invoice(
         return
 
     rows: list[list[InlineKeyboardButton]] = []
-    for p in sorted(invoices, key=lambda x: (x.teacher_name or "", x.status.value != "paid", x.paid_at or "")):
+    for p in sorted(invoices, key=lambda x: (labels.get(x.teacher_id) or x.teacher_name or "", x.status.value != "paid", x.paid_at or "")):
         paid = p.status.value == "paid"
         if not paid and p.total_amount <= 0:
             continue  # остаток 0 — платить нечего
+        label = labels.get(p.teacher_id) or p.teacher_name or "—"
         if paid:
             when = f" ({(p.paid_at or '')[:10]})" if p.paid_at else ""
             rows.append([InlineKeyboardButton(
-                text=f"✅ {p.teacher_name or '—'} — {p.total_amount} руб.{when}", callback_data="noop",
+                text=f"✅ {label} — {p.total_amount} руб.{when}", callback_data="noop",
             )])
         else:
             # По занятиям можно отметить выборочно; абонемент — только целиком
@@ -213,7 +214,7 @@ async def cb_pay_pick_invoice(
                       if p.teacher_id.startswith(SUBSCRIPTION_KEY_PREFIX)
                       else f"paysel:{p.payment_id}:{group_id}")
             rows.append([InlineKeyboardButton(
-                text=f"⏳ {p.teacher_name or '—'} — к доплате {p.total_amount} руб.",
+                text=f"⏳ {label} — к доплате {p.total_amount} руб.",
                 callback_data=target,
             )])
     if not rows:
@@ -414,7 +415,7 @@ async def cb_pay_select_confirm(
     await callback.message.edit_text(
         f"<b>Подтвердить оплату?</b>\n"
         f"Ученик: {student.name}\n"
-        f"Педагог: {ledger.name}\n"
+        f"{'Группа' if ledger.group else 'Педагог'}: {ledger.name}\n"
         f"Период: {display_period(data['psel_period'])}\n"
         f"Занятий: {len(picked)} ({dates})\n"
         f"Сумма: <b>{total} руб.</b>\n\n"

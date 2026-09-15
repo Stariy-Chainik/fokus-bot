@@ -284,8 +284,27 @@ class PaymentService:
                 agg = result.setdefault(b.teacher_id, BillAggregate(name=b.teacher_name))
                 agg.total += b.amount
                 agg.items.append(b)
+        await self._label_group_bills(result)
         result.update(await self._subscription_bills_for_student(student_id, period_month))
         return result
+
+    async def _label_group_bills(self, bills: dict[str, BillAggregate]) -> None:
+        """Строка счёта, где все занятия групповые, подписывается названием группы, а не педагога.
+
+        Ключ остаётся teacher_id (учёт оплат по педагогу не меняется); при нескольких группах
+        одного педагога названия перечисляются через запятую.
+        """
+        if self._group_repo is None:
+            return
+        group_names: dict[str, str] | None = None
+        for agg in bills.values():
+            if not agg.items or not all(b.lesson_type == "group" and b.group_id for b in agg.items):
+                continue
+            if group_names is None:
+                group_names = {g.group_id: g.name for g in await self._group_repo.get_all(include_archived=True)}
+            names = list(dict.fromkeys(group_names.get(b.group_id, b.group_id) for b in agg.items))
+            agg.name = ", ".join(names)
+            agg.group = True
 
     async def ledger_for(self, student: Student, period_month: str) -> dict:
         """Накопительный счёт по педагогам за месяц: teacher_id → TeacherLedger.
@@ -317,7 +336,7 @@ class PaymentService:
             ledgers[teacher_id] = TeacherLedger(
                 teacher_id=teacher_id, name=agg.name, accrued=agg.total, paid=paid,
                 items=list(agg.items), paid_rows=paid_rows, pending=pending,
-                subscription=agg.subscription,
+                subscription=agg.subscription, group=agg.group,
             )
         return ledgers
 

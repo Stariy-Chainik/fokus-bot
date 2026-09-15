@@ -28,7 +28,7 @@ def build_bill_text(
             lines.append(f"  <b>Сумма: {agg.total} ₽</b>")
             lines.append("")
             continue
-        lines.append(f"👨‍🏫 <b>{agg.name}</b>")
+        lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b>")
         cur_date: str | None = None
         for b in sorted(agg.items, key=lambda x: x.date):
             if b.date != cur_date:

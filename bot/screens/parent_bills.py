@@ -47,7 +47,7 @@ def render_bill_detail(period_month: str, ledgers_by_student: list) -> BillDetai
                 d.lines.append(f"<b>💳 {ledger.name} {status_mark}</b>")
                 d.lines.append("  фиксированная сумма за месяц")
             else:
-                d.lines.append(f"<b>Педагог: {ledger.name}</b>")
+                d.lines.append(f"<b>{'Группа' if ledger.group else 'Педагог'}: {ledger.name}</b>")
                 items = sorted(ledger.items, key=lambda b: (b.date, b.lesson_id))
                 marks = lesson_paid_marks([item.amount for item in items], ledger.paid)
                 paid_items = [item for item, paid in zip(items, marks, strict=False) if paid]

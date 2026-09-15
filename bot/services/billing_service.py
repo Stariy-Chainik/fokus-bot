@@ -69,6 +69,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
             created_at=lesson.recorded_at,
             updated_at=lesson.updated_at,
             lesson_type=lesson.type.value,
+            group_id=lesson.group_id or None,
         )
 
     if lesson.type == LessonType.GROUP:

@@ -20,6 +20,7 @@ class BillAggregate:
     total: int = 0
     items: list = field(default_factory=list)   # Billing-строки занятий; у абонемента пусто
     subscription: bool = False
+    group: bool = False  # подпись — название группы (все занятия групповые), а не педагог
 
 
 @dataclass
@@ -32,6 +33,7 @@ class TeacherLedger:
     paid_rows: list = field(default_factory=list)   # StudentPeriodPayment со статусом paid
     pending: Optional[StudentPeriodPayment] = None  # строка-остаток (status pending) или None
     subscription: bool = False
+    group: bool = False               # name — название группы, а не педагога
 
     @property
     def remainder(self) -> int:
