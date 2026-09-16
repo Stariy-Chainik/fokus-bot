@@ -186,7 +186,7 @@ async def cb_cl_date(
 ) -> None:
     # cl_date:{student_id}:{date}
     cb = ClientDateCb.unpack(callback.data)
-    student_id, period_str = cb.student_id, cb.period_str
+    student_id, period_str = cb.student_id, cb.date
     await _show_lessons(callback, student_repo, payment_service, period_str, student_id)
     await callback.answer()
 
@@ -294,7 +294,7 @@ async def cb_cl_month_teacher(
 ) -> None:
     # cl_month_t:{student_id}:{ym}:{teacher_id|all}
     cb = ClientMonthTeacherCb.unpack(callback.data)
-    student_id, period_str, teacher_id = cb.student_id, cb.period_str, cb.teacher_id
+    student_id, period_str, teacher_id = cb.student_id, cb.period, cb.teacher_id
     await _show_lessons(
         callback, student_repo, payment_service,
         period_str, student_id, teacher_filter=teacher_id,
@@ -310,6 +310,6 @@ async def cb_cl_month(
 ) -> None:
     # cl_month:{student_id}:{ym}
     cb = ClientMonthCb.unpack(callback.data)
-    student_id, period_str = cb.student_id, cb.period_str
+    student_id, period_str = cb.student_id, cb.period
     await _show_lessons(callback, student_repo, payment_service, period_str, student_id)
     await callback.answer()

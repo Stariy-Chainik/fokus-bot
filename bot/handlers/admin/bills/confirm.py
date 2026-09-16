@@ -176,7 +176,7 @@ async def cb_pay_pick_invoice(
     payment_service: PaymentService,
 ) -> None:
     cb = PayConfirmStudentCb.unpack(callback.data)
-    period_month, group_id, student_id = cb.period_month, cb.group_id, cb.student_id
+    period_month, group_id, student_id = cb.period, cb.group_id, cb.student_id
     back_cb = (
         f"pcpb:{period_month}:none" if group_id == "none"
         else f"pcpg:{period_month}:{group_id}"

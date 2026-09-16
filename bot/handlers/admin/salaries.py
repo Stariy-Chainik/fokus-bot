@@ -274,6 +274,6 @@ async def cb_salary_day_show(
     salary_service: SalaryService,
 ) -> None:
     cb = SalaryDayShowCb.unpack(callback.data)
-    teacher_id, date_str = cb.teacher_id, cb.date_str
+    teacher_id, date_str = cb.teacher_id, cb.date
     await _show_day_salary(callback, teacher_id, date_str, teacher_repo, lesson_repo, salary_service)
     await callback.answer()
