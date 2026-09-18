@@ -184,6 +184,11 @@ def test_students_list_and_card(api):
     status, body = _call(app, "GET", "/api/admin/students?q=иван")
     assert status == 200 and [s["name"] for s in body["students"]] == ["Иванов Иван"]
     assert body["students"][0]["groups"] == ["БП Джаз"] and body["students"][0]["hasParent"] is True
+    assert body["total"] == 2
+    assert [s["name"] for s in _call(app, "GET", "/api/admin/students?group=GRP-0001")[1]["students"]] == ["Иванов Иван", "Петрова Анна"]
+    assert [s["name"] for s in _call(app, "GET", "/api/admin/students?group=GRP-0404")[1]["students"]] == []
+    assert [s["name"] for s in _call(app, "GET", "/api/admin/students?noparent=1")[1]["students"]] == ["Петрова Анна"]
+    assert _call(app, "GET", "/api/admin/students?debt=1")[1]["students"] == []          # долгов за закрытые месяцы нет
     status, card = _call(app, "GET", "/api/admin/students/STU-0001")
     assert status == 200 and card["name"] == "Иванов Иван" and card["teachers"] == ["Река Станислав"]
     cur = next(m for m in card["months"] if m["period"] == YM)

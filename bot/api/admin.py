@@ -126,20 +126,31 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     # ── ученики ──────────────────────────────────────────────────────────
     async def students(request: web.Request, user) -> web.Response:
+        """Список с фильтрами: q — по имени, group — id группы, noparent=1 — без родителя в боте,
+        debt=1 — с долгом за закрытые месяцы (как в «Должниках»)."""
         q = request.query.get("q", "").strip().lower()
+        group_id = request.query.get("group", "").strip()
+        no_parent = request.query.get("noparent") == "1"
+        with_debt = request.query.get("debt") == "1"
         groups = await _groups_by_id()
         by_student = await student_group_repo.get_map_by_student()
+        debtors: set[str] = set()
+        if with_debt:
+            period = current_period()
+            debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
+            debtors = {sid for sid, m in debt_map.items() if any(ym < period and amt > 0 for ym, amt in m.items())}
         out = []
         for s in sorted(await student_repo.get_all(), key=lambda x: x.name.lower()):
-            if q and q not in s.name.lower():
-                continue
             gids = by_student.get(s.student_id, [])
+            if (q and q not in s.name.lower()) or (group_id and group_id not in gids) \
+                    or (no_parent and s.parent_addrs) or (with_debt and s.student_id not in debtors):
+                continue
             out.append({
                 "id": s.student_id, "name": s.name,
                 "groups": [groups[g].name for g in gids if g in groups],
                 "hasParent": bool(s.parent_addrs), "isAthlete": bool(s.athlete_tg_id),
             })
-        return _json({"students": out})
+        return _json({"students": out, "total": len(await student_repo.get_all())})
 
     async def student_card(request: web.Request, user) -> web.Response:
         sid = request.match_info["sid"]

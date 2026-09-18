@@ -50,11 +50,11 @@ const restPill = x => x.total === 0 ? pill('нет начислений') : x.re
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
 /* ── навигация ───────────────────────────────────────────────────────── */
-const TABS = [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.teachers', 'Педагоги', 'chart'], ['a.more', 'Ещё', 'dots']];
+const TABS = [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.teachers', 'Педагоги', 'teacher'], ['a.finance', 'Финансы', 'chart']];
 const ICON = {
   home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-  dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  teacher: '<circle cx="12" cy="7" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0M3 3h4M17 3h4"/>',
 };
 const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];
@@ -80,7 +80,7 @@ SCREENS['a.home'] = async () => {
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}` };
 };
 
-SCREENS['a.payhub'] = async () => ({ title: 'Оплаты', html: list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам', go: 'a.debtors' })]) });
+SCREENS['a.payhub'] = async () => ({ title: 'Оплаты', html: `<div class="eyebrow">Принять оплату</div>${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}<div class="eyebrow">Контроль</div>${list([cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })])}` });
 
 SCREENS['a.pay'] = async ({ bill }) => ({ title: bill ? 'Счёт ученика' : 'Подтвердить оплату', html: `<div class="h2">Выберите месяц</div>${list(lastPeriods(3).map((ym, i) => cell({ t: fmon(ym), s: i === 0 ? 'текущий месяц' : 'закрыт', go: 'a.pay.groups', p: { ym, bill } })))}` });
 
@@ -136,11 +136,19 @@ SCREENS['a.debtors'] = async () => {
 };
 
 SCREENS['a.students'] = async () => {
+  const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false });
   const q = state.ui.q || '';
-  const d = await api(`/students?q=${encodeURIComponent(q)}`);
-  return { title: 'Ученики', html: `<input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: esc(s.groups.join(', ')) || 'без группы', r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
+  if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
+  const qs = `q=${encodeURIComponent(q)}&group=${encodeURIComponent(f.group)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`;
+  const d = await api(`/students?${qs}`);
+  const filtered = f.group || f.noparent || f.debt || q;
+  return { title: 'Ученики', html: `
+    <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
+    <select class="search" id="sf-group" data-act="sfGroup"><option value="">Все группы</option>${state.ui.groupsCache.map(b => `<optgroup label="${esc(b.name)}">${b.groups.map(g => `<option value="${g.id}" ${f.group === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</optgroup>`).join('')}</select>
+    <div class="chips"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${filtered ? `<button class="chip" data-act="sfReset" data-p='{}'>✕ Сбросить</button>` : ''}</div>
+    <p class="hint" style="margin:-4px 0 10px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
+    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: esc(s.groups.join(', ')) || 'без группы', r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
 };
-
 SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
   const cur = s.months.find(m => m.period === lastPeriods(1)[0]) || { total: 0, paid: 0, rest: 0 };
@@ -168,7 +176,7 @@ SCREENS['a.teacher'] = async ({ id }) => {
     <p class="hint" style="margin-top:10px">Ставки, группы и открытие периода — следующий этап; пока из бота.</p>` };
 };
 
-SCREENS['a.more'] = async () => ({ title: 'Ещё', html: list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} }), cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }), cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })]) + `<p class="hint" style="margin-top:12px">Филиалы и группы, редактирование карточек и занятий — следующий этап; пока из бота.${state.me ? ` Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` });
+SCREENS['a.finance'] = async () => ({ title: 'Финансы', html: `<div class="eyebrow">Школа</div>${list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} })])}<div class="eyebrow">Педагоги</div>${list([cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }), cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} })])}<p class="hint" style="margin-top:12px">Филиалы и группы, редактирование карточек и занятий — следующий этап; пока из бота.${state.me ? ` Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` });
 
 /* ── действия ────────────────────────────────────────────────────────── */
 const ACT = {
@@ -294,10 +302,14 @@ async function render() {
   if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
 }
 ACT.retry = () => render();
+ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };
+ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; render(); };
+document.addEventListener('change', e => { if (e.target.id === 'sf-group') { state.ui.sf.group = e.target.value; render(); } });
 
 document.addEventListener('click', e => {
   const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');
   if (wrap && !stop) { closeSheet(); return; }
+  if (e.target.closest('select')) return;
   const el = e.target.closest('[data-go],[data-act],[data-root]'); if (!el) return;
   if (el.dataset.root) { closeSheet(); root(el.dataset.root); return; }
   const p = el.dataset.p ? JSON.parse(el.dataset.p) : {};
