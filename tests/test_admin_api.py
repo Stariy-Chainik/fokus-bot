@@ -14,9 +14,9 @@ from bot.services import LessonService, PaymentService, ProfitService, StudentSe
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
-    ByIdRepo, ClientRepoFake, LessonRepoFake, OverrideRepoFake, PaymentRepoFake, StudentGroupRepoFake,
-    StudentRepoFake, SubmissionRepoFake, TeacherGroupRepoFake, UserRepoFake, mk_branch, mk_group, mk_lesson,
-    mk_payment, mk_student, mk_submission, mk_teacher, mk_user,
+    BranchRepoFake, ClientRepoWritable, GroupRepoFake, LessonRepoFake, PaymentRepoFake, StudentGroupRepoWritable,
+    StudentRepoWritable, SubOverrideRepoFake, SubmissionRepoFake, TeacherGroupRepoWritable, TeacherRepoFake, UserRepoWritable,
+    mk_branch, mk_group, mk_lesson, mk_payment, mk_student, mk_submission, mk_teacher, mk_user,
 )
 from tests.test_telegram_auth import TOKEN, make_init_data
 
@@ -108,13 +108,14 @@ def _dp():
         mk_lesson("LES-3", teacher, f"{YM}-12", duration=60, lesson_type=LessonType.GROUP,
                   attendees="STU-0001:60:800,STU-0002:60:800", group_id="GRP-0001"),
     ]
-    student_repo, teacher_repo = StudentRepoFake(students), ByIdRepo([teacher], "teacher_id")
-    group_repo, branch_repo = ByIdRepo(groups, "group_id"), ByIdRepo([mk_branch()], "branch_id")
-    sg_repo = StudentGroupRepoFake([("STU-0001", "GRP-0001", "", ""), ("STU-0002", "GRP-0001", "", "")])
-    tg_repo = TeacherGroupRepoFake({"TCH-0001": ["GRP-0001"]})
-    lesson_repo, payment_repo, client_repo = LessonRepoFake(lessons), PaymentRepoFake([]), ClientRepoFake([])
+    student_repo, teacher_repo = StudentRepoWritable(students), TeacherRepoFake([teacher])
+    group_repo, branch_repo = GroupRepoFake(groups), BranchRepoFake([mk_branch()])
+    sg_repo = StudentGroupRepoWritable([("STU-0001", "GRP-0001", "", ""), ("STU-0002", "GRP-0001", "", "")])
+    tg_repo = TeacherGroupRepoWritable({"TCH-0001": ["GRP-0001"]})
+    lesson_repo, payment_repo, client_repo = LessonRepoFake(lessons), PaymentRepoFake([]), ClientRepoWritable([])
+    sub_override_repo = SubOverrideRepoFake()
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, group_repo=group_repo,
-                                     student_group_repo=sg_repo, subscription_override_repo=OverrideRepoFake())
+                                     student_group_repo=sg_repo, subscription_override_repo=sub_override_repo)
     salary_service = SalaryService(lesson_repo)
     finance_repo = FinanceRepoFake()
     submission_repo = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])
@@ -123,7 +124,8 @@ def _dp():
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
         "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
         "notifier": NotifierFake(),
-        "user_repo": UserRepoFake([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),
+        "user_repo": UserRepoWritable([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),
+        "subscription_override_repo": sub_override_repo,
         "student_repo": student_repo, "teacher_repo": teacher_repo, "group_repo": group_repo, "branch_repo": branch_repo,
         "student_group_repo": sg_repo, "teacher_group_repo": tg_repo, "lesson_repo": lesson_repo,
         "payment_repo": payment_repo, "submission_repo": submission_repo,

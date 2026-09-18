@@ -614,3 +614,218 @@ class FakeSheetsClient:
 
     def get_worksheet(self, sheet_name: str) -> FakeWorksheet:
         return self.ws
+
+
+# ─── Фейки с записью (API кабинета администратора) ────────────────────────────
+
+class GroupRepoFake(ByIdRepo):
+    def __init__(self, groups) -> None:
+        super().__init__(groups, "group_id")
+
+    def _find(self, gid):
+        return next((g for g in self.items if g.group_id == gid), None)
+
+    async def add(self, branch_id, name):
+        g = Group(group_id=f"GRP-{len(self.items) + 1:04d}", branch_id=branch_id, name=name)
+        self.items.append(g)
+        return replace(g)
+
+    async def update_name(self, gid, name):
+        g = self._find(gid)
+        if g: g.name = name  # noqa: E701
+        return g is not None
+
+    async def update_billing(self, gid, billing_mode, price_short, duration_short, price_full, duration_full):
+        g = self._find(gid)
+        if g is None:
+            return False
+        g.billing_mode, g.price_full, g.duration_full = billing_mode, price_full, duration_full
+        g.price_short, g.duration_short = price_short, duration_short
+        return True
+
+    async def set_archived(self, gid, archived):
+        g = self._find(gid)
+        if g: g.archived = archived  # noqa: E701
+        return g is not None
+
+    async def delete(self, gid):
+        before = len(self.items)
+        self.items = [g for g in self.items if g.group_id != gid]
+        return len(self.items) < before
+
+
+class BranchRepoFake(ByIdRepo):
+    def __init__(self, branches) -> None:
+        super().__init__(branches, "branch_id")
+
+    async def add(self, name):
+        b = Branch(branch_id=f"BRN-{len(self.items) + 1:04d}", name=name)
+        self.items.append(b)
+        return replace(b)
+
+    async def update_name(self, bid, name):
+        b = next((x for x in self.items if x.branch_id == bid), None)
+        if b: b.name = name  # noqa: E701
+        return b is not None
+
+    async def delete(self, bid):
+        before = len(self.items)
+        self.items = [b for b in self.items if b.branch_id != bid]
+        return len(self.items) < before
+
+
+class TeacherRepoFake(ByIdRepo):
+    def __init__(self, teachers) -> None:
+        super().__init__(teachers, "teacher_id")
+
+    async def add(self, tg_id, name, rate_group, rate_for_teacher, rate_for_student):
+        t = Teacher(teacher_id=f"TCH-{len(self.items) + 1:04d}", tg_id=tg_id, name=name,
+                    rate_group=rate_group, rate_for_teacher=rate_for_teacher, rate_for_student=rate_for_student)
+        self.items.append(t)
+        return replace(t)
+
+    async def update_rates(self, tid, rate_group, rate_for_teacher, rate_for_student):
+        t = next((x for x in self.items if x.teacher_id == tid), None)
+        if t is None:
+            return False
+        t.rate_group, t.rate_for_teacher, t.rate_for_student = rate_group, rate_for_teacher, rate_for_student
+        return True
+
+    async def delete(self, tid):
+        before = len(self.items)
+        self.items = [t for t in self.items if t.teacher_id != tid]
+        return len(self.items) < before
+
+
+class StudentRepoWritable(StudentRepoFake):
+    def _find(self, sid):
+        return next((s for s in self.items if s.student_id == sid), None)
+
+    async def add(self, name):
+        s = Student(student_id=f"STU-{len(self.items) + 1:04d}", name=name)
+        self.items.append(s)
+        return replace(s)
+
+    async def update_name(self, sid, name):
+        s = self._find(sid)
+        if s: s.name = name  # noqa: E701
+        return s is not None
+
+    async def update_tier(self, sid, tier):
+        s = self._find(sid)
+        if s: s.group_tier = tier  # noqa: E701
+        return s is not None
+
+    async def delete(self, sid):
+        before = len(self.items)
+        self.items = [s for s in self.items if s.student_id != sid]
+        return len(self.items) < before
+
+    async def set_partner(self, sid, pid):
+        if sid == pid:
+            raise ValueError("сам себе")
+        a, b = self._find(sid), self._find(pid)
+        for x in (a, b):
+            if x.partner_id and x.partner_id not in (sid, pid):
+                old = self._find(x.partner_id)
+                if old: old.partner_id = None  # noqa: E701
+        a.partner_id, b.partner_id = pid, sid
+
+    async def clear_partner(self, sid):
+        s = self._find(sid)
+        if s and s.partner_id:
+            p = self._find(s.partner_id)
+            if p: p.partner_id = None  # noqa: E701
+            s.partner_id = None
+
+    async def set_client_id(self, sid, cid):
+        s = self._find(sid)
+        if s: s.client_id = cid  # noqa: E701
+        return s is not None
+
+    async def set_athlete_tg_id(self, sid, tg_id):
+        s = self._find(sid)
+        if s: s.athlete_tg_id = tg_id  # noqa: E701
+        return s is not None
+
+
+class ClientRepoWritable(ClientRepoFake):
+    async def create(self, name, created_by_tg_id, phone="", tg_id=None, max_id=None):
+        c = Client(client_id=f"CLT-{len(self.items) + 1:04d}", name=name, tg_id=tg_id, phone=phone or None, max_id=max_id)
+        self.items.append(c)
+        return replace(c)
+
+
+class StudentGroupRepoWritable(StudentGroupRepoFake):
+    async def remove_all_for_group(self, group_id):
+        before = len(self.rows)
+        self.rows = [r for r in self.rows if r.group_id != group_id]
+        return before - len(self.rows)
+
+
+class TeacherGroupRepoWritable(TeacherGroupRepoFake):
+    async def add(self, teacher_id, group_id):
+        self._t2g.setdefault(teacher_id, []).append(group_id)
+        return TeacherGroup(teacher_id, group_id)
+
+    async def remove(self, teacher_id, group_id):
+        gids = self._t2g.get(teacher_id, [])
+        if group_id in gids:
+            gids.remove(group_id)
+            return True
+        return False
+
+    async def remove_all_for_group(self, group_id):
+        n = 0
+        for gids in self._t2g.values():
+            while group_id in gids:
+                gids.remove(group_id); n += 1  # noqa: E702
+        return n
+
+    async def remove_all_for_teacher(self, teacher_id):
+        return len(self._t2g.pop(teacher_id, []))
+
+
+class UserRepoWritable(UserRepoFake):
+    async def add(self, tg_id, teacher_id=None, is_admin=False):
+        u = User(user_id=f"USR-{len(self.items) + 1:04d}", tg_id=tg_id, is_admin=is_admin, teacher_id=teacher_id)
+        self.items.append(u)
+        return u
+
+    async def update_teacher_id(self, tg_id, teacher_id):
+        u = await self.get_by_tg_id(tg_id)
+        if u: u.teacher_id = teacher_id  # noqa: E701
+        return u is not None
+
+    async def delete_by_teacher_id(self, teacher_id):
+        before = len(self.items)
+        self.items = [u for u in self.items if u.teacher_id != teacher_id]
+        return len(self.items) < before
+
+
+class SubOverrideRepoFake:
+    """SubscriptionOverrideRepository: (group_id, period|'*', student_id|None) → amount."""
+
+    def __init__(self, rows=()) -> None:
+        from bot.models.entities import SubscriptionOverride
+        self._cls = SubscriptionOverride
+        self.items = [r if isinstance(r, SubscriptionOverride) else SubscriptionOverride(*r) for r in rows]
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_for_group(self, group_id):
+        return [o for o in self.items if o.group_id == group_id]
+
+    async def upsert(self, group_id, period_month, student_id, amount):
+        sid = student_id or None
+        self.items = [o for o in self.items if (o.group_id, o.period_month, o.student_id) != (group_id, period_month, sid)]
+        o = self._cls(group_id=group_id, period_month=period_month, student_id=sid, amount=amount)
+        self.items.append(o)
+        return o
+
+    async def delete(self, group_id, period_month, student_id):
+        sid = student_id or None
+        before = len(self.items)
+        self.items = [o for o in self.items if (o.group_id, o.period_month, o.student_id) != (group_id, period_month, sid)]
+        return len(self.items) < before
