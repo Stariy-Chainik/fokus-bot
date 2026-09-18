@@ -458,11 +458,14 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | `audit_teacher_students.py` | Read-only consistency check: every student's visibility to each teacher matches `teacher_groups ∩ student_groups`. |
 | `migrate_student_groups.py` | One-shot migration from legacy `students.group_id` column to the `student_groups` join table. Idempotent. |
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
-| `sync_yakovleva_attendance.py [YYYY-MM]` | **Отключён 18.09.2026 по решению владельца**: занятия ХГ Яковлева отмечает вручную в боте, как остальные педагоги; синхронизация из таблицы «Посещения» дважды приводила к дублям и порче составов. Таймер `fokus-sync-yakovleva.timer` на проде выключен (`systemctl disable --now`), скрипт оставлен для истории — не запускать без явного решения владельца. |
 | `setup_group_archive.py [--apply]` | Идемпотентно добавляет колонку `groups.archived` (архив групп). |
 | `setup_joined_period.py [--apply]` | Идемпотентно добавляет `student_groups.joined_period` и `left_period`, проставляет существующим строкам первый месяц занятий их группы (поведение счётов не меняется). |
 | `setup_diary_sheets.py` | Идемпотентно создаёт листы `training_entries`, `athlete_tasks` и колонку `students.athlete_tg_id` (9-я) для кабинета спортсмена. |
 | `send_bills_grp0004.py` | Template script for ad-hoc bill mailings to one group. Parametrized at the top (`GROUP_ID`, `PERIOD`, `RECIPIENT`). |
+
+> Синхронизация посещений Яковлевой (ХГ) из внешней Google-таблицы (скрипт `sync_yakovleva_attendance.py` и таймер
+> `fokus-sync-yakovleva.timer`) **удалена 19.09.2026 по решению владельца**: занятия и составы ХГ ведутся вручную в боте,
+> как у остальных педагогов. Внешняя таблица — только справочно, автоматически ничего не переносится.
 
 Production: **Hetzner VPS (Nuremberg)**, systemd unit `fokus-bot.service`, deployed by `./scripts/deploy.sh`. Logs via `journalctl -u fokus-bot`. The Railway-related `WEBHOOK_URL` / `Procfile` are present but unused — current production runs in polling mode under systemd.
 
