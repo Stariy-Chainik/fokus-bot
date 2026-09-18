@@ -45,7 +45,7 @@ const list = rows => `<div class="list">${rows.join('')}</div>`;
 const pill = (txt, kind = 'mute') => `<span class="pill ${kind}">${txt}</span>`;
 const btn = (txt, act, p = {}, kind = '') => `<button class="btn ${kind}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${txt}</button>`;
 const goBtn = (txt, go, p = {}, kind = '') => `<button class="btn ${kind}" ${attr(go, p)}>${txt}</button>`;
-const kpi = (v, l, kind = '') => `<div class="kpi ${kind}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+const kpi = (v, l, kind = '', go, p) => go ? `<button class="kpi ${kind}" ${attr(go, p)}><div class="v">${v}</div><div class="l">${l} ›</div></button>` : `<div class="kpi ${kind}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
 const restPill = x => x.total === 0 ? pill('нет начислений') : x.rest === 0 ? pill('✓ оплачено', 'ok') : x.paid ? pill(`к доплате ${fmt(x.rest)}`, 'warn') : pill(`к оплате ${fmt(x.rest)}`, 'warn');
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
@@ -75,7 +75,7 @@ SCREENS['a.home'] = async () => {
   const h = await api('/home');
   return { title: 'Школа сегодня', html: `
     <div class="h2">${fdate(h.today)}</div>
-    <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn')}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня')}${kpi(h.studentsCount, 'учеников')}</div>
+    <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
     <div class="eyebrow">Быстрые действия</div>
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}` };
 };
@@ -281,6 +281,27 @@ Object.assign(ACT, {
   remind: ({ n, total }) => sheet(`<h3>Напомнить должникам?</h3><div class="hint">Родители ${plural(n, ['ученика', 'учеников', 'учеников'])} получат сумму долга за закрытые месяцы (${fmt(total)}) и ссылку на счета.</div><div style="margin-top:12px">${btn('📤 Отправить', 'doRemind', {})}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   doRemind: async () => { try { const r = await api('/debtors/remind', { method: 'POST' }); closeSheet(); toast(`Доставлено ${r.sent}${r.failed ? `, не доставлено ${r.failed}` : ''}${r.skipped ? `, без бота ${r.skipped}` : ''}`); } catch (e) { toast(errText(e)); } },
 });
+
+
+/* ── занятия за день ─────────────────────────────────────────────────── */
+const lessonCell = ls => cell({ lead: ls.type === 'group' ? '👥' : ls.students.length > 1 ? '👫' : '👤', plain: true, t: esc(ls.type === 'group' ? ls.groupName || 'группа' : ls.students.join(' + ')), s: `${esc(ls.teacherName)} · ${ls.durationMin} мин${ls.type === 'group' && ls.students.length ? ` · ${plural(ls.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${ls.locked ? ' · 🔒' : ''}`, r: ls.earned ? `<b>${fmt(ls.earned)}</b>` : '', go: 'a.lesson', p: { id: ls.id } });
+SCREENS['a.lessons.day'] = async ({ date }) => {
+  const days = []; for (let i = 0; i < 7; i++) { const x = new Date(); x.setDate(x.getDate() - i); days.push(x.toISOString().slice(0, 10)); }
+  const d = date || days[0];
+  const r = await api(`/lessons?date=${d}`);
+  return { title: 'Занятия за день', html: `<div class="chips">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: x }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div><div class="h2">${fdate(d)}</div>${r.lessons.length ? list(r.lessons.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(r.earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}` };
+};
+SCREENS['a.lesson'] = async ({ id }) => {
+  const l = await api(`/lessons/${id}`);
+  return { title: 'Занятие', html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(l.type === 'group' ? l.groupName || 'Группа' : l.attendees.map(a => a.name).join(' + '))}</div><div class="hint">${fdate(l.date)} · ${l.durationMin} мин · ${esc(l.teacherName)}${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>${l.locked ? '<div style="margin-top:8px">' + pill('🔒 период сдан', 'mute') + '</div>' : ''}</div>
+    ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({ lead: initials(a.name), t: esc(a.name), r: a.amount === null ? '' : a.amount ? `<b>${fmt(a.amount)}</b>` : 'абонемент', go: 'a.student', p: { id: a.studentId } })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
+    <div class="card" style="margin-top:10px"><div class="total"><span>Зарплата педагога</span><span class="big">${fmt(l.earned)}</span></div></div>
+    <div style="margin-top:12px">${btn(l.locked ? '🗑 Удалить (период сдан)' : '🗑 Удалить занятие', 'delLesson', { id, locked: l.locked }, 'danger')}</div>
+    <p class="hint" style="margin-top:8px">Правка полей не поддерживается — как в боте: удалить и отметить заново.</p>` };
+};
+ACT.delLesson = ({ id, locked }) => sheet(`<h3>Удалить занятие?</h3><div class="hint">Начисления родителям и зарплата педагога по нему исчезнут.${locked ? ' Период сдан — вы удаляете как администратор.' : ''}</div><div style="margin-top:12px">${btn('🗑 Удалить', 'doDelLesson', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.doDelLesson = async ({ id }) => { try { await api(`/lessons/${id}`, { method: 'DELETE' }); closeSheet(); back(); toast('Занятие удалено'); } catch (e) { toast(errText(e)); } };
 
 /* ── рендер ─────────────────────────────────────────────────────────── */
 async function render() {

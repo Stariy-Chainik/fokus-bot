@@ -66,7 +66,9 @@
   .pill.acc { background: var(--accent-soft); color: var(--accent-deep); }
   .pill.mute { background: var(--line); color: var(--muted); }
   .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; text-align: left; width: 100%; font: inherit; color: inherit; }
+  button.kpi { cursor: pointer; }
+  button.kpi:active { background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
   .kpi .v { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
   .kpi .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .kpi.bad .v { color: var(--bad); } .kpi.warn .v { color: var(--warn); } .kpi.ok .v { color: var(--ok); }

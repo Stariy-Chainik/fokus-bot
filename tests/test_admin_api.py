@@ -10,7 +10,7 @@ from bot.api import register_admin_api
 from bot.models.entities import FinanceEntry, TeacherPayout
 from bot.repositories.salary_override_repo import SalaryDayOverride
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
-from bot.services import PaymentService, ProfitService, StudentService, TeacherVisibilityService
+from bot.services import LessonService, PaymentService, ProfitService, StudentService, TeacherVisibilityService
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
@@ -117,14 +117,16 @@ def _dp():
                                      student_group_repo=sg_repo, subscription_override_repo=OverrideRepoFake())
     salary_service = SalaryService(lesson_repo)
     finance_repo = FinanceRepoFake()
+    submission_repo = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])
     return {
+        "lesson_service": LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service),
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
         "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
         "notifier": NotifierFake(),
         "user_repo": UserRepoFake([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),
         "student_repo": student_repo, "teacher_repo": teacher_repo, "group_repo": group_repo, "branch_repo": branch_repo,
         "student_group_repo": sg_repo, "teacher_group_repo": tg_repo, "lesson_repo": lesson_repo,
-        "payment_repo": payment_repo, "submission_repo": SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")]),
+        "payment_repo": payment_repo, "submission_repo": submission_repo,
         "payment_service": payment_service, "salary_service": salary_service, "client_repo": client_repo,
         "student_service": StudentService(student_repo, teacher_repo, group_repo, branch_repo, sg_repo, client_repo,
                                           TeacherVisibilityService(student_repo, tg_repo, sg_repo)),

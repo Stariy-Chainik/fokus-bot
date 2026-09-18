@@ -389,5 +389,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, admin_only(handler))
     from bot.api.admin_finance import register_finance_routes
+    from bot.api.admin_lessons import register_lesson_routes
     register_finance_routes(app, dp, admin_only, PREFIX)
+    register_lesson_routes(app, dp, admin_only, PREFIX)
     logger.info("Admin API зарегистрирован: %d маршрутов под %s", len(routes), PREFIX)
