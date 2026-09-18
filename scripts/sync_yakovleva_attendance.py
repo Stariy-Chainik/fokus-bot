@@ -41,15 +41,29 @@ GROUPS = {
     "nach":   ("GRP-0021", 60,  "sub"),        # Боброво: Начальная подготовка
     "sred":   ("GRP-0022", 120, "sub"),        # Боброво: Средняя
     "sport":  ("GRP-0023", 120, "sub"),        # Боброво: Спортивная (в листе «Старшая»)
+    "bp":     ("GRP-0026", 60,  "sub"),        # Бутово Парк (школа)
 }
 # Заголовок секции листа (нижний регистр) → ключ GROUPS; если не нашли — по составу
-BLOCK_TITLES = {"(сад)": "sad", "начальная": "nach", "средняя": "sred", "старшая": "sport", "спортивная": "sport"}
+BLOCK_TITLES = {"(сад)": "sad", "бутово парк": "bp", "начальная": "nach", "средняя": "sred",
+                "старшая": "sport", "спортивная": "sport"}
 INDIVIDUAL_GROUP, INDIVIDUAL_PRICE = "GRP-0020", 1800
 PER_VISIT_FULL, PER_VISIT_SHORT = (850, 60), (500, 35)
 
 
 def _key(n: str) -> str:
     return " ".join(n.lower().replace("ё", "е").split()[:2])
+
+
+def match_block(titles: str, roster: list[str], rosters: dict[str, set[str]]):
+    """Блок листа → запись GROUPS: по заголовку секции, иначе по максимальному пересечению
+    состава с составами групп бота (`rosters`: group_id → ключи имён). None — сопоставить нельзя."""
+    for k, v in BLOCK_TITLES.items():
+        if k in titles:
+            return GROUPS[v]
+    names = {_key(n) for n in roster}
+    overlap = {cfg: len(names & rosters.get(cfg[0], set())) for cfg in GROUPS.values()}
+    best = max(overlap, key=lambda cfg: overlap[cfg])
+    return best if overlap[best] else None
 
 
 def _section_for(rows, i) -> str:
@@ -115,7 +129,12 @@ async def main() -> None:
             print("  + ученик", s.student_id, name)
         return s
 
-    existing = {(lsn.date, lsn.group_id): lsn for lsn in await les.get_by_teacher_and_period(TEACHER[0], month)}
+    existing: dict[tuple[str, str], Lesson] = {}
+    for lsn in await les.get_by_teacher_and_period(TEACHER[0], month):
+        dup = existing.get((lsn.date, lsn.group_id))
+        if dup is not None and lsn.group_id != INDIVIDUAL_GROUP:
+            print(f"  !! два занятия {lsn.date} {lsn.group_id}: {dup.lesson_id} и {lsn.lesson_id} — синхронизируется последнее")
+        existing[(lsn.date, lsn.group_id)] = lsn
     ids = await les.get_existing_ids()
 
     async def add_lesson(day: int, gid: str, dur: int, att: str):
@@ -138,15 +157,13 @@ async def main() -> None:
     for titles, roster, marks in parse_blocks(rows, month):
         # Блок → группа бота: сначала по заголовку секции, иначе по максимальному
         # пересечению состава с составами групп (устойчиво к перестановке блоков).
-        cfg = None
-        for k, v in BLOCK_TITLES.items():
-            if k in titles:
-                cfg = GROUPS[v]
+        cfg = match_block(titles, roster, {g: {_key(by_id[sid].name) for sid in sids if sid in by_id}
+                                           for g, sids in group_rosters.items()})
         if cfg is None:
-            names = {_key(n) for n in roster}
-            best = max(GROUPS.values(), key=lambda g: len(
-                names & {_key(by_id[sid].name) for sid in group_rosters[g[0]] if sid in by_id}))
-            cfg = best
+            # Новый блок без знакомого заголовка и без общих учениц: группу бота не угадать —
+            # пропускаем, иначе затрём состав чужой группы. Нужна запись в GROUPS/BLOCK_TITLES.
+            print(f"  !! блок {titles.strip()[:60]!r} ({len(roster)} чел.) не сопоставлен ни с одной группой — пропущен")
+            continue
         gid, dur, mode = cfg
         members = group_rosters[gid]
         trial_only = {n for n in roster if any(nn == n for d in marks for nn, _ in marks[d])
