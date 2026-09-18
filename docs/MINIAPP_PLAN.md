@@ -17,9 +17,8 @@ https://claude.ai/artifact/U9bp9iTbfTpTm6WL9cBMmx. Реализация идёт
   каждый запрос (`bot/utils/telegram_auth.py`), затем роль из листа `users` (`is_admin`).
   Для локальной разработки без Telegram: `MINIAPP_DEV_TG_ID=<tg_id>` + заголовок `Authorization: dev`
   (фронт шлёт его при `?dev=1`). На проде переменная пустая — заголовок игнорируется.
-- **Сервер** — тот же процесс, что и вебхук ЮКассы (`PAYMENT_WEBHOOK_PORT`, 8081). Для Telegram нужен
-  HTTPS-домен: nginx → 127.0.0.1:8081 (`/app/`, `/api/`, `/yookassa-webhook`), сертификат Let's Encrypt,
-  затем BotFather → Bot Settings → Menu Button → `https://<домен>/app/`.
+- **Сервер** — тот же процесс, что и вебхук ЮКассы (`PAYMENT_WEBHOOK_PORT`, 8081). HTTPS даёт Caddy
+  на том же VPS (см. «Домен и вход» ниже); кнопка входа — в меню админа бота и кнопка меню чата.
 
 ## Локальная разработка
 
@@ -44,10 +43,14 @@ MINIAPP_DEV_TG_ID=<ваш tg_id> .venv/bin/python scripts/miniapp_dev.py --port 
 Дальше — кабинет педагога (`/api/teacher/*`), спортсмена, родителя (последний; родительские
 экраны берутся из `bot/screens` + `parent_views`, чтобы та же страница открывалась и из MAX).
 
-## Что нужно от владельца перед запуском в Telegram
+## Домен и вход (сделано 2026-09-18)
 
-1. Домен (любой, ~300–500 ₽/год) с A-записью на 178.104.240.252.
-2. На сервере: nginx + certbot (делается один раз, ~15 минут).
-3. В BotFather: кнопка меню `https://<домен>/app/`.
-
-До этого кабинет проверяется локально (`miniapp_dev.py`).
+- Адрес: **https://fokus.178-104-240-252.sslip.io/app/** — sslip.io резолвит имя в IP сервера без
+  покупки домена; HTTPS выпускает Caddy (контейнер `n8n-caddy-1`, конфиг `/opt/n8n/Caddyfile`,
+  блок `fokus.…sslip.io` → `172.18.0.1:8081`, наружу открыты только `/app/*` и `/api/*`).
+  Свой домен позже: A-запись на 178.104.240.252, такой же блок в Caddyfile, `MINIAPP_URL` в `.env`,
+  `docker exec n8n-caddy-1 caddy reload --config /etc/caddy/Caddyfile`.
+- `MINIAPP_URL` на проде задан → в меню админа бота первая кнопка «🖥 Открыть кабинет» (web_app).
+- Кнопка меню «Кабинет» рядом с полем ввода — только в чатах админов: `scripts/set_miniapp_menu.py`
+  (`--reset` возвращает стандартное меню). Родители и педагоги её не видят.
+- Вебхук ЮКассы по-прежнему принимает по `http://IP:8081/yookassa-webhook`.

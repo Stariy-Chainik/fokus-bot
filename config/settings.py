@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     group_link_secret: str = Field(default="", alias="GROUP_LINK_SECRET")
     # Mini App: tg_id, под которым принимается заголовок `Authorization: dev` (только локально; на проде пусто)
     miniapp_dev_tg_id: Optional[int] = Field(default=None, alias="MINIAPP_DEV_TG_ID")
+    # Публичный HTTPS-адрес Mini App (страница /app/); пусто — кнопки кабинета в боте нет
+    miniapp_url: str = Field(default="", alias="MINIAPP_URL")
 
     # Педагоги, которым разрешено выставлять счета ученикам своих групп
     # (teacher_id через запятую или |, например: TCH-0009). Пусто — счета только у админов.

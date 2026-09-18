@@ -503,6 +503,7 @@ Optional — MAX (кабинет родителя):
 
 Optional — Mini App:
 - `MINIAPP_DEV_TG_ID` — tg_id, под которым API кабинета принимает заголовок `Authorization: dev` (только для локальной разработки; на проде пусто).
+- `MINIAPP_URL` — публичный HTTPS-адрес страницы кабинета (на проде `https://fokus.178-104-240-252.sslip.io/app/`, HTTPS через Caddy в `/opt/n8n/Caddyfile`); задан → в меню админа кнопка «🖥 Открыть кабинет», а `scripts/set_miniapp_menu.py` ставит кнопку меню «Кабинет» в чатах админов.
 
 Optional — infrastructure:
 - `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)
