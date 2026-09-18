@@ -57,6 +57,7 @@ class SubscriptionProfitRow:
     group_name: str
     billed_students: int
     income: int
+    group_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -287,11 +288,11 @@ class ProfitService:
     async def get_month_summary(self, period: str) -> ProfitSummary:
         lesson_summary = await self.get_lesson_summary(period)
         raw_subscription_rows = (
-            await self._payment_service.subscription_revenue_breakdown(period)
+            await self._payment_service.subscription_revenue_rows(period)
         )
         subscription_rows = tuple(
-            SubscriptionProfitRow(group_name, billed_students, income)
-            for group_name, billed_students, income in raw_subscription_rows
+            SubscriptionProfitRow(group_name, billed_students, income, group_id)
+            for group_id, group_name, billed_students, income in raw_subscription_rows
         )
         finance_entries = tuple(
             await self._finance_entry_repo.get_by_period(period)

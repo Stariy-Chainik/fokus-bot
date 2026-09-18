@@ -1,6 +1,10 @@
 """API кабинета администратора, этап 2: прибыль, ручные записи, зарплаты, выплаты, история оплат, напоминание должникам."""
+import asyncio
+
 import pytest
 
+from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
+from tests.fakes import mk_group, mk_lesson, mk_payment
 from tests.test_admin_api import YM, _call, make_api
 
 PARENT_TG = 5037902894
@@ -100,3 +104,37 @@ def test_debtors_remind_without_bot(api):
     app, dp = api
     dp.pop("notifier")
     assert _call(app, "POST", "/api/admin/debtors/remind")[0] == 503
+
+
+def test_profit_teacher_lessons_name_the_students(api):
+    app, dp = api
+    status, t = _call(app, "GET", f"/api/admin/profit/teacher/TCH-0001?period={YM}")
+    assert status == 200
+    by_id = {x["lessonId"]: x for x in t["lessons"]}
+    assert by_id["LES-1"]["students"] == ["Иванов Иван"] and by_id["LES-1"]["groupName"] == ""
+    assert by_id["LES-3"]["groupName"] == "БП Джаз" and by_id["LES-3"]["students"] == ["Иванов Иван", "Петрова Анна"]
+
+
+def test_profit_subscription_group_roster_and_payments(api):
+    app, dp = api
+    teacher = asyncio.run(dp["teacher_repo"].get_by_id("TCH-0001"))
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Азбука", billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=3000))
+    for sid in ("STU-0001", "STU-0002"):
+        asyncio.run(dp["student_group_repo"].add(sid, "GRP-0002"))
+    dp["lesson_repo"].items.append(mk_lesson("LES-9", teacher, f"{YM}-05", duration=60, lesson_type=LessonType.GROUP, group_id="GRP-0002"))
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0001", YM, "SUB:GRP-0002", 3000, status=PaymentStatus.PAID))
+    asyncio.run(dp["subscription_override_repo"].upsert("GRP-0002", "*", "STU-0002", 0))  # Петрова освобождена навсегда
+
+    status, p = _call(app, "GET", f"/api/admin/profit?ym={YM}")
+    assert status == 200 and p["subscriptions"] == [{"groupId": "GRP-0002", "groupName": "Азбука", "students": 1, "income": 3000}]
+
+    status, d = _call(app, "GET", f"/api/admin/profit/subscription/GRP-0002?ym={YM}")
+    assert status == 200 and (d["groupName"], d["price"], d["accrued"], d["paid"]) == ("Азбука", 3000, 3000, 3000)
+    assert [(x["name"], x["accrued"], x["paid"], x["status"], x["active"]) for x in d["students"]] == [
+        ("Иванов Иван", 3000, 3000, "paid", True), ("Петрова Анна", 0, 0, "exempt", True),
+    ]
+    # месяц без занятия группы — начислений нет, но оплата, если была, видна
+    status, d = _call(app, "GET", "/api/admin/profit/subscription/GRP-0002?ym=2026-03")
+    assert status == 200 and d["accrued"] == 0 and [x["status"] for x in d["students"]] == ["exempt", "exempt"]
+    assert _call(app, "GET", f"/api/admin/profit/subscription/GRP-0001?ym={YM}")[0] == 404  # группа по посещению
+    assert _call(app, "GET", f"/api/admin/profit/subscription/GRP-0404?ym={YM}")[0] == 404

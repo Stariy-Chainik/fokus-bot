@@ -9,8 +9,9 @@ from datetime import date
 
 from aiohttp import web
 
-from bot.models.enums import PaymentStatus
+from bot.models.enums import LessonType, PaymentStatus
 from bot.services.payment_service import build_debtor_rows
+from bot.utils.attendees import parse_attendees
 from bot.utils.dates import current_period, display_period
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
@@ -62,6 +63,8 @@ async def _read_json(request: web.Request) -> dict | None:
 def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> None:
     teacher_repo = dp["teacher_repo"]
     student_repo = dp["student_repo"]
+    group_repo = dp["group_repo"]
+    lesson_repo = dp["lesson_repo"]
     payment_repo = dp["payment_repo"]
     finance_repo = dp["finance_entry_repo"]
     payout_repo = dp["payout_repo"]
@@ -115,7 +118,8 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         s = await profit_service.get_month_summary(period)
         return _json({
             "period": period, "rows": _profit_rows(s),
-            "subscriptions": [{"groupName": x.group_name, "students": x.billed_students, "income": x.income} for x in s.subscription_rows],
+            "subscriptions": [{"groupId": x.group_id, "groupName": x.group_name, "students": x.billed_students, "income": x.income}
+                              for x in s.subscription_rows],
             "finance": [{"id": e.entry_id, "kind": e.kind, "title": e.title, "amount": e.amount} for e in s.finance_entries],
             "totals": _profit_totals(s),
         })
@@ -127,17 +131,54 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         s = await profit_service.get_lesson_summary(day)
         return _json({"date": day, "rows": _profit_rows(s), "totals": _profit_totals(s)})
 
+    async def profit_subscription(request: web.Request, user) -> web.Response:
+        """Состав абонементной группы за месяц: начислено / оплачено по каждому ученику."""
+        gid = request.match_info["gid"]
+        period = request.query.get("ym") or current_period()
+        rows = await payment_service.subscription_group_detail(gid, period)
+        group = await group_repo.get_by_id(gid)
+        if rows is None or group is None:
+            return _json({"error": "not_found"}, status=404)
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+
+        def status(r) -> str:
+            if r.accrued == 0:
+                return "paid" if r.paid else "exempt"
+            return "paid" if r.paid >= r.accrued else "partial" if r.paid else "unpaid"
+
+        students = sorted(({
+            "studentId": r.student_id, "name": names.get(r.student_id, r.student_id), "accrued": r.accrued, "paid": r.paid,
+            "remainder": max(r.accrued - r.paid, 0), "active": r.active, "status": status(r),
+        } for r in rows), key=lambda x: x["name"])
+        return _json({
+            "groupId": gid, "groupName": group.name, "period": period, "price": group.price_full, "students": students,
+            "accrued": sum(r.accrued for r in rows), "paid": sum(r.paid for r in rows),
+        })
+
     async def profit_teacher(request: web.Request, user) -> web.Response:
         tid = request.match_info["tid"]
         period = request.query.get("period") or current_period()
         d = await profit_service.get_teacher_detail(tid, period)
         if d is None:
             return _json({"error": "not_found"}, status=404)
+        lessons = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(tid, period)}
+        groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+
+        def who(ls) -> list[str]:
+            if ls is None:
+                return []
+            if ls.type == LessonType.GROUP:
+                return [names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
+            return [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
+
         return _json({
             "teacherId": d.teacher_id, "name": d.teacher_name, "period": d.period, "owner": d.owner,
             "lessons": [{"lessonId": r.lesson_id, "date": r.date, "lessonType": getattr(r.lesson_type, "value", str(r.lesson_type)),
                          "durationMin": r.duration_min, "income": r.income, "salary": r.salary, "rent": r.rent,
-                         "ownerIncome": r.owner_income} for r in d.lessons],
+                         "ownerIncome": r.owner_income, "students": who(lessons.get(r.lesson_id)),
+                         "groupId": getattr(lessons.get(r.lesson_id), "group_id", "") or "",
+                         "groupName": groups.get(getattr(lessons.get(r.lesson_id), "group_id", ""), "")} for r in d.lessons],
             "income": d.income, "salary": d.salary, "ownerIncome": d.owner_income, "profit": d.profit, "margin": d.margin_percent,
         })
 
@@ -289,6 +330,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
     routes = [
         ("POST", "/debtors/remind", debtors_remind),
         ("GET", "/profit", profit), ("GET", "/profit/day", profit_day), ("GET", "/profit/teacher/{tid}", profit_teacher),
+        ("GET", "/profit/subscription/{gid}", profit_subscription),
         ("POST", "/finance", finance_add), ("DELETE", "/finance/{eid}", finance_delete),
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),

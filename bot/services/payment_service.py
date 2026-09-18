@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 # Абонемент — продукт группы, а не педагога, но модель инвойса требует teacher_id;
 # синтетический ключ хранится в той же строковой колонке.
 SUBSCRIPTION_KEY_PREFIX = "SUB:"
+
+
+@dataclass(frozen=True)
+class SubscriptionMemberRow:
+    """Участник абонементной группы за месяц: начислено (0 — освобождён или вне членства) и оплачено."""
+    student_id: str
+    accrued: int
+    paid: int
+    active: bool  # членство покрывает этот месяц
 _SUMMER_MONTHS = (7, 8)
 
 
@@ -111,7 +120,13 @@ class PaymentService:
     async def subscription_revenue_breakdown(
         self, period_month: str,
     ) -> list[tuple[str, int, int]]:
-        """Абонементная выручка периода по группам: [(имя группы, учеников, сумма ₽)].
+        """Абонементная выручка периода по группам: [(имя группы, учеников, сумма ₽)]."""
+        return [(name, billed, total) for _gid, name, billed, total in await self.subscription_revenue_rows(period_month)]
+
+    async def subscription_revenue_rows(
+        self, period_month: str,
+    ) -> list[tuple[str, str, int, int]]:
+        """Абонементная выручка периода по группам: [(group_id, имя группы, учеников, сумма ₽)].
 
         Та же логика, что в счетах/долгах: группа активна (≥1 занятие в месяце),
         каждому участнику — цена месяца (override ученика → группы → price_full),
@@ -135,7 +150,7 @@ class PaymentService:
             return []
         overrides = await self._sub_override_map()
         membership = await self._student_group_repo.get_membership_map()
-        result: list[tuple[str, int, int]] = []
+        result: list[tuple[str, str, int, int]] = []
         for g in sorted(sub_groups, key=lambda x: x.name):
             if g.group_id not in active:
                 continue
@@ -151,8 +166,43 @@ class PaymentService:
                     billed += 1
                     total += amount
             if total > 0:
-                result.append((g.name, billed, total))
+                result.append((g.group_id, g.name, billed, total))
         return result
+
+    async def subscription_group_detail(
+        self, group_id: str, period_month: str,
+    ) -> list[SubscriptionMemberRow] | None:
+        """Состав абонементной группы за месяц: кому сколько начислено и кто сколько оплатил.
+
+        None — группы нет или она не абонементная. Начисление — как в счетах: только за
+        месяц с занятием группы (`subscription_billable_months`), за месяцы членства,
+        с учётом переопределений (0 — освобождён). Оплачено — сумма PAID-строк по ключу
+        SUB:{group_id}; ушедший, но оплативший, тоже показывается (active=False).
+        """
+        if self._group_repo is None or self._student_group_repo is None:
+            return None
+        group = await self._group_repo.get_by_id(group_id)
+        if group is None or group.billing_mode != GroupBillingMode.SUBSCRIPTION:
+            return None
+        months = {ls.date[:7] for ls in await self._lesson_repo.get_all()
+                  if ls.type == LessonType.GROUP and ls.group_id == group_id}
+        billable = period_month in subscription_billable_months(months, until=period_month)
+        overrides = await self._sub_override_map()
+        membership = await self._student_group_repo.get_membership_map()
+        key = f"{SUBSCRIPTION_KEY_PREFIX}{group_id}"
+        paid: dict[str, int] = {}
+        for pay in await self._payment_repo.get_all():
+            if pay.teacher_id == key and pay.period_month == period_month and pay.status == PaymentStatus.PAID:
+                paid[pay.student_id] = paid.get(pay.student_id, 0) + pay.total_amount
+        rows: list[SubscriptionMemberRow] = []
+        for (sid, gid), row in membership.items():
+            if gid != group_id:
+                continue
+            active = row.covers(period_month)
+            amount = self._sub_amount(overrides, group_id, period_month, sid, group.price_full) if active and billable else 0
+            rows.append(SubscriptionMemberRow(sid, max(amount, 0), paid.pop(sid, 0), active))
+        rows.extend(SubscriptionMemberRow(sid, 0, amount, False) for sid, amount in paid.items())
+        return rows
 
     async def pin_subscription_history(
         self, group_id: str, effective_period: str, pin_amount: int,
