@@ -458,7 +458,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | `audit_teacher_students.py` | Read-only consistency check: every student's visibility to each teacher matches `teacher_groups ∩ student_groups`. |
 | `migrate_student_groups.py` | One-shot migration from legacy `students.group_id` column to the `student_groups` join table. Idempotent. |
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
-| `sync_yakovleva_attendance.py [YYYY-MM]` | Синхронизация посещений Яковлевой (ХГ) из внешней таблицы «Посещения» (источник правды, read-only) в бота: составы + занятия с посещаемостью, пробные бесплатно. Идемпотентный. На проде — systemd-таймер `fokus-sync-yakovleva.timer`, ежедневно 20:00 UTC (23:00 МСК), текущий и предыдущий месяц. |
+| `sync_yakovleva_attendance.py [YYYY-MM]` | **Отключён 18.09.2026 по решению владельца**: занятия ХГ Яковлева отмечает вручную в боте, как остальные педагоги; синхронизация из таблицы «Посещения» дважды приводила к дублям и порче составов. Таймер `fokus-sync-yakovleva.timer` на проде выключен (`systemctl disable --now`), скрипт оставлен для истории — не запускать без явного решения владельца. |
 | `setup_group_archive.py [--apply]` | Идемпотентно добавляет колонку `groups.archived` (архив групп). |
 | `setup_joined_period.py [--apply]` | Идемпотентно добавляет `student_groups.joined_period` и `left_period`, проставляет существующим строкам первый месяц занятий их группы (поведение счётов не меняется). |
 | `setup_diary_sheets.py` | Идемпотентно создаёт листы `training_entries`, `athlete_tasks` и колонку `students.athlete_tg_id` (9-я) для кабинета спортсмена. |
