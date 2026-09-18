@@ -1,0 +1,815 @@
+<title>Фокус Mini App</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cormorant+Garamond:ital,wght@1,600&display=swap">
+<style>
+  :root {
+    --bg: #ECE7EA; --paper: #F4F1F3; --card: #FFFFFF; --ink: #1F171C; --muted: #756A71; --line: #E4DCE0; --line-strong: #CFC3C9;
+    --accent: #A3123E; --accent-ink: #FFFFFF; --accent-soft: #F7E3EA; --accent-deep: #7C0E30;
+    --ok: #2F7D4F; --ok-soft: #E3F1E8; --warn: #B8760F; --warn-soft: #FBEFD9; --bad: #B3261E; --bad-soft: #F9E0DE;
+    --chrome: #1B1418; --chrome-edge: #3A2C33; --tab-bg: #FBF9FA; --focus: #A3123E;
+    --shadow: 0 1px 2px rgba(31,23,28,.06), 0 8px 24px rgba(31,23,28,.08);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100C0E; --paper: #171215; --card: #231B20; --ink: #F3ECEF; --muted: #A3959C; --line: #372C32; --line-strong: #4B3D44;
+      --accent: #E0567F; --accent-ink: #1B0A10; --accent-soft: #3B1F2A; --accent-deep: #F08AA8;
+      --ok: #6FC48F; --ok-soft: #1F3A2A; --warn: #E0A84A; --warn-soft: #3D2E14; --bad: #F0837B; --bad-soft: #43201E;
+      --chrome: #000000; --chrome-edge: #2A2026; --tab-bg: #1C1519; --focus: #E0567F;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #100C0E; --paper: #171215; --card: #231B20; --ink: #F3ECEF; --muted: #A3959C; --line: #372C32; --line-strong: #4B3D44;
+    --accent: #E0567F; --accent-ink: #1B0A10; --accent-soft: #3B1F2A; --accent-deep: #F08AA8;
+    --ok: #6FC48F; --ok-soft: #1F3A2A; --warn: #E0A84A; --warn-soft: #3D2E14; --bad: #F0837B; --bad-soft: #43201E;
+    --chrome: #000000; --chrome-edge: #2A2026; --tab-bg: #1C1519; --focus: #E0567F;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Manrope", "Segoe UI", Roboto, system-ui, sans-serif; font-size: 15px; line-height: 1.45;
+    padding-block: 28px; padding-inline: 20px; min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  :where(button, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .page { display: grid; grid-template-columns: minmax(260px, 360px) auto; gap: 40px; justify-content: center; align-items: start; max-width: 1100px; margin: 0 auto; }
+  @media (max-width: 860px) { .page { grid-template-columns: 1fr; gap: 20px; justify-items: center; } }
+
+  .intro { padding-top: 12px; }
+  .wordmark { font-family: "Cormorant Garamond", "Times New Roman", serif; font-style: italic; font-weight: 600; font-size: 44px; letter-spacing: .04em; line-height: 1; color: var(--accent); }
+  .intro h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 14px 0 8px; text-wrap: balance; }
+  .intro p { color: var(--muted); margin: 0 0 18px; max-width: 42ch; }
+  .roles { display: flex; gap: 6px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .roles button { flex: 1; border: 0; background: transparent; border-radius: 10px; padding: 9px 8px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .roles button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+  .legend { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 10px; }
+  .legend li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; font-size: 13.5px; color: var(--muted); }
+  .legend li b { color: var(--ink); font-weight: 700; }
+  .legend .dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 4px; justify-self: center; }
+  .note { margin-top: 20px; padding: 12px 14px; border-left: 3px solid var(--warn); background: var(--warn-soft); border-radius: 0 10px 10px 0; font-size: 13.5px; }
+  .whoami { margin-top: 18px; font-size: 13.5px; color: var(--muted); }
+  .whoami b { color: var(--ink); }
+
+  /* ── phone ────────────────────────────────────────────── */
+  .phone { width: 390px; max-width: 100%; height: min(800px, 92vh); min-height: 560px; background: var(--chrome); border-radius: 44px; padding: 12px; box-shadow: var(--shadow), inset 0 0 0 1px var(--chrome-edge); }
+  @media (max-width: 480px) { .phone { padding: 0; border-radius: 0; box-shadow: none; height: 86vh; } .phone .screen { border-radius: 0; } }
+  .screen { position: relative; height: 100%; background: var(--paper); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; }
+  .tg-head { display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; height: 52px; padding: 0 6px; background: var(--card); border-bottom: 1px solid var(--line); flex: none; }
+  .tg-head .title { text-align: center; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tg-head .sub { display: block; font-size: 11px; color: var(--muted); font-weight: 500; }
+  .tg-back { border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 15px; padding: 8px 6px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 2px; visibility: hidden; }
+  .tg-back.on { visibility: visible; }
+  .tg-dots { justify-self: end; color: var(--muted); font-size: 20px; letter-spacing: 1px; padding-right: 8px; }
+  .content { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 14px 14px 24px; scrollbar-width: thin; }
+  .tabs { flex: none; display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); padding: 6px 4px 10px; }
+  .tabs button { flex: 1; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--muted); padding: 4px 0; border-radius: 10px; cursor: pointer; }
+  .tabs button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tabs button[aria-selected="true"] { color: var(--accent); }
+
+  /* ── components ───────────────────────────────────────── */
+  .h2 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 12px; text-wrap: balance; }
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+  .eyebrow:first-child { margin-top: 2px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .card + .card { margin-top: 10px; }
+  .pad { padding: 12px 14px; }
+  .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .cell { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 11px 14px; border: 0; background: transparent; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .cell:last-child { border-bottom: 0; }
+  .cell.static { cursor: default; }
+  .cell:not(.static):hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .cell .lead { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; font-size: 13px; }
+  .cell .lead.plain { background: transparent; width: 26px; font-size: 18px; }
+  .cell.nolead { grid-template-columns: 1fr auto; }
+  .cell .t { font-weight: 600; font-size: 14.5px; }
+  .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+  .cell .r { font-size: 13px; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cell .r b { color: var(--ink); font-weight: 700; }
+  .chev { color: var(--line-strong); margin-left: 6px; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.acc { background: var(--accent-soft); color: var(--accent-deep); }
+  .pill.mute { background: var(--line); color: var(--muted); }
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .kpi .v { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .kpi .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .kpi.bad .v { color: var(--bad); } .kpi.warn .v { color: var(--warn); } .kpi.ok .v { color: var(--ok); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; border: 0; border-radius: 12px; padding: 12px 14px; font-weight: 700; font-size: 15px; cursor: pointer; background: var(--accent); color: var(--accent-ink); }
+  .btn.sec { background: var(--accent-soft); color: var(--accent-deep); }
+  .btn.ghost { background: transparent; border: 1px solid var(--line-strong); color: var(--ink); }
+  .btn.danger { background: var(--bad-soft); color: var(--bad); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn + .btn { margin-top: 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+  .chip { border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .search { width: 100%; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; margin-bottom: 10px; }
+  .money { font-variant-numeric: tabular-nums; }
+  .total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); font-weight: 700; }
+  .total .big { font-size: 20px; font-weight: 800; }
+  .lesson-line { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); align-items: center; font-size: 13.5px; }
+  .lesson-line:last-child { border-bottom: 0; }
+  .lesson-line .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .lesson-line .d { color: var(--muted); font-size: 12px; }
+  .lesson-line.pick { cursor: pointer; border: 0; width: 100%; background: transparent; text-align: left; border-bottom: 1px solid var(--line); }
+  .mark { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+  .mark.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .mark.paid { background: var(--ok-soft); border-color: var(--ok-soft); color: var(--ok); }
+  .step { display: flex; gap: 6px; margin-bottom: 12px; }
+  .step i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+  .step i.on { background: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 12px; }
+  .bill { font-size: 13.5px; }
+  .bill .grp { padding: 10px 14px 6px; font-weight: 700; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+  .bill .grp:first-child { border-top: 0; }
+  .grade { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--ok-soft); color: var(--ok); font-weight: 800; font-size: 13px; }
+  .grade.none { background: var(--warn-soft); color: var(--warn); }
+  .stars { display: flex; gap: 6px; }
+  .stars button { flex: 1; border: 1px solid var(--line-strong); background: var(--card); border-radius: 10px; padding: 10px 0; font-weight: 800; cursor: pointer; }
+  .stars button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal .wd { text-align: center; font-size: 11px; color: var(--muted); padding: 4px 0; }
+  .cal button { border: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .cal button.dot { border-color: var(--accent-soft); background: var(--accent-soft); }
+  .cal button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .cal button.off { visibility: hidden; }
+  .textarea { width: 100%; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; min-height: 70px; resize: vertical; }
+
+  /* sheet + toast */
+  .sheet-wrap { position: absolute; inset: 0; background: rgba(15,8,11,.45); display: flex; align-items: flex-end; z-index: 5; }
+  .sheet { width: 100%; background: var(--card); border-radius: 22px 22px 34px 34px; padding: 10px 16px 24px; max-height: 88%; overflow-y: auto; }
+  .sheet .grab { width: 40px; height: 4px; background: var(--line-strong); border-radius: 2px; margin: 0 auto 12px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 18px; font-weight: 800; }
+  .toast { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 12px; font-weight: 600; font-size: 13.5px; z-index: 6; box-shadow: var(--shadow); max-width: 88%; text-align: center; }
+  .fade { animation: fade .16s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .fade { animation: none; } }
+</style>
+
+<div class="page">
+  <aside class="intro">
+    <div class="wordmark">ФОКУС</div>
+    <h1>Mini App — кликабельный прототип</h1>
+    <p>Те же экраны и правила, что в Telegram-боте школы, собранные как мини-приложение. Кабинеты в порядке проработки: администратор, педагог, спортсмен, родитель.</p>
+    <div class="roles" role="tablist" aria-label="Роль">
+      <button role="tab" data-role="admin" aria-selected="true">Админ</button>
+      <button role="tab" data-role="teacher" aria-selected="false">Педагог</button>
+      <button role="tab" data-role="athlete" aria-selected="false">Спортсмен</button>
+      <button role="tab" data-role="parent" aria-selected="false">Родитель</button>
+    </div>
+    <div class="whoami" id="whoami"></div>
+    <ul class="legend">
+      <li><span class="dot" style="background: var(--ok)"></span><span><b>Оплачено</b> — деньги получены и зачтены</span></li>
+      <li><span class="dot" style="background: var(--warn)"></span><span><b>Ожидает</b> — остаток к оплате в текущем месяце</span></li>
+      <li><span class="dot" style="background: var(--bad)"></span><span><b>Долг</b> — неоплаченный закрытый месяц</span></li>
+    </ul>
+    <div class="note">Прототип без внедрения: данные условные (имена вымышлены), платежи не проводятся, ничего не сохраняется — обновление страницы сбрасывает всё к началу.</div>
+  </aside>
+
+  <div class="phone">
+    <div class="screen">
+      <div class="tg-head">
+        <button class="tg-back" id="back" aria-label="Назад"><span style="font-size:20px;line-height:1">‹</span> Назад</button>
+        <div class="title" id="title">Фокус</div>
+        <div class="tg-dots">⋯</div>
+      </div>
+      <div class="content" id="content"></div>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div id="overlay"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────────────
+   Условные данные. Правила — как в боте: накопительный счёт по педагогу,
+   абонемент фикс-суммой, оплата закрывает занятия с ранних, прямая оплата
+   педагогу не начисляется, зарплата руководителя остаётся в прибыли.
+   ──────────────────────────────────────────────────────────────────────── */
+const TODAY = '2026-09-18', YM = '2026-09', PREV = '2026-08';
+const D = {
+  teachers: [
+    { id:'T1', name:'Столяров Сергей', owner:true, rate:{g:1500,t:2500,s:2500}, groups:['G1'] },
+    { id:'T2', name:'Никитина Мария', rate:{g:1300,t:1300,s:2000}, groups:['G1','G3'], billing:true },
+    { id:'T3', name:'Громов Илья', rate:{g:1900,t:1900,s:2600}, groups:['G2','G3'] },
+    { id:'T4', name:'Лебедева Олеся', rate:{g:1700,t:1000,s:1800}, groups:['G4','G5'], shift:'Смена Боброво · 3 ч' },
+    { id:'T5', name:'Царёва Ангелина', direct:true, rent:500, rate:{g:1000,t:1500,s:2000}, groups:['G6','G8'] },
+  ],
+  branches: [ { id:'B1', name:'Южное Бутово' }, { id:'B2', name:'Боброво' } ],
+  groups: [
+    { id:'G1', name:'БП БТ Спортивная', branch:'B1', mode:'subscription', price:7000 },
+    { id:'G2', name:'БП БТ Спортивная — Громов', branch:'B1', mode:'per_visit', price:800 },
+    { id:'G3', name:'БП Джаз', branch:'B1', mode:'per_visit', price:800 },
+    { id:'G4', name:'ХГ Младшая', branch:'B2', mode:'subscription', price:6000 },
+    { id:'G5', name:'ХГ Старшая', branch:'B2', mode:'subscription', price:6500 },
+    { id:'G6', name:'Детская хореография', branch:'B1', mode:'none', price:0 },
+    { id:'G7', name:'БП БТ Спортивная — Ершова', branch:'B1', mode:'per_visit', price:800, archived:true },
+    { id:'G8', name:'ЮБ Малыши', branch:'B1', mode:'per_visit', price:700, price_short:500, tiers:true },
+  ],
+  students: [
+    { id:'S1', name:'Волкова Алиса', groups:['G1','G2','G3'], parent:'P1', partner:'S4', athlete:true },
+    { id:'S2', name:'Волков Максим', groups:['G1','G2'], parent:'P1' },
+    { id:'S3', name:'Орлова Вера', groups:['G1','G3'], parent:'P2' },
+    { id:'S4', name:'Быков Артём', groups:['G2','G3'], parent:'P3', partner:'S1', athlete:true },
+    { id:'S5', name:'Соколова Лиза', groups:['G4'], parent:'P4' },
+    { id:'S6', name:'Кузьмина Даша', groups:['G5'], parent:null },
+    { id:'S7', name:'Мельник Ева', groups:['G6','G8'], parent:'P5', tier:'short' },
+    { id:'S9', name:'Гусева Мила', groups:['G8'], parent:null, tier:'full' },
+    { id:'S8', name:'Тарасов Глеб', groups:['G2'], parent:'P6' },
+  ],
+  parents: { P1:'Елена Волкова', P2:'Ирина Орлова', P3:'Дмитрий Быков', P4:'Анна Соколова', P5:'Ольга Мельник', P6:'Павел Тарасов' },
+  lessons: [
+    { id:'L1', date:'2026-09-02', t:'T2', type:'group', g:'G1', dur:60, att:[] },
+    { id:'L2', date:'2026-09-03', t:'T1', type:'ind', dur:45, att:[{s:'S1',amt:2500}] },
+    { id:'L3', date:'2026-09-04', t:'T3', type:'group', g:'G2', dur:60, att:[{s:'S1',amt:800},{s:'S2',amt:800},{s:'S4',amt:800}] },
+    { id:'L4', date:'2026-09-05', t:'T2', type:'ind', dur:45, att:[{s:'S1',amt:2000}] },
+    { id:'L5', date:'2026-09-05', t:'T5', type:'ind', dur:45, att:[{s:'S2',amt:0}] },
+    { id:'L6', date:'2026-09-07', t:'T3', type:'group', g:'G2', dur:45, att:[{s:'S1',amt:800},{s:'S4',amt:800}] },
+    { id:'L7', date:'2026-09-09', t:'T2', type:'group', g:'G1', dur:60, att:[] },
+    { id:'L8', date:'2026-09-10', t:'T1', type:'ind', dur:60, att:[{s:'S3',amt:3333}] },
+    { id:'L9', date:'2026-09-11', t:'T3', type:'group', g:'G2', dur:60, att:[{s:'S1',amt:800},{s:'S2',amt:800},{s:'S4',amt:800},{s:'S8',amt:800}] },
+    { id:'L10', date:'2026-09-12', t:'T3', type:'group', g:'G3', dur:60, att:[{s:'S1',amt:800},{s:'S3',amt:800},{s:'S4',amt:800}] },
+    { id:'L11', date:'2026-09-12', t:'T2', type:'ind', dur:45, att:[{s:'S1',amt:2000}] },
+    { id:'L12', date:'2026-09-14', t:'T3', type:'group', g:'G2', dur:45, att:[{s:'S1',amt:800},{s:'S2',amt:800}] },
+    { id:'L13', date:'2026-09-14', t:'T2', type:'ind', dur:45, att:[{s:'S4',amt:2000}] },
+    { id:'L14', date:'2026-09-16', t:'T2', type:'group', g:'G1', dur:60, att:[] },
+    { id:'L15', date:'2026-09-17', t:'T1', type:'ind', dur:45, att:[{s:'S1',amt:2500}] },
+    { id:'L16', date:'2026-09-18', t:'T3', type:'group', g:'G2', dur:60, att:[{s:'S2',amt:800},{s:'S4',amt:800},{s:'S8',amt:800}] },
+    { id:'L17', date:'2026-09-12', t:'T5', type:'ind', dur:45, att:[{s:'S6',amt:0}] },
+    { id:'L18', date:'2026-09-16', t:'T5', type:'ind', dur:60, att:[{s:'S2',amt:0}] },
+    { id:'L19', date:'2026-09-01', t:'T4', type:'group', g:'G4', dur:60, att:[] },
+    { id:'L20', date:'2026-09-03', t:'T4', type:'group', g:'G5', dur:90, att:[] },
+    { id:'L21', date:'2026-09-08', t:'T4', type:'group', g:'G4', dur:60, att:[] },
+    { id:'L22', date:'2026-09-15', t:'T4', type:'group', g:'G5', dur:90, att:[] },
+    { id:'L23', date:'2026-09-15', t:'T5', type:'group', g:'G6', dur:60, att:[] },
+    { id:'L24', date:'2026-09-18', t:'T2', type:'ind', dur:45, att:[{s:'S3',amt:2000}] },
+    { id:'L26', date:'2026-09-16', t:'T5', type:'group', g:'G8', dur:60, att:[{s:'S7',amt:500},{s:'S9',amt:700}] },
+    { id:'L30', date:'2026-08-28', t:'T3', type:'group', g:'G2', dur:60, att:[{s:'S2',amt:700},{s:'S4',amt:700}] },
+    { id:'L31', date:'2026-08-29', t:'T2', type:'ind', dur:45, att:[{s:'S1',amt:1500}] },
+    { id:'L32', date:'2026-08-30', t:'T3', type:'group', g:'G3', dur:60, att:[{s:'S3',amt:700},{s:'S4',amt:700}] },
+  ],
+  payments: [
+    { id:'PAY-1', s:'S1', ym:'2026-09', key:'SUB:G1', amt:7000, date:'2026-09-04', method:'yookassa' },
+    { id:'PAY-2', s:'S1', ym:'2026-09', key:'T1', amt:2500, date:'2026-09-04', method:'yookassa' },
+    { id:'PAY-3', s:'S1', ym:'2026-09', key:'T3', amt:800, date:'2026-09-05', method:'sbp' },
+    { id:'PAY-4', s:'S1', ym:'2026-09', key:'T2', amt:2000, date:'2026-09-06', method:'yookassa' },
+    { id:'PAY-5', s:'S2', ym:'2026-09', key:'T3', amt:800, date:'2026-09-06', method:'cash' },
+    { id:'PAY-6', s:'S4', ym:'2026-09', key:'T3', amt:1600, date:'2026-09-08', method:'bank' },
+    { id:'PAY-7', s:'S2', ym:'2026-08', key:'T3', amt:700, date:'2026-08-29', method:'cash' },
+    { id:'PAY-8', s:'S1', ym:'2026-08', key:'T2', amt:1500, date:'2026-08-30', method:'yookassa' },
+    { id:'PAY-9', s:'S3', ym:'2026-08', key:'T3', amt:700, date:'2026-09-02', method:'sbp' },
+  ],
+  payouts: { T2:20000, T3:35000, T4:15300 },
+  submitted: { T2:['2026-08'], T3:['2026-08'], T4:['2026-08'], T5:['2026-08'] },
+  finance: [ { ym:'2026-09', kind:'income', title:'Турнир «Кубок осени»', amt:15000 }, { ym:'2026-09', kind:'expense', title:'Аренда зала, Боброво', amt:20000 } ],
+  inbox: [
+    { id:'I1', kind:'receipt', who:'Елена Волкова', text:'Чек по реквизитам — Волков Максим, 7 000 ₽ (абонемент)', s:'S2', key:'SUB:G1', amt:7000 },
+    { id:'I2', kind:'cash', who:'Павел Тарасов', text:'Сообщил об оплате наличными — Тарасов Глеб, 2 400 ₽', s:'S8', key:'T3', amt:2400 },
+    { id:'I3', kind:'child', who:'Ирина Орлова', text:'Просит привязать второго ребёнка: Орлов Тимофей', s:null },
+    { id:'I4', kind:'request', who:'Громов Илья', text:'Заявка на нового ученика: Смирнова Полина → БП БТ Спортивная — Громов', g:'G2', name:'Смирнова Полина' },
+  ],
+  overrides: [ { g:'G1', s:'S3', ym:'*', amt:0 }, { g:'G1', s:null, ym:'2026-08', amt:0 } ],
+  rateHistory: [ { t:'T2', until:'2026-08', g:1000, t2:1000, s:1500 }, { t:'T3', until:'2026-08', g:1350, t2:1500, s:2000 } ],
+  periods: { S1:{ G1:['2026-04',''] }, S2:{ G1:['2026-04',''] }, S3:{ G1:['2026-05',''] }, S5:{ G4:['2026-04',''] }, S6:{ G5:['2026-09',''] } },
+  dayOverrides: [],
+  diary: [
+    { id:'E1', s:'S1', date:'2026-09-14', min:40, topics:['Самба','Ча-ча-ча'], comment:'Отработала ритм в самбе', grade:5, gcomment:'Отлично, держи корпус' },
+    { id:'E2', s:'S1', date:'2026-09-16', min:30, topics:['Румба'], comment:'Растяжка и румба', grade:null },
+    { id:'E3', s:'S4', date:'2026-09-15', min:45, topics:['Джайв'], comment:'Кики по заданию', grade:null },
+  ],
+  tasks: [ { id:'K1', s:'S1', text:'Растяжка 15 мин каждый день', min:15, open:true }, { id:'K2', s:'S4', text:'Кики в джайве — 3 подхода', min:10, open:true } ],
+};
+const ME = { teacher:'T2', parent:'P1', athlete:'S1' };
+
+/* ── справочники и форматирование ─────────────────────────────────────── */
+const T = id => D.teachers.find(x=>x.id===id);
+const G = id => D.groups.find(x=>x.id===id);
+const S = id => D.students.find(x=>x.id===id);
+const fmt = n => Math.round(n).toLocaleString('ru-RU').replace(/ /g,' ') + ' ₽';
+const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MON_SHORT = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+const MON_NOM = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const WD = ['вс','пн','вт','ср','чт','пт','сб'];
+const fdate = d => { const x = new Date(d+'T00:00:00'); return `${x.getDate()} ${MON_SHORT[x.getMonth()]}, ${WD[x.getDay()]}`; };
+const fmon = ym => `${MON_NOM[+ym.slice(5)-1]} ${ym.slice(0,4)}`;
+const short = name => { const [f, n] = name.split(' '); return n ? `${f} ${n[0]}.` : f; };
+const plural = (n, f) => { const m = n % 10, h = n % 100; return `${n} ${h>10&&h<20 ? f[2] : m===1 ? f[0] : m>1&&m<5 ? f[1] : f[2]}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const byDate = (a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+const METHOD = { yookassa:'Картой онлайн', sbp:'СБП онлайн', bank:'По реквизитам', cash:'Наличные', admin:'Вручную (админ)' };
+
+/* ── расчёты: счёт, оплаты, долги, зарплата, прибыль ──────────────────── */
+function billsFor(sid, ym) {
+  const res = {};
+  D.lessons.filter(l => l.date.startsWith(ym) && l.att.some(a => a.s === sid)).forEach(l => {
+    const t = T(l.t);
+    if (t.direct && l.type === 'ind') return;
+    const amt = l.att.find(a => a.s === sid).amt;
+    const b = res[l.t] ??= { key:l.t, name:t.name, items:[], total:0, groupOnly:true };
+    b.items.push({ ...l, amt }); b.total += amt; if (l.type !== 'group') b.groupOnly = false;
+  });
+  Object.values(res).forEach(b => { if (b.groupOnly && b.items.length) { b.name = [...new Set(b.items.map(i => G(i.g).name))].join(', '); b.group = true; } });
+  const st = S(sid);
+  st.groups.forEach(gid => { const g = G(gid); if (g.mode !== 'subscription' || !covers(sid, gid, ym) || ym < '2026-08') return; const amt = subPrice(sid, gid, ym); if (amt > 0) res['SUB:'+gid] = { key:'SUB:'+gid, name:'Абонемент', sub:true, items:[], total:amt }; });
+  Object.values(res).forEach(b => { b.paid = paidFor(sid, ym, b.key); b.rest = Math.max(b.total - b.paid, 0); b.over = Math.max(b.paid - b.total, 0); });
+  return res;
+}
+const ovr = (g, sid, ym) => D.overrides.find(o => o.g===g && o.s===sid && o.ym===ym);
+function subPrice(sid, gid, ym) { const o = ovr(gid, sid, ym) || ovr(gid, sid, '*') || ovr(gid, null, ym); return o ? o.amt : G(gid).price; }
+function covers(sid, gid, ym) { const m = (D.periods[sid]||{})[gid] || ['','']; return (!m[0] || m[0] <= ym) && (!m[1] || ym < m[1]); }
+const priceFor = (g, sid) => g.tiers && (S(sid)||{}).tier==='short' ? g.price_short : g.price;
+const isExempt = (sid, gid) => !!ovr(gid, sid, '*') && ovr(gid, sid, '*').amt === 0;
+const paidFor = (sid, ym, key) => D.payments.filter(p => p.s===sid && p.ym===ym && p.key===key).reduce((a,p)=>a+p.amt, 0);
+function marks(items, paid) { let left = paid; return items.slice().sort(byDate).map(i => { const ok = i.amt > 0 && left >= i.amt; if (ok) left -= i.amt; return { ...i, paid: ok }; }); }
+const sumBills = b => Object.values(b).reduce((a,x)=>({ total:a.total+x.total, paid:a.paid+Math.min(x.paid,x.total), rest:a.rest+x.rest }), {total:0,paid:0,rest:0});
+function debtMap() {
+  const out = {};
+  D.students.forEach(s => ['2026-08','2026-09'].forEach(ym => { const r = sumBills(billsFor(s.id, ym)).rest; if (r > 0) (out[s.id] ??= {})[ym] = r; }));
+  return out;
+}
+function ratesAt(t, ym) { const h = D.rateHistory.filter(r => r.t === t.id && r.until >= ym).sort((a,b)=>a.until<b.until?-1:1)[0]; return h ? { g:h.g, t:h.t2, s:h.s } : t.rate; }
+function earned(l) { const t = T(l.t); if (t.direct && l.type === 'ind') return 0; const r = ratesAt(t, l.date.slice(0,7)); const rate = l.type === 'group' ? r.g : r.t; return Math.round(rate * l.dur / 45); }
+function salaryLines(tid, ym) {
+  const t = T(tid); const ls = D.lessons.filter(l => l.t === tid && l.date.startsWith(ym)).sort(byDate);
+  if (t.shift) return [...new Set(ls.map(l=>l.date))].sort().map(d => { const o = D.dayOverrides.find(x => x.t===tid && x.date===d); return o ? { kind:'override', title:`${fdate(d)} · нестандартный день`, sub:`${o.min} мин${o.c?' · '+o.c:''}`, amt: Math.round(o.min/60*1700) } : { kind:'shift', title:`${fdate(d)} · ${t.shift}`, sub: ls.filter(l=>l.date===d).map(l=>G(l.g).name).join(', '), amt:5100 }; });
+  return ls.map(l => ({ kind:l.type, title:`${fdate(l.date)} · ${l.type==='group'?G(l.g).name:l.att.map(a=>S(a.s)?.name||'?').join(' + ')}`, sub:`${l.dur} мин${t.direct&&l.type==='ind'?' · напрямую педагогу':''}`, amt: earned(l) }));
+}
+function salaryFor(tid, ym) { return salaryLines(tid, ym).reduce((a,x)=>a+x.amt, 0); }
+function profitFor(ym) {
+  const rows = D.teachers.map(t => {
+    const ls = D.lessons.filter(l => l.t === t.id && l.date.startsWith(ym));
+    let income = 0, salary = 0, ownerIncome = 0, rent = 0, rentN = 0, gN = 0, iN = 0;
+    ls.forEach(l => {
+      const inc = l.att.reduce((a,x)=>a+x.amt, 0);
+      if (t.direct && l.type === 'ind') { rent += t.rent; rentN++; income += t.rent; iN++; return; }
+      if (!inc) return;
+      income += inc; l.type === 'group' ? gN++ : iN++;
+      const e = earned(l); if (t.owner) ownerIncome += e; else salary += e;
+    });
+    if (t.shift) salary = salaryFor(t.id, ym);
+    return { t, income, salary, ownerIncome, rent, rentN, gN, iN };
+  }).filter(r => r.income || r.salary);
+  const subs = D.groups.filter(g => g.mode === 'subscription').map(g => { const sts = D.students.filter(s => s.groups.includes(g.id) && covers(s.id, g.id, ym) && subPrice(s.id, g.id, ym) > 0); return { g, n: sts.length, income: sts.reduce((a,s)=>a+subPrice(s.id,g.id,ym),0) }; });
+  const fin = D.finance.filter(f => f.ym === ym);
+  const lessonIncome = rows.reduce((a,r)=>a+r.income,0), salary = rows.reduce((a,r)=>a+r.salary,0), subIncome = subs.reduce((a,x)=>a+x.income,0);
+  const manualIn = fin.filter(f=>f.kind==='income').reduce((a,f)=>a+f.amt,0), manualOut = fin.filter(f=>f.kind==='expense').reduce((a,f)=>a+f.amt,0);
+  return { rows, subs, fin, lessonIncome, salary, subIncome, manualIn, manualOut, ownerIncome: rows.reduce((a,r)=>a+r.ownerIncome,0), rent: rows.reduce((a,r)=>a+r.rent,0), total: lessonIncome+subIncome+manualIn, profit: lessonIncome+subIncome+manualIn-salary-manualOut };
+}
+const isLocked = l => (D.submitted[l.t]||[]).includes(l.date.slice(0,7));
+
+/* ── UI-кирпичи ──────────────────────────────────────────────────────── */
+const cell = ({ lead, t, s, r, go, p, plain, cls='' }) => `<button class="cell ${lead===undefined?'nolead':''} ${go?'':'static'} ${cls}" ${go?`data-go="${go}" data-p='${JSON.stringify(p||{})}'`:''}>${lead!==undefined?`<span class="lead ${plain?'plain':''}">${lead}</span>`:''}<span><div class="t">${t}</div>${s?`<div class="s">${s}</div>`:''}</span><span class="r">${r||''}${go?'<span class="chev">›</span>':''}</span></button>`;
+const list = rows => `<div class="list">${rows.join('')}</div>`;
+const pill = (txt, kind='mute') => `<span class="pill ${kind}">${txt}</span>`;
+const btn = (txt, act, p={}, kind='') => `<button class="btn ${kind}" data-act="${act}" data-p='${JSON.stringify(p)}'>${txt}</button>`;
+const goBtn = (txt, go, p={}, kind='') => `<button class="btn ${kind}" data-go="${go}" data-p='${JSON.stringify(p)}'>${txt}</button>`;
+const kpi = (v, l, kind='') => `<div class="kpi ${kind}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+const val = id => (document.getElementById(id)||{}).value ?? '';
+const field = (id, label, value='', attrs='') => `<label class="hint" for="${id}" style="display:block;margin:10px 0 4px">${label}</label><input class="search" style="margin:0" id="${id}" value="${esc(value)}" ${attrs}>`;
+const monthChips = (act, cur, months, extra={}) => `<div class="chips">${months.map(m => `<button class="chip" aria-pressed="${cur===m}" data-act="${act}" data-p='${JSON.stringify({...extra, ym:m})}'>${m==='*'?'постоянно':MON_NOM[+m.slice(5)-1]}</button>`).join('')}</div>`;
+const MONTHS6 = ['2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'];
+const initials = n => n.split(' ').map(x=>x[0]).join('').slice(0,2);
+const statusPill = b => b.total === 0 ? pill('нет начислений') : b.rest === 0 ? pill('✓ оплачено','ok') : b.paid ? pill(`к доплате ${fmt(b.rest)}`,'warn') : pill(`к оплате ${fmt(b.rest)}`,'warn');
+
+/* ── навигация ───────────────────────────────────────────────────────── */
+const ROLE_TABS = {
+  admin: [['a.home','Сводка','home'],['a.payhub','Оплаты','card'],['a.students','Ученики','users'],['a.finance','Финансы','chart'],['a.more','Ещё','dots']],
+  teacher: [['t.home','Сегодня','home'],['t.record','Отметить','plus'],['t.lessons','Занятия','list'],['t.groups','Группы','users'],['t.more','Ещё','dots']],
+  athlete: [['h.home','Дневник','book'],['h.log','Записать','plus'],['h.tasks','Задания','list'],['h.rating','Рейтинг','chart']],
+  parent: [['p.bills','Счета','card'],['p.lessons','Занятия','list'],['p.diary','Дневник','book'],['p.more','Ещё','dots']],
+};
+const ICON = {
+  home:'<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/>', chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  dots:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>', plus:'<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>', book:'<path d="M4 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4zM20 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z"/>',
+};
+const state = { role:'admin', stacks:{ admin:[{n:'a.home'}], teacher:[{n:'t.home'}], athlete:[{n:'h.home'}], parent:[{n:'p.bills'}] }, ui:{} };
+const stack = () => state.stacks[state.role];
+const cur = () => stack()[stack().length-1];
+function go(n, p={}) { stack().push({ n, p }); render(); }
+function back() { if (stack().length > 1) { stack().pop(); render(); } }
+function root(n) { state.stacks[state.role] = [{ n }]; render(); }
+function toast(msg) { const o = document.getElementById('overlay'); const el = document.createElement('div'); el.className = 'toast fade'; el.textContent = msg; o.appendChild(el); setTimeout(() => el.remove(), 2200); }
+function sheet(html) { document.getElementById('overlay').innerHTML = `<div class="sheet-wrap" data-act="closeSheet"><div class="sheet fade" data-stop="1"><div class="grab"></div>${html}</div></div>`; }
+function closeSheet() { const w = document.querySelector('.sheet-wrap'); if (w) w.remove(); }
+
+/* ── экраны: АДМИНИСТРАТОР ───────────────────────────────────────────── */
+const SCREENS = {};
+const MODE = { subscription:'абонемент', per_visit:'по посещению', none:'без оплаты' };
+const bname = id => (D.branches.find(b => b.id === id) || {}).name || '';
+const INBOX_ICON = { receipt:'🧾', cash:'💵', child:'👨‍👩‍👧', request:'📝' };
+SCREENS['a.home'] = () => {
+  const debt = debtMap(); const debtors = Object.keys(debt).filter(s => debt[s][PREV]).length;
+  const pending = D.students.reduce((a,s)=>a+sumBills(billsFor(s.id, YM)).rest, 0);
+  const todayN = D.lessons.filter(l => l.date === TODAY).length;
+  return { title:'Школа сегодня', html:`
+    <div class="h2">${fdate(TODAY)}</div>
+    <div class="kpis">${kpi(fmt(pending),'ожидает оплаты за сентябрь','warn')}${kpi(debtors,'должников за август','bad')}${kpi(plural(todayN,['занятие','занятия','занятий']),'отмечено сегодня')}${kpi(D.inbox.length,'требуют решения','warn')}</div>
+    <div class="eyebrow">Требуют решения</div>
+    ${D.inbox.length ? list(D.inbox.map(i => cell({ lead: INBOX_ICON[i.kind], plain:true, t:i.text, s:i.who, go:'a.inbox', p:{id:i.id} }))) : '<div class="empty">Всё разобрано</div>'}
+    <div class="eyebrow">Быстрые действия</div>
+    ${list([cell({ lead:'💾', plain:true, t:'Подтвердить оплату', s:'ученик → педагог → занятия', go:'a.pay' }), cell({ lead:'⚠️', plain:true, t:'Должники', s:'закрытые месяцы', go:'a.debtors' }), cell({ lead:'📝', plain:true, t:'Отметить занятие за педагога', s:'обходит замок периода', go:'a.record' }), cell({ lead:'✏️', plain:true, t:'Изменить занятия', s:'просмотр и удаление, даже в сданном периоде', go:'a.editlessons' })])}` };
+};
+SCREENS['a.inbox'] = ({ id }) => {
+  const i = D.inbox.find(x => x.id === id); if (!i) return { title:'Готово', html:'<div class="empty">Запрос уже обработан</div>' };
+  if (i.kind === 'request') return { title:'Заявка педагога', html:`<div class="card pad"><div style="font-weight:700">${i.text}</div><div class="hint" style="margin-top:4px">от ${i.who} · ученика ещё нет в школе</div></div><div style="margin-top:14px">${btn('✅ Создать ученика и добавить в группу','reqCreate',{id})}${goBtn('🔗 Это уже существующий ученик','a.req.link',{id},'sec')}${btn('Отклонить','inboxNo',{id},'ghost')}</div>` };
+  const st = i.s ? S(i.s) : null; const b = st ? billsFor(st.id, YM)[i.key] : null;
+  return { title:'Запрос', html:`
+    <div class="card pad"><div style="font-weight:700">${i.text}</div><div class="hint" style="margin-top:4px">от ${i.who}</div></div>
+    ${b ? `<div class="eyebrow">По счёту</div><div class="list">${cell({ t:b.name, s:`${fmon(YM)} · ${st.name}`, r:statusPill(b) })}</div>` : ''}
+    <div style="margin-top:14px">
+      ${i.kind==='child' ? btn('✅ Одобрить привязку','inboxOk',{id}) + btn('Отклонить','inboxNo',{id},'ghost') : btn(`✅ Подтвердить оплату ${fmt(i.amt)}`,'inboxOk',{id}) + btn('❌ Чек не подходит','inboxNo',{id},'ghost')}
+    </div>` };
+};
+SCREENS['a.req.link'] = ({ id }) => { const i = D.inbox.find(x => x.id === id); return { title:'Кто это?', html:`<div class="hint" style="margin-bottom:10px">Заявка: ${i.name}. Выберите ученика — он будет добавлен в группу «${G(i.g).name}».</div>${list(D.students.filter(s=>!s.groups.includes(i.g)).map(s => `<button class="cell" data-act="doReqLink" data-p='${JSON.stringify({id, sid:s.id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(g=>G(g).name).join(', ')}</div></span><span></span></button>`))}` }; };
+SCREENS['a.pay'] = () => ({ title:'Подтвердить оплату', html:`<div class="h2">Выберите месяц</div>${list(['2026-09','2026-08','2026-07'].map(ym => cell({ t:fmon(ym), s: ym===YM?'текущий месяц':'закрыт', go:'a.pay.groups', p:{ym} })))}` });
+SCREENS['a.pay.groups'] = ({ ym }) => ({ title: fmon(ym), html: D.branches.map(b => `<div class="eyebrow">${b.name}</div>${list(D.groups.filter(g => g.branch===b.id && !g.archived).map(g => cell({ lead:'💃', plain:true, t:g.name, s:MODE[g.mode] + (g.price?` · ${fmt(g.price)}`:''), go:'a.pay.students', p:{ym, g:g.id} })))}`).join('') + `<div class="eyebrow">Без группы</div>${list([cell({ t:'📋 Все ученики', go:'a.pay.students', p:{ym, g:null} })])}` });
+SCREENS['a.pay.students'] = ({ ym, g }) => {
+  const sts = D.students.filter(s => !g || s.groups.includes(g)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+  return { title: g ? G(g).name : 'Все ученики', html:`<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите ученика</div>${list(sts.map(s => { const b = sumBills(billsFor(s.id, ym)); return cell({ lead:initials(s.name), t:s.name, s: b.total ? `начислено ${fmt(b.total)} · оплачено ${fmt(b.paid)}` : 'нет начислений', r: b.rest ? pill(fmt(b.rest),'warn') : b.total ? pill('✓','ok') : '', go:'a.pay.student', p:{ym, sid:s.id} }); }))}` };
+};
+SCREENS['a.pay.student'] = ({ ym, sid }) => {
+  const st = S(sid), bills = Object.values(billsFor(sid, ym)); const sum = sumBills(bills);
+  if (!bills.length) return { title: st.name, html:`<div class="empty">У ${st.name} за ${fmon(ym)} нет занятий.</div>` };
+  const rows = [];
+  bills.forEach(b => {
+    D.payments.filter(p => p.s===sid && p.ym===ym && p.key===b.key).sort(byDate).forEach(p => rows.push(cell({ lead:'✅', plain:true, t:`${b.name} — ${fmt(p.amt)}`, s:`${fdate(p.date)} · ${METHOD[p.method]}`, cls:'static' })));
+    if (b.rest > 0) rows.push(cell({ lead:'⏳', plain:true, t:`${b.name} — к ${b.paid?'доплате':'оплате'} ${fmt(b.rest)}`, s: b.sub ? 'абонемент — только целиком' : `${plural(marks(b.items,b.paid).filter(m=>!m.paid).length,['занятие','занятия','занятий'])} не оплачено`, go: b.sub ? 'a.pay.sub' : 'a.pay.select', p:{ym, sid, key:b.key} }));
+  });
+  return { title: st.name, html:`<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите счёт для подтверждения</div>${list(rows.length?rows:[cell({t:'✅ Всё оплачено'})])}<div class="total"><span>Итого ${fmt(sum.total)} · оплачено ${fmt(sum.paid)}</span><span class="${sum.rest?'':'ok'}">${sum.rest?`к оплате ${fmt(sum.rest)}`:'✓'}</span></div><div style="margin-top:12px">${goBtn('🧾 Открыть счёт ученика','a.bill',{ym,sid},'sec')}</div>` };
+};
+SCREENS['a.pay.select'] = ({ ym, sid, key }) => {
+  const b = billsFor(sid, ym)[key]; const ms = marks(b.items, b.paid); const ui = state.ui.sel ??= {};
+  if (ui.key !== key+sid+ym) { ui.key = key+sid+ym; ui.picked = new Set(); }
+  const chosen = ms.filter(m => !m.paid && ui.picked.has(m.id)); const total = chosen.reduce((a,m)=>a+m.amt,0);
+  return { title: b.name, html:`
+    <div class="hint" style="margin-bottom:10px">${S(sid).name} · ${fmon(ym)}. Отметьте занятия, за которые приняли деньги.</div>
+    <div class="list">${ms.map(m => m.paid ? `<div class="lesson-line"><span class="mark paid">✓</span><span>${fdate(m.date)} · ${m.type==='group'?'групп.':'инд.'} · ${m.dur} мин<div class="d">оплачено</div></span><span class="amt">${fmt(m.amt)}</span></div>` : `<button class="lesson-line pick" data-act="pick" data-p='${JSON.stringify({id:m.id})}'><span class="mark ${ui.picked.has(m.id)?'on':''}">${ui.picked.has(m.id)?'✓':''}</span><span>${fdate(m.date)} · ${m.type==='group'?'групп.':'инд.'} · ${m.dur} мин</span><span class="amt">${fmt(m.amt)}</span></button>`).join('')}</div>
+    <div style="margin-top:12px">${btn(total?`✅ Подтвердить оплату ${fmt(total)}`:'Выберите занятия','confirmSel',{ym,sid,key,total}, total?'':'sec')}</div>
+    <p class="hint" style="margin-top:10px">Сумма зачитывается на самые ранние неоплаченные занятия этого педагога — так же считает бот.</p>` };
+};
+SCREENS['a.pay.sub'] = ({ ym, sid, key }) => { const b = billsFor(sid, ym)[key]; return { title:'Абонемент', html:`<div class="card pad"><div style="font-weight:700">${S(sid).name}</div><div class="hint">${G(key.slice(4)).name} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin-top:8px">${fmt(b.rest)}</div></div><div style="margin-top:12px">${btn('✅ Подтвердить оплату абонемента','confirmSub',{ym,sid,key,amt:b.rest})}</div>` }; };
+SCREENS['a.bill'] = ({ ym, sid }) => {
+  const st = S(sid), bills = Object.values(billsFor(sid, ym)), sum = sumBills(bills);
+  return { title:'Счёт ученика', html:`
+    <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${st.name}</div><div class="hint">Группы: ${st.groups.map(g=>G(g).name).join(', ')}<br>Месяц: ${fmon(ym)}</div></div>
+    ${bills.map(b => `<div class="grp"><span>${b.sub?'💳':b.group?'👥':'👨‍🏫'} ${b.name}</span><span class="money">${fmt(b.total)}</span></div>${b.sub ? `<div class="lesson-line"><span></span><span class="hint">фиксированная сумма за месяц</span><span></span></div>` : marks(b.items,b.paid).map(m=>`<div class="lesson-line"><span class="mark ${m.paid?'paid':''}">${m.paid?'✓':''}</span><span>${fdate(m.date)} · ${m.dur} мин</span><span class="amt">${fmt(m.amt)}</span></div>`).join('')}`).join('')}
+    <div class="total"><span>Начислено ${fmt(sum.total)}<br><span class="hint">оплачено ${fmt(sum.paid)}</span></span><span class="big">${sum.rest?fmt(sum.rest):'✓'}</span></div></div>
+    <div style="margin-top:12px">${btn('📨 Отправить родителям','sendBill',{sid}) }${goBtn('📨 Отправить всей группе','a.groupsend',{ym, g: st.groups[0]},'ghost')}</div>` };
+};
+SCREENS['a.groupsend'] = ({ ym, g }) => { const sts = D.students.filter(s=>s.groups.includes(g)); return { title:'Рассылка по группе', html:`<div class="card pad"><b>${G(g).name}</b><div class="hint">${fmon(ym)} · ${plural(sts.length,['ученик','ученика','учеников'])}, счёт полный — по всем педагогам</div></div>${list(sts.map(s=>{const b=sumBills(billsFor(s.id,ym));return cell({lead:initials(s.name),t:s.name,s:s.parent?D.parents[s.parent]:'родитель не привязан',r:b.rest?pill(fmt(b.rest),'warn'):pill('✓','ok')})}))}<div style="margin-top:12px">${btn('📨 Отправить всем','sendGroup',{n:sts.filter(s=>s.parent).length})}</div>` }; };
+SCREENS['a.debtors'] = () => {
+  const debt = debtMap(); const rows = D.students.filter(s => debt[s.id]).map(s => ({ s, months: debt[s.id] })).sort((a,b) => Object.values(b.months).reduce((x,y)=>x+y,0) - Object.values(a.months).reduce((x,y)=>x+y,0));
+  const closed = rows.filter(r => r.months[PREV]);
+  return { title:'Должники', html:`<div class="hint" style="margin-bottom:10px">Долг = начислено − оплачено. Текущий месяц помечен * и в напоминание не входит.</div>${list(rows.map(r => cell({ lead:initials(r.s.name), t:r.s.name, s: Object.entries(r.months).map(([ym,a]) => `${MON_NOM[+ym.slice(5)-1]}${ym===YM?'*':''}: ${fmt(a)}`).join(' · '), r: r.months[PREV] ? pill(fmt(r.months[PREV]),'bad') : pill(fmt(r.months[YM]),'warn'), go:'a.student', p:{id:r.s.id} })))}<div style="margin-top:12px">${btn(`📤 Напомнить всем (${closed.length})`,'remind',{n:closed.length}, closed.length?'':'sec')}</div>` };
+};
+SCREENS['a.students'] = () => { const q = (state.ui.q||'').toLowerCase(); const sts = D.students.filter(s => s.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ru')); return { title:'Ученики', html:`<input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(state.ui.q||'')}">${list(sts.map(s => cell({ lead:initials(s.name), t:s.name, s:s.groups.map(g=>G(g).name).join(', ')||'без группы', r: s.parent ? '' : pill('без родителя','warn'), go:'a.student', p:{id:s.id} })))}<div style="margin-top:12px">${goBtn('➕ Добавить ученика','a.student.add',{},'sec')}</div>` }; };
+SCREENS['a.student.add'] = () => { const ui = state.ui.ns ??= { groups:new Set() }; return { title:'Новый ученик', html:`${field('ns-name','Фамилия и имя', ui.name||'', 'placeholder="Фамилия первой — так ищет бот"')}<div class="eyebrow">Группы</div><div class="chips">${D.groups.filter(g=>!g.archived).map(g=>`<button class="chip" aria-pressed="${ui.groups.has(g.id)}" data-act="nsGroup" data-p='{"g":"${g.id}"}'>${g.name}</button>`).join('')}</div><p class="hint">Абонементная группа — членство с текущего месяца. Партнёра и родителя назначите в карточке.</p><div style="margin-top:12px">${btn('💾 Создать ученика','addStudent',{})}</div>` }; };
+SCREENS['a.student'] = ({ id }) => {
+  const s = S(id); if (!s) return { title:'Ученик', html:'<div class="empty">Ученик удалён</div>' }; const b = sumBills(billsFor(id, YM)); const debt = debtMap()[id] || {};
+  return { title: s.name, html:`
+    <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-weight:800;font-size:17px">${s.name}</div><div class="hint">${s.parent ? `Родитель: ${D.parents[s.parent]}` : 'Родитель не привязан'}${s.athlete?' · 🏃 спортсмен':''}</div></div>${debt[PREV]?pill(`долг ${fmt(debt[PREV])}`,'bad'):b.rest?pill(`к оплате ${fmt(b.rest)}`,'warn'):b.total?pill('оплачено','ok'):''}</div></div>
+    <div class="eyebrow">Группы</div>${s.groups.length?list(s.groups.map(g => cell({ lead:'💃', plain:true, t:G(g).name, s:MODE[G(g).mode] + (isExempt(s.id,g)?' · освобождён постоянно':'') + (G(g).mode==='subscription'&&D.periods[id]?.[g]?` · с ${MON_NOM[+D.periods[id][g][0].slice(5)-1].toLowerCase()}${D.periods[id][g][1]?` по ${MON_NOM[+D.periods[id][g][1].slice(5)-2]?.toLowerCase()||''}`:''}`:''), go:'a.group', p:{id:g} }))):'<div class="empty">Не состоит в группах</div>'}
+    <div class="eyebrow">Счета и оплаты</div>${list([cell({ lead:'🧾', plain:true, t:'Счёт за сентябрь', r:`<b>${fmt(b.total)}</b>`, go:'a.bill', p:{ym:YM,sid:id} }), cell({ lead:'💾', plain:true, t:'Подтвердить оплату', go:'a.pay.student', p:{ym:YM,sid:id} }), cell({ lead:'📜', plain:true, t:'История оплат', go:'a.payhist', p:{sid:id} })])}
+    <div class="eyebrow">Карточка</div>${list([cell({ lead:'👨‍👩‍👧', plain:true, t: s.parent ? 'Сменить родителя' : 'Привязать родителя', s: s.parent ? D.parents[s.parent] : 'по телефону или из списка', go:'a.parent.link', p:{id} }), cell({ lead:'👫', plain:true, t: s.partner ? `Партнёр: ${S(s.partner).name}` : 'Партнёр не назначен', s:'сменить / убрать', go:'a.partner', p:{id} }), cell({ lead:'✏️', plain:true, t:'Переименовать', s:'история занятий не меняется', go:'a.rename', p:{id} }), cell({ lead:'💃', plain:true, t:'Группы ученика', s:'добавить / убрать', go:'a.student.groups', p:{id} })].concat(s.groups.some(g=>G(g).tiers)?[cell({ lead:'⏱', plain:true, t:`Тариф: ${s.tier==='short'?'35 минут':'60 минут'}`, s:D.groups.find(g=>s.groups.includes(g.id)&&g.tiers).name, go:'a.tier', p:{id} })]:[]).concat(s.athlete?[cell({ lead:'🏃', plain:true, t:'Кабинет спортсмена привязан', s:'Telegram ученика · отвязать', go:'a.athlete', p:{id} })]:[]))}
+    <div style="margin-top:12px">${btn('🗑 Удалить ученика','delStudent',{id},'danger')}</div>` };
+};
+SCREENS['a.rename'] = ({ id }) => ({ title:'Переименовать', html:`${field('rn','Новое имя', S(id).name)}<p class="hint">В прошлых занятиях и счетах останется старое написание — так устроен бот.</p><div style="margin-top:12px">${btn('💾 Сохранить','doRename',{id})}</div>` });
+SCREENS['a.partner'] = ({ id }) => { const s = S(id); const cands = D.students.filter(x => x.id !== id && x.groups.some(g => s.groups.includes(g))); return { title:'Партнёр', html:`<div class="hint" style="margin-bottom:10px">${s.name} · кандидаты из общих групп. Связь симметричная — у партнёра тоже обновится.</div>${list(cands.map(c => `<button class="cell" data-act="setPartner" data-p='${JSON.stringify({id, pid:c.id})}'><span class="mark ${s.partner===c.id?'on':''}">${s.partner===c.id?'✓':''}</span><span><div class="t">${c.name}</div><div class="s">${c.partner&&c.partner!==id?`сейчас в паре с ${short(S(c.partner).name)}`:'свободен'}</div></span><span></span></button>`))}${s.partner?`<div style="margin-top:12px">${btn('Убрать партнёра','clearPartner',{id},'danger')}</div>`:''}` }; };
+SCREENS['a.parent.link'] = ({ id }) => { const s = S(id); return { title:'Родитель', html:`<div class="eyebrow">Из списка</div>${list(Object.entries(D.parents).map(([pid,name]) => `<button class="cell" data-act="linkParent" data-p='${JSON.stringify({id, pid})}'><span class="mark ${s.parent===pid?'on':''}">${s.parent===pid?'✓':''}</span><span><div class="t">${name}</div><div class="s">${D.students.filter(x=>x.parent===pid).map(x=>x.name.split(' ')[1]).join(', ')||'детей нет'}</div></span><span></span></button>`))}<div class="eyebrow">Новый родитель</div>${field('np-name','Имя')}${field('np-phone','Телефон','','placeholder="+7 ••• ••• •• ••" inputmode="tel"')}<div style="margin-top:12px">${btn('➕ Создать и привязать','newParent',{id},'sec')}</div><p class="hint" style="margin-top:8px">Доступ в бот родитель получит сам — по ссылке группы; здесь только карточка клиента.</p>` }; };
+SCREENS['a.payhist'] = ({ sid, ym }) => { const s = S(sid); const ps = D.payments.filter(p=>p.s===sid&&(!ym||p.ym===ym)).sort((a,b)=>byDate(b,a)); return { title: ym?fmon(ym):'История оплат', html:`<div class="hint" style="margin-bottom:10px">${s.name}${ym?` · оплачено ${fmt(ps.reduce((a,p)=>a+p.amt,0))}`:''}</div>${ps.length?list(ps.map(p => { const b = billsFor(sid,p.ym)[p.key]; return cell({ lead:'✅', plain:true, t:`${b?b.name:p.key} — ${fmt(p.amt)}`, s:`${fmon(p.ym)} · ${fdate(p.date)} · ${METHOD[p.method]}` }); })):'<div class="empty">Оплат ещё не было</div>'}` }; };
+SCREENS['a.finance'] = () => ({ title:'Финансы', html: list([cell({ lead:'📊', plain:true, t:'Прибыль', s:'занятия + абонементы + доходы − зарплата − расходы', go:'a.profit', p:{ym:YM} }), cell({ lead:'💰', plain:true, t:'Зарплаты', s:'начислено педагогам по месяцам', go:'a.salaries', p:{ym:YM} }), cell({ lead:'💸', plain:true, t:'Выплатить зарплату', s:'аванс и остаток', go:'a.payouts' }), cell({ lead:'📜', plain:true, t:'История оплат', s:'по фамилии ученика', go:'a.students' })]) });
+const profitRow = (r, ym) => `<button class="cell" data-go="a.profit.t" data-p='${JSON.stringify({ym,tid:r.t.id})}'><span class="lead" style="${r.t.owner?'background:var(--warn-soft);color:var(--warn)':''}">${r.t.owner?'👑':initials(r.t.name)}</span><span><div class="t">${r.t.name}</div><div class="s">${r.gN?`👥 ${r.gN}`:''} ${r.iN?`👤 ${r.iN}`:''} · выручка ${fmt(r.income)} · зарплата ${fmt(r.salary)}${r.rent?`<br>🏟 в т.ч. аренда зала ${fmt(r.rent)} (${r.rentN} зан.)`:''}${r.t.owner?`<br>👑 руководитель: ${fmt(r.ownerIncome)} остаются в прибыли`:''}</div></span><span class="r"><b>${fmt(r.income - r.salary)}</b><br>${r.income?Math.round((r.income-r.salary)/r.income*100):0}%<span class="chev">›</span></span></button>`;
+SCREENS['a.profit'] = ({ ym }) => {
+  const p = profitFor(ym);
+  return { title:`Прибыль за ${fmon(ym)}`, html:`
+    <div class="chips">${['2026-09','2026-08'].map(m => `<button class="chip" aria-pressed="${m===ym}" data-go="a.profit" data-p='${JSON.stringify({ym:m})}' data-replace="1">${MON_NOM[+m.slice(5)-1]}</button>`).join('')}<button class="chip" data-go="a.profit.day" data-p='{}'>📅 За день…</button></div>
+    <div class="kpis">${kpi(fmt(p.total),'выручка')}${kpi(fmt(p.profit),'прибыль','ok')}</div>
+    <div class="eyebrow">Педагоги</div><div class="list">${p.rows.map(r => profitRow(r, ym)).join('')}</div>
+    <div class="eyebrow">Абонементы</div>${list(p.subs.map(x => cell({ t:x.g.name, s:`${plural(x.n,['ученик','ученика','учеников'])}`, r:`<b>${fmt(x.income)}</b>` })))}
+    <div class="eyebrow">Прочие доходы и расходы</div>${list(p.fin.map(f => `<div class="cell static"><span class="lead plain">${f.kind==='income'?'🏆':'📉'}</span><span><div class="t">${f.title}</div></span><span class="r"><b style="color:${f.kind==='income'?'var(--ok)':'var(--bad)'}">${f.kind==='income'?'+':'−'}${fmt(f.amt)}</b> <button class="chip" style="padding:2px 8px;margin-left:6px" data-act="delFin" data-p='${JSON.stringify({ym, title:f.title})}' aria-label="Удалить">🗑</button></span></div>`).concat([`<div class="cell static"><span><div class="row"><button class="chip" data-act="finForm" data-p='${JSON.stringify({ym,kind:'income'})}'>➕ Доход</button><button class="chip" data-act="finForm" data-p='${JSON.stringify({ym,kind:'expense'})}'>➕ Расход</button></div></span><span></span></div>`]))}
+    <div class="card" style="margin-top:14px"><div class="pad money" style="display:grid;gap:6px">
+      <div style="display:flex;justify-content:space-between"><span>Выручка</span><b>${fmt(p.total)}</b></div>
+      ${p.rent?`<div style="display:flex;justify-content:space-between" class="hint"><span>в т.ч. аренда зала</span><span>${fmt(p.rent)}</span></div>`:''}
+      <div style="display:flex;justify-content:space-between"><span>Зарплата</span><b>${fmt(p.salary)}</b></div>
+      ${p.ownerIncome?`<div style="display:flex;justify-content:space-between" class="hint"><span>👑 руководитель в прибыли</span><span>${fmt(p.ownerIncome)}</span></div>`:''}
+      ${p.manualOut?`<div style="display:flex;justify-content:space-between"><span>Расходы</span><b>${fmt(p.manualOut)}</b></div>`:''}
+    </div><div class="total"><span>Прибыль</span><span class="big" style="color:var(--ok)">${fmt(p.profit)}</span></div></div>` };
+};
+SCREENS['a.profit.day'] = ({ date }) => {
+  const days = [...new Set(D.lessons.filter(l=>l.date.startsWith(YM)).map(l=>l.date))].sort().reverse();
+  const d = date || days[0];
+  const rows = D.teachers.map(t => { const ls = D.lessons.filter(l=>l.t===t.id&&l.date===d); let income=0,salary=0,ownerIncome=0,rent=0,rentN=0,gN=0,iN=0; ls.forEach(l => { const inc = l.att.reduce((a,x)=>a+x.amt,0); if (t.direct&&l.type==='ind') { rent+=t.rent; rentN++; income+=t.rent; iN++; return; } if (!inc) return; income+=inc; l.type==='group'?gN++:iN++; const e=earned(l); t.owner?ownerIncome+=e:salary+=e; }); return { t, income, salary, ownerIncome, rent, rentN, gN, iN }; }).filter(r=>r.income);
+  const inc = rows.reduce((a,r)=>a+r.income,0), sal = rows.reduce((a,r)=>a+r.salary,0);
+  return { title:'Прибыль за день', html:`<div class="chips">${days.slice(0,8).map(x=>`<button class="chip" aria-pressed="${x===d}" data-go="a.profit.day" data-p='${JSON.stringify({date:x})}' data-replace="1">${x.slice(8)} ${MON_SHORT[8]}</button>`).join('')}</div><div class="h2">${fdate(d)}</div>${rows.length?`<div class="list">${rows.map(r=>profitRow(r,d)).join('')}</div><div class="card" style="margin-top:12px"><div class="total"><span>Выручка ${fmt(inc)} · зарплата ${fmt(sal)}</span><span class="big" style="color:var(--ok)">${fmt(inc-sal)}</span></div></div><p class="hint" style="margin-top:8px">За день — только занятия; абонементы и ручные записи считаются по месяцу.</p>`:'<div class="empty">Тарифицируемых занятий нет</div>'}` };
+};
+SCREENS['a.profit.t'] = ({ ym, tid }) => { const t = T(tid); const isDay = ym.length === 10; const ls = D.lessons.filter(l=>l.t===tid&&(isDay?l.date===ym:l.date.startsWith(ym))).sort(byDate).map(l=>({l, inc: t.direct&&l.type==='ind'?t.rent:l.att.reduce((a,x)=>a+x.amt,0), e: earned(l)})).filter(x=>x.inc); const inc = ls.reduce((a,x)=>a+x.inc,0), sal = t.owner?0:ls.reduce((a,x)=>a+x.e,0); return { title: t.name, html:`${t.owner?'<div class="card pad" style="border-color:var(--warn-soft);background:var(--warn-soft)">👑 Руководитель: зарплата не вычитается, остаётся в прибыли</div><div style="height:10px"></div>':''}<div class="list">${ls.map(x=>`<div class="lesson-line"><span>${x.l.type==='group'?'👥':'👤'}</span><span>${fdate(x.l.date)} · ${x.l.dur} мин${t.direct&&x.l.type==='ind'?' · 🏟 аренда':''}</span><span class="amt">${fmt(x.inc)} − ${fmt(t.owner?0:x.e)}</span></div>`).join('')}</div><div class="card" style="margin-top:10px"><div class="total"><span>Выручка ${fmt(inc)} · зарплата ${fmt(sal)}</span><span class="big">${fmt(inc-sal)}</span></div></div>` }; };
+SCREENS['a.salaries'] = ({ ym }) => ({ title:'Зарплаты', html:`<div class="chips">${['2026-09','2026-08'].map(m=>`<button class="chip" aria-pressed="${m===ym}" data-go="a.salaries" data-p='${JSON.stringify({ym:m})}' data-replace="1">${MON_NOM[+m.slice(5)-1]}</button>`).join('')}</div>${list(D.teachers.map(t => cell({ lead:initials(t.name), t:t.name, s: t.shift ? t.shift : t.direct ? 'прямая оплата: инд. — 0, группы — как обычно' : `${plural(D.lessons.filter(l=>l.t===t.id&&l.date.startsWith(ym)).length,['занятие','занятия','занятий'])}`, r:`<b>${fmt(salaryFor(t.id,ym))}</b>`, go:'a.salary.t', p:{tid:t.id, ym} })))}<div class="card" style="margin-top:10px"><div class="total"><span>Итого за ${MON_NOM[+ym.slice(5)-1].toLowerCase()}</span><span class="big">${fmt(D.teachers.reduce((a,t)=>a+salaryFor(t.id,ym),0))}</span></div></div>` });
+SCREENS['a.salary.t'] = ({ tid, ym }) => { const t = T(tid); const lines = salaryLines(tid, ym); return { title:`${t.name} · ${MON_NOM[+ym.slice(5)-1]}`, html:`${list(lines.map(x => cell({ lead: x.kind==='shift'?'🕒':x.kind==='override'?'✍️':x.kind==='group'?'👥':'👤', plain:true, t:x.title, s:x.sub, r:`<b>${fmt(x.amt)}</b>` })))}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(lines.reduce((a,x)=>a+x.amt,0))}</span></div></div><p class="hint" style="margin-top:8px">${t.shift?'Смена: оплачивается объединение интервалов групп за день, занятия в смене — 0.':t.direct?'Индивидуальные занятия оплачиваются педагогу напрямую — школа зарплату не платит.':`Ставки на месяц: группа ${fmt(ratesAt(t,ym).g)}, инд. ${fmt(ratesAt(t,ym).t)} за 45 мин.`}</p>` }; };
+SCREENS['a.payouts'] = () => ({ title:'Выплатить зарплату', html:`<div class="hint" style="margin-bottom:10px">${fmon(YM)} · начислено / выплачено</div>${list(D.teachers.filter(t=>!t.owner).map(t => { const acc = salaryFor(t.id, YM), paid = D.payouts[t.id]||0; const st = paid>=acc&&acc?'🟢':paid?'🟡':'🔴'; return cell({ lead:st, plain:true, t:t.name, s:`выплачено ${fmt(paid)} из ${fmt(acc)}`, r: acc-paid>0?pill(`остаток ${fmt(acc-paid)}`,'warn'):pill('✓','ok'), go:'a.payout', p:{tid:t.id} }); }))}` });
+SCREENS['a.payout'] = ({ tid }) => { const t = T(tid), acc = salaryFor(tid, YM), paid = D.payouts[tid]||0; return { title: t.name, html:`<div class="kpis">${kpi(fmt(acc),'начислено за сентябрь')}${kpi(fmt(paid),'уже выплачено', paid>=acc?'ok':'')}</div><div style="margin-top:12px">${btn(`✅ Выплатить остаток ${fmt(Math.max(acc-paid,0))}`,'payout',{tid,amt:Math.max(acc-paid,0)}, acc-paid>0?'':'sec')}${btn('Произвольная сумма (аванс)','payoutForm',{tid},'ghost')}${goBtn('🕒 Нестандартный день','a.dayoverride',{tid},'ghost')}</div><div class="eyebrow">Строки начисления</div>${list(salaryLines(tid,YM).map(x=>cell({ t:x.title, s:x.sub, r:`<b>${fmt(x.amt)}</b>` })))}` }; };
+SCREENS['a.dayoverride'] = ({ tid }) => { const ui = state.ui.dov ??= { date:TODAY }; const t = T(tid); const days = [...new Set(D.lessons.filter(l=>l.t===tid&&l.date.startsWith(YM)).map(l=>l.date))].sort().reverse().slice(0,6); return { title:'Нестандартный день', html:`<div class="hint" style="margin-bottom:8px">${t.name}. Минуты за дату заменяют расчёт по группам в этот день.</div><div class="chips">${days.map(d=>`<button class="chip" aria-pressed="${ui.date===d}" data-act="dovDate" data-p='{"date":"${d}"}'>${d.slice(8)} ${MON_SHORT[8]}</button>`).join('')}</div>${field('dov-min','Минуты смены', ui.min||'', 'inputmode="numeric" placeholder="например, 120"')}${field('dov-c','Комментарий', '', 'placeholder="замена, короткий день…"')}<div style="margin-top:12px">${btn('💾 Сохранить','addDayOverride',{tid})}</div>${D.dayOverrides.filter(o=>o.t===tid).length?`<div class="eyebrow">Уже заданы</div>${list(D.dayOverrides.filter(o=>o.t===tid).map(o=>cell({ lead:'✍️', plain:true, t:`${fdate(o.date)} · ${o.min} мин`, s:o.c })))}`:''}` }; };
+SCREENS['a.more'] = () => ({ title:'Ещё', html: list([cell({ lead:'👩‍🏫', plain:true, t:'Педагоги', s:'ставки, группы, сдача периода', go:'a.teachers' }), cell({ lead:'🏢', plain:true, t:'Филиалы и группы', s:'биллинг, составы, архив', go:'a.branches' }), cell({ lead:'📝', plain:true, t:'Отметить занятие за педагога', go:'a.record' }), cell({ lead:'✏️', plain:true, t:'Изменить занятия', s:'педагог → дата / месяц → удалить', go:'a.editlessons' }), cell({ lead:'📓', plain:true, t:'Дневник спортсменов', s:'оценки и задания', go:'t.diary', p:{admin:true} }), cell({ lead:'🩺', plain:true, t:'Диагностика', s:'проверка целостности данных', go:'a.diag' })]) });
+SCREENS['a.teachers'] = () => ({ title:'Педагоги', html:`${list(D.teachers.map(t => cell({ lead: (D.submitted[t.id]||[]).includes(PREV)||t.owner?'🟢':'🔴', plain:true, t:t.name, s:`${t.groups.map(g=>G(g).name).join(', ')||'групп нет'}`, r: t.owner?pill('👑 руководитель','warn'):t.direct?pill('прямая оплата','acc'):'', go:'a.teacher', p:{id:t.id} })))}<p class="hint" style="margin-top:8px">🟢/🔴 — сдан ли август</p><div style="margin-top:8px">${goBtn('➕ Добавить педагога','a.teacher.add',{},'sec')}</div>` });
+SCREENS['a.teacher.add'] = () => ({ title:'Новый педагог', html:`${field('nt-tg','Telegram ID','','inputmode="numeric" placeholder="число из @userinfobot"')}${field('nt-name','Фамилия и имя')}<div class="eyebrow">Ставки за 45 минут</div>${field('nt-g','Группа, ₽','1500','inputmode="numeric"')}${field('nt-t','Индивидуальное — педагогу, ₽','1300','inputmode="numeric"')}${field('nt-s','Индивидуальное — цена для ученика, ₽','2000','inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Создать педагога','addTeacher',{})}</div>` });
+SCREENS['a.teacher'] = ({ id }) => { const t = T(id); if (!t) return { title:'Педагог', html:'<div class="empty">Педагог удалён</div>' }; return { title: t.name, html:`
+  <div class="kpis">${kpi(fmt(t.rate.g),'ставка — группа /45 мин')}${kpi(fmt(t.rate.t),'ставка — инд. /45 мин')}${kpi(fmt(t.rate.s),'цена для ученика /45 мин')}${kpi(fmt(salaryFor(id,YM)),'начислено за сентябрь')}</div>
+  <div class="eyebrow">Группы</div>${list(t.groups.map(g => cell({ lead:'💃', plain:true, t:G(g).name, go:'a.group', p:{id:g} })).concat([cell({ lead:'✏️', plain:true, t:'Изменить набор групп', go:'a.teacher.groups', p:{id} })]))}
+  <div class="eyebrow">Периоды</div>${list(['2026-09','2026-08','2026-07'].map(ym => { const sub = (D.submitted[id]||[]).includes(ym); return `<div class="cell static"><span class="lead plain">${sub?'🔒':'🔓'}</span><span><div class="t">${fmon(ym)}</div><div class="s">${sub?'сдан — занятия заморожены':'открыт'}</div></span><span class="r">${sub?`<button class="chip" data-act="openPeriod" data-p='${JSON.stringify({id,ym})}'>открыть</button>`:''}</span></div>`; }))}
+  ${D.rateHistory.filter(r=>r.t===id).length?`<div class="eyebrow">История ставок</div>${list(D.rateHistory.filter(r=>r.t===id).map(r=>cell({ t:`по ${MON_NOM[+r.until.slice(5)-1].toLowerCase()} включительно`, s:`группа ${fmt(r.g)} · инд. ${fmt(r.t2)} · ученику ${fmt(r.s)}` })))}`:''}
+  <div style="margin-top:12px">${goBtn('✏️ Изменить ставки','a.rates',{id},'sec')}${btn('🗑 Удалить педагога','delTeacher',{id},'danger')}</div>` }; };
+SCREENS['a.teacher.groups'] = ({ id }) => { const t = T(id); return { title:'Группы педагога', html:`${list(D.groups.filter(g=>!g.archived).map(g=>`<button class="cell" data-act="toggleTG" data-p='${JSON.stringify({id,g:g.id})}'><span class="mark ${t.groups.includes(g.id)?'on':''}">${t.groups.includes(g.id)?'✓':''}</span><span><div class="t">${g.name}</div><div class="s">${bname(g.branch)}</div></span><span></span></button>`))}<p class="hint" style="margin-top:8px">Видимость учеников педагогу = его группы ∩ группы ученика.</p>` }; };
+SCREENS['a.rates'] = ({ id }) => { const t = T(id); const ui = state.ui.rates ??= { eff:'2026-10' }; return { title:'Ставки', html:`<div class="hint">${t.name}</div>${field('r-g','Группа, ₽ / 45 мин', t.rate.g, 'inputmode="numeric"')}${field('r-t','Индивидуальное — педагогу, ₽ / 45 мин', t.rate.t, 'inputmode="numeric"')}${field('r-s','Индивидуальное — цена для ученика, ₽ / 45 мин', t.rate.s, 'inputmode="numeric"')}<div class="eyebrow">Действует с месяца</div>${monthChips('rEff', ui.eff, ['2026-09','2026-10','2026-11'])}<p class="hint">Прошлые месяцы продолжат считаться по старым ставкам — они запишутся в историю.</p><div style="margin-top:12px">${btn('💾 Сохранить ставки','saveRates',{id})}</div>` }; };
+SCREENS['a.branches'] = () => ({ title:'Филиалы и группы', html: D.branches.map(b => `<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center">${b.name}<button class="chip" style="padding:1px 8px;text-transform:none;letter-spacing:0;font-weight:600" data-act="delBranch" data-p='{"id":"${b.id}"}' aria-label="Удалить филиал">🗑</button></div>${list(D.groups.filter(g=>g.branch===b.id).sort((a,b)=>(a.archived?1:0)-(b.archived?1:0)).map(g => cell({ lead:g.archived?'📦':'💃', plain:true, t:g.name, s:MODE[g.mode] + (g.price?` · ${fmt(g.price)}`:'') + ` · ${plural(D.students.filter(s=>s.groups.includes(g.id)).length,['ученик','ученика','учеников'])}`, go:'a.group', p:{id:g.id} })))}`).join('') + `<div style="margin-top:12px">${goBtn('➕ Группа','a.group.add',{},'sec')}${goBtn('➕ Филиал','a.branch.add',{},'ghost')}</div>` });
+SCREENS['a.branch.add'] = () => ({ title:'Новый филиал', html:`${field('nb-name','Название','','placeholder="например, Коммунарка"')}<div style="margin-top:12px">${btn('💾 Создать','addBranch',{})}</div>` });
+SCREENS['a.group.add'] = () => { const ui = state.ui.ng ??= { b:D.branches[0].id, mode:'none' }; return { title:'Новая группа', html:`${field('ng-name','Название','','placeholder="БП Латина — Громов"')}<div class="eyebrow">Филиал</div><div class="chips">${D.branches.map(b=>`<button class="chip" aria-pressed="${ui.b===b.id}" data-act="ngSet" data-p='{"b":"${b.id}"}'>${b.name}</button>`).join('')}</div><div class="eyebrow">Оплата</div><div class="chips">${Object.entries(MODE).map(([k,n])=>`<button class="chip" aria-pressed="${ui.mode===k}" data-act="ngSet" data-p='{"mode":"${k}"}'>${n}</button>`).join('')}</div>${ui.mode!=='none'?field('ng-price', ui.mode==='subscription'?'Цена в месяц, ₽':'Цена за посещение, ₽','','inputmode="numeric"'):''}<div style="margin-top:12px">${btn('💾 Создать группу','addGroup',{})}</div>` }; };
+SCREENS['a.group'] = ({ id }) => { const g = G(id); if (!g) return { title:'Группа', html:'<div class="empty">Группа удалена</div>' }; const sts = D.students.filter(s=>s.groups.includes(id)); const ts = D.teachers.filter(t=>t.groups.includes(id)); return { title: g.name, html:`
+  <div class="card pad"><div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-weight:800">${g.name}${g.archived?' 📦':''}</div><div class="hint">${bname(g.branch)} · ${ts.map(t=>short(t.name)).join(', ')||'педагог не назначен'}</div></div>${pill(MODE[g.mode],'acc')}</div>${g.price?`<div class="money" style="margin-top:8px;font-size:20px;font-weight:800">${fmt(g.price)} <span class="hint" style="font-size:13px;font-weight:500">${g.mode==='subscription'?'в месяц с ученика':'за посещение'}</span></div>`:''}</div>
+  <div class="eyebrow">Состав · ${sts.length}</div>${sts.length?list(sts.map(s => `<div class="cell static"><span class="lead">${initials(s.name)}</span><button class="cell" style="padding:0;border:0;display:block" data-go="a.student" data-p='${JSON.stringify({id:s.id})}'><div class="t">${s.name}</div>${isExempt(s.id,id)?'<div class="s">освобождён от абонемента постоянно</div>':g.mode==='subscription'&&D.periods[s.id]?.[id]?.[1]?`<div class="s">ушёл с ${MON_NOM[+D.periods[s.id][id][1].slice(5)-1].toLowerCase()}</div>`:''}</button><span class="r"><button class="chip" style="padding:2px 8px" data-act="removeFromGroup" data-p='${JSON.stringify({sid:s.id,g:id})}' aria-label="Убрать из группы">✖</button></span></div>`)):'<div class="empty">Состав пуст</div>'}
+  <div class="eyebrow">Настройки</div>${list([cell({ lead:'💳', plain:true, t:'Биллинг ученикам', s:`${MODE[g.mode]}${g.price?` · ${fmt(g.price)}`:''} · переопределения: ${D.overrides.filter(o=>o.g===id).length}`, go:'a.billing', p:{id} }), g.mode==='subscription'?cell({ lead:'📅', plain:true, t:'Месяцы членства', s:'вступил / ушёл — задним числом', go:'a.members', p:{id} }):'', cell({ lead:'➕', plain:true, t:'Добавить ученика', go:'a.group.addst', p:{id} }), cell({ lead:'👩‍🏫', plain:true, t:'Педагоги группы', s: ts.map(t=>short(t.name)).join(', ')||'не назначены', go:'a.group.teachers', p:{id} }), cell({ lead:'✏️', plain:true, t:'Переименовать', go:'a.group.rename', p:{id} }), cell({ lead:'🧾', plain:true, t:'Счета всей группе', go:'a.groupsend', p:{ym:YM, g:id} })].filter(Boolean))}
+  <div style="margin-top:12px">${btn(g.archived?'📤 Вернуть из архива':'📦 В архив','toggleArchive',{id},'ghost')}${btn('🗑 Удалить группу','delGroup',{id},'danger')}</div><p class="hint" style="margin-top:8px">Архивная группа пропадает из выбора при записи и счетах, но история занятий, счетов и зарплат не меняется.</p>` }; };
+SCREENS['a.group.rename'] = ({ id }) => ({ title:'Переименовать группу', html:`${field('gn', 'Название', G(id).name)}<div style="margin-top:12px">${btn('💾 Сохранить','renameGroup',{id})}</div>` });
+SCREENS['a.billing'] = ({ id }) => { const g = G(id); const ui = state.ui.bill ??= { eff:'2026-10' }; const ovrs = D.overrides.filter(o=>o.g===id); return { title:'Биллинг ученикам', html:`<div class="hint">${g.name}</div><div class="eyebrow">Режим</div><div class="chips">${Object.entries(MODE).map(([k,n])=>`<button class="chip" aria-pressed="${g.mode===k}" data-act="setMode" data-p='${JSON.stringify({id,mode:k})}'>${n}</button>`).join('')}</div>${g.mode!=='none'?`${field('g-price', g.mode==='subscription'?'Цена в месяц, ₽':'Цена за посещение, ₽', g.price, 'inputmode="numeric"')}${g.mode==='subscription'?`<div class="eyebrow">Новая цена действует с</div>${monthChips('billEff', ui.eff, ['2026-09','2026-10','2026-11'])}<p class="hint">Смена цены — только вперёд: прошлые активные месяцы фиксируются старой ценой.</p>`:'<p class="hint">Цена попадёт в новые занятия; уже отмеченные хранят свою.</p>'}<div style="margin-top:8px">${btn('💾 Сохранить цену','savePrice',{id},'sec')}</div>`:''}${g.mode==='subscription'?`<div class="eyebrow">Переопределения · ${ovrs.length}</div>${ovrs.length?list(ovrs.map(o=>`<div class="cell static"><span class="lead plain">${o.amt?'💳':'🚫'}</span><span><div class="t">${o.ym==='*'?'постоянно':MON_NOM[+o.ym.slice(5)-1]} · ${o.s?S(o.s).name:'вся группа'}</div><div class="s">${o.amt?fmt(o.amt):'не начислять'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="delOvr" data-p='${JSON.stringify({g:id,s:o.s,ym:o.ym})}' aria-label="Удалить">✖</button></span></div>`)):''}<div style="margin-top:8px">${goBtn('➕ Переопределение','a.ovr.add',{id},'ghost')}</div><p class="hint">Приоритет: ученик/месяц → постоянное правило ученика → группа/месяц → цена группы. 0 = не начислять.</p>`:''}` }; };
+SCREENS['a.ovr.add'] = ({ id }) => { const ui = state.ui.ovr ??= { s:null, ym:YM }; const sts = D.students.filter(s=>s.groups.includes(id)); return { title:'Переопределение', html:`<div class="eyebrow">Кому</div><div class="chips"><button class="chip" aria-pressed="${ui.s===null}" data-act="ovrSet" data-p='{"s":null}'>вся группа</button>${sts.map(s=>`<button class="chip" aria-pressed="${ui.s===s.id}" data-act="ovrSet" data-p='{"s":"${s.id}"}'>${s.name}</button>`).join('')}</div><div class="eyebrow">Месяц</div>${monthChips('ovrSet', ui.ym, ui.s?['2026-09','2026-10','2026-11','*']:['2026-09','2026-10','2026-11'])}${field('ovr-amt','Сумма, ₽ (0 — не начислять)','0','inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить','addOvr',{id})}</div>` }; };
+SCREENS['a.members'] = ({ id }) => { const g = G(id); const sts = D.students.filter(s=>s.groups.includes(id)); return { title:'Месяцы членства', html:`<div class="hint" style="margin-bottom:10px">${g.name}. Абонемент начисляется с месяца вступления и до месяца ухода.</div>${list(sts.map(s=>{ const m=(D.periods[s.id]||{})[id]||['','']; return `<button class="cell" data-act="memberEdit" data-p='${JSON.stringify({sid:s.id,g:id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">с ${m[0]?MON_NOM[+m[0].slice(5)-1].toLowerCase():'начала'} · ${m[1]?`ушёл с ${MON_NOM[+m[1].slice(5)-1].toLowerCase()}`:'не ушёл'}</div></span><span class="r"><span class="chev">›</span></span></button>`; }))}` }; };
+SCREENS['a.group.addst'] = ({ id }) => { const q = (state.ui.q2||'').toLowerCase(); const sts = D.students.filter(s=>!s.groups.includes(id) && s.name.toLowerCase().includes(q)); return { title:'Добавить в группу', html:`<input class="search" id="q2" placeholder="Поиск по фамилии" value="${esc(state.ui.q2||'')}">${list(sts.map(s=>`<button class="cell" data-act="addToGroup" data-p='${JSON.stringify({sid:s.id,g:id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(x=>G(x).name).join(', ')||'без группы'}</div></span><span class="r">➕</span></button>`))}<div style="margin-top:12px">${goBtn('Нового ученика — создать','a.student.add',{},'ghost')}</div>` }; };
+SCREENS['a.editlessons'] = () => ({ title:'Изменить занятия', html:`<div class="hint" style="margin-bottom:10px">Выберите педагога. Удалять можно и в сданном периоде.</div>${list(D.teachers.map(t => cell({ lead:initials(t.name), t:t.name, s:`${plural(D.lessons.filter(l=>l.t===t.id&&l.date.startsWith(YM)).length,['занятие','занятия','занятий'])} в сентябре`, go:'a.editlessons.t', p:{tid:t.id} })))}` });
+SCREENS['a.editlessons.t'] = ({ tid }) => { const f = state.ui.elf ??= { when:'month' }; let ls = D.lessons.filter(l=>l.t===tid); ls = f.when==='today'?ls.filter(l=>l.date===TODAY):f.when==='yesterday'?ls.filter(l=>l.date==='2026-09-17'):f.when==='month'?ls.filter(l=>l.date.startsWith(YM)):ls; ls.sort((a,b)=>byDate(b,a)); return { title: T(tid).name, html:`<div class="chips">${[['today','Сегодня'],['yesterday','Вчера'],['month','Сентябрь'],['all','Все']].map(([k,n])=>`<button class="chip" aria-pressed="${f.when===k}" data-act="elf" data-p='{"when":"${k}"}'>${n}</button>`).join('')}</div>${ls.length?list(ls.map(lessonCell)):'<div class="empty">Занятий нет</div>'}` }; };
+SCREENS['a.guest'] = ({ id }) => { const l = D.lessons.find(x=>x.id===id); const g = G(l.g); const sts = D.students.filter(s=>!l.att.some(a=>a.s===s.id)); return { title:'Гость в занятии', html:`<div class="hint" style="margin-bottom:10px">${g.name} · ${fdate(l.date)} · гость платит ${fmt(g.price)}, в состав группы не попадает.</div>${list(sts.map(s=>`<button class="cell" data-act="addGuest" data-p='${JSON.stringify({id, sid:s.id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(x=>G(x).name).join(', ')}</div></span><span class="r">➕</span></button>`))}` }; };
+SCREENS['a.diag'] = () => { const orphanT = D.lessons.filter(l=>!T(l.t)); const orphanS = D.lessons.filter(l=>l.att.some(a=>!S(a.s))); const noGroup = D.students.filter(s=>!s.groups.length); const noTeacher = D.groups.filter(g=>!g.archived&&!D.teachers.some(t=>t.groups.includes(g.id))); const noParent = D.students.filter(s=>!s.parent); const issues = [ ...orphanT.map(l=>cell({ lead:'⚠️', plain:true, t:`Занятие ${l.id} без педагога`, s:fdate(l.date) })), ...orphanS.map(l=>cell({ lead:'⚠️', plain:true, t:`Занятие ${l.id}: ученик удалён`, s:fdate(l.date), go:'t.lesson', p:{id:l.id} })), ...noTeacher.map(g=>cell({ lead:'ℹ️', plain:true, t:`Группа без педагога: ${g.name}`, go:'a.group', p:{id:g.id} })), ...noGroup.map(s=>cell({ lead:'ℹ️', plain:true, t:`Ученик без группы: ${s.name}`, go:'a.student', p:{id:s.id} })), ...noParent.map(s=>cell({ lead:'ℹ️', plain:true, t:`Родитель не привязан: ${s.name}`, go:'a.student', p:{id:s.id} })) ]; return { title:'Диагностика', html:`<div class="card pad"><div style="font-weight:700">${issues.length?`Найдено: ${issues.length}`:'✅ Всё согласовано'}</div><div class="hint">${D.lessons.length} занятий · ${D.students.length} учеников · ${D.teachers.length} педагогов · ${D.groups.length} групп</div></div><div class="eyebrow">Результат</div>${issues.length?list(issues):'<div class="empty">Проблем нет</div>'}` }; };
+SCREENS['a.record'] = () => ({ title:'За педагога', html:`<div class="hint" style="margin-bottom:10px">Выберите педагога — дальше обычный мастер записи (замок периода обходится).</div>${list(D.teachers.map(t => cell({ lead:initials(t.name), t:t.name, go:'t.record', p:{proxy:t.id} })))}` });
+SCREENS['a.stub'] = ({ m }) => ({ title:'Экран', html:`<div class="card pad"><div style="font-weight:700">В боте это отдельный шаг</div><div class="hint" style="margin-top:4px">${m}</div></div><p class="hint" style="margin-top:10px">В прототипе кабинета педагога и родителя не прорабатывался.</p>` });
+
+SCREENS['a.payhub'] = () => ({ title:'Оплаты', html: list([cell({ lead:'💾', plain:true, t:'Подтвердить оплату', s:'ученик → педагог → занятия', go:'a.pay' }), cell({ lead:'🧾', plain:true, t:'Счёт ученика за период', s:'период → филиал → группа → ученик / вся группа', go:'a.bills' }), cell({ lead:'⚠️', plain:true, t:'Должники', s:'сводный долг, напоминание', go:'a.debtors' }), cell({ lead:'📜', plain:true, t:'История оплат', s:'по фамилии → месяцы → оплаты', go:'a.payhist.search' })]) });
+SCREENS['a.bills'] = () => ({ title:'Счёт ученика', html:`<div class="h2">За какой месяц?</div>${list(['2026-09','2026-08','2026-07'].map(ym => cell({ t:fmon(ym), s: ym===YM?'текущий — суммы пересчитываются при каждом открытии':'закрыт', go:'a.bills.branch', p:{ym} })))}` });
+SCREENS['a.bills.branch'] = ({ ym }) => ({ title: fmon(ym), html:`<div class="h2">Филиал</div>${list(D.branches.map(b => cell({ lead:'🏢', plain:true, t:b.name, s:plural(D.groups.filter(g=>g.branch===b.id&&!g.archived).length,['группа','группы','групп']), go:'a.bills.group', p:{ym, b:b.id} })))}` });
+SCREENS['a.bills.group'] = ({ ym, b, g }) => { if (!g) return { title: bname(b), html:`<div class="h2">Группа</div>${list(D.groups.filter(x=>x.branch===b&&!x.archived).map(x => cell({ lead:'💃', plain:true, t:x.name, s:MODE[x.mode], go:'a.bills.group', p:{ym,b,g:x.id} })))}` }; const sts = D.students.filter(s=>s.groups.includes(g)); return { title: G(g).name, html:`<div class="hint" style="margin-bottom:10px">${fmon(ym)} · счёт полный — по всем педагогам ученика</div>${list([cell({ lead:'📨', plain:true, t:'Отправить счета всей группе', s:plural(sts.length,['ученик','ученика','учеников']), go:'a.groupsend', p:{ym,g} })].concat(sts.map(s => { const x = sumBills(billsFor(s.id, ym)); return cell({ lead:initials(s.name), t:s.name, s:x.total?`начислено ${fmt(x.total)}`:'нет начислений', r:x.rest?pill(fmt(x.rest),'warn'):x.total?pill('✓','ok'):'', go:'a.bill', p:{ym,sid:s.id} }); })))}` }; };
+SCREENS['a.payhist.search'] = () => { const q = (state.ui.q3||'').toLowerCase(); const sts = D.students.filter(s=>s.name.toLowerCase().includes(q)); return { title:'История оплат', html:`<input class="search" id="q3" placeholder="Фамилия ученика" value="${esc(state.ui.q3||'')}">${list(sts.map(s => cell({ lead:initials(s.name), t:s.name, s:plural(D.payments.filter(p=>p.s===s.id).length,['оплата','оплаты','оплат']), go:'a.payhist.months', p:{sid:s.id} })))}` }; };
+SCREENS['a.payhist.months'] = ({ sid }) => { const months = [...new Set(D.payments.filter(p=>p.s===sid).map(p=>p.ym).concat([YM]))].sort().reverse(); return { title: S(sid).name, html: list(months.map(ym => { const b = sumBills(billsFor(sid, ym)); const paid = D.payments.filter(p=>p.s===sid&&p.ym===ym).reduce((a,p)=>a+p.amt,0); return cell({ lead: b.rest?'⏳':'✅', plain:true, t:fmon(ym), s:`оплачено ${fmt(paid)}${b.rest?` · ожидает ${fmt(b.rest)}`:''}`, go:'a.payhist', p:{sid, ym} }); })) }; };
+SCREENS['a.student.groups'] = ({ id }) => { const s = S(id); return { title:'Группы ученика', html:`<div class="hint" style="margin-bottom:10px">${s.name}. Выход из абонементной группы — с указанием месяца.</div>${list(D.groups.filter(g=>!g.archived).map(g=>`<button class="cell" data-act="toggleSG" data-p='${JSON.stringify({sid:id,g:g.id})}'><span class="mark ${s.groups.includes(g.id)?'on':''}">${s.groups.includes(g.id)?'✓':''}</span><span><div class="t">${g.name}</div><div class="s">${bname(g.branch)} · ${MODE[g.mode]}</div></span><span></span></button>`))}` }; };
+SCREENS['a.group.teachers'] = ({ id }) => ({ title:'Педагоги группы', html:`<div class="hint" style="margin-bottom:10px">${G(id).name}. Группу могут вести несколько педагогов — занятие принадлежит тому, кто его отметил.</div>${list(D.teachers.map(t=>`<button class="cell" data-act="toggleTG" data-p='${JSON.stringify({id:t.id,g:id})}'><span class="mark ${t.groups.includes(id)?'on':''}">${t.groups.includes(id)?'✓':''}</span><span><div class="t">${t.name}</div></span><span></span></button>`))}` });
+SCREENS['a.tier'] = ({ id }) => { const s = S(id); const g = D.groups.find(x=>s.groups.includes(x.id)&&x.tiers); return { title:'Тариф', html:`<div class="hint" style="margin-bottom:10px">${s.name} · ${g.name}. Деление на 35/60 минут — только в детсадовских группах.</div>${list([['short','⏱ 35 минут',fmt(g.price_short)],['full','⏱ 60 минут',fmt(g.price)]].map(([k,n,p])=>`<button class="cell" data-act="setTier" data-p='${JSON.stringify({id,tier:k})}'><span class="mark ${(s.tier||'full')===k?'on':''}">${(s.tier||'full')===k?'✓':''}</span><span><div class="t">${n}</div><div class="s">${p} за посещение</div></span><span></span></button>`))}` }; };
+SCREENS['a.athlete'] = ({ id }) => ({ title:'Спортсмен', html:`<div class="card pad"><div style="font-weight:800">${S(id).name}</div><div class="hint">Кабинет спортсмена привязан к Telegram ученика: записи тренировок, задания, рейтинг.</div></div><div style="margin-top:12px">${btn('🚫 Отвязать Telegram','unlinkAthlete',{id},'danger')}</div><p class="hint" style="margin-top:8px">Записи дневника останутся; ученик сможет привязаться заново через «Я спортсмен».</p>` });
+SCREENS['t.task.new'] = ({ sid }) => ({ title:'Новое задание', html:`<div class="hint">${S(sid).name}</div>${field('tk-t','Упражнение','','placeholder="Растяжка, кики, вращения…"')}${field('tk-m','Минут в день','15','inputmode="numeric"')}${field('tk-c','Комментарий','','placeholder="на что обратить внимание"')}<div style="margin-top:12px">${btn('📌 Выдать задание','addTask',{sid})}</div><p class="hint" style="margin-top:8px">Спортсмен получит push и сможет отмечать выполнение в своих записях.</p>` });
+
+/* ── экраны: ПЕДАГОГ ─────────────────────────────────────────────────── */
+const tMe = () => T(ME.teacher);
+SCREENS['t.home'] = () => {
+  const t = tMe(); const todayL = D.lessons.filter(l=>l.t===t.id&&l.date===TODAY); const monthL = D.lessons.filter(l=>l.t===t.id&&l.date.startsWith(YM));
+  return { title:'Мой день', html:`
+    <div class="h2">${fdate(TODAY)}</div>
+    <div class="kpis">${kpi(plural(todayL.length,['занятие','занятия','занятий']),'отмечено сегодня')}${kpi(fmt(salaryFor(t.id,YM)),`заработано за ${MON_NOM[8].toLowerCase()}`,'ok')}${kpi(monthL.length,'занятий в сентябре')}${kpi('с 25-го','сдача сентября','warn')}</div>
+    <div style="margin-top:12px">${goBtn('✍️ Отметить занятие','t.record')}</div>
+    <div class="eyebrow">Сегодня</div>${todayL.length?list(todayL.map(l=>lessonCell(l))):'<div class="empty">Сегодня ещё ничего не отмечено</div>'}
+    <div class="eyebrow">Периоды</div>${list([cell({ lead:'🔒', plain:true, t:fmon(PREV), s:'сдан 26 августа', r:pill('сдан','ok') }), cell({ lead:'🔓', plain:true, t:fmon(YM), s:'открыт · сдать можно с 25 сентября', go:'t.submit' })])}` };
+};
+const lessonCell = l => cell({ lead:l.type==='group'?'👥':l.att.length===2?'👫':'👤', plain:true, t: l.type==='group' ? G(l.g).name : l.att.map(a=>S(a.s).name).join(' + '), s:`${fdate(l.date)} · ${l.dur} мин${isLocked(l)?' · 🔒 период сдан':''}`, r: earned(l)?`<b>${fmt(earned(l))}</b>`:'', go:'t.lesson', p:{id:l.id} });
+SCREENS['t.record'] = ({ proxy }) => {
+  const t = T(proxy || ME.teacher); const w = state.ui.wiz ??= { step:0, type:null, g:null, students:[], att:new Set(), date:TODAY, dur:null, t: t.id };
+  if (w.t !== t.id) { Object.assign(w, { step:0, type:null, g:null, students:[], att:new Set(), date:TODAY, dur:null, t:t.id }); }
+  const steps = ['Тип','Кто','Дата','Длительность','Проверка']; const bar = `<div class="step">${steps.map((_,i)=>`<i class="${i<=w.step?'on':''}"></i>`).join('')}</div>`;
+  const hdr = `${proxy?`<div class="card pad" style="margin-bottom:10px;background:var(--warn-soft);border-color:var(--warn-soft)">Запись за педагога: <b>${t.name}</b></div>`:''}${bar}`;
+  const visible = D.students.filter(s => s.groups.some(g => t.groups.includes(g)));
+  if (w.step === 0) return { title:'Отметить занятие', html: hdr + `<div class="h2">Что отмечаем?</div>${list([['group','👥','Группа','занятие по расписанию группы'],['ind','👤','Индивидуальное','один ученик'],['pair','👫','Пара','двое учеников, счёт делится'],['solo','🎯','Солисты','несколько инд. подряд']].map(([k,i,n,s]) => `<button class="cell" data-act="wiz" data-p='${JSON.stringify({type:k})}'><span class="lead plain">${i}</span><span><div class="t">${n}</div><div class="s">${s}</div></span><span class="r"><span class="chev">›</span></span></button>`))}` };
+  if (w.step === 1) {
+    if (w.type === 'group') return { title:'Группа', html: hdr + `<div class="h2">Какая группа?</div>${list(t.groups.map(g => `<button class="cell" data-act="wiz" data-p='${JSON.stringify({g})}'><span class="lead plain">💃</span><span><div class="t">${G(g).name}</div><div class="s">${{subscription:'абонемент — без посещаемости',per_visit:'по посещению — отметим, кто был',none:'бесплатная'}[G(g).mode]}</div></span><span class="r"><span class="chev">›</span></span></button>`))}` };
+    const max = w.type === 'ind' ? 1 : w.type === 'pair' ? 2 : 6;
+    return { title: w.type==='pair'?'Пара':'Ученики', html: hdr + `<div class="h2">${w.type==='ind'?'Кто занимался?':w.type==='pair'?'Кто в паре?':'Кто занимался по очереди?'}</div>${list(visible.map(s => `<button class="cell" data-act="wizPick" data-p='${JSON.stringify({s:s.id,max})}'><span class="mark ${w.students.includes(s.id)?'on':''}">${w.students.includes(s.id)?'✓':''}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(g=>G(g).name).join(', ')}</div></span><span></span></button>`))}<div style="margin-top:12px">${btn('Дальше','wiz',{next:true}, w.students.length&&(w.type!=='pair'||w.students.length===2)?'':'sec')}</div>${w.type==='ind'?'<p class="hint" style="margin-top:8px">Второе индивидуальное занятие с тем же учеником в тот же день бот не даст сохранить.</p>':''}` };
+  }
+  if (w.step === 2 && w.type === 'group' && G(w.g).mode === 'per_visit' && !w.attDone) {
+    const roster = D.students.filter(s => s.groups.includes(w.g));
+    return { title:'Посещаемость', html: hdr + `<div class="h2">Кто был?</div><div class="hint" style="margin-bottom:10px">${G(w.g).name} · ${fmt(G(w.g).price)} за посещение</div>${list(roster.map(s => `<button class="cell" data-act="wizAtt" data-p='${JSON.stringify({s:s.id})}'><span class="mark ${w.att.has(s.id)?'on':''}">${w.att.has(s.id)?'✓':''}</span><span><div class="t">${s.name}</div></span><span></span></button>`))}<div style="margin-top:12px">${btn(`Дальше (${w.att.size})`,'wiz',{attDone:true}, w.att.size?'':'sec')}</div><p class="hint" style="margin-top:8px">Гостя из другой группы можно добавить после сохранения — в карточке занятия.</p>` };
+  }
+  if (w.step === 2) {
+    const d = new Date('2026-09-01T00:00:00'); const first = (d.getDay()+6)%7; const days = 30; const has = new Set(D.lessons.filter(l=>l.t===t.id).map(l=>l.date));
+    return { title:'Дата', html: hdr + `<div class="h2">Когда?</div><div class="chips"><button class="chip" aria-pressed="${w.date===TODAY}" data-act="wizDate" data-p='{"date":"${TODAY}"}'>Сегодня</button><button class="chip" aria-pressed="${w.date==='2026-09-17'}" data-act="wizDate" data-p='{"date":"2026-09-17"}'>Вчера</button></div><div class="card pad"><div style="font-weight:700;margin-bottom:8px">Сентябрь 2026</div><div class="cal">${['пн','вт','ср','чт','пт','сб','вс'].map(x=>`<div class="wd">${x}</div>`).join('')}${Array.from({length:first},()=>'<button class="off"></button>').join('')}${Array.from({length:days},(_,i)=>{const ds=`2026-09-${String(i+1).padStart(2,'0')}`;return `<button class="${has.has(ds)?'dot':''}" aria-pressed="${w.date===ds}" data-act="wizDate" data-p='{"date":"${ds}"}' ${ds>TODAY?'disabled':''}>${i+1}</button>`}).join('')}</div></div><div style="margin-top:12px">${btn('Дальше','wiz',{next:true})}</div>` };
+  }
+  if (w.step === 3) return { title:'Длительность', html: hdr + `<div class="h2">Сколько минут?</div><div class="row">${[45,60,90].map(m=>`<button class="chip" style="flex:1;padding:14px 0;text-align:center;font-size:16px" aria-pressed="${w.dur===m}" data-act="wizDur" data-p='{"dur":${m}}'>${m}</button>`).join('')}</div><p class="hint" style="margin-top:10px">Цена для родителя = ставка × минуты / 45; в группах по посещению — цена группы.</p><div style="margin-top:12px">${btn('Дальше','wiz',{next:true}, w.dur?'':'sec')}</div>` };
+  const prev = wizPreview(w, t);
+  return { title:'Проверьте', html: hdr + `<div class="card pad"><div style="font-weight:800;font-size:16px">${prev.title}</div><div class="hint">${fdate(w.date)} · ${w.dur} мин · ${prev.kind}</div></div><div class="eyebrow">Начисления</div>${list(prev.rows.map(r => cell({ t:r.name, r:`<b>${r.amt?fmt(r.amt):'абонемент'}</b>` })))}<div class="card" style="margin-top:10px"><div class="total"><span>Ваша зарплата</span><span class="big">${fmt(prev.earned)}</span></div></div><div style="margin-top:12px">${btn('💾 Сохранить занятие','wizSave',{})}${btn('Отмена','wizReset',{},'ghost')}</div>` };
+};
+function wizPreview(w, t) {
+  if (w.type === 'group') { const g = G(w.g); const rows = g.mode==='per_visit' ? [...w.att].map(s=>({name:S(s).name, amt:priceFor(g, s)})) : D.students.filter(s=>s.groups.includes(g.id)).map(s=>({name:s.name, amt:0})); return { title:g.name, kind:'группа', rows, earned: Math.round(t.rate.g*w.dur/45) }; }
+  const per = Math.round(t.rate.s*w.dur/45); const n = w.type==='pair'?2:1;
+  const rows = w.students.map(s=>({ name:S(s).name, amt: t.direct ? 0 : w.type==='pair' ? Math.round(per/2) : per }));
+  return { title: w.students.map(s=>S(s).name).join(' + '), kind: {ind:'индивидуальное',pair:'пара',solo:'солисты'}[w.type], rows, earned: t.direct ? 0 : Math.round(t.rate.t*w.dur/45) * (w.type==='solo'?w.students.length:1) };
+}
+SCREENS['t.lessons'] = () => { const t = tMe(); const f = state.ui.lf ??= { when:'month', kind:'all' }; let ls = D.lessons.filter(l=>l.t===t.id); ls = f.when==='today'?ls.filter(l=>l.date===TODAY):f.when==='yesterday'?ls.filter(l=>l.date==='2026-09-17'):f.when==='date'?ls.filter(l=>l.date===f.date):ls.filter(l=>l.date.startsWith(YM)); if (f.kind!=='all') ls = ls.filter(l=>(f.kind==='group')===(l.type==='group')); ls.sort((a,b)=>byDate(b,a)); return { title:'Мои занятия', html:`<div class="chips">${[['today','Сегодня'],['yesterday','Вчера'],['month','Сентябрь']].map(([k,n])=>`<button class="chip" aria-pressed="${f.when===k}" data-act="lf" data-p='{"when":"${k}"}'>${n}</button>`).join('')}<button class="chip" aria-pressed="${f.when==='date'}" data-go="t.lessons.date" data-p='{}'>📅 ${f.when==='date'?fdate(f.date):'Дата…'}</button></div><div class="chips">${[['all','Все'],['group','Группы'],['ind','Индивидуальные']].map(([k,n])=>`<button class="chip" aria-pressed="${f.kind===k}" data-act="lf" data-p='{"kind":"${k}"}'>${n}</button>`).join('')}</div>${ls.length?list(ls.map(lessonCell)):'<div class="empty">Занятий нет</div>'}<p class="hint" style="margin-top:8px">${plural(ls.length,['занятие','занятия','занятий'])} · заработано ${fmt(ls.reduce((a,l)=>a+earned(l),0))}</p>` }; };
+SCREENS['t.lesson'] = ({ id }) => { const l = D.lessons.find(x=>x.id===id); if (!l) return { title:'Занятие', html:'<div class="empty">Занятие удалено</div>' }; const locked = isLocked(l); return { title:'Занятие', html:`<div class="card pad"><div style="font-weight:800;font-size:16px">${l.type==='group'?G(l.g).name:l.att.map(a=>S(a.s).name).join(' + ')}</div><div class="hint">${fdate(l.date)} · ${l.dur} мин · ${T(l.t).name}</div>${locked?`<div style="margin-top:8px">${pill('🔒 период сдан','mute')}</div>`:''}</div>${l.att.length?`<div class="eyebrow">Ученики</div>${list(l.att.map(a=>cell({ lead:initials(S(a.s).name), t:S(a.s).name, r:a.amt?`<b>${fmt(a.amt)}</b>`:T(l.t).direct?'напрямую педагогу':'абонемент' })))}`:''}<div class="card" style="margin-top:10px"><div class="total"><span>Зарплата за занятие</span><span class="big">${fmt(earned(l))}</span></div></div><div style="margin-top:12px">${l.type==='group'&&G(l.g).mode==='per_visit'?goBtn('➕ Добавить гостя','a.guest',{id},'sec'):''}${locked && state.role!=='admin' ? '<p class="hint">Удалить нельзя: период сдан. Попросите админа открыть период.</p>' : btn(locked?'🗑 Удалить (🔒 период сдан)':'🗑 Удалить занятие','delLesson',{id},'danger')}</div>` }; };
+SCREENS['t.groups'] = () => { const t = tMe(); return { title:'Мои группы', html: list(t.groups.map(g => cell({ lead:'💃', plain:true, t:G(g).name, s:`${plural(D.students.filter(s=>s.groups.includes(g)).length,['ученик','ученика','учеников'])} · ${{subscription:'абонемент',per_visit:'по посещению',none:'без оплаты'}[G(g).mode]}`, go:'t.group', p:{id:g} }))) + `<div class="eyebrow">Ещё</div>${list([cell({ lead:'👫', plain:true, t:'Мои пары', s:'по группам', go:'t.pairs' }), cell({ lead:'🎯', plain:true, t:'Мои солисты', s:'ученики без партнёра', go:'t.pairs', p:{solo:true} })])}` }; };
+SCREENS['t.group'] = ({ id }) => { const g = G(id); const sts = D.students.filter(s=>s.groups.includes(id)); return { title: g.name, html:`<div class="hint" style="margin-bottom:10px">${plural(sts.length,['ученик','ученика','учеников'])} · ${{subscription:'абонемент',per_visit:'по посещению',none:'без оплаты'}[g.mode]}</div>${list(sts.map(s => cell({ lead:initials(s.name), t:s.name, s:s.partner?`пара с ${short(S(s.partner).name)}`:'солист', go:'t.student', p:{id:s.id} })))}<div style="margin-top:12px">${goBtn('➕ Добавить ученика','t.group.addst',{id},'sec')}${goBtn('📋 Посещаемость за месяц','t.attendance',{id},'ghost')}</div>` }; };
+SCREENS['t.pairs'] = ({ solo }) => { const t = tMe(); const vis = D.students.filter(s => s.groups.some(g=>t.groups.includes(g))); if (solo) return { title:'Солисты', html: list(vis.filter(s=>!s.partner).map(s=>cell({ lead:initials(s.name), t:s.name, go:'t.student', p:{id:s.id} }))) }; const seen = new Set(); const pairs = vis.filter(s=>s.partner&&!seen.has(s.id)&&(seen.add(s.id),seen.add(s.partner),true)); return { title:'Пары', html: list(pairs.map(s=>cell({ lead:'👫', plain:true, t:`${short(s.name)} + ${short(S(s.partner).name)}`, s:s.groups.map(g=>G(g).name)[0], go:'t.student', p:{id:s.id} }))) }; };
+SCREENS['t.student'] = ({ id }) => { const s = S(id); const t = tMe(); const ls = D.lessons.filter(l=>l.t===t.id&&l.att.some(a=>a.s===id)).sort((a,b)=>byDate(b,a)); return { title: s.name, html:`<div class="card pad"><div style="font-weight:800;font-size:16px">${s.name}</div><div class="hint">${s.partner?`Партнёр: ${S(s.partner).name}`:'Без партнёра'} · ${s.groups.map(g=>G(g).name).join(', ')}</div></div><div class="eyebrow">Занятия со мной</div>${ls.length?list(ls.map(lessonCell)):'<div class="empty">Ещё не занимались</div>'}<div class="eyebrow">Действия</div>${list([s.athlete?cell({ lead:'📓', plain:true, t:'Дневник спортсмена', go:'t.diary.s', p:{id} }):'', cell({ lead:'👫', plain:true, t:s.partner?'Сменить партнёра':'Назначить партнёра', go:'a.partner', p:{id} }), cell({ lead:'✏️', plain:true, t:'Переименовать', go:'a.rename', p:{id} })].filter(Boolean))}` }; };
+SCREENS['t.more'] = () => ({ title:'Ещё', html: list([cell({ lead:'📤', plain:true, t:'Сдать период', s:'заморозить сентябрь для счетов', go:'t.submit' }), cell({ lead:'📈', plain:true, t:'Моя статистика', go:'t.stats' }), cell({ lead:'📓', plain:true, t:'Дневник спортсменов', s:'2 записи без оценки', go:'t.diary' })].concat(tMe().billing?[cell({ lead:'🧾', plain:true, t:'Счета моих групп', s:'право счетов по своим группам', go:'t.bills' })]:[])) });
+SCREENS['t.submit'] = () => { const t = tMe(); const ls = D.lessons.filter(l=>l.t===t.id&&l.date.startsWith(YM)); const can = TODAY.slice(8) >= '25'; return { title:'Сдать период', html:`<div class="card pad"><div style="font-weight:800;font-size:16px">${fmon(YM)}</div><div class="hint">${plural(ls.length,['занятие','занятия','занятий'])} · ${plural(ls.filter(l=>l.type==='group').length,['групповое','групповых','групповых'])} · ${plural(ls.filter(l=>l.type!=='group').length,['индивидуальное','индивидуальных','индивидуальных'])}</div><div class="money" style="font-size:24px;font-weight:800;margin-top:8px">${fmt(salaryFor(t.id,YM))}</div></div><div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">После сдачи занятия месяца нельзя добавлять и удалять — счета родителям становятся окончательными. Открыть период обратно может только админ.</div><div style="margin-top:12px">${btn(can?'📤 Сдать сентябрь':'Сдать можно с 25 сентября','submit',{}, can?'':'sec')}</div>` }; };
+SCREENS['t.stats'] = () => { const t = tMe(); const m = ['2026-09','2026-08'].map(ym => ({ ym, ls: D.lessons.filter(l=>l.t===t.id&&l.date.startsWith(ym)) })); return { title:'Моя статистика', html: m.map(x => `<div class="eyebrow">${fmon(x.ym)}</div><div class="kpis">${kpi(fmt(salaryFor(t.id,x.ym)),'заработано','ok')}${kpi(x.ls.length,'занятий')}${kpi(x.ls.filter(l=>l.type==='group').length,'групповых')}${kpi(x.ls.filter(l=>l.type!=='group').length,'индивидуальных')}</div>`).join('') }; };
+SCREENS['t.diary'] = () => { const aths = D.students.filter(s=>s.athlete); return { title:'Дневник спортсменов', html: list(aths.map(s => { const n = D.diary.filter(e=>e.s===s.id&&e.grade==null).length; return cell({ lead:initials(s.name), t:s.name, s:`${plural(D.diary.filter(e=>e.s===s.id).length,['запись','записи','записей'])} · ${plural(D.tasks.filter(k=>k.s===s.id&&k.open).length,['задание','задания','заданий'])}`, r: n?pill(`🆕 ${n} без оценки`,'warn'):'', go:'t.diary.s', p:{id:s.id} }); })) + `<div style="margin-top:12px">${goBtn('🏆 Рейтинг сентября','t.rating',{},'sec')}</div>` }; };
+SCREENS['t.diary.s'] = ({ id }) => { const s = S(id); const es = D.diary.filter(e=>e.s===id).sort((a,b)=>byDate(b,a)); const pts = es.reduce((a,e)=>a+e.min*(e.grade??3),0); return { title: s.name, html:`<div class="kpis">${kpi(es.length,'тренировок в сентябре')}${kpi(es.reduce((a,e)=>a+e.min,0)+' мин','всего')}${kpi(pts,'очков = минуты × оценка')}${kpi('#2','место в рейтинге','ok')}</div><div class="eyebrow">Записи</div>${list(es.map(e => cell({ lead:`<span class="grade ${e.grade?'':'none'}">${e.grade??'?'}</span>`, plain:true, t:`${fdate(e.date)} · ${e.min} мин`, s:`${e.topics.join(', ')} — ${e.comment}`, go:'t.diary.e', p:{id:e.id} })))}<div class="eyebrow">Открытые задания</div>${list(D.tasks.filter(k=>k.s===id&&k.open).map(k=>`<div class="cell static"><span class="lead plain">📌</span><span><div class="t">${k.text}</div><div class="s">${k.min} мин${k.c?' · '+k.c:''}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="closeTask" data-p='{"id":"${k.id}"}'>закрыть</button></span></div>`))}<div style="margin-top:12px">${goBtn('➕ Новое задание','t.task.new',{sid:id},'sec')}</div>` }; };
+SCREENS['t.diary.e'] = ({ id }) => { const e = D.diary.find(x=>x.id===id); const g = state.ui.grade ?? e.grade; return { title:'Запись', html:`<div class="card pad"><div style="font-weight:800">${S(e.s).name} · ${fdate(e.date)}</div><div class="hint">${e.min} мин · ${e.topics.join(', ')}</div><p style="margin:8px 0 0">«${e.comment}»</p></div><div class="eyebrow">Оценка</div><div class="stars">${[1,2,3,4,5].map(n=>`<button aria-pressed="${g===n}" data-act="grade" data-p='{"n":${n}}'>${n}</button>`).join('')}</div><textarea class="textarea" id="gc" style="margin-top:10px" placeholder="Комментарий спортсмену и родителям">${esc(e.gcomment||'')}</textarea><div style="margin-top:12px">${btn(e.grade?'Сохранить оценку':'⭐ Оценить','saveGrade',{id}, g?'':'sec')}</div>` }; };
+SCREENS['t.rating'] = () => ({ title:'Рейтинг · сентябрь', html: list(D.students.filter(s=>s.athlete).map(s=>({ s, pts: D.diary.filter(e=>e.s===s.id).reduce((a,e)=>a+e.min*(e.grade??3),0) })).sort((a,b)=>b.pts-a.pts).map((x,i)=>cell({ lead:i===0?'🥇':i===1?'🥈':'🥉', plain:true, t:x.s.name, r:`<b>${x.pts}</b> очков` }))) });
+
+/* ── экраны: РОДИТЕЛЬ ────────────────────────────────────────────────── */
+const kids = () => D.students.filter(s => s.parent === ME.parent);
+const kidChips = (cur, act) => `<div class="chips">${kids().map(k=>`<button class="chip" aria-pressed="${cur===k.id}" data-act="${act}" data-p='{"sid":"${k.id}"}'>${k.name.split(' ')[1]}</button>`).join('')}</div>`;
+SCREENS['p.bills'] = () => { const sid = state.ui.kid ??= kids()[0].id; const s = S(sid); return { title:'Счета', html: kidChips(sid,'kid') + list(['2026-09','2026-08','2026-07'].map(ym => { const b = sumBills(billsFor(sid, ym)); return cell({ lead: !b.total?'—':b.rest?'⏳':'✅', plain:true, t:fmon(ym), s: !b.total?'начислений нет':b.rest?(b.paid?`оплачено ${fmt(b.paid)} · к доплате ${fmt(b.rest)}`:`к оплате ${fmt(b.rest)}`):'всё оплачено', r:b.total?`<b>${fmt(b.total)}</b>`:'', go:'p.bill', p:{ym,sid} }); })) + `<p class="hint" style="margin-top:10px">${s.name}: ✅ месяц закрыт полностью, ⏳ есть остаток — можно платить после каждого занятия.</p>` }; };
+SCREENS['p.bill'] = ({ ym, sid }) => { const bills = Object.values(billsFor(sid, ym)); const sum = sumBills(bills); return { title: fmon(ym), html:`<div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${S(sid).name}</div></div>${bills.map(b => `<div class="grp"><span>${b.sub?'💳 Абонемент':b.group?'Группа: '+b.name:'Педагог: '+b.name}</span>${b.rest?pill(b.paid?`к доплате ${fmt(b.rest)}`:fmt(b.total),'warn'):b.over?pill(`переплата ${fmt(b.over)}`,'acc'):pill('✓ оплачено','ok')}</div>${b.sub?`<div class="lesson-line"><span></span><span class="hint">фиксированная сумма за месяц</span><span class="amt">${fmt(b.total)}</span></div>`:marks(b.items,b.paid).map(m=>`<div class="lesson-line"><span class="mark ${m.paid?'paid':''}">${m.paid?'✓':''}</span><span>${fdate(m.date)} · ${m.dur} мин</span><span class="amt">${fmt(m.amt)}</span></div>`).join('')}`).join('')}<div class="total"><span>${sum.rest?'К оплате':'Итого'}</span><span class="big">${fmt(sum.rest||sum.total)}</span></div></div>${sum.rest?`<div style="margin-top:12px">${goBtn(`💳 Оплатить ${fmt(sum.rest)}`,'p.pay',{ym,sid})}</div>`:''}` }; };
+SCREENS['p.pay'] = ({ ym, sid, only }) => { const bills = Object.values(billsFor(sid, ym)).filter(b=>b.rest); const sel = state.ui.psel ??= new Set(bills.map(b=>b.key)); const chosen = bills.filter(b=>sel.has(b.key)); const total = chosen.reduce((a,b)=>a+b.rest,0); return { title:'Оплата', html:`<div class="hint" style="margin-bottom:8px">Можно оплатить всё или выбрать часть</div><div class="list">${bills.map(b=>`<button class="cell" data-act="psel" data-p='{"key":"${b.key}"}'><span class="mark ${sel.has(b.key)?'on':''}">${sel.has(b.key)?'✓':''}</span><span><div class="t">${b.name}</div><div class="s">${b.sub?'абонемент — целиком':plural(marks(b.items,b.paid).filter(m=>!m.paid).length,['занятие','занятия','занятий'])}</div></span><span class="r"><b>${fmt(b.rest)}</b></span></button>`).join('')}</div><div class="eyebrow">Способ оплаты · ${fmt(total)}</div>${list([['sbp','📱','СБП онлайн','мгновенно, без комиссии для вас'],['yookassa','💳','Картой онлайн','ЮКасса, чек на email'],['bank','🏦','По реквизитам','QR-код и реквизиты, затем пришлите чек'],['cash','💵','Наличные','сообщить администратору']].map(([k,i,n,s])=>`<button class="cell" data-act="payMethod" data-p='${JSON.stringify({k,ym,sid,total,keys:[...sel]})}' ${total?'':'disabled'}><span class="lead plain">${i}</span><span><div class="t">${n}</div><div class="s">${s}</div></span><span class="r"><span class="chev">›</span></span></button>`))}` }; };
+SCREENS['p.lessons'] = () => { const sid = state.ui.kid2 ??= 'all'; const pl = state.ui.pl ??= { ym:YM, date:null }; const ym = pl.ym; const sts = sid==='all'?kids():[S(sid)]; let unpaid = 0; const blocks = sts.map(s => { const bills = billsFor(s.id, ym); const paidMap = {}; Object.values(bills).forEach(b => marks(b.items,b.paid).forEach(m => paidMap[m.id] = m.paid)); const ls = D.lessons.filter(l=>(pl.date?l.date===pl.date:l.date.startsWith(ym))&&l.att.some(a=>a.s===s.id)).sort(byDate); return `<div class="eyebrow">${s.name}</div><div class="list">${ls.map(l => { const t = T(l.t); const amt = l.att.find(a=>a.s===s.id).amt; const direct = t.direct&&l.type==='ind'; if (!direct && amt && !paidMap[l.id]) unpaid += amt; return `<div class="lesson-line"><span>${direct?'':amt?(paidMap[l.id]?'<span class="mark paid">✓</span>':'<span class="mark"></span>'):''}</span><span>${fdate(l.date)} · ${short(t.name)}${l.type==='group'?' (группа)':''} · ${l.dur} мин</span><span class="amt">${direct?'<span class="hint">напрямую педагогу</span>':amt?fmt(amt):'<span class="hint">абонемент</span>'}</span></div>`; }).join('')}</div>`; }).join(''); return { title:'Занятия', html:`<div class="chips"><button class="chip" aria-pressed="${sid==='all'}" data-act="kid2" data-p='{"sid":"all"}'>Все вместе</button>${kids().map(k=>`<button class="chip" aria-pressed="${sid===k.id}" data-act="kid2" data-p='{"sid":"${k.id}"}'>${k.name.split(' ')[1]}</button>`).join('')}</div><div class="chips">${['2026-09','2026-08'].map(m=>`<button class="chip" aria-pressed="${ym===m&&!pl.date}" data-act="plMonth" data-p='{"ym":"${m}"}'>${MON_NOM[+m.slice(5)-1]}</button>`).join('')}<button class="chip" aria-pressed="${!!pl.date}" data-go="p.lessons.date" data-p='{}'>📅 ${pl.date?fdate(pl.date):'Дата…'}</button></div>${blocks}${unpaid?`<div class="card" style="margin-top:12px"><div class="total"><span>⬜ Не оплачено</span><span class="big">${fmt(unpaid)}</span></div></div><div style="margin-top:10px">${goBtn('💳 Оплатить','p.bill',{ym, sid: sid==='all'?kids()[0].id:sid},'sec')}</div>`:''}` }; };
+SCREENS['p.diary'] = () => { const ath = kids().filter(s=>s.athlete); if (!ath.length) return { title:'Дневник', html:'<div class="empty">Дневник ведут ученики спортивных групп</div>' }; const s = ath[0]; const es = D.diary.filter(e=>e.s===s.id).sort((a,b)=>byDate(b,a)); return { title:'Дневник', html:`<div class="hint" style="margin-bottom:8px">${s.name} · только просмотр</div><div class="kpis">${kpi(es.length,'тренировок')}${kpi(es.reduce((a,e)=>a+e.min,0)+' мин','за сентябрь')}${kpi(es.reduce((a,e)=>a+e.min*(e.grade??3),0),'очков')}${kpi('#2','в рейтинге','ok')}</div><div class="eyebrow">Записи</div>${list(es.map(e=>cell({ lead:`<span class="grade ${e.grade?'':'none'}">${e.grade??'…'}</span>`, plain:true, t:`${fdate(e.date)} · ${e.min} мин · ${e.topics.join(', ')}`, s: e.grade?`Педагог: ${e.gcomment}`:'ждёт оценки педагога' })))}<div class="eyebrow">Задания</div>${list(D.tasks.filter(k=>k.s===s.id&&k.open).map(k=>cell({ lead:'📌', plain:true, t:k.text, s:'открыто' })))}` }; };
+SCREENS['p.more'] = () => ({ title:'Ещё', html:`<div class="card pad"><div style="font-weight:800">${D.parents[ME.parent]}</div><div class="hint">Дети: ${kids().map(k=>k.name).join(', ')}</div></div><div style="height:10px"></div>${list([cell({ lead:'➕', plain:true, t:'Добавить ребёнка', s:'по фамилии, с одобрением администратора', go:'p.addchild' }), cell({ lead:'📱', plain:true, t:'Телефон', s:state.ui.phone||'+7 916 000-44-21', go:'p.phone' }), cell({ lead:'✉️', plain:true, t:'Email для чеков', s:'временно недоступно', r:pill('скрыто','mute') }), cell({ lead:'🔔', plain:true, t:'Уведомления', s:'счета, напоминания, оценки', go:'p.notifications' })])}` });
+
+/* ── педагог и родитель: недостающие экраны ─────────────────────────── */
+const calendarHtml = (act, cur, dots, extra={}) => { const first = (new Date('2026-09-01T00:00:00').getDay()+6)%7; return `<div class="card pad"><div style="font-weight:700;margin-bottom:8px">Сентябрь 2026</div><div class="cal">${['пн','вт','ср','чт','пт','сб','вс'].map(x=>`<div class="wd">${x}</div>`).join('')}${Array.from({length:first},()=>'<button class="off"></button>').join('')}${Array.from({length:30},(_,i)=>{const ds=`2026-09-${String(i+1).padStart(2,'0')}`;return `<button class="${dots.has(ds)?'dot':''}" aria-pressed="${cur===ds}" data-act="${act}" data-p='${JSON.stringify({...extra,date:ds})}' ${ds>TODAY?'disabled':''}>${i+1}</button>`}).join('')}</div></div>`; };
+SCREENS['t.lessons.date'] = () => { const t = tMe(); return { title:'Выбрать дату', html:`<p class="hint">Точки — дни, где есть ваши занятия.</p>${calendarHtml('lfDate', state.ui.lf?.date, new Set(D.lessons.filter(l=>l.t===t.id).map(l=>l.date)))}` }; };
+SCREENS['t.group.addst'] = ({ id }) => { const q = (state.ui.q4||'').trim(); const sts = D.students.filter(s=>!s.groups.includes(id) && q && s.name.toLowerCase().includes(q.toLowerCase())); return { title:'Добавить ученика', html:`<input class="search" id="q4" placeholder="Фамилия ученика" value="${esc(state.ui.q4||'')}">${q?(sts.length?list(sts.map(s=>`<button class="cell" data-act="addToGroup" data-p='${JSON.stringify({sid:s.id,g:id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(x=>G(x).name).join(', ')||'без группы'}</div></span><span class="r">➕</span></button>`)):`<div class="empty">В школе нет ученика «${esc(q)}»</div>`)+`<div style="margin-top:12px">${btn(`📨 Заявка админу: создать «${esc(q)}»`,'teacherRequest',{g:id,name:q},'sec')}</div>`:'<p class="hint">Начните вводить фамилию. Если ученика нет — отправите заявку администратору, он создаст карточку.</p>'}` }; };
+SCREENS['t.attendance'] = ({ id }) => { const g = G(id); const ls = D.lessons.filter(l=>l.g===id&&l.date.startsWith(YM)).sort(byDate); const sts = D.students.filter(s=>s.groups.includes(id)); if (g.mode!=='per_visit') return { title:'Посещаемость', html:`<div class="empty">${g.name}: ${MODE[g.mode]} — посещаемость не отмечается, занятия сохраняются сразу.</div>` }; return { title:'Посещаемость', html:`<div class="hint" style="margin-bottom:10px">${g.name} · ${fmon(YM)} · ${plural(ls.length,['занятие','занятия','занятий'])}: ${ls.map(l=>+l.date.slice(8)).join(', ')} сентября</div>${list(sts.map(s=>{ const n = ls.filter(l=>l.att.some(a=>a.s===s.id)).length; return cell({ lead:initials(s.name), t:s.name, s:ls.map(l=>l.att.some(a=>a.s===s.id)?'✓':'·').join(' '), r:`<b>${n}</b>/${ls.length}` }); }))}` }; };
+SCREENS['t.bills'] = () => ({ title:'Счета моих групп', html:`<div class="h2">За какой месяц?</div>${list(['2026-09','2026-08'].map(ym=>cell({ t:fmon(ym), go:'t.bills.groups', p:{ym} })))}` });
+SCREENS['t.bills.groups'] = ({ ym }) => ({ title: fmon(ym), html:`<div class="h2">Группа</div>${list(tMe().groups.map(g=>cell({ lead:'💃', plain:true, t:G(g).name, s:MODE[G(g).mode], go:'a.bills.group', p:{ym, b:G(g).branch, g} })))}<p class="hint" style="margin-top:8px">Счёт полный — по всем педагогам ученика, не только по вам.</p>` });
+SCREENS['p.lessons.date'] = () => ({ title:'Выбрать дату', html: calendarHtml('plDate', state.ui.pl?.date, new Set(D.lessons.filter(l=>l.att.some(a=>kids().some(k=>k.id===a.s))).map(l=>l.date))) });
+SCREENS['p.phone'] = () => ({ title:'Телефон', html:`${field('ph','Номер для связи и чеков', state.ui.phone||'+7 916 000-44-21','inputmode="tel"')}<p class="hint">Школа видит номер в карточке ученика; в чек ЮКассы он не попадает — туда идёт email.</p><div style="margin-top:12px">${btn('💾 Сохранить','savePhone',{})}</div>` });
+SCREENS['p.notifications'] = () => ({ title:'Уведомления', html: list([['🧾','Счёт за сентябрь — Волкова Алиса','к оплате 7 000 ₽ · 14 сен'],['⭐','Оценка за тренировку 14 сен — 5','«Отлично, держи корпус» · Никитина М.'],['✅','Оплата подтверждена — Волков Максим','800 ₽ наличными · 6 сен'],['📌','Новое задание — Волкова Алиса','Растяжка 15 мин каждый день']].map(([i,t,s])=>cell({ lead:i, plain:true, t, s }))) + '<p class="hint" style="margin-top:8px">Приходят сообщениями от бота; здесь — история.</p>' });
+SCREENS['p.addchild'] = () => { const q = (state.ui.q5||'').trim(); const mine = new Set(kids().map(k=>k.id)); const sts = D.students.filter(s=>!mine.has(s.id) && q && s.name.toLowerCase().includes(q.toLowerCase())); return { title:'Добавить ребёнка', html:`<input class="search" id="q5" placeholder="Фамилия ребёнка" value="${esc(state.ui.q5||'')}">${q?(sts.length?list(sts.map(s=>`<button class="cell" data-act="childRequest" data-p='${JSON.stringify({sid:s.id})}'><span class="lead">${initials(s.name)}</span><span><div class="t">${s.name}</div><div class="s">${s.groups.map(g=>G(g).name).join(', ')}</div></span><span class="r">Это мой</span></button>`)):`<div class="empty">Не нашли «${esc(q)}» — уточните написание у администратора</div>`):'<p class="hint">Найдём в списке школы. Второй ребёнок привязывается после одобрения администратора.</p>'}` }; };
+
+/* ── экраны: СПОРТСМЕН ───────────────────────────────────────────────── */
+const TOPICS = ['Самба','Ча-ча-ча','Румба','Пасодобль','Джайв','Медленный вальс','Танго','Квикстеп','ОФП'];
+const hMe = () => S(ME.athlete);
+const points = e => e.min * (e.grade ?? 3);
+const board = topic => D.students.filter(s=>s.athlete).map(s=>({ s, pts: D.diary.filter(e=>e.s===s.id&&e.date.startsWith(YM)).reduce((a,e)=> a + (topic ? (e.topics.includes(topic) ? points(e)/e.topics.length : 0) : points(e)), 0) })).sort((a,b)=>b.pts-a.pts);
+const place = (sid, topic) => { const b = board(topic); const i = b.findIndex(x=>x.s.id===sid); return i<0?'—':`#${b.filter((x,j)=>j<i&&x.pts>b[i].pts).length+1}`; };
+SCREENS['h.home'] = () => { const s = hMe(); const es = D.diary.filter(e=>e.s===s.id&&e.date.startsWith(YM)).sort((a,b)=>byDate(b,a)); return { title:'Мой дневник', html:`<div class="kpis">${kpi(es.length,'тренировок в сентябре')}${kpi(es.reduce((a,e)=>a+e.min,0)+' мин','всего')}${kpi(Math.round(es.reduce((a,e)=>a+points(e),0)),'очков = минуты × оценка')}${kpi(place(s.id),'место в рейтинге','ok')}</div><div style="margin-top:12px">${goBtn('✍️ Записать тренировку','h.log')}</div><div class="eyebrow">Записи</div>${es.length?list(es.map(e=>cell({ lead:`<span class="grade ${e.grade?'':'none'}">${e.grade??'…'}</span>`, plain:true, t:`${fdate(e.date)} · ${e.min} мин`, s:e.topics.join(', ')+(e.comment?' — '+e.comment:''), go:'h.entry', p:{id:e.id} }))):'<div class="empty">Записей пока нет</div>'}` }; };
+SCREENS['h.entry'] = ({ id }) => { const e = D.diary.find(x=>x.id===id); if (!e) return { title:'Запись', html:'<div class="empty">Запись удалена</div>' }; return { title: fdate(e.date), html:`<div class="card pad"><div style="font-weight:800">${e.min} мин · ${e.topics.join(', ')}</div>${e.comment?`<p style="margin:6px 0 0">«${e.comment}»</p>`:''}</div><div class="eyebrow">Оценка педагога</div><div class="card pad">${e.grade?`<span class="grade">${e.grade}</span> <span style="margin-left:8px">${e.gcomment||''}</span>`:'<span class="hint">ещё не оценено</span>'}</div><div style="margin-top:12px">${e.grade?'<p class="hint">Оценённую запись удалить нельзя.</p>':btn('🗑 Удалить запись','delEntry',{id},'danger')}</div>` }; };
+SCREENS['h.log'] = () => { const w = state.ui.hl ??= { step:0, date:TODAY, min:null, topics:new Set(), tasks:new Set() }; const steps = ['Дата','Минуты','Темы','Задания','Комментарий']; const bar = `<div class="step">${steps.map((_,i)=>`<i class="${i<=w.step?'on':''}"></i>`).join('')}</div>`; const openTasks = D.tasks.filter(k=>k.s===ME.athlete&&k.open);
+  if (w.step===0) return { title:'Когда тренировалась?', html: bar + `<div class="chips"><button class="chip" aria-pressed="${w.date===TODAY}" data-act="hlSet" data-p='{"date":"${TODAY}"}'>Сегодня</button><button class="chip" aria-pressed="${w.date==='2026-09-17'}" data-act="hlSet" data-p='{"date":"2026-09-17"}'>Вчера</button></div>${calendarHtml('hlSet', w.date, new Set(D.diary.filter(e=>e.s===ME.athlete).map(e=>e.date)))}<div style="margin-top:12px">${btn('Дальше','hlNext',{})}</div>` };
+  if (w.step===1) return { title:'Сколько минут?', html: bar + `<div class="row">${[20,30,45,60,90].map(m=>`<button class="chip" style="flex:1;padding:14px 0;text-align:center;font-size:16px" aria-pressed="${w.min===m}" data-act="hlSet" data-p='{"min":${m}}'>${m}</button>`).join('')}</div>${field('hl-min','Или своё число','', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('Дальше','hlNext',{})}</div>` };
+  if (w.step===2) return { title:'Что отрабатывала?', html: bar + `<div class="chips">${TOPICS.map(t=>`<button class="chip" aria-pressed="${w.topics.has(t)}" data-act="hlTopic" data-p='${JSON.stringify({t})}'>${t}</button>`).join('')}</div><p class="hint">Минуты делятся поровну между темами — так считается рейтинг по танцу.</p><div style="margin-top:12px">${btn('Дальше','hlNext',{}, w.topics.size?'':'sec')}</div>` };
+  if (w.step===3) { if (!openTasks.length) { w.step = 4; return SCREENS['h.log'](); } return { title:'Задания', html: bar + `<p class="hint">Отметьте, какие задания педагога выполнили.</p>${list(openTasks.map(k=>`<button class="cell" data-act="hlTask" data-p='{"id":"${k.id}"}'><span class="mark ${w.tasks.has(k.id)?'on':''}">${w.tasks.has(k.id)?'✓':''}</span><span><div class="t">${k.text}</div><div class="s">${k.min} мин</div></span><span></span></button>`))}<div style="margin-top:12px">${btn('Дальше','hlNext',{})}</div>` }; }
+  return { title:'Комментарий', html: bar + `<textarea class="textarea" id="hl-c" placeholder="Что получилось, что нет"></textarea><div class="card pad" style="margin-top:10px"><div class="hint">Проверьте</div><b>${fdate(w.date)} · ${w.min} мин · ${[...w.topics].join(', ')}</b>${w.tasks.size?`<div class="hint">выполнено заданий: ${w.tasks.size}</div>`:''}</div><div style="margin-top:12px">${btn('💾 Сохранить','hlSave',{})}${btn('Отмена','hlReset',{},'ghost')}</div>` }; };
+SCREENS['h.tasks'] = () => { const ks = D.tasks.filter(k=>k.s===ME.athlete); return { title:'Мои задания', html: ks.length?list(ks.map(k=>{ const done = D.diary.filter(e=>e.s===ME.athlete&&(e.tasks||[]).includes(k.id)); const last = done.map(e=>e.date).sort().pop(); return cell({ lead:k.open?'📌':'✅', plain:true, t:k.text, s:`${k.min} мин${k.c?' · '+k.c:''} · сделано ${plural(done.length,['раз','раза','раз'])}${last?`, последний ${fdate(last)}`:''}`, r:k.open?'':pill('закрыто') }); })):'<div class="empty">Заданий нет — педагог выдаёт их в дневнике</div>' }; };
+SCREENS['h.rating'] = () => { const topic = state.ui.rt || null; const b = board(topic); return { title:'Рейтинг · сентябрь', html:`<div class="chips"><button class="chip" aria-pressed="${!topic}" data-act="rt" data-p='{"t":null}'>Все</button>${TOPICS.slice(0,5).map(t=>`<button class="chip" aria-pressed="${topic===t}" data-act="rt" data-p='${JSON.stringify({t})}'>${t}</button>`).join('')}</div>${list(b.slice(0,10).map((x,i)=>cell({ lead:i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}`, plain:true, t:x.s.name+(x.s.id===ME.athlete?' (я)':''), r:`<b>${Math.round(x.pts)}</b> очков` })))}<p class="hint" style="margin-top:8px">Очки = минуты × оценка (без оценки — ×3). Ваше место: ${place(ME.athlete, topic)}.</p>` }; };
+
+/* ── действия ────────────────────────────────────────────────────────── */
+const ACT = {
+  stub: ({ m }) => go('a.stub', { m }),
+  closeSheet: () => closeSheet(),
+  pick: ({ id }) => { const s = state.ui.sel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); },
+  confirmSel: ({ ym, sid, key, total }) => { if (!total) return; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${S(sid).name} · ${billsFor(sid,ym)[key].name} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div><div class="chips">${['cash','bank','sbp'].map(k=>`<button class="chip" aria-pressed="${(state.ui.method||'cash')===k}" data-act="method" data-p='{"k":"${k}"}'>${METHOD[k]}</button>`).join('')}</div>${btn('✅ Подтвердить','doConfirm',{ym,sid,key,amt:total})}${btn('Отмена','closeSheet',{},'ghost')}`); },
+  method: ({ k }) => { state.ui.method = k; document.querySelectorAll('.sheet .chip').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).k === k))); },
+  doConfirm: ({ ym, sid, key, amt }) => { D.payments.push({ id:'PAY-'+(D.payments.length+1), s:sid, ym, key, amt, date:TODAY, method: state.ui.method||'cash' }); closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(amt)} зачтена`); },
+  confirmSub: ({ ym, sid, key, amt }) => { D.payments.push({ id:'PAY-'+(D.payments.length+1), s:sid, ym, key, amt, date:TODAY, method:'cash' }); back(); toast(`Абонемент ${fmt(amt)} оплачен`); },
+  inboxOk: ({ id }) => { const i = D.inbox.find(x=>x.id===id); if (i && i.kind==='child' && i.s && i.pid) S(i.s).parent = i.pid; if (i && i.s && i.kind!=='child') D.payments.push({ id:'PAY-'+(D.payments.length+1), s:i.s, ym:YM, key:i.key, amt:i.amt, date:TODAY, method:i.kind==='cash'?'cash':'bank' }); D.inbox = D.inbox.filter(x=>x.id!==id); back(); toast(i.kind==='child'?'Ребёнок привязан, родителю отправлено уведомление':'Оплата подтверждена, родителю отправлен ✅'); },
+  sendBill: ({ sid }) => toast(`Счёт отправлен: ${D.parents[S(sid).parent]||'родитель не привязан'}`),
+  sendGroup: ({ n }) => toast(`Счета отправлены ${plural(n,['родителю','родителям','родителям'])}`),
+  remind: ({ n }) => { if (n) sheet(`<h3>Напомнить должникам?</h3><div class="hint">${plural(n,['родитель','родителя','родителей'])} получат сумму долга за закрытые месяцы и кнопку «Оплатить».</div><div style="margin-top:12px">${btn('📤 Отправить','doRemind',{n})}${btn('Отмена','closeSheet',{},'ghost')}</div>`); },
+  doRemind: ({ n }) => { closeSheet(); toast(`Напоминания отправлены (${n})`); },
+  payout: ({ tid, amt }) => { if (!amt) return; D.payouts[tid] = (D.payouts[tid]||0) + amt; back(); toast(`Выплачено ${fmt(amt)} — ${T(tid).name}`); },
+  wiz: p => { const w = state.ui.wiz; if (p.type) { w.type = p.type; w.step = 1; } else if (p.g) { w.g = p.g; w.step = 2; if (G(p.g).mode !== 'per_visit') w.attDone = true; } else if (p.attDone) { w.attDone = true; } else if (p.next) { w.step++; } render(); },
+  wizPick: ({ s, max }) => { const w = state.ui.wiz; const i = w.students.indexOf(s); if (i >= 0) w.students.splice(i,1); else if (w.students.length < max) w.students.push(s); else if (max === 1) w.students = [s]; render(); },
+  wizAtt: ({ s }) => { const a = state.ui.wiz.att; a.has(s) ? a.delete(s) : a.add(s); render(); },
+  wizDate: ({ date }) => { state.ui.wiz.date = date; render(); },
+  wizDur: ({ dur }) => { state.ui.wiz.dur = dur; render(); },
+  wizReset: () => { state.ui.wiz = null; root(state.role==='admin'?'a.home':'t.home'); },
+  wizSave: () => { const w = state.ui.wiz, t = T(w.t); const prev = wizPreview(w, t); const ids = w.type==='group' ? [...w.att] : w.students; const mk = (i, s) => ({ id:'L'+(100+D.lessons.length+i), date:w.date, t:t.id, type: w.type==='group'?'group':'ind', g: w.g, dur:w.dur, att: s });
+    if (w.type === 'solo') w.students.forEach((s,i) => D.lessons.push(mk(i, [{ s, amt: prev.rows[i].amt }])));
+    else D.lessons.push(mk(0, w.type==='group' ? ids.map(s=>({ s, amt: G(w.g).mode==='per_visit'?priceFor(G(w.g), s):0 })) : w.students.map((s,i)=>({ s, amt: prev.rows[i].amt }))));
+    state.ui.wiz = null; root(state.role==='admin'?'a.home':'t.home'); toast(`Сохранено · ${prev.title}`); },
+  lf: p => { Object.assign(state.ui.lf, p); render(); },
+  delLesson: ({ id }) => sheet(`<h3>Удалить занятие?</h3><div class="hint">Начисления родителю исчезнут. Оплаченное занятие даст переплату.</div><div style="margin-top:12px">${btn('🗑 Удалить','doDel',{id},'danger')}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doDel: ({ id }) => { D.lessons = D.lessons.filter(l=>l.id!==id); closeSheet(); back(); toast('Занятие удалено'); },
+  submit: () => sheet(`<h3>Сдать сентябрь?</h3><div class="hint">Занятия месяца будут заморожены.</div><div style="margin-top:12px">${btn('📤 Сдать','doSubmit',{})}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doSubmit: () => { (D.submitted[ME.teacher] ??= []).push(YM); closeSheet(); back(); toast('Сентябрь сдан'); },
+  grade: ({ n }) => { state.ui.grade = n; render(); },
+  saveGrade: ({ id }) => { const e = D.diary.find(x=>x.id===id); if (!state.ui.grade && !e.grade) return; e.grade = state.ui.grade ?? e.grade; e.gcomment = document.getElementById('gc').value; state.ui.grade = null; back(); toast('Оценка отправлена спортсмену и родителям'); },
+  kid: ({ sid }) => { state.ui.kid = sid; render(); },
+  kid2: ({ sid }) => { state.ui.kid2 = sid; render(); },
+  psel: ({ key }) => { const s = state.ui.psel; s.has(key) ? s.delete(key) : s.add(key); render(); },
+  payMethod: ({ k, ym, sid, total, keys }) => {
+    const name = S(sid).name;
+    if (k === 'cash') sheet(`<h3>💵 Наличные</h3><div class="hint">Передайте ${fmt(total)} администратору и нажмите кнопку — админ подтвердит, и занятия отметятся ✅.</div><div style="margin-top:12px">${btn('📨 Уведомить об оплате','cashNotify',{sid,total})}${btn('Назад','closeSheet',{},'ghost')}</div>`);
+    else if (k === 'bank') sheet(`<h3>🏦 По реквизитам</h3><div class="card pad" style="margin:8px 0"><div class="hint">Получатель</div><b>ИП Столяров С. А.</b><div class="hint" style="margin-top:6px">Счёт</div><b class="money">4081 7810 •••• 0042</b><div class="hint" style="margin-top:6px">Назначение</div><b>Занятия ${name}, ${fmon(ym)}</b></div><div style="display:grid;place-items:center;padding:8px"><div style="width:120px;height:120px;background:repeating-conic-gradient(var(--ink) 0 25%, var(--card) 0 50%) 0 0/16px 16px;border:6px solid var(--card);outline:1px solid var(--line)"></div><div class="hint" style="margin-top:6px">QR по стандарту ЦБ · ${fmt(total)}</div></div>${btn('📎 Прислать чек','receipt',{sid,total,keys,ym})}${btn('Назад','closeSheet',{},'ghost')}`);
+    else sheet(`<h3>${k==='sbp'?'📱 СБП онлайн':'💳 Картой онлайн'}</h3><div class="hint">Откроется страница ЮКассы на ${fmt(total)}. После оплаты бот сам отметит занятия — ничего присылать не нужно.</div><div style="margin-top:12px">${btn('Перейти к оплате →','ykPay',{sid,total,keys,ym})}${btn('Назад','closeSheet',{},'ghost')}</div>`);
+  },
+  cashNotify: ({ sid, total }) => { D.inbox.push({ id:'I'+(D.inbox.length+9), kind:'cash', who:D.parents[ME.parent], text:`Сообщил об оплате наличными — ${S(sid).name}, ${fmt(total)}`, s:sid, key:Object.values(billsFor(sid,YM)).find(b=>b.rest)?.key, amt:total }); closeSheet(); back(); toast('Администратор уведомлён'); },
+  receipt: ({ sid, total }) => { D.inbox.push({ id:'I'+(D.inbox.length+9), kind:'receipt', who:D.parents[ME.parent], text:`Чек по реквизитам — ${S(sid).name}, ${fmt(total)}`, s:sid, key:Object.values(billsFor(sid,YM)).find(b=>b.rest)?.key, amt:total }); closeSheet(); back(); toast('Чек отправлен администратору'); },
+  ykPay: ({ sid, total, keys, ym }) => { keys.forEach(key => { const b = billsFor(sid,ym)[key]; if (b?.rest) D.payments.push({ id:'PAY-'+(D.payments.length+1), s:sid, ym, key, amt:b.rest, date:TODAY, method:'yookassa' }); }); closeSheet(); state.ui.psel = null; back(); toast(`Оплачено ${fmt(total)} — ЮКасса подтвердила платёж`); },
+};
+
+/* ── действия администратора ─────────────────────────────────────────── */
+Object.assign(ACT, {
+  reqCreate: ({ id }) => { const i = D.inbox.find(x=>x.id===id); const sid = 'S'+(D.students.length+10); D.students.push({ id:sid, name:i.name, groups:[i.g], parent:null }); D.inbox = D.inbox.filter(x=>x.id!==id); stack().pop(); go('a.student',{id:sid}); toast(`${i.name} создан и добавлен в группу`); },
+  doReqLink: ({ id, sid }) => { const i = D.inbox.find(x=>x.id===id); S(sid).groups.push(i.g); D.inbox = D.inbox.filter(x=>x.id!==id); stack().splice(-2); go('a.student',{id:sid}); toast('Ученик добавлен в группу, педагогу отправлено уведомление'); },
+  nsGroup: ({ g }) => { const s = state.ui.ns.groups; s.has(g)?s.delete(g):s.add(g); state.ui.ns.name = val('ns-name'); render(); },
+  addStudent: () => { const name = val('ns-name').trim(); if (!name) { toast('Введите имя'); return; } const sid = 'S'+(D.students.length+10); const groups = [...state.ui.ns.groups]; D.students.push({ id:sid, name, groups, parent:null }); groups.forEach(g => { if (G(g).mode==='subscription') (D.periods[sid] ??= {})[g] = [YM,'']; }); state.ui.ns = null; stack().pop(); go('a.student',{id:sid}); toast('Ученик создан'); },
+  doRename: ({ id }) => { const n = val('rn').trim(); if (!n) return; S(id).name = n; back(); toast('Переименовано'); },
+  setPartner: ({ id, pid }) => { const s = S(id), p = S(pid); if (s.partner===pid) return; if (s.partner) S(s.partner).partner = null; if (p.partner) S(p.partner).partner = null; s.partner = pid; p.partner = id; render(); toast(`Пара: ${short(s.name)} + ${short(p.name)}`); },
+  clearPartner: ({ id }) => { const s = S(id); if (s.partner) S(s.partner).partner = null; s.partner = null; back(); toast('Партнёр убран'); },
+  linkParent: ({ id, pid }) => { S(id).parent = pid; back(); toast(`Родитель: ${D.parents[pid]}`); },
+  newParent: ({ id }) => { const n = val('np-name').trim(); if (!n) { toast('Введите имя'); return; } const pid = 'P'+(Object.keys(D.parents).length+1); D.parents[pid] = n; S(id).parent = pid; back(); toast(`Создан родитель ${n}`); },
+  delStudent: ({ id }) => sheet(`<h3>Удалить ${S(id).name}?</h3><div class="hint">Партнёр отвяжется, членства снимутся; отмеченные занятия останутся в истории.</div><div style="margin-top:12px">${btn('🗑 Удалить','doDelStudent',{id},'danger')}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doDelStudent: ({ id }) => { const s = S(id); if (s.partner) S(s.partner).partner = null; D.students = D.students.filter(x=>x.id!==id); closeSheet(); state.stacks.admin = [{n:'a.students'}]; render(); toast('Ученик удалён'); },
+  finForm: ({ ym, kind }) => sheet(`<h3>${kind==='income'?'➕ Доход':'➕ Расход'} · ${fmon(ym)}</h3>${field('fin-t','Название','',kind==='income'?'placeholder="Турнир, аренда костюмов…"':'placeholder="Аренда зала, реклама…"')}${field('fin-a','Сумма, ₽','','inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить','addFin',{ym,kind})}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  addFin: ({ ym, kind }) => { const t = val('fin-t').trim(), a = +val('fin-a'); if (!t || !a) { toast('Нужны название и сумма'); return; } D.finance.push({ ym, kind, title:t, amt:a }); closeSheet(); render(); toast('Записано'); },
+  delFin: ({ ym, title }) => { D.finance = D.finance.filter(f=>!(f.ym===ym&&f.title===title)); render(); toast('Запись удалена'); },
+  payoutForm: ({ tid }) => sheet(`<h3>Аванс · ${T(tid).name}</h3>${field('po-a','Сумма, ₽','','inputmode="numeric"')}<div style="margin-top:12px">${btn('💸 Выплатить','doPayoutCustom',{tid})}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doPayoutCustom: ({ tid }) => { const a = +val('po-a'); if (!a) return; D.payouts[tid] = (D.payouts[tid]||0) + a; closeSheet(); render(); toast(`Выплачено ${fmt(a)}`); },
+  dovDate: ({ date }) => { state.ui.dov.date = date; state.ui.dov.min = val('dov-min'); render(); },
+  addDayOverride: ({ tid }) => { const min = +val('dov-min'); if (!min) { toast('Укажите минуты'); return; } D.dayOverrides = D.dayOverrides.filter(o=>!(o.t===tid&&o.date===state.ui.dov.date)); D.dayOverrides.push({ t:tid, date:state.ui.dov.date, min, c:val('dov-c') }); state.ui.dov = null; back(); toast('День сохранён'); },
+  toggleTG: ({ id, g }) => { const t = T(id); const i = t.groups.indexOf(g); i>=0 ? t.groups.splice(i,1) : t.groups.push(g); render(); },
+  rEff: ({ ym }) => { state.ui.rates.eff = ym; render(); },
+  saveRates: ({ id }) => { const t = T(id); const g=+val('r-g'), tt=+val('r-t'), s=+val('r-s'); if (!g||!tt||!s) { toast('Все три ставки должны быть больше нуля'); return; } const eff = state.ui.rates.eff; const until = eff==='2026-09'?'2026-08':eff==='2026-10'?'2026-09':'2026-10'; D.rateHistory = D.rateHistory.filter(r=>!(r.t===id&&r.until===until)); D.rateHistory.push({ t:id, until, g:t.rate.g, t2:t.rate.t, s:t.rate.s }); t.rate = { g, t:tt, s }; state.ui.rates = null; back(); toast(`Ставки действуют с ${MON_NOM[+eff.slice(5)-1].toLowerCase()}`); },
+  openPeriod: ({ id, ym }) => sheet(`<h3>Открыть ${MON_NOM[+ym.slice(5)-1].toLowerCase()}?</h3><div class="hint">${T(id).name} снова сможет добавлять и удалять занятия месяца; счета родителям за него перестанут быть окончательными.</div><div style="margin-top:12px">${btn('🔓 Открыть период','doOpenPeriod',{id,ym},'danger')}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doOpenPeriod: ({ id, ym }) => { D.submitted[id] = (D.submitted[id]||[]).filter(x=>x!==ym); closeSheet(); render(); toast('Период открыт'); },
+  delTeacher: ({ id }) => sheet(`<h3>Удалить ${T(id).name}?</h3><div class="hint">Связи с группами удалятся; занятия останутся в истории под его именем.</div><div style="margin-top:12px">${btn('🗑 Удалить','doDelTeacher',{id},'danger')}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doDelTeacher: ({ id }) => { D.teachers = D.teachers.filter(t=>t.id!==id); closeSheet(); state.stacks.admin = [{n:'a.more'},{n:'a.teachers'}]; render(); toast('Педагог удалён'); },
+  addTeacher: () => { const name = val('nt-name').trim(); const g=+val('nt-g'), t=+val('nt-t'), s=+val('nt-s'); if (!name||!val('nt-tg')) { toast('Нужны Telegram ID и имя'); return; } const id = 'T'+(D.teachers.length+10); D.teachers.push({ id, name, rate:{g,t,s}, groups:[] }); stack().pop(); go('a.teacher',{id}); toast('Педагог создан — назначьте группы'); },
+  addBranch: () => { const n = val('nb-name').trim(); if (!n) return; D.branches.push({ id:'B'+(D.branches.length+1), name:n }); back(); toast('Филиал создан'); },
+  ngSet: p => { state.ui.ng.name = val('ng-name'); Object.assign(state.ui.ng, p); render(); },
+  addGroup: () => { const ui = state.ui.ng; const n = val('ng-name').trim(); const price = +val('ng-price')||0; if (!n) { toast('Введите название'); return; } if (ui.mode!=='none' && !price) { toast('Укажите цену'); return; } const id = 'G'+(D.groups.length+10); D.groups.push({ id, name:n, branch:ui.b, mode:ui.mode, price }); state.ui.ng = null; stack().pop(); go('a.group',{id}); toast('Группа создана'); },
+  renameGroup: ({ id }) => { const n = val('gn').trim(); if (!n) return; G(id).name = n; back(); toast('Переименовано'); },
+  removeFromGroup: ({ sid, g }) => { if (G(g).mode==='subscription') sheet(`<h3>Убрать ${S(sid).name}?</h3><div class="hint">Абонементная группа: выберите, с какого месяца ученик ушёл — строка сохранится с датой ухода.</div><div style="margin-top:12px">${btn('С этого месяца (сентябрь)','doLeave',{sid,g,ym:YM})}${btn('Со следующего (октябрь)','doLeave',{sid,g,ym:'2026-10'},'sec')}${btn('Отмена','closeSheet',{},'ghost')}</div>`); else { const s = S(sid); s.groups = s.groups.filter(x=>x!==g); render(); toast('Убран из группы'); } },
+  doLeave: ({ sid, g, ym }) => { ((D.periods[sid] ??= {})[g] ??= [YM,''])[1] = ym; closeSheet(); render(); toast(`${S(sid).name}: абонемент не начисляется с ${MON_NOM[+ym.slice(5)-1].toLowerCase()}`); },
+  addToGroup: ({ sid, g }) => { const s = S(sid); s.groups.push(g); if (G(g).mode==='subscription') (D.periods[sid] ??= {})[g] = [YM,'']; state.ui.q2 = ''; back(); toast(`${s.name} — в группе`); },
+  toggleArchive: ({ id }) => { const g = G(id); g.archived = !g.archived; render(); toast(g.archived?'Группа в архиве':'Группа возвращена'); },
+  setMode: ({ id, mode }) => { const g = G(id); if (g.mode === mode) return; g.mode = mode; if (mode==='none') g.price = 0; render(); toast(`Режим: ${MODE[mode]}`); },
+  billEff: ({ ym }) => { state.ui.bill.eff = ym; render(); },
+  savePrice: ({ id }) => { const g = G(id); const price = +val('g-price'); if (!price) { toast('Укажите цену'); return; } if (g.mode==='subscription') { const eff = state.ui.bill.eff; ['2026-08','2026-09','2026-10'].filter(m=>m<eff).forEach(m => { if (!ovr(id,null,m)) D.overrides.push({ g:id, s:null, ym:m, amt:g.price }); }); } g.price = price; state.ui.bill = null; back(); toast(`Цена ${fmt(price)} сохранена`); },
+  ovrSet: p => { Object.assign(state.ui.ovr, p); if (state.ui.ovr.s===null && state.ui.ovr.ym==='*') state.ui.ovr.ym = YM; render(); },
+  addOvr: ({ id }) => { const ui = state.ui.ovr; const amt = +val('ovr-amt')||0; D.overrides = D.overrides.filter(o=>!(o.g===id&&o.s===ui.s&&o.ym===ui.ym)); D.overrides.push({ g:id, s:ui.s, ym:ui.ym, amt }); state.ui.ovr = null; back(); toast(amt?`Цена ${fmt(amt)}`:'Освобождение сохранено'); },
+  delOvr: ({ g, s, ym }) => { D.overrides = D.overrides.filter(o=>!(o.g===g&&o.s===s&&o.ym===ym)); render(); toast('Переопределение снято'); },
+  memberEdit: ({ sid, g }) => { const m = (D.periods[sid]||{})[g]||['','']; sheet(`<h3>${S(sid).name}</h3><div class="eyebrow">Вступил с</div>${monthChips('setJoined', m[0], ['2026-04','2026-05','2026-08','2026-09','2026-10'], {sid,g})}<div class="eyebrow">Ушёл с</div><div class="chips"><button class="chip" aria-pressed="${!m[1]}" data-act="setLeft" data-p='${JSON.stringify({sid,g,ym:''})}'>не ушёл</button>${['2026-09','2026-10','2026-11'].map(x=>`<button class="chip" aria-pressed="${m[1]===x}" data-act="setLeft" data-p='${JSON.stringify({sid,g,ym:x})}'>${MON_NOM[+x.slice(5)-1]}</button>`).join('')}</div><div style="margin-top:12px">${btn('Готово','closeSheetRender',{},'sec')}</div>`); },
+  setJoined: ({ sid, g, ym }) => { ((D.periods[sid] ??= {})[g] ??= ['',''])[0] = ym; ACT.memberEdit({sid,g}); },
+  setLeft: ({ sid, g, ym }) => { ((D.periods[sid] ??= {})[g] ??= ['',''])[1] = ym; ACT.memberEdit({sid,g}); },
+  closeSheetRender: () => { closeSheet(); render(); },
+  addGuest: ({ id, sid }) => { const l = D.lessons.find(x=>x.id===id); l.att.push({ s:sid, amt:priceFor(G(l.g), sid) }); back(); toast(`${S(sid).name} добавлен как гость`); },
+  elf: p => { Object.assign(state.ui.elf, p); render(); },
+});
+
+Object.assign(ACT, {
+  toggleSG: ({ sid, g }) => { const s = S(sid); if (s.groups.includes(g)) ACT.removeFromGroup({ sid, g }); else { s.groups.push(g); if (G(g).mode==='subscription') (D.periods[sid] ??= {})[g] = [YM,'']; render(); toast(`Добавлен в «${G(g).name}»`); } },
+  setTier: ({ id, tier }) => { S(id).tier = tier; back(); toast(tier==='short'?'Тариф: 35 минут':'Тариф: 60 минут'); },
+  unlinkAthlete: ({ id }) => { S(id).athlete = false; back(); toast('Telegram отвязан, ученик и родители уведомлены'); },
+  delGroup: ({ id }) => sheet(`<h3>Удалить ${G(id).name}?</h3><div class="hint">Ученики выйдут из состава, педагоги отвяжутся; прошлые занятия останутся. Если нужна история в списках — лучше архив.</div><div style="margin-top:12px">${btn('🗑 Удалить группу','doDelGroup',{id},'danger')}${btn('📦 Лучше в архив','toggleArchiveClose',{id},'sec')}${btn('Отмена','closeSheet',{},'ghost')}</div>`),
+  doDelGroup: ({ id }) => { D.groups = D.groups.filter(g=>g.id!==id); D.students.forEach(s => s.groups = s.groups.filter(x=>x!==id)); D.teachers.forEach(t => t.groups = t.groups.filter(x=>x!==id)); closeSheet(); state.stacks.admin = [{n:'a.more'},{n:'a.branches'}]; render(); toast('Группа удалена'); },
+  toggleArchiveClose: ({ id }) => { closeSheet(); ACT.toggleArchive({ id }); },
+  delBranch: ({ id }) => { const gs = D.groups.filter(g=>g.branch===id); sheet(`<h3>Удалить филиал «${bname(id)}»?</h3><div class="hint">${gs.length?`Вместе с ним удалятся ${plural(gs.length,['группа','группы','групп'])}: ${gs.map(g=>g.name).join(', ')}.`:'Групп в филиале нет.'}</div><div style="margin-top:12px">${btn('🗑 Удалить','doDelBranch',{id},'danger')}${btn('Отмена','closeSheet',{},'ghost')}</div>`); },
+  doDelBranch: ({ id }) => { D.groups.filter(g=>g.branch===id).map(g=>g.id).forEach(gid => { D.students.forEach(s => s.groups = s.groups.filter(x=>x!==gid)); D.teachers.forEach(t => t.groups = t.groups.filter(x=>x!==gid)); }); D.groups = D.groups.filter(g=>g.branch!==id); D.branches = D.branches.filter(b=>b.id!==id); closeSheet(); render(); toast('Филиал удалён'); },
+  addTask: ({ sid }) => { const t = val('tk-t').trim(); if (!t) { toast('Опишите упражнение'); return; } D.tasks.push({ id:'K'+(D.tasks.length+1), s:sid, text:t, min:+val('tk-m')||0, c:val('tk-c'), open:true }); back(); toast('Задание выдано, спортсмену отправлен push'); },
+  closeTask: ({ id }) => { D.tasks.find(x=>x.id===id).open = false; render(); toast('Задание закрыто'); },
+  inboxNo: ({ id }) => { const i = D.inbox.find(x=>x.id===id); if (i && i.kind==='receipt') { sheet(`<h3>Чек не подходит</h3><div class="hint">Родитель получит причину и сможет прислать чек заново.</div><div class="chips" style="margin-top:8px">${['Сумма не совпадает','Чек не читается','Не тот ученик'].map(r=>`<button class="chip" data-act="rcptReason" data-p='${JSON.stringify({r})}'>${r}</button>`).join('')}</div>${field('rc-r','Причина','')}<div style="margin-top:12px">${btn('❌ Отклонить чек','doInboxNo',{id})}${btn('Отмена','closeSheet',{},'ghost')}</div>`); return; } ACT.doInboxNo({ id }); },
+  rcptReason: ({ r }) => { const f = document.getElementById('rc-r'); if (f) f.value = r; },
+  doInboxNo: ({ id }) => { const reason = val('rc-r'); D.inbox = D.inbox.filter(x=>x.id!==id); closeSheet(); back(); toast(reason?`Отклонено: ${reason}`:'Отклонено — родитель получил сообщение'); },
+});
+
+Object.assign(ACT, {
+  lfDate: ({ date }) => { Object.assign(state.ui.lf, { when:'date', date }); back(); },
+  teacherRequest: ({ g, name }) => { D.inbox.push({ id:'I'+(D.inbox.length+20), kind:'request', who:tMe().name, text:`Заявка на нового ученика: ${name} → ${G(g).name}`, g, name }); state.ui.q4 = ''; back(); toast('Заявка отправлена администратору'); },
+  plDate: ({ date }) => { state.ui.pl = { ...(state.ui.pl||{ym:YM}), date }; back(); },
+  plMonth: ({ ym }) => { state.ui.pl = { ym, date:null }; render(); },
+  savePhone: () => { state.ui.phone = val('ph'); back(); toast('Телефон сохранён'); },
+  childRequest: ({ sid }) => { D.inbox.push({ id:'I'+(D.inbox.length+20), kind:'child', who:D.parents[ME.parent], text:`Просит привязать второго ребёнка: ${S(sid).name}`, s:sid, pid:ME.parent }); state.ui.q5 = ''; back(); toast('Заявка отправлена — после одобрения ребёнок появится в списке'); },
+  hlSet: p => { const w = state.ui.hl; if (p.min===undefined) { const m = +val('hl-min'); if (m) w.min = m; } Object.assign(w, p); render(); },
+  hlNext: () => { const w = state.ui.hl; if (w.step===1) { const m = +val('hl-min'); if (m) w.min = m; if (!w.min) { toast('Укажите минуты'); return; } } if (w.step===2 && !w.topics.size) return; w.step++; render(); },
+  hlTopic: ({ t }) => { const s = state.ui.hl.topics; s.has(t)?s.delete(t):s.add(t); render(); },
+  hlTask: ({ id }) => { const s = state.ui.hl.tasks; s.has(id)?s.delete(id):s.add(id); render(); },
+  hlSave: () => { const w = state.ui.hl; D.diary.push({ id:'E'+(D.diary.length+10), s:ME.athlete, date:w.date, min:w.min, topics:[...w.topics], tasks:[...w.tasks], comment:val('hl-c'), grade:null }); state.ui.hl = null; root('h.home'); toast('Тренировка записана — педагог увидит её в дневнике'); },
+  hlReset: () => { state.ui.hl = null; root('h.home'); },
+  delEntry: ({ id }) => { D.diary = D.diary.filter(e=>e.id!==id); back(); toast('Запись удалена'); },
+  rt: ({ t }) => { state.ui.rt = t; render(); },
+});
+
+/* ── рендер ─────────────────────────────────────────────────────────── */
+const TITLE_ROLE = { admin:'Администратор', teacher:'Никитина Мария · педагог', athlete:'Волкова Алиса · спортсмен', parent:'Елена Волкова · родитель' };
+function render() {
+  const s = cur(); const scr = SCREENS[s.n](s.p || {});
+  document.getElementById('title').innerHTML = `${scr.title}<span class="sub">${TITLE_ROLE[state.role]}</span>`;
+  const c = document.getElementById('content'); c.innerHTML = `<div class="fade">${scr.html}</div>`; c.scrollTop = 0;
+  document.getElementById('back').classList.toggle('on', stack().length > 1);
+  const tabs = ROLE_TABS[state.role]; const rootN = stack()[0].n;
+  document.getElementById('tabs').innerHTML = tabs.map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN===n}" data-root="${n}"><svg viewBox="0 0 24 24">${ICON[ic]}</svg>${label}</button>`).join('');
+  document.getElementById('whoami').innerHTML = { admin:'Вы смотрите как <b>администратор</b> — видит всю школу, подтверждает оплаты, считает прибыль.', teacher:'Вы смотрите как <b>Никитина Мария</b>, педагог — отмечает занятия, видит свои группы и зарплату.', athlete:'Вы смотрите как <b>Алиса Волкова</b>, спортсменка группы «БП БТ Спортивная» — записывает тренировки, видит задания, оценки и рейтинг.', parent:'Вы смотрите как <b>Елена Волкова</b>, мама Алисы и Максима — счета, занятия, дневник.' }[state.role];
+  ['q','q2','q3','q4','q5'].forEach(id => { const q = document.getElementById(id); if (q) q.addEventListener('input', e => { state.ui[id] = e.target.value; const pos = e.target.selectionStart; render(); const nq = document.getElementById(id); nq.focus(); nq.setSelectionRange(pos,pos); }); });
+}
+document.addEventListener('click', e => {
+  const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');
+  if (wrap && !stop) { closeSheet(); return; }
+  const el = e.target.closest('[data-go],[data-act],[data-root],[data-role]'); if (!el) return;
+  if (el.dataset.role) { state.role = el.dataset.role; document.querySelectorAll('.roles button').forEach(b => b.setAttribute('aria-selected', String(b === el))); closeSheet(); render(); return; }
+  if (el.dataset.root) { closeSheet(); root(el.dataset.root); return; }
+  const p = el.dataset.p ? JSON.parse(el.dataset.p) : {};
+  if (el.dataset.go) { if (el.dataset.replace) { stack().pop(); } go(el.dataset.go, p); return; }
+  if (el.dataset.act && ACT[el.dataset.act]) ACT[el.dataset.act](p);
+});
+document.getElementById('back').addEventListener('click', () => { closeSheet(); back(); });
+render();
+</script>
