@@ -35,10 +35,16 @@ _RETRY_NETWORK_ERRORS = (
 )
 
 
+def _retry_wait(status: int, attempt: int) -> int:
+    """Пауза перед повтором: 429 (квота «запросов в минуту») ждём 10 → 20 → 40 с — окно квоты
+    в минуту должно успеть обновиться; 500/503 и сеть — 5 → 10 → 20 с."""
+    return (10 if status == 429 else 5) * (2 ** attempt)
+
+
 def _with_retry(func, *args, **kwargs):
     """
     Синхронный retry для gspread-вызовов внутри потока.
-    При 429/503 и сетевых разрывах делает экспоненциальный backoff: 5с → 10с → 20с.
+    При 429/500/503 и сетевых разрывах делает экспоненциальный backoff (см. _retry_wait).
     """
     for attempt in range(_RETRY_ATTEMPTS):
         try:
@@ -46,7 +52,7 @@ def _with_retry(func, *args, **kwargs):
         except gspread.exceptions.APIError as exc:
             status = getattr(getattr(exc, "response", None), "status_code", 0)
             if status in _RETRY_STATUSES and attempt < _RETRY_ATTEMPTS - 1:
-                wait = 5 * (2 ** attempt)
+                wait = _retry_wait(status, attempt)
                 logger.warning(
                     "Sheets API error %s, retry %d/%d in %ds",
                     status, attempt + 1, _RETRY_ATTEMPTS, wait,
@@ -211,6 +217,49 @@ class BaseRepository:
     def _invalidate_cache(self) -> None:
         BaseRepository._cache.pop(self._sheet_name, None)
 
+    # ── Правка кеша на месте (экономит чтение листа после каждой записи) ─────
+    # Сохраняем семантику get_all_records(default_blank=None): пусто → None,
+    # целые числа → int. Ключевые ячейки перед каждой записью всё равно сверяются
+    # с живым листом (_verified_row_index), так что расхождение кеша не опасно.
+
+    @staticmethod
+    def _coerce(value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value.strip())
+        return value
+
+    def _cached_records(self) -> list | None:
+        cached = BaseRepository._cache.get(self._sheet_name)
+        return cached[0] if cached else None
+
+    def _patch_cache(self, row_index: int, values: list[Any] | None = None,
+                     cell: tuple[int, Any] | None = None, delete: bool = False, append: bool = False) -> None:
+        records = self._cached_records()
+        headers = BaseRepository._headers.get(self._sheet_name)
+        if records is None or headers is None:
+            self._invalidate_cache()
+            return
+        if append:
+            records.append({h: self._coerce(values[i] if values and i < len(values) else None)
+                            for i, h in enumerate(headers)})
+            return
+        idx = row_index - 2
+        if not 0 <= idx < len(records):
+            self._invalidate_cache()
+            return
+        if delete:
+            del records[idx]
+        elif cell is not None:
+            col, value = cell
+            if not 1 <= col <= len(headers):
+                self._invalidate_cache()
+                return
+            records[idx][headers[col - 1]] = self._coerce(value)
+        elif values is not None:
+            records[idx] = {h: self._coerce(values[i] if i < len(values) else None) for i, h in enumerate(headers)}
+
     # ── Async public helpers (вызываются из async-методов репозиториев) ───────
 
     async def _all_records(self) -> list[dict[str, Any]]:
@@ -225,7 +274,7 @@ class BaseRepository:
 
     async def _append_row(self, values: list[Any]) -> None:
         await asyncio.to_thread(self._sync_append_row, values)
-        self._invalidate_cache()
+        self._patch_cache(0, values=values, append=True)
 
     async def _find_row_index(self, col_header: str, value: str) -> int | None:
         """
@@ -241,12 +290,12 @@ class BaseRepository:
 
     async def _update_row(self, row_index: int, values: list[Any]) -> None:
         await asyncio.to_thread(self._sync_update_row, row_index, values)
-        self._invalidate_cache()
+        self._patch_cache(row_index, values=values)
 
     async def _delete_row(self, row_index: int) -> None:
         await asyncio.to_thread(self._sync_delete_row, row_index)
-        self._invalidate_cache()
+        self._patch_cache(row_index, delete=True)
 
     async def _update_cell(self, row_index: int, col: int, value: Any) -> None:
         await asyncio.to_thread(self._sync_update_cell, row_index, col, value)
-        self._invalidate_cache()
+        self._patch_cache(row_index, cell=(col, value))

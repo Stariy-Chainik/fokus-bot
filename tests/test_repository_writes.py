@@ -5,7 +5,7 @@ import logging
 import pytest
 
 import bot.repositories.base as base_mod
-from bot.repositories.base import BaseRepository, _norm
+from bot.repositories.base import BaseRepository, _norm, _retry_wait
 from bot.repositories.group_repo import GroupRepository
 from bot.repositories.payment_repo import PaymentRepository
 from bot.repositories.student_group_repo import StudentGroupRepository
@@ -132,3 +132,40 @@ def test_confirm_all_for_period_updates_only_pending_positive_rows():
     assert run(repo.confirm_all_for_period("STU-1", "2026-09", 7, "receipt_bank")) == 1
     assert ws.rows[0][5] == "paid" and ws.rows[0][13] == "receipt_bank" and ws.rows[0][7] == 7
     assert ws.rows[2][5] == "pending" and ws.rows[3][5] == "pending"
+
+
+def _reads(ws):
+    return sum(1 for c in ws.calls if c[0] == "get_all_records")
+
+
+def test_writes_patch_cache_without_rereading_sheet():
+    """После записи кеш правится на месте: следующее чтение не ходит в Sheets (экономия квоты)."""
+    repo, ws = _groups_repo()
+    run(repo.get_all())
+    assert _reads(ws) == 1
+    assert run(repo.set_archived("GRP-0002", True)) is True
+    assert [g.archived for g in run(repo.get_all(include_archived=True))][1] is True
+    assert run(repo.delete("GRP-0001")) is True
+    assert [g.group_id for g in run(repo.get_all(include_archived=True))] == ["GRP-0002", "GRP-0003", "GRP-0004"]
+    run(repo.add("BRN-0001", "Новая"))
+    assert [g.name for g in run(repo.get_all(include_archived=True))][-1] == "Новая"
+    assert _reads(ws) == 1                                   # ни одного лишнего чтения листа
+    assert run(repo.update_name("GRP-0003", "Третья")) is True
+    assert run(repo.get_by_id("GRP-0003")).name == "Третья"
+    assert _reads(ws) == 1
+    # и лист, и кеш согласованы
+    assert [r[2] for r in ws.rows] == [g.name for g in run(repo.get_all(include_archived=True))]
+
+
+def test_cache_patch_falls_back_to_invalidate_without_headers():
+    repo, ws = _groups_repo()
+    run(repo.get_all())
+    BaseRepository._headers.pop("groups", None)            # заголовки ещё не читались
+    run(repo._update_cell(2, 3, "X"))
+    assert "groups" not in BaseRepository._cache             # кеш сброшен — следующее чтение с листа
+    assert run(repo.get_by_id("GRP-0001")).name == "X"
+
+
+def test_retry_wait_is_longer_for_quota_errors():
+    assert [_retry_wait(429, a) for a in range(3)] == [10, 20, 40]
+    assert [_retry_wait(503, a) for a in range(3)] == [5, 10, 20]
