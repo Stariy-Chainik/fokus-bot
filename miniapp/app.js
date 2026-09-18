@@ -77,7 +77,7 @@ SCREENS['a.home'] = async () => {
     <div class="h2">${fdate(h.today)}</div>
     <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
     <div class="eyebrow">Быстрые действия</div>
-    ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}` };
+    ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}` };
 };
 
 SCREENS['a.payhub'] = async () => ({ title: 'Оплаты', html: `<div class="eyebrow">Принять оплату</div>${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}<div class="eyebrow">Контроль</div>${list([cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })])}` });
@@ -174,7 +174,7 @@ SCREENS['a.teacher'] = async ({ id }) => {
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
     <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : '<div class="empty">Ещё ничего не сдано</div>'}
-    <div style="margin-top:12px">${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
+    <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
 };
 
 SCREENS['a.finance'] = async () => ({ title: 'Финансы', html: `<div class="eyebrow">Школа</div>${list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} })])}<div class="eyebrow">Педагоги</div>${list([cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }), cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} })])}<p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` });
@@ -310,7 +310,7 @@ const chipsAct = (act, cur, items, extra = {}) => `<div class="chips">${items.ma
 const nextPeriods = n => { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() + i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; };
 const monthLabel = ym => ym === '*' ? 'постоянно' : ym ? `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}` : '—';
 
-SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки, группы, сданные периоды', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
+SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки, группы, сданные периоды', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'группа, пара, солисты', go: 'a.record' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
 
 SCREENS['a.branches'] = async () => {
   const d = await api('/branches');
@@ -443,6 +443,64 @@ Object.assign(ACT, {
   doOpenPeriod: async ({ id, ym }) => { try { await api(`/teachers/${id}/periods/${ym}/open`, { method: 'POST' }); closeSheet(); render(); toast('Период открыт'); } catch (e) { toast(errText(e)); } },
   teacherDelete: ({ id, name }) => sheet(`<h3>Удалить ${esc(name)}?</h3><div class="hint">Связи с группами и доступ к боту удалятся; занятия останутся в истории под его именем.</div><div style="margin-top:12px">${btn('🗑 Удалить', 'doTeacherDelete', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   doTeacherDelete: async ({ id }) => { try { await api(`/teachers/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.school' }, { n: 'a.teachers' }]; render(); toast('Педагог удалён'); } catch (e) { toast(errText(e)); } },
+});
+
+/* ── запись занятия за педагога (мастер как в боте) ─────────────────────── */
+const KIND_LABEL = { group: 'Группа', pair: 'Пара', shared: 'Несколько солистов в одном занятии', soloist: 'Солисты по отдельности', rshare: 'Индивидуальное' };
+const KIND_HINT = { group: 'занятие по расписанию группы', pair: 'счёт делится между партнёрами', shared: 'от 2 до 4 учеников, одно занятие', soloist: 'каждому — своё занятие', rshare: 'от 1 до 3 участниц, цена за каждую' };
+const rw = () => state.ui.rw;
+function rwReset(tid, name, keep = {}) { state.ui.rw = { tid, name, step: 0, date: keep.date || new Date().toISOString().slice(0, 10), kind: null, dur: null, gid: null, ask: null, ids: new Set(), tiers: {}, opts: keep.opts || null }; }
+const stepBar = (n, total) => `<div class="step">${Array.from({ length: total }, (_, i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</div>`;
+const rwHeader = w => `<div class="hint" style="margin-bottom:8px">${esc(w.name)} · ${fdate(w.date)}${w.kind ? ' · ' + KIND_LABEL[w.kind] : ''}${w.dur ? ' · ' + w.dur + ' мин' : ''}</div>`;
+const actCell = ({ lead, t, s, act, p }) => `<button class="cell" data-act="${act}" data-p='${esc(JSON.stringify(p))}'><span class="lead plain">${lead}</span><span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r"><span class="chev">›</span></span></button>`;
+const pick = (id, on, t, s, act, p) => `<button class="cell" data-act="${act}" data-p='${esc(JSON.stringify(p))}'><span class="mark ${on ? 'on' : ''}">${on ? '✓' : ''}</span><span><div class="t">${esc(t)}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span></span></button>`;
+
+SCREENS['a.record'] = async () => { const d = await api('/teachers'); return { title: 'За педагога', html: `<div class="hint" style="margin-bottom:10px">Выберите педагога — дальше обычный мастер записи; замок сданного периода у администратора обходится.</div>${list(d.teachers.map(t => cell({ lead: initials(t.name), t: esc(t.name), s: esc(t.groups.join(', ')) || 'групп нет', go: 'a.record.w', p: { tid: t.id, name: t.name } })))}` }; };
+
+SCREENS['a.record.w'] = async ({ tid, name }) => {
+  if (!rw() || rw().tid !== tid) rwReset(tid, name);
+  const w = rw();
+  if (!w.opts) w.opts = await api(`/record/options?teacher=${tid}`);
+  const o = w.opts; const total = 5;
+  if (w.step === 0) return { title: 'Отметить занятие', html: stepBar(0, total) + rwHeader(w) + `<div class="h2">Когда было занятие?</div><div class="chips"><button class="chip" aria-pressed="${w.date === o.today}" data-act="rwDate" data-p='${esc(JSON.stringify({ v: o.today }))}'>Сегодня</button><button class="chip" aria-pressed="${w.date === yesterdayOf(o.today)}" data-act="rwDate" data-p='${esc(JSON.stringify({ v: yesterdayOf(o.today) }))}'>Вчера</button></div>${field('rw-date', 'Другая дата', w.date, `type="date" max="${o.today}"`)}<div style="margin-top:12px">${btn('Дальше', 'rwNext', {})}</div>` };
+  if (w.step === 1) return { title: 'Тип занятия', html: stepBar(1, total) + rwHeader(w) + list(o.kinds.map(k => actCell({ lead: { group: '👥', pair: '👫', shared: '🎯', soloist: '👤', rshare: '👤' }[k], t: KIND_LABEL[k], s: KIND_HINT[k], act: 'rwKind', p: { v: k } }))) };
+  if (w.step === 2) { const opts = w.kind === 'rshare' ? o.rshareDurations : o.durations; return { title: 'Длительность', html: stepBar(2, total) + rwHeader(w) + `<div class="h2">Сколько минут?</div><div class="chips">${opts.map(m => `<button class="chip" style="padding:12px 16px;font-size:16px" aria-pressed="${w.dur === m}" data-act="rwDur" data-p='${esc(JSON.stringify({ v: m }))}'>${m}</button>`).join('')}</div><p class="hint">Цена для родителя = ставка × минуты / 45; в группах «по посещению» — цена группы.</p>` }; }
+  if (w.step === 3) {
+    if (w.kind === 'group' && !w.gid) {
+      const byBranch = {}; o.groups.forEach(g => (byBranch[g.branchName] = byBranch[g.branchName] || []).push(g));
+      return { title: 'Группа', html: stepBar(3, total) + rwHeader(w) + (o.groups.length ? Object.entries(byBranch).map(([b, gs]) => `<div class="eyebrow">${esc(b)}</div>${list(gs.map(g => actCell({ lead: '💃', t: esc(g.name), s: `${MODE[g.mode]}${g.priceFull ? ' · ' + fmt(g.priceFull) : ''} · ${plural(g.roster.length, ['ученик', 'ученика', 'учеников'])}`, act: 'rwGroup', p: { v: g.id } })))}`).join('') : '<div class="empty">У педагога нет групп</div>') };
+    }
+    if (w.kind === 'group') {
+      const g = o.groups.find(x => x.id === w.gid);
+      if (g.mode === 'per_visit' && w.ask === null) return { title: 'Посещаемость', html: stepBar(3, total) + rwHeader(w) + `<div class="card pad"><div style="font-weight:800">${esc(g.name)}</div><div class="hint">Отметить присутствующих? В группе «по посещению» счёт получают только отмеченные.</div></div><div style="margin-top:12px">${btn('✅ Да, отметить', 'rwAsk', { v: true })}${btn('Нет — записать без посещаемости', 'rwAsk', { v: false }, 'ghost')}</div>` };
+      if (g.mode === 'per_visit' && w.ask) {
+        const hasShort = g.priceShort > 0;
+        return { title: 'Кто был?', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">${esc(g.name)} · ${fmt(g.priceFull)} за посещение${hasShort ? ` · короткое ${g.durationShort} мин — ${fmt(g.priceShort)}` : ''}</div><div class="chips"><button class="chip" data-act="rwAll" data-p='${esc(JSON.stringify({ ids: g.roster.map(s => s.id) }))}'>${w.ids.size === g.roster.length ? 'Снять всех' : 'Отметить всех'}</button></div><div class="list">${g.roster.map(s => { const tier = w.tiers[s.id] || s.tier; return `<div class="cell static" style="padding-right:8px"><button class="mark ${w.ids.has(s.id) ? 'on' : ''}" style="border:1.5px solid var(--line-strong)" data-act="rwToggle" data-p='${esc(JSON.stringify({ v: s.id }))}'>${w.ids.has(s.id) ? '✓' : ''}</button><button class="cell nolead" style="padding:0;border:0;display:block;text-align:left" data-act="rwToggle" data-p='${esc(JSON.stringify({ v: s.id }))}'><div class="t">${esc(s.name)}</div></button><span class="r">${hasShort ? `<button class="chip" style="padding:2px 8px" data-act="rwTier" data-p='${esc(JSON.stringify({ v: s.id }))}'>${tier === 'short' ? g.durationShort : g.durationFull} мин ↕</button>` : ''}</span></div>`; }).join('')}</div><div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
+      }
+    }
+    if (w.kind === 'rshare') { const pool = []; const seen = new Set(); o.groups.filter(g => g.id !== o.rshareGroupId).forEach(g => g.roster.forEach(s => { if (!seen.has(s.id)) { seen.add(s.id); pool.push({ ...s, group: g.name }); } })); return { title: 'Участницы', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">Отметьте от 1 до 3 участниц. Отмечено: ${w.ids.size}</div>${list(pool.map(s => pick(s.id, w.ids.has(s.id), s.name, esc(s.group), 'rwToggle', { v: s.id, max: 3 })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` }; }
+    if (w.kind === 'pair') return { title: 'Пары', html: stepBar(3, total) + rwHeader(w) + (o.pairs.length ? `<div class="hint" style="margin-bottom:8px">Отметьте пары, которые занимались.</div>${list(o.pairs.map(p => pick(p.aId, w.ids.has(p.aId), `${p.aName} ↔ ${p.bName}`, '', 'rwToggle', { v: p.aId })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` : '<div class="empty">У педагога нет сформированных пар</div>') };
+    const max = w.kind === 'shared' ? 4 : 99;
+    return { title: w.kind === 'shared' ? 'Солисты вместе' : 'Солисты', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">${w.kind === 'shared' ? 'Отметьте от 2 до 4 учеников — одно занятие, счёт делится поровну.' : 'Отметьте учеников — каждому запишется своё занятие. Можно отметить и ученика из пары, если он пришёл один.'} Отмечено: ${w.ids.size}</div>${list(o.students.map(s => pick(s.id, w.ids.has(s.id), s.name, s.partnerId ? 'в паре' : '', 'rwToggle', { v: s.id, max })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
+  }
+  // подтверждение
+  const g = w.gid ? o.groups.find(x => x.id === w.gid) : null;
+  const names = w.kind === 'pair' ? o.pairs.filter(p => w.ids.has(p.aId)).map(p => `${p.aName} ↔ ${p.bName}`) : [...w.ids].map(id => { const all = [...o.students, ...o.groups.flatMap(x => x.roster)]; const s = all.find(x => x.id === id); return s ? s.name : id; });
+  return { title: 'Проверьте', html: stepBar(4, total) + `<div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g ? g.name : KIND_LABEL[w.kind])}</div><div class="hint">${esc(w.name)} · ${fdate(w.date)} · ${w.dur} мин</div></div>${names.length ? `<div class="eyebrow">${w.kind === 'pair' ? 'Пары' : 'Ученики'} · ${names.length}</div>${list(names.map(n => cell({ t: esc(n) })))}` : g ? '<p class="hint" style="margin-top:8px">Без отметки посещаемости — ' + (g.mode === 'per_visit' ? 'счета никому не выставятся' : MODE[g.mode]) + '.</p>' : ''}<div style="margin-top:12px">${btn('💾 Сохранить занятие', 'rwSave', {})}${btn('Отмена', 'rwCancel', {}, 'ghost')}</div>` };
+};
+function yesterdayOf(today) { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+Object.assign(ACT, {
+  rwDate: ({ v }) => { rw().date = v; render(); },
+  rwKind: ({ v }) => { const w = rw(); w.kind = v; w.ids = new Set(); w.tiers = {}; w.gid = v === 'rshare' ? w.opts.rshareGroupId : null; w.ask = null; if (v === 'rshare') { w.dur = 60; w.step = 3; } else w.step = 2; render(); },
+  rwDur: ({ v }) => { const w = rw(); w.dur = v; w.step = 3; if (w.kind === 'group' && w.opts.groups.length === 1) { w.gid = w.opts.groups[0].id; } render(); },
+  rwGroup: ({ v }) => { const w = rw(); w.gid = v; w.ask = null; w.ids = new Set(); const g = w.opts.groups.find(x => x.id === v); if (g.mode !== 'per_visit') { w.step = 4; } render(); },
+  rwAsk: ({ v }) => { const w = rw(); w.ask = v; if (!v) { w.ids = new Set(); w.step = 4; } render(); },
+  rwToggle: ({ v, max }) => { const w = rw(); if (w.ids.has(v)) w.ids.delete(v); else if (!max || w.ids.size < max) w.ids.add(v); else toast(`Не больше ${max}`); render(); },
+  rwAll: ({ ids }) => { const w = rw(); if (w.ids.size === ids.length) w.ids = new Set(); else w.ids = new Set(ids); render(); },
+  rwTier: ({ v }) => { const w = rw(); const g = w.opts.groups.find(x => x.id === w.gid); const s = g.roster.find(x => x.id === v); const cur_ = w.tiers[v] || s.tier; w.tiers[v] = cur_ === 'short' ? 'full' : 'short'; render(); },
+  rwNext: () => { const w = rw(); if (w.step === 0) { const d = val('rw-date'); if (d) w.date = d; if (w.date > w.opts.today) { toast('Дата в будущем'); return; } w.step = 1; } else if (w.step === 3) { if (w.kind === 'shared' && w.ids.size < 2) { toast('Нужно от 2 до 4 учеников'); return; } if (!w.ids.size) return; w.step = 4; } render(); },
+  rwCancel: () => { state.ui.rw = null; back(); },
+  rwSave: async () => { const w = rw(); const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, studentIds: [...w.ids], tiers: w.tiers }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`); } catch (e) { toast(e instanceof ApiError && e.code === 'conflict' ? 'Соло с этим учеником на эту дату уже записано' : errText(e)); } },
 });
 
 /* ── рендер ─────────────────────────────────────────────────────────── */

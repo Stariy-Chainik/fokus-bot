@@ -8,6 +8,7 @@ from aiohttp import web
 
 from bot.models.enums import LessonType
 from bot.services.billing_service import calc_earned
+from bot.api.record import RecordError, record_create, record_options
 from bot.utils.attendees import parse_attendees
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,32 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             logger.info("Mini App: админ %s удалил занятие %s", user.tg_id, lid)
         return _json({"ok": ok}, status=200 if ok else 404)
 
-    routes = [("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete)]
+    # ── запись занятия за педагога (замок периода обходится, как у админа в боте) ──
+    async def record_options_view(request: web.Request, user) -> web.Response:
+        tid = request.query.get("teacher", "")
+        if await teacher_repo.get_by_id(tid) is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json(await record_options(dp, tid))
+
+    async def record_create_view(request: web.Request, user) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        if not isinstance(body, dict):
+            return _json({"error": "bad_request"}, status=400)
+        teacher = await teacher_repo.get_by_id(body.get("teacherId") or "")
+        if teacher is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            result = await record_create(dp, teacher, body, bypass_period_lock=True)
+        except RecordError as exc:
+            return _json({"error": exc.code, "message": str(exc)}, status=exc.status)
+        logger.info("Mini App: админ %s отметил занятие за %s: %s", user.tg_id, teacher.teacher_id, result["lessons"])
+        return _json(result)
+
+    routes = [("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
+              ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view)]
     for method, path, handler in routes:
         app.router.add_route(method, prefix + path, guard(handler))
     logger.info("Admin API (занятия): %d маршрутов", len(routes))

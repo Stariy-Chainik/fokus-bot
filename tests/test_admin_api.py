@@ -119,6 +119,7 @@ def _dp():
     salary_service = SalaryService(lesson_repo)
     finance_repo = FinanceRepoFake()
     submission_repo = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])
+    visibility = TeacherVisibilityService(student_repo, tg_repo, sg_repo)
     return {
         "lesson_service": LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service),
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
@@ -130,8 +131,8 @@ def _dp():
         "student_group_repo": sg_repo, "teacher_group_repo": tg_repo, "lesson_repo": lesson_repo,
         "payment_repo": payment_repo, "submission_repo": submission_repo,
         "payment_service": payment_service, "salary_service": salary_service, "client_repo": client_repo,
-        "student_service": StudentService(student_repo, teacher_repo, group_repo, branch_repo, sg_repo, client_repo,
-                                          TeacherVisibilityService(student_repo, tg_repo, sg_repo)),
+        "visibility": visibility,
+        "student_service": StudentService(student_repo, teacher_repo, group_repo, branch_repo, sg_repo, client_repo, visibility),
     }
 
 
