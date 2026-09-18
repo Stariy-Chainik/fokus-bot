@@ -113,7 +113,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     async def home(request: web.Request, user) -> web.Response:
         period = current_period()
         prev = _prev_period(period)
-        debt_map = await payment_service.compute_debt_map()
+        debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
         pending = sum(m.get(period, 0) for m in debt_map.values())
         debtors = sum(1 for m in debt_map.values() if any(ym < period and amt > 0 for ym, amt in m.items()))
         today = date.today().isoformat()
@@ -352,7 +352,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     # ── должники ─────────────────────────────────────────────────────────
     async def debtors(request: web.Request, user) -> web.Response:
         period = current_period()
-        debt_map = await payment_service.compute_debt_map()
+        debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
         students_by_id = {s.student_id: s for s in await student_repo.get_all()}
         out = []
         for sid, months in debt_map.items():
@@ -377,4 +377,6 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, admin_only(handler))
+    from bot.api.admin_finance import register_finance_routes
+    register_finance_routes(app, dp, admin_only, PREFIX)
     logger.info("Admin API зарегистрирован: %d маршрутов под %s", len(routes), PREFIX)

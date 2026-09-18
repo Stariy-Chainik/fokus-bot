@@ -7,8 +7,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot.api import register_admin_api
+from bot.models.entities import FinanceEntry, TeacherPayout
+from bot.repositories.salary_override_repo import SalaryDayOverride
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
-from bot.services import PaymentService, StudentService, TeacherVisibilityService
+from bot.services import PaymentService, ProfitService, StudentService, TeacherVisibilityService
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
@@ -20,6 +22,80 @@ from tests.test_telegram_auth import TOKEN, make_init_data
 
 ADMIN_TG, PARENT_TG = 826576855, 5037902894
 YM = date.today().strftime("%Y-%m")
+
+
+class FinanceRepoFake:
+    def __init__(self) -> None:
+        self.items: list[FinanceEntry] = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_period(self, period):
+        return [e for e in self.items if e.period_month == period]
+
+    async def add(self, period, kind, title, amount):
+        e = FinanceEntry(entry_id=f"FIN-{len(self.items) + 1:06d}", period_month=period, kind=kind, title=title,
+                         amount=amount, created_at="2026-09-18 10:00:00")
+        self.items.append(e)
+        return e
+
+    async def delete(self, entry_id):
+        before = len(self.items)
+        self.items = [e for e in self.items if e.entry_id != entry_id]
+        return len(self.items) < before
+
+
+class PayoutRepoFake:
+    def __init__(self) -> None:
+        self.items: list[TeacherPayout] = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_period(self, period):
+        return [p for p in self.items if p.period_month == period]
+
+    async def get_by_teacher_period(self, teacher_id, period):
+        return [p for p in self.items if p.teacher_id == teacher_id and p.period_month == period]
+
+    async def add(self, teacher_id, period, amount, paid_by_tg_id, comment=""):
+        p = TeacherPayout(payout_id=f"PO-{len(self.items) + 1:06d}", teacher_id=teacher_id, period_month=period,
+                          amount=amount, paid_at="2026-09-18 10:00:00", paid_by_tg_id=paid_by_tg_id, comment=comment)
+        self.items.append(p)
+        return p
+
+
+class SalaryOverrideRepoFake:
+    def __init__(self) -> None:
+        self.items: list[SalaryDayOverride] = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_for_teacher_period(self, teacher_id, period):
+        return [o for o in self.items if o.teacher_id == teacher_id and o.date.startswith(period)]
+
+    async def add(self, teacher_id, day, minutes, comment, created_by):
+        self.items = [o for o in self.items if not (o.teacher_id == teacher_id and o.date == day)]
+        o = SalaryDayOverride(f"SO-{len(self.items) + 1:06d}", teacher_id, day, minutes, comment, "2026-09-18 10:00:00", created_by)
+        self.items.append(o)
+        return o
+
+    async def delete(self, override_id):
+        before = len(self.items)
+        self.items = [o for o in self.items if o.override_id != override_id]
+        return len(self.items) < before
+
+
+class NotifierFake:
+    def __init__(self) -> None:
+        self.sent: list[tuple[list, str]] = []
+
+    async def send_many(self, addrs, text, rows=None):
+        addrs = list(addrs)
+        self.sent.append((addrs, text))
+        return len(addrs)
 
 
 def _dp():
@@ -39,24 +115,37 @@ def _dp():
     lesson_repo, payment_repo, client_repo = LessonRepoFake(lessons), PaymentRepoFake([]), ClientRepoFake([])
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, group_repo=group_repo,
                                      student_group_repo=sg_repo, subscription_override_repo=OverrideRepoFake())
+    salary_service = SalaryService(lesson_repo)
+    finance_repo = FinanceRepoFake()
     return {
+        "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
+        "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
+        "notifier": NotifierFake(),
         "user_repo": UserRepoFake([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),
         "student_repo": student_repo, "teacher_repo": teacher_repo, "group_repo": group_repo, "branch_repo": branch_repo,
         "student_group_repo": sg_repo, "teacher_group_repo": tg_repo, "lesson_repo": lesson_repo,
         "payment_repo": payment_repo, "submission_repo": SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")]),
-        "payment_service": payment_service, "salary_service": SalaryService(lesson_repo), "client_repo": client_repo,
+        "payment_service": payment_service, "salary_service": salary_service, "client_repo": client_repo,
         "student_service": StudentService(student_repo, teacher_repo, group_repo, branch_repo, sg_repo, client_repo,
                                           TeacherVisibilityService(student_repo, tg_repo, sg_repo)),
     }
 
 
-@pytest.fixture()
-def api(monkeypatch):
+def make_api(monkeypatch):
     """(dp, dp): приложение aiohttp создаётся на каждый вызов — у каждого свой event loop."""
     monkeypatch.setattr(settings, "bot_token", TOKEN)
     monkeypatch.setattr(settings, "miniapp_dev_tg_id", None)
+    for name in ("owner_teacher_ids", "direct_pay_teacher_ids", "hall_rent_per_lesson", "debtors_since_period", "shift_groups",
+                 "salary_duration_groups", "revenue_share_groups"):
+        if hasattr(settings, name):
+            monkeypatch.setattr(settings, name, "")
     dp = _dp()
     return dp, dp
+
+
+@pytest.fixture()
+def api(monkeypatch):
+    return make_api(monkeypatch)
 
 
 def _call(dp, method, path, tg_id=ADMIN_TG, json=None, headers=None):

@@ -212,7 +212,7 @@ class LessonRepoFake:
         return [x for x in self.items if x.teacher_id == teacher_id]
 
     async def get_by_teacher_and_period(self, teacher_id, period):
-        return [x for x in self.items if x.teacher_id == teacher_id and x.date[:7] == period]
+        return [x for x in self.items if x.teacher_id == teacher_id and x.date.startswith(period)]  # месяц или день, как в репо
 
     async def get_by_student_and_period(self, student_id, period):
         out = []
