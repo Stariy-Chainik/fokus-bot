@@ -180,9 +180,11 @@ def _register_payment_webhook(app, dp: Dispatcher, bot: Bot) -> None:
 
 
 def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
-    """Регистрирует HTTP API личного кабинета (Telegram Mini App)."""
-    from bot.api import register_miniapp_api
+    """Регистрирует HTTP API личного кабинета (Telegram Mini App) и его фронт (/app/)."""
+    from bot.api import register_admin_api, register_miniapp_api, register_miniapp_static
     register_miniapp_api(app, dp, bot)
+    register_admin_api(app, dp, bot)
+    register_miniapp_static(app)
 
 
 async def _rate_history_refresher(dp: Dispatcher, interval_sec: int = 300) -> None:

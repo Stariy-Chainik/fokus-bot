@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # Секрет для ссылок-приглашений в группу (t.me/bot?start=g_...).
     # Пусто — используется BOT_TOKEN. Смена секрета отзывает все ссылки.
     group_link_secret: str = Field(default="", alias="GROUP_LINK_SECRET")
+    # Mini App: tg_id, под которым принимается заголовок `Authorization: dev` (только локально; на проде пусто)
+    miniapp_dev_tg_id: Optional[int] = Field(default=None, alias="MINIAPP_DEV_TG_ID")
 
     # Педагоги, которым разрешено выставлять счета ученикам своих групп
     # (teacher_id через запятую или |, например: TCH-0009). Пусто — счета только у админов.

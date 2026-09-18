@@ -53,6 +53,18 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
    - Telegram: `/webhook/{bot_token}` if `WEBHOOK_URL` is set, otherwise polling.
    - YooKassa: `/yookassa-webhook` always registered on `PAYMENT_WEBHOOK_PORT` (default 8081).
 
+### Telegram Mini App (кабинет администратора — этап 1)
+
+Фронт `miniapp/` (`index.html` + `app.js`, без сборки) раздаётся aiohttp-сервером бота по `/app/`
+([bot/api/static.py](bot/api/static.py)); API `/api/admin/*` — [bot/api/admin.py](bot/api/admin.py), тонкий слой над
+`PaymentService`/`SalaryService`/`StudentService` (суммы считает сервер, один запрос = один экран).
+Авторизация: `Authorization: tma <initData>` (подпись — `bot/utils/telegram_auth.py`) + `users.is_admin`;
+локально — `MINIAPP_DEV_TG_ID` и заголовок `Authorization: dev` (`?dev=1` во фронте). Локальный сервер без
+Telegram-поллинга: `MINIAPP_DEV_TG_ID=<tg_id> .venv/bin/python scripts/miniapp_dev.py` →
+http://localhost:8090/app/?dev=1 (данные — живая таблица). Тесты — `tests/test_admin_api.py`. План этапов,
+контракт API и что нужно для запуска в Telegram (домен + nginx + BotFather) — [docs/MINIAPP_PLAN.md](docs/MINIAPP_PLAN.md).
+Прототип всех кабинетов — `web/miniapp-prototype.html`.
+
 ### MAX front (кабинет родителя в мессенджере MAX)
 
 Второй мессенджер для **родителя** на тех же репозиториях/сервисах: пакет [bot/max/](bot/max/) (библиотека `maxapi`, Python ≥ 3.10). `bot/__main__.py` при непустом `MAX_BOT_TOKEN` собирает `maxapi.Dispatcher` (`bot/max/app.py::build`) и запускает polling отдельной задачей (`run_max`, перезапуск при сбое); пустой токен — MAX выключен, Telegram работает как прежде. Ключевые части:
@@ -488,6 +500,9 @@ Optional — payments:
 
 Optional — MAX (кабинет родителя):
 - `MAX_BOT_TOKEN` — токен бота MAX от @MasterBot; пусто — MAX не запускается. Ссылки групп для MAX используют тот же `GROUP_LINK_SECRET`.
+
+Optional — Mini App:
+- `MINIAPP_DEV_TG_ID` — tg_id, под которым API кабинета принимает заголовок `Authorization: dev` (только для локальной разработки; на проде пусто).
 
 Optional — infrastructure:
 - `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)
