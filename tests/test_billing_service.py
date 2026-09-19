@@ -192,3 +192,14 @@ def test_rate_history_picks_nearest_boundary():
     assert rate_history.effective_rates(t, "2026-05")[2] == 600
     assert rate_history.effective_rates(t, "2026-06")[2] == 700
     assert rate_history.effective_rates(t, "2026-09")[2] == 900
+
+
+def test_group_salary_rate_overrides_teacher_card_rate(monkeypatch):
+    """GROUP_SALARY_RATES: в «своей» группе ставка педагога другая (БП Джаз — 2000 ₽ за час)."""
+    from config.settings import settings
+    teacher = _teacher(rate_group=1350)
+    monkeypatch.setattr(settings, "group_salary_rates", "GRP-0019:1500")
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0019") == 2000
+    assert calc_earned(LessonType.GROUP, 90, teacher, "GRP-0019") == 3000     # пропорционально, как везде
+    assert calc_earned(LessonType.GROUP, 45, teacher, "GRP-0001") == 1350     # другая группа — ставка карточки
+    assert calc_earned(LessonType.INDIVIDUAL, 45, teacher, "GRP-0019") == teacher.rate_for_teacher

@@ -151,6 +151,20 @@ class Settings(BaseSettings):
                     out[gid.strip()] = int(minutes.strip())
         return out
 
+    # Своя ставка педагога за занятия конкретной группы (₽ за 45 мин, как rate_group).
+    # Формат: GRP-0019:1500 — «БП Джаз»: 60 мин = 2000 ₽.
+    group_salary_rates: str = Field(default="", alias="GROUP_SALARY_RATES")
+
+    @property
+    def group_salary_rate_map(self) -> dict:
+        out = {}
+        for chunk in self.group_salary_rates.replace("|", ",").split(","):
+            if ":" in chunk:
+                gid, rate = chunk.split(":", 1)
+                if gid.strip() and rate.strip().isdigit():
+                    out[gid.strip()] = int(rate.strip())
+        return out
+
     @property
     def revenue_share_group_map(self) -> dict:
         out = {}

@@ -17,6 +17,8 @@ def calc_earned(
 ) -> int:
     """earned = ставка × (duration_min / 45). Количество учеников не влияет.
 
+    Ставка — из карточки педагога на месяц занятия, но у групп из
+    GROUP_SALARY_RATES своя (напр. «БП Джаз» 1500 ₽/45 мин → 2000 ₽ за час).
     Исключение — группы из REVENUE_SHARE_GROUPS (например, индивидуальные
     Яковлевой): педагог получает процент от сбора с посетивших занятие,
     длительность на зарплату не влияет.
@@ -41,6 +43,9 @@ def calc_earned(
     # Ставки на период занятия (история ставок: старые цены для прошлых месяцев)
     rate_group, rate_for_teacher, _ = effective_rates(teacher, period)
     rate = rate_group if lesson_type == LessonType.GROUP else rate_for_teacher
+    # Своя ставка группы (GROUP_SALARY_RATES) — вместо ставки из карточки педагога.
+    if group_id and lesson_type == LessonType.GROUP:
+        rate = settings.group_salary_rate_map.get(group_id, rate)
     return round(rate * duration_min / MINUTES_PER_UNIT)
 
 
