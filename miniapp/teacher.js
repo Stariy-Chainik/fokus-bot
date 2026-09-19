@@ -28,6 +28,7 @@ SCREENS['t.home'] = async () => {
       cell({ lead: '💰', plain: true, t: 'Зарплата и сдача периода', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
     ])}
     ${!h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
+    ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'выставить и отправить родителям', go: 't.bills', p: {} })])}` : ''}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
 
@@ -128,8 +129,141 @@ SCREENS['t.money'] = async ({ ym }) => {
     }))) : '<div class="empty">Начислений нет</div>'}` };
 };
 
+/* ── Дневники спортсменов ────────────────────────────────────────────── */
+SCREENS['t.diary'] = async () => {
+  const d = await api('/diary');
+  return { title: 'Дневники', html: `
+    <div class="chips"><button class="chip" data-go="t.rating" data-p='${esc(JSON.stringify({ ym: d.period }))}'>🏆 Рейтинг</button></div>
+    ${d.athletes.length ? list(d.athletes.map(a => cell({
+      lead: initials(a.name), t: esc(a.name), s: a.unrated ? `🆕 ${plural(a.unrated, ['запись', 'записи', 'записей'])} без оценки` : 'всё оценено',
+      r: a.unrated ? pill(String(a.unrated), 'warn') : '', go: 't.diary.s', p: { id: a.id },
+    }))) : '<div class="empty">У ваших учеников нет кабинета спортсмена</div>'}
+    <p class="hint" style="margin-top:8px">Спортсмен сам записывает тренировки в боте, вы ставите оценку и выдаёте задания.</p>` };
+};
+
+const tEntryCell = (e, sid) => cell({
+  lead: e.grade ? '⭐' : '🆕', plain: true,
+  t: `${fdate(e.date)} · ${e.minutes} мин`,
+  s: `${esc(e.topics.join(', ') || 'без темы')}${e.comment ? ` · ${esc(e.comment)}` : ''}${e.tasks.length ? ` · задания: ${esc(e.tasks.join(', '))}` : ''}${e.gradeComment ? `<br>📝 ${esc(e.gradeComment)}` : ''}`,
+  r: e.grade ? `<b>${e.grade}/5</b>` : pill('оценить', 'warn'),
+  act: 'tGradeAsk', p: { id: e.id, sid, name: `${fdate(e.date)} · ${e.minutes} мин`, grade: e.grade || 0 },
+});
+
+SCREENS['t.diary.s'] = async ({ id, ym }) => {
+  const d = await api(`/diary/${id}${ym ? `?ym=${ym}` : ''}`);
+  const st = d.stats;
+  const topics = Object.entries(st.byTopic || {}).sort((a, b) => b[1] - a[1]);
+  return { title: d.student.name, html: `
+    ${monthChips('t.diary.s', d.period, { id })}
+    <div class="kpis">${kpi(st.sessions, 'тренировок')}${kpi(st.minutes + ' мин', 'всего')}</div>
+    <div class="kpis" style="margin-top:10px">${kpi(st.avgGrade ? st.avgGrade.toFixed(1) : '—', 'средняя оценка', 'ok')}${kpi(st.points, `очки${d.place ? ` · ${d.place <= 3 ? `${d.placeIcon} ` : ''}${d.place} место` : ''}`)}</div>
+    ${topics.length ? `<div class="eyebrow">По танцам</div>${list(topics.map(([t, m]) => cell({ t: esc(t), r: `${Math.round(m)} мин` })))}` : ''}
+    <div class="eyebrow">Записи</div>
+    ${d.entries.length ? list(d.entries.map(e => tEntryCell(e, id))) : '<div class="empty">В этом месяце записей нет</div>'}
+    <div class="eyebrow">Задания</div>
+    ${d.openTasks.length ? list(d.openTasks.map(t => cell({ lead: '📋', plain: true, t: esc(t.exercise), s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}` }))) : '<div class="empty">Открытых заданий нет</div>'}
+    <div style="margin-top:12px">${btn('➕ Выдать задание', 'tTaskForm', { sid: id })}${goBtn('📋 Все задания', 't.diary.tasks', { sid: id }, 'sec')}</div>` };
+};
+
+SCREENS['t.diary.tasks'] = async ({ sid }) => {
+  const d = await api(`/diary/${sid}/tasks`);
+  return { title: 'Задания', html: `
+    <div class="h2">${esc(d.student.name)}</div>
+    ${d.tasks.length ? list(d.tasks.map(t => cell({
+      lead: t.status === 'open' ? '📋' : '✅', plain: true, t: esc(t.exercise),
+      s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}${t.doneTimes ? ` · сделано ${t.doneTimes} раз${t.lastDone ? `, последний ${fdate(t.lastDone)}` : ''}` : ''}`,
+      r: t.status === 'open' ? `<button class="chip" data-act="tTaskClose" data-p='${esc(JSON.stringify({ id: t.id, sid }))}'>Закрыть</button>` : pill('закрыто', 'mute'),
+    }))) : '<div class="empty">Заданий нет</div>'}
+    <div style="margin-top:12px">${btn('➕ Выдать задание', 'tTaskForm', { sid })}</div>` };
+};
+
+SCREENS['t.rating'] = async ({ ym }) => {
+  const period = ym || lastPeriods(1)[0];
+  const d = await api(`/diary/rating?ym=${period}`);
+  return { title: 'Рейтинг', html: `
+    ${monthChips('t.rating', period, {})}
+    ${d.rows.length ? list(d.rows.map(r => cell({
+      lead: r.icon || String(r.place), plain: true, t: esc(r.name) + (r.mine ? ' <span class="hint">· мой ученик</span>' : ''),
+      s: `${plural(r.sessions, ['тренировка', 'тренировки', 'тренировок'])} · ${r.minutes} мин${r.avgGrade ? ` · средняя ${r.avgGrade.toFixed(1)}` : ''}`,
+      r: `<b>${r.points}</b>`,
+    }))) : '<div class="empty">В этом месяце записей нет</div>'}
+    <p class="hint" style="margin-top:8px">Очки = минуты × оценка (без оценки коэффициент 3).</p>` };
+};
+
+/* ── Счета своих групп (BILLING_TEACHER_IDS) ─────────────────────────── */
+SCREENS['t.bills'] = async ({ ym }) => {
+  const period = ym || lastPeriods(1)[0];
+  const d = await api(`/bills?ym=${period}`);
+  return { title: 'Счета групп', html: `
+    ${monthChips('t.bills', period, {})}
+    ${d.groups.length ? list(d.groups.map(g => cell({
+      lead: '👥', plain: true, t: esc(g.name), s: MODE[g.mode] || g.mode,
+      r: plural(g.students, ['ученик', 'ученика', 'учеников']), go: 't.bills.g', p: { gid: g.id, ym: period },
+    }))) : '<div class="empty">Групп нет</div>'}` };
+};
+
+SCREENS['t.bills.g'] = async ({ gid, ym }) => {
+  const d = await api(`/bills/group/${gid}?ym=${ym}`);
+  const toSend = d.students.filter(s => s.total > 0).length;
+  return { title: d.group.name, html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.group.name)}</div><div class="hint">${fmon(ym)} · начислено ${fmt(d.students.reduce((a, s) => a + s.total, 0))}</div></div>
+    ${d.students.length ? list(d.students.map(s => cell({
+      lead: initials(s.name), t: esc(s.name),
+      s: s.hasParent ? (s.rest ? `к оплате ${fmt(s.rest)}` : 'оплачено') : 'родитель не привязан',
+      r: `<b>${fmt(s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym },
+    }))) : '<div class="empty">В группе никого нет</div>'}
+    <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid, ym, count: toSend, name: d.group.name }, toSend ? '' : 'ghost')}</div>` };
+};
+
+SCREENS['t.bill'] = async ({ sid, ym }) => {
+  const b = await api(`/bills/student/${sid}?ym=${ym}`);
+  return { title: b.student.name, html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
+      <div class="hint">${fmon(b.period)}${b.groups.length ? ` · ${esc(b.groups.join(', '))}` : ''}</div></div>
+    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => `
+      <div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>
+      ${r.items.map(i => `<div class="lesson-line"><span>${i.paid ? '✅' : '⬜'}</span><span>${fdate(i.date)} · ${i.durationMin} мин</span><span class="amt">${fmt(i.amount)}</span></div>`).join('')}`).join('')}
+      <div class="total"><span>К оплате</span><span class="big">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
+    <div style="margin-top:12px">${b.student.hasParent
+      ? btn('📨 Отправить родителю', 'tBillSend', { sid, ym, name: b.student.name }, b.total ? '' : 'ghost')
+      : '<div class="card pad hint">Родитель не привязан к ученику — отправлять некому.</div>'}</div>` };
+};
+
 /* ── действия ────────────────────────────────────────────────────────── */
 ACT.tGroupTab = ({ v }) => { state.ui.tGroupTab = v; render(); };
+ACT.tGradeAsk = ({ id, sid, name, grade }) => sheet(`<h3>Оценить тренировку</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/5` : ''}</div>
+  <div class="chips" style="margin-top:12px">${[1, 2, 3, 4, 5].map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
+  ${field('gcomment', 'Комментарий (необязательно)', '', 'placeholder="Что получилось, что подтянуть"')}
+  <div style="margin-top:12px">${btn('⭐ Сохранить оценку', 'tGradeDo', { id, sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tGradePick = ({ g }) => { state.ui.tGrade = g; document.querySelectorAll('[id^="grade-"]').forEach(b => b.setAttribute('aria-pressed', b.id === `grade-${g}`)); };
+ACT.tGradeDo = async ({ id }) => {
+  const grade = state.ui.tGrade;
+  if (!grade) { toast('Выберите оценку от 1 до 5'); return; }
+  try { await api(`/diary/entries/${id}/grade`, { method: 'POST', body: { grade, comment: val('gcomment').trim() } }); state.ui.tGrade = 0; closeSheet(); render(); toast('Оценка сохранена, спортсмену отправлено'); }
+  catch (e) { toast(errText(e)); }
+};
+ACT.tTaskForm = ({ sid }) => sheet(`<h3>➕ Задание</h3><div class="hint">Спортсмен увидит его при записи тренировки.</div>
+  ${field('task-e', 'Упражнение', '', 'placeholder="Махи у станка, растяжка…"')}${field('task-m', 'Минут', '15', 'inputmode="numeric"')}${field('task-c', 'Комментарий (необязательно)', '')}
+  <div style="margin-top:12px">${btn('💾 Выдать задание', 'tTaskAdd', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tTaskAdd = async ({ sid }) => {
+  const exercise = val('task-e').trim(); const minutes = +val('task-m');
+  if (!exercise || !minutes) { toast('Нужно упражнение и минуты'); return; }
+  try { await api(`/diary/${sid}/tasks`, { method: 'POST', body: { exercise, minutes, comment: val('task-c').trim() } }); closeSheet(); render(); toast('Задание отправлено спортсмену'); }
+  catch (e) { toast(errText(e)); }
+};
+ACT.tTaskClose = async ({ id }) => { try { await api(`/diary/tasks/${id}/close`, { method: 'POST' }); render(); toast('Задание закрыто'); } catch (e) { toast(errText(e)); } };
+ACT.tBillSend = ({ sid, ym, name }) => sheet(`<h3>Отправить счёт?</h3><div class="hint">${esc(name)} · ${fmon(ym)}. Родитель получит счёт в Telegram или MAX.</div>
+  <div style="margin-top:12px">${btn('📨 Отправить', 'tBillSendDo', { sid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tBillSendDo = async ({ sid, ym }) => {
+  try { const r = await api(`/bills/student/${sid}/send?ym=${ym}`, { method: 'POST' }); closeSheet(); toast(r.sentTo ? `Счёт отправлен (${r.sentTo} из ${r.recipients})` : 'Не удалось доставить'); }
+  catch (e) { closeSheet(); toast(errText(e)); }
+};
+ACT.tBillGroupAsk = ({ gid, ym, count, name }) => { if (!count) { toast('Начислений в группе нет'); return; } sheet(`<h3>Счета всей группе?</h3><div class="hint">${esc(name)} · ${fmon(ym)}: ${plural(count, ['ученик', 'ученика', 'учеников'])} с начислениями. Родители получат счёт сразу.</div>
+  <div style="margin-top:12px">${btn('📨 Отправить всем', 'tBillGroupDo', { gid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`); };
+ACT.tBillGroupDo = async ({ gid, ym }) => {
+  try { const r = await api(`/bills/group/${gid}/send?ym=${ym}`, { method: 'POST' }); closeSheet(); toast(`Отправлено: ${r.sent}${r.noParent ? `, без родителя: ${r.noParent}` : ''}${r.failed ? `, не дошло: ${r.failed}` : ''}`); }
+  catch (e) { closeSheet(); toast(errText(e)); }
+};
 ACT.tDelLesson = ({ id }) => sheet(`<h3>Удалить занятие?</h3><div class="hint">Занятие и начисления по нему пропадут. Отменить нельзя.</div>
   <div style="margin-top:12px">${btn('🗑 Удалить', 'tDelLessonDo', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 ACT.tDelLessonDo = async ({ id }) => {

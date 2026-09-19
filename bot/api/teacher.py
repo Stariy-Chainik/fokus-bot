@@ -15,13 +15,20 @@ from datetime import date
 
 from aiohttp import web
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 from bot.api.admin import auth_tg_id
 from bot.api.record import RecordError, record_create, record_options
+from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import LessonType
-from bot.services import LessonService
+from bot.services import LessonService, payment_ledger
 from bot.services.billing_service import calc_earned
+from bot.services.diary_service import place_icon
 from bot.services.rosters import group_members
+from bot.utils.dates import format_date_display
+from bot.utils.notify import notify
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from bot.utils.dates import current_period, last_periods, now_str
 from bot.utils.groups import hide_service_groups
@@ -39,6 +46,12 @@ def _json(data, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
+def _dp_get(dp, key: str):
+    """Необязательная зависимость (дневник, notifier): в тестах их может не быть."""
+    data = getattr(dp, "workflow_data", dp)
+    return data.get(key) if hasattr(data, "get") else None
+
+
 def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
     """Строка списка занятий: кто занимался и сколько начислено педагогу."""
     if ls.type == LessonType.GROUP:
@@ -53,7 +66,7 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
     }
 
 
-def register_teacher_api(app: web.Application, dp) -> None:
+def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     user_repo = dp["user_repo"]
     teacher_repo = dp["teacher_repo"]
     student_repo = dp["student_repo"]
@@ -66,6 +79,11 @@ def register_teacher_api(app: web.Application, dp) -> None:
     lesson_service = dp["lesson_service"]
     salary_service = dp["salary_service"]
     visibility = dp["visibility"]
+    payment_service = dp["payment_service"]
+    payment_repo = dp["payment_repo"]
+    client_repo = dp["client_repo"]
+    diary_service = _dp_get(dp, "diary_service")
+    notifier = _dp_get(dp, "notifier")
 
     def teacher_only(handler):
         async def wrapped(request: web.Request) -> web.Response:
@@ -327,12 +345,282 @@ def register_teacher_api(app: web.Application, dp) -> None:
                     teacher.teacher_id, ym, len(lessons_), total)
         return _json({"ok": True, "period": ym, "lessons": len(lessons_), "total": total})
 
+    # ── дневники спортсменов ─────────────────────────────────────────────
+    def _entry(e, tasks: dict) -> dict:
+        return {
+            "id": e.entry_id, "date": e.date, "minutes": e.minutes, "topics": list(e.topics or []),
+            "comment": e.comment, "grade": e.grade, "gradeComment": e.grade_comment,
+            "tasks": [tasks[t].exercise for t in (e.task_ids or []) if t in tasks],
+        }
+
+    async def _athletes(teacher) -> list:
+        return await diary_service.athletes_for_teacher(teacher.teacher_id, is_admin=False)
+
+    def diary_only(handler):
+        async def wrapped(request: web.Request, user, teacher) -> web.Response:
+            if diary_service is None:
+                return _json({"error": "unavailable"}, status=503)
+            return await handler(request, user, teacher)
+        return wrapped
+
+    @diary_only
+    async def diary(request: web.Request, user, teacher) -> web.Response:
+        athletes = await _athletes(teacher)
+        unrated = await diary_service.unrated_counts([a.student_id for a in athletes])
+        period = request.query.get("ym") or current_period()
+        return _json({
+            "period": period,
+            "athletes": [{"id": a.student_id, "name": a.name, "unrated": unrated.get(a.student_id, 0)}
+                         for a in sorted(athletes, key=lambda x: x.name)],
+        })
+
+    @diary_only
+    async def diary_student(request: web.Request, user, teacher) -> web.Response:
+        sid = request.match_info["sid"]
+        period = request.query.get("ym") or current_period()
+        athletes = {a.student_id: a for a in await _athletes(teacher)}
+        s = athletes.get(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        entries = await diary_service.entries_for_student(sid, period=period)
+        tasks = await diary_service.tasks_map(sid)
+        st = await diary_service.stats(sid, period)
+        board = await diary_service.leaderboard(period)
+        row = next((r for r in board if r.student_id == sid), None)
+        return _json({
+            "student": {"id": sid, "name": s.name}, "period": period,
+            "stats": {"sessions": st.sessions, "minutes": st.total_minutes, "points": st.points,
+                      "graded": st.graded, "avgGrade": st.avg_grade, "byTopic": st.by_topic},
+            "place": row.place if row else None, "placeIcon": place_icon(row.place) if row else "",
+            "entries": [_entry(e, tasks) for e in sorted(entries, key=lambda e: e.date, reverse=True)],
+            "openTasks": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment}
+                          for t in await diary_service.open_tasks(sid)],
+        })
+
+    @diary_only
+    async def diary_grade(request: web.Request, user, teacher) -> web.Response:
+        eid = request.match_info["eid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        grade, comment = (body or {}).get("grade"), ((body or {}).get("comment") or "").strip()
+        entry = await diary_service.entry(eid)
+        if entry is None:
+            return _json({"error": "not_found"}, status=404)
+        athletes = {a.student_id: a for a in await _athletes(teacher)}
+        s = athletes.get(entry.student_id)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        if not isinstance(grade, int):
+            return _json({"error": "bad_request", "message": "Оценка — число от 1 до 5"}, status=400)
+        try:
+            updated = await diary_service.grade_entry(eid, grade, comment, teacher.teacher_id)
+        except ValueError:
+            return _json({"error": "bad_request", "message": "Оценка — число от 1 до 5"}, status=400)
+        if updated is None:
+            return _json({"error": "not_found"}, status=404)
+        topics = ", ".join(entry.topics) if entry.topics else "—"
+        note = f"\n📝 {comment}" if comment else ""
+        if bot is not None:
+            await notify(bot, [s.athlete_tg_id],
+                         f"⭐ <b>{teacher.name}</b> оценил(а) вашу тренировку {format_date_display(entry.date)} "
+                         f"({entry.minutes} мин, {topics}): <b>{grade}/5</b>{note}")
+        if notifier is not None:
+            await notifier.send_many(s.parent_addrs,
+                                     f"⭐ <b>{s.name}</b>: тренировка {format_date_display(entry.date)} "
+                                     f"({entry.minutes} мин, {topics}) оценена педагогом {teacher.name}: "
+                                     f"<b>{grade}/5</b>{note}")
+        logger.info("Mini App: педагог %s оценил запись %s на %s", teacher.teacher_id, eid, grade)
+        return _json({"ok": True, "grade": updated.grade, "gradeComment": updated.grade_comment})
+
+    @diary_only
+    async def diary_tasks(request: web.Request, user, teacher) -> web.Response:
+        sid = request.match_info["sid"]
+        athletes = {a.student_id: a for a in await _athletes(teacher)}
+        if sid not in athletes:
+            return _json({"error": "not_found"}, status=404)
+        usage = await diary_service.task_usage(sid)
+        rows = (await diary_service.tasks_map(sid)).values()
+        return _json({
+            "student": {"id": sid, "name": athletes[sid].name},
+            "tasks": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
+                       "status": t.status, "doneTimes": usage.get(t.task_id, (0, ""))[0],
+                       "lastDone": usage.get(t.task_id, (0, ""))[1]}
+                      for t in sorted(rows, key=lambda t: (t.status != "open", t.created_at), reverse=False)],
+            "recent": await diary_service.recent_exercises(teacher.teacher_id),
+        })
+
+    @diary_only
+    async def diary_task_add(request: web.Request, user, teacher) -> web.Response:
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        exercise = ((body or {}).get("exercise") or "").strip()
+        minutes, comment = (body or {}).get("minutes"), ((body or {}).get("comment") or "").strip()
+        athletes = {a.student_id: a for a in await _athletes(teacher)}
+        if sid not in athletes:
+            return _json({"error": "not_found"}, status=404)
+        if not exercise or not isinstance(minutes, int) or minutes <= 0:
+            return _json({"error": "bad_request", "message": "Нужно упражнение и минуты"}, status=400)
+        task = await diary_service.create_task(sid, teacher.teacher_id, exercise, minutes, comment)
+        note = f"\n💬 {comment}" if comment else ""
+        if bot is not None:
+            await notify(bot, [athletes[sid].athlete_tg_id],
+                         f"📋 <b>Новое задание от {teacher.name}</b>\n\n<b>{task.exercise}</b> — "
+                         f"{task.minutes} мин{note}\n\nОтмечайте задание при записи каждой тренировки.")
+        logger.info("Mini App: педагог %s выдал задание %s ученику %s", teacher.teacher_id, task.task_id, sid)
+        return _json({"ok": True, "id": task.task_id})
+
+    @diary_only
+    async def diary_task_close(request: web.Request, user, teacher) -> web.Response:
+        task = await diary_service.task(request.match_info["tid"])
+        athletes = {a.student_id for a in await _athletes(teacher)}
+        if task is None or task.student_id not in athletes:
+            return _json({"error": "not_found"}, status=404)
+        closed = await diary_service.close_task(task.task_id)
+        return _json({"ok": closed is not None})
+
+    @diary_only
+    async def diary_rating(request: web.Request, user, teacher) -> web.Response:
+        period = request.query.get("ym") or current_period()
+        topic = request.query.get("topic") or None
+        board = await diary_service.leaderboard(period, topic)
+        mine = {a.student_id for a in await _athletes(teacher)}
+        return _json({
+            "period": period, "topic": topic or "",
+            "rows": [{"id": r.student_id, "name": r.name, "points": r.points, "minutes": r.minutes,
+                      "sessions": r.sessions, "avgGrade": r.avg_grade, "place": r.place,
+                      "icon": place_icon(r.place), "mine": r.student_id in mine} for r in board],
+        })
+
+    # ── счета своих групп (только BILLING_TEACHER_IDS) ───────────────────
+    def billing_only(handler):
+        async def wrapped(request: web.Request, user, teacher) -> web.Response:
+            if teacher.teacher_id not in settings.billing_teacher_id_set:
+                return _json({"error": "forbidden"}, status=403)
+            return await handler(request, user, teacher)
+        return wrapped
+
+    async def _own_group_ids(teacher) -> set:
+        return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
+
+    async def _bill_rows(sid: str, period: str) -> tuple[dict, dict, list]:
+        bills = await payment_service.compute_bills_for_student_period(sid, period)
+        paid_map = payment_ledger.paid_sums(await payment_repo.get_by_student_and_period(sid, period))
+        rows = []
+        for key, agg in bills.items():
+            paid = paid_map.get(key, 0)
+            rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": agg.total,
+                         "paid": min(paid, agg.total), "rest": max(agg.total - paid, 0),
+                         "items": [{"date": m["date"], "durationMin": m["duration_min"],
+                                    "amount": m["amount"], "paid": m["paid"]}
+                                   for m in payment_ledger.lesson_marks(agg.items, paid)]})
+        summary = {"total": sum(r["total"] for r in rows), "paid": sum(r["paid"] for r in rows),
+                   "rest": sum(r["rest"] for r in rows)}
+        return bills, summary, rows
+
+    @billing_only
+    async def bills_groups(request: web.Request, user, teacher) -> web.Response:
+        period = request.query.get("ym") or current_period()
+        gids = await _own_group_ids(teacher)
+        groups_ = [g for g in await group_repo.get_all() if g.group_id in gids]
+        out = [{"id": g.group_id, "name": g.name, "mode": g.billing_mode.value,
+                "students": len(await student_group_repo.get_students_for_group(g.group_id))}
+               for g in sorted(groups_, key=lambda g: g.name)]
+        return _json({"period": period, "groups": out, "periods": last_periods(3)})
+
+    @billing_only
+    async def bills_group(request: web.Request, user, teacher) -> web.Response:
+        gid = request.match_info["gid"]
+        period = request.query.get("ym") or current_period()
+        if gid not in await _own_group_ids(teacher):
+            return _json({"error": "not_found"}, status=404)
+        g = await group_repo.get_by_id(gid)
+        rows = []
+        for s in await group_members(student_repo, student_group_repo, gid):
+            _b, summary, _r = await _bill_rows(s.student_id, period)
+            rows.append({"id": s.student_id, "name": s.name, "hasParent": bool(s.parent_addrs), **summary})
+        return _json({"group": {"id": gid, "name": g.name if g else gid}, "period": period, "students": rows})
+
+    @billing_only
+    async def bills_student(request: web.Request, user, teacher) -> web.Response:
+        sid = request.match_info["sid"]
+        period = request.query.get("ym") or current_period()
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        _bills, summary, rows = await _bill_rows(sid, period)
+        return _json({"student": {"id": sid, "name": s.name, "hasParent": bool(s.parent_addrs)},
+                      "period": period, "rows": rows, **summary,
+                      "groups": await _student_group_names(sid, student_group_repo, group_repo)})
+
+    @billing_only
+    async def bills_student_send(request: web.Request, user, teacher) -> web.Response:
+        if bot is None:
+            return _json({"error": "bot_unavailable"}, status=503)
+        sid = request.match_info["sid"]
+        period = request.query.get("ym") or current_period()
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        bills = await payment_service.compute_bills_for_student_period(sid, period)
+        if not bills:
+            return _json({"error": "nothing_to_send"}, status=409)
+        names = await _student_group_names(sid, student_group_repo, group_repo)
+        recipients, sent_to, _ = await _send_bill_to_parents(
+            cast(Any, SimpleNamespace(bot=bot)), s, period, bills, names, payment_service, client_repo,
+        )
+        logger.info("Mini App: педагог %s отправил счёт %s за %s", teacher.teacher_id, sid, period)
+        return _json({"recipients": recipients, "sentTo": sent_to})
+
+    @billing_only
+    async def bills_group_send(request: web.Request, user, teacher) -> web.Response:
+        if bot is None:
+            return _json({"error": "bot_unavailable"}, status=503)
+        gid = request.match_info["gid"]
+        period = request.query.get("ym") or current_period()
+        if gid not in await _own_group_ids(teacher):
+            return _json({"error": "not_found"}, status=404)
+        sent = no_parent = failed = skipped = 0
+        for s in await group_members(student_repo, student_group_repo, gid):
+            bills = await payment_service.compute_bills_for_student_period(s.student_id, period)
+            if not bills:
+                skipped += 1
+                continue
+            names = await _student_group_names(s.student_id, student_group_repo, group_repo)
+            recipients, sent_to, _ = await _send_bill_to_parents(
+                cast(Any, SimpleNamespace(bot=bot)), s, period, bills, names, payment_service, client_repo,
+            )
+            if recipients == 0:
+                no_parent += 1
+            elif sent_to == 0:
+                failed += 1
+            else:
+                sent += 1
+        logger.info("Mini App: педагог %s разослал счета группы %s за %s — %d",
+                    teacher.teacher_id, gid, period, sent)
+        return _json({"sent": sent, "noParent": no_parent, "failed": failed, "skipped": skipped})
+
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group), ("GET", "/students/{sid}", student),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
+        ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),
+        ("POST", "/diary/entries/{eid}/grade", diary_grade),
+        ("GET", "/diary/{sid}/tasks", diary_tasks), ("POST", "/diary/{sid}/tasks", diary_task_add),
+        ("POST", "/diary/tasks/{tid}/close", diary_task_close),
+        ("GET", "/bills", bills_groups), ("GET", "/bills/group/{gid}", bills_group),
+        ("POST", "/bills/group/{gid}/send", bills_group_send),
+        ("GET", "/bills/student/{sid}", bills_student), ("POST", "/bills/student/{sid}/send", bills_student_send),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

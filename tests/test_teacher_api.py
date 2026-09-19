@@ -8,17 +8,22 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from bot.api import register_teacher_api
 from bot.models.enums import LessonType
-from tests.fakes import mk_lesson, mk_submission, mk_user
-from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, make_api
+from bot.services.diary_service import DiaryService
+from config.settings import settings
+from tests.fakes import (
+    AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake,
+    mk_entry, mk_lesson, mk_submission, mk_user,
+)
+from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, make_api
 from tests.test_telegram_auth import make_init_data
 
-TEACHER_TG = 4242
+TEACHER_TG, ATHLETE_TG = 4242, 777001
 
 
-def _call(dp, method, path, tg_id=TEACHER_TG, json=None, headers=None):
+def _call(dp, method, path, tg_id=TEACHER_TG, json=None, headers=None, bot=None):
     async def run():
         app = web.Application()
-        register_teacher_api(app, dp)
+        register_teacher_api(app, dp, bot)
         client = TestClient(TestServer(app))
         await client.start_server()
         try:
@@ -34,6 +39,15 @@ def _call(dp, method, path, tg_id=TEACHER_TG, json=None, headers=None):
 def api(monkeypatch):
     dp, _ = make_api(monkeypatch)
     asyncio.run(dp["user_repo"].add(TEACHER_TG, teacher_id="TCH-0001"))   # педагог со своим кабинетом
+    dp["student_repo"].items[0].athlete_tg_id = ATHLETE_TG                # Иванов — спортсмен с кабинетом
+    dp["entry_repo"] = TrainingEntryRepoFake([
+        mk_entry("TE-1", "STU-0001", f"{YM}-05", 60, topics=["Джайв"]),
+        mk_entry("TE-2", "STU-0001", f"{YM}-07", 30, topics=["Самба"], grade=5),
+    ])
+    dp["task_repo"] = AthleteTaskRepoFake()
+    dp["diary_service"] = DiaryService(dp["entry_repo"], dp["task_repo"], dp["student_repo"],
+                                       dp["student_group_repo"], dp["group_repo"], dp["visibility"])
+    dp["notifier"] = NotifierFake()
     return dp, dp
 
 
@@ -133,3 +147,67 @@ def test_unknown_user_is_forbidden(api):
     assert _call(app, "GET", "/api/teacher/home", tg_id=999999)[0] == 403
     dp["user_repo"].items.append(mk_user(777, teacher_id="TCH-0404"))    # ссылка на несуществующего педагога
     assert _call(app, "GET", "/api/teacher/home", tg_id=777)[0] == 403
+
+
+def test_diary_lists_own_athletes_and_grades_entry(api):
+    app, dp = api
+    status, d = _call(app, "GET", "/api/teacher/diary")
+    assert status == 200 and [(a["name"], a["unrated"]) for a in d["athletes"]] == [("Иванов Иван", 1)]
+
+    status, card = _call(app, "GET", f"/api/teacher/diary/STU-0001?ym={YM}")
+    assert status == 200 and card["stats"]["sessions"] == 2 and card["stats"]["minutes"] == 90
+    assert [e["id"] for e in card["entries"]] == ["TE-2", "TE-1"]      # новые сверху
+
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/teacher/diary/entries/TE-1/grade", json={"grade": 4, "comment": "Ровнее корпус"}, bot=bot)
+    assert status == 200 and r["grade"] == 4
+    assert dp["entry_repo"].items[0].grade == 4 and dp["entry_repo"].items[0].graded_by == "TCH-0001"
+    assert bot.sent and str(ATHLETE_TG) in str(bot.sent[0])            # спортсмену ушёл пуш
+    assert _call(app, "POST", "/api/teacher/diary/entries/TE-1/grade", json={"grade": 9})[0] == 400
+    assert _call(app, "POST", "/api/teacher/diary/entries/TE-404/grade", json={"grade": 4})[0] == 404
+
+
+def test_diary_tasks_flow(api):
+    app, dp = api
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks",
+                      json={"exercise": "Махи у станка", "minutes": 15, "comment": "каждый день"}, bot=bot)
+    assert status == 200 and r["ok"] is True and bot.sent
+    status, t = _call(app, "GET", "/api/teacher/diary/STU-0001/tasks")
+    assert status == 200 and [(x["exercise"], x["status"]) for x in t["tasks"]] == [("Махи у станка", "open")]
+
+    tid = t["tasks"][0]["id"]
+    assert _call(app, "POST", f"/api/teacher/diary/tasks/{tid}/close")[1]["ok"] is True
+    assert dp["task_repo"].items[0].status == "closed"
+    assert _call(app, "POST", "/api/teacher/diary/STU-0002/tasks", json={"exercise": "x", "minutes": 5})[0] == 404
+    assert _call(app, "POST", "/api/teacher/diary/STU-0001/tasks", json={"exercise": "", "minutes": 5})[0] == 400
+
+
+def test_diary_rating_marks_own_athletes(api):
+    app, dp = api
+    status, r = _call(app, "GET", f"/api/teacher/diary/rating?ym={YM}")
+    assert status == 200 and [(x["name"], x["mine"]) for x in r["rows"]] == [("Иванов Иван", True)]
+
+
+def test_bills_only_for_billing_teachers(api, monkeypatch):
+    app, dp = api
+    assert _call(app, "GET", "/api/teacher/bills")[0] == 403          # право не выдано
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+
+    status, d = _call(app, "GET", f"/api/teacher/bills?ym={YM}")
+    assert status == 200 and [g["name"] for g in d["groups"]] == ["БП Джаз"]
+
+    status, g = _call(app, "GET", f"/api/teacher/bills/group/GRP-0001?ym={YM}")
+    assert status == 200 and [(s["name"], s["total"]) for s in g["students"]] == [("Иванов Иван", 4800), ("Петрова Анна", 800)]
+
+    status, b = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")
+    assert status == 200 and b["total"] == 4800 and b["rest"] == 4800
+    assert _call(app, "GET", "/api/teacher/bills/group/GRP-0404")[0] == 404
+
+
+def test_bills_send_needs_bot(api, monkeypatch):
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    assert _call(app, "POST", f"/api/teacher/bills/student/STU-0001/send?ym={YM}")[0] == 503   # бот не передан
+    status, r = _call(app, "POST", f"/api/teacher/bills/student/STU-0001/send?ym={YM}", bot=FakeBot())
+    assert status == 200 and r["recipients"] >= 1                     # у Иванова привязан родитель

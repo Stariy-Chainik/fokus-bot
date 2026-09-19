@@ -45,7 +45,7 @@ function lastPeriods(n) { const out = []; const d = new Date(); for (let i = 0; 
 
 /* ── UI-кирпичи ──────────────────────────────────────────────────────── */
 const attr = (go, p) => go ? `data-go="${go}" data-p='${esc(JSON.stringify(p || {}))}'` : '';
-const cell = ({ lead, t, s, r, go, p, plain, cls = '' }) => `<button class="cell ${lead === undefined ? 'nolead' : ''} ${go ? '' : 'static'} ${cls}" ${attr(go, p)}>${lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : ''}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
+const cell = ({ lead, t, s, r, go, p, act, plain, cls = '' }) => `<button class="cell ${lead === undefined ? 'nolead' : ''} ${go || act ? '' : 'static'} ${cls}" ${go ? attr(go, p) : act ? `data-act="${act}" data-p='${esc(JSON.stringify(p || {}))}'` : ''}>${lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : ''}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
 const list = rows => `<div class="list">${rows.join('')}</div>`;
 const pill = (txt, kind = 'mute') => `<span class="pill ${kind}">${txt}</span>`;
 const btn = (txt, act, p = {}, kind = '') => `<button class="btn ${kind}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${txt}</button>`;
@@ -57,12 +57,13 @@ const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tal
 /* ── навигация ───────────────────────────────────────────────────────── */
 const TABS = {
   admin: [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.school', 'Школа', 'teacher'], ['a.finance', 'Финансы', 'chart']],
-  teacher: [['t.home', 'Сводка', 'home'], ['t.lessons', 'Занятия', 'card'], ['t.groups', 'Группы', 'users'], ['t.money', 'Зарплата', 'chart']],
+  teacher: [['t.home', 'Сводка', 'home'], ['t.lessons', 'Занятия', 'card'], ['t.groups', 'Группы', 'users'], ['t.diary', 'Дневник', 'book'], ['t.money', 'Зарплата', 'chart']],
 };
 const ICON = {
   home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   teacher: '<circle cx="12" cy="7" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0M3 3h4M17 3h4"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M8 7h7M8 11h7"/>',
 };
 const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];

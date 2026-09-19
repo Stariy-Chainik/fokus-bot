@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from bot.models import (
     Branch, Client, Group, Lesson, Student, StudentGroup, StudentPeriodPayment, Teacher,
     TeacherGroup, TeacherPeriodSubmission, User,
+    TrainingEntry, AthleteTask,
 )
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus, StudentGroupTier
 from bot.utils.attendees import attendee_ids
@@ -829,3 +830,73 @@ class SubOverrideRepoFake:
         before = len(self.items)
         self.items = [o for o in self.items if (o.group_id, o.period_month, o.student_id) != (group_id, period_month, sid)]
         return len(self.items) < before
+
+
+class TrainingEntryRepoFake:
+    """Дневник спортсмена в памяти: записи и оценки (bot/repositories/training_entry_repo.py)."""
+
+    def __init__(self, entries=()) -> None:
+        self.items = list(entries)
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_id(self, entry_id):
+        return next((e for e in self.items if e.entry_id == entry_id), None)
+
+    async def get_for_student(self, student_id):
+        return [e for e in self.items if e.student_id == student_id]
+
+    async def add(self, student_id, date, minutes, topics, task_ids, comment=""):
+        entry = TrainingEntry(entry_id=f"TE-{len(self.items) + 1:06d}", student_id=student_id, date=date,
+                              minutes=minutes, topics=list(topics), task_ids=list(task_ids), comment=comment,
+                              created_at=f"{date} 12:00:00")
+        self.items.append(entry)
+        return entry
+
+    async def set_grade(self, entry_id, grade, grade_comment, graded_by):
+        entry = await self.get_by_id(entry_id)
+        if entry is None:
+            return None
+        entry.grade, entry.grade_comment, entry.graded_by = grade, grade_comment, graded_by
+        return entry
+
+    async def delete(self, entry_id):
+        before = len(self.items)
+        self.items = [e for e in self.items if e.entry_id != entry_id]
+        return len(self.items) < before
+
+
+class AthleteTaskRepoFake:
+    """Задания педагога спортсмену в памяти (bot/repositories/athlete_task_repo.py)."""
+
+    def __init__(self, tasks=()) -> None:
+        self.items = list(tasks)
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_id(self, task_id):
+        return next((t for t in self.items if t.task_id == task_id), None)
+
+    async def get_for_student(self, student_id, only_open=False):
+        return [t for t in self.items if t.student_id == student_id and (not only_open or t.status == "open")]
+
+    async def add(self, student_id, teacher_id, exercise, minutes, comment="", source="teacher"):
+        task = AthleteTask(task_id=f"TK-{len(self.items) + 1:06d}", student_id=student_id, teacher_id=teacher_id,
+                           exercise=exercise, minutes=minutes, comment=comment, source=source, created_at="2026-09-01 12:00:00")
+        self.items.append(task)
+        return task
+
+    async def close(self, task_id):
+        task = await self.get_by_id(task_id)
+        if task is not None:
+            task.status, task.closed_at = "closed", "2026-09-20 12:00:00"
+        return task
+
+
+def mk_entry(entry_id: str, student_id: str, date: str, minutes: int = 60,
+             topics=(), grade=None, comment: str = "", task_ids=()) -> TrainingEntry:
+    return TrainingEntry(entry_id=entry_id, student_id=student_id, date=date, minutes=minutes,
+                         topics=list(topics), task_ids=list(task_ids), comment=comment,
+                         created_at=f"{date} 12:00:00", grade=grade)
