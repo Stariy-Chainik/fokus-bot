@@ -103,7 +103,9 @@ def build_group_attendees_csv(
 
     PER_VISIT-группа → расширенный формат со снапшотом тарифа: по tier
     ученика (default FULL) берутся duration/price short|full из группы;
-    tier "trial" — пробное занятие: длительность полная, сумма 0.
+    tier "trial" — пробное занятие: длительность полная, сумма 0. Если в группе
+    короткого тарифа нет (price_short = 0), тариф SHORT из карточки ученика не
+    применяется — иначе занятие молча стало бы бесплатным.
     Иначе — старый CSV из id, либо None при пустом списке.
     """
     if attendee_ids and group is not None and group.billing_mode == GroupBillingMode.PER_VISIT:
@@ -113,7 +115,7 @@ def build_group_attendees_csv(
             if tier == TRIAL_TIER:  # пробное: пришёл, но не платит
                 dur = group.duration_full
                 amt = 0
-            elif tier == StudentGroupTier.SHORT.value:
+            elif tier == StudentGroupTier.SHORT.value and group.price_short > 0:
                 dur = group.duration_short
                 amt = group.price_short
             else:

@@ -150,3 +150,10 @@ def test_visit_tier_cycles_to_trial():
     assert next_visit_tier("full", has_short=False) == "trial"
     assert next_visit_tier("trial", has_short=False) == "full"
     assert next_visit_tier("short", has_short=False) == "trial"   # тариф карточки, которого нет в группе
+
+
+def test_short_tier_ignored_when_group_has_no_short_price():
+    """Группа только с полным тарифом: ученик с карточным SHORT платит полную цену, а не 0 ₽."""
+    group = _per_visit_group(price_short=0, duration_short=0)
+    assert build_group_attendees_csv(group, ["STU-1"], {"STU-1": "short"}) == "STU-1:60:700"
+    assert build_group_attendees_csv(group, ["STU-1"], {"STU-1": "trial"}) == "STU-1:60:0"
