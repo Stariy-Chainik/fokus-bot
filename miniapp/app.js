@@ -212,15 +212,44 @@ SCREENS['a.profit'] = async ({ ym }) => {
   return { title: `Прибыль за ${fmon(ym)}`, html: `
     ${monthChips('a.profit', ym, {})}<div class="chips" style="margin-top:-6px"><button class="chip" data-go="a.profit.day" data-p='{}'>📅 За день…</button></div>
     ${p.totals.isEmpty ? '<div class="empty">Занятий нет</div>' : `
-    <div class="kpis">${kpi(fmt(p.totals.totalIncome), 'выручка')}${kpi(fmt(p.totals.profit), 'прибыль', 'ok')}</div>
+    <div class="kpis">${kpi(fmt(p.totals.totalIncome), 'выручка', '', 'a.profit.income', { ym })}${kpi(fmt(p.totals.profit), 'прибыль', 'ok', 'a.profit.profit', { ym })}</div>
     <div class="eyebrow">Педагоги</div><div class="list">${p.rows.map(r => profitRow(r, ym)).join('')}</div>
     ${p.subscriptions.length ? `<div class="eyebrow">Абонементы</div>${list(p.subscriptions.map(x => cell({ t: esc(x.groupName), s: plural(x.students, ['ученик', 'ученика', 'учеников']), r: `<b>${fmt(x.income)}</b>`, go: 'a.profit.sub', p: { gid: x.groupId, ym } })))}` : ''}`}
     <div class="eyebrow">Прочие доходы и расходы</div>${list(p.finance.map(f => `<div class="cell static"><span class="lead plain">${f.kind === 'income' ? '🏆' : '📉'}</span><span><div class="t">${esc(f.title)}</div></span><span class="r"><b style="color:${f.kind === 'income' ? 'var(--ok)' : 'var(--bad)'}">${f.kind === 'income' ? '+' : '−'}${fmt(f.amount)}</b> <button class="chip" style="padding:2px 8px;margin-left:6px" data-act="delFin" data-p='${esc(JSON.stringify({ id: f.id }))}' aria-label="Удалить">🗑</button></span></div>`).concat([`<div class="cell static"><span><div class="chips" style="margin:0"><button class="chip" data-act="finForm" data-p='${esc(JSON.stringify({ ym, kind: 'income' }))}'>➕ Доход</button><button class="chip" data-act="finForm" data-p='${esc(JSON.stringify({ ym, kind: 'expense' }))}'>➕ Расход</button></div></span><span></span></div>`]))}
     ${p.totals.isEmpty ? '' : totalsCard(p.totals)}` };
 };
+const moneyRow = (label, v, cls = '', sub = false) => `<div style="display:flex;justify-content:space-between;gap:8px${sub ? ';padding-left:14px' : ''}" class="${sub ? 'hint' : ''}"><span>${label}</span><b class="money" style="color:${cls || 'inherit'}">${v}</b></div>`;
+const teacherIncomeCell = (r, ym) => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `${r.groupLessons ? `👥 ${r.groupLessons} ` : ''}${r.individualLessons ? `👤 ${r.individualLessons}` : ''}${r.rent ? ` · 🏟 аренда зала ${fmt(r.rent)}` : ''}`, r: `<b>${fmt(r.income)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } });
+const dayCells = (days, sub) => days.length ? list(days.map(d => cell({ lead: String(+d.date.slice(8)), t: fdate(d.date), s: sub(d), r: `<b>${fmt(sub === dayIncomeSub ? d.income : d.profit)}</b>`, go: 'a.profit.day', p: { date: d.date } }))) : '<div class="empty">Занятий нет</div>';
+const dayIncomeSub = d => plural(d.lessons, ['занятие', 'занятия', 'занятий']) + (d.rent ? ` · аренда ${fmt(d.rent)}` : '');
+const dayProfitSub = d => `выручка ${fmt(d.income)} − зарплата ${fmt(d.salary)}`;
+SCREENS['a.profit.income'] = async ({ ym }) => {
+  const b = await api(`/profit/breakdown?ym=${ym}`); const t = b.totals;
+  return { title: `Выручка за ${fmon(ym)}`, html: `
+    <div class="card pad money" style="display:grid;gap:6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em">${fmt(t.totalIncome)}</div>
+      ${moneyRow('Занятия (оплата по педагогам)', fmt(t.lessonIncome))}${t.rentIncome ? moneyRow(`в т.ч. аренда зала, ${plural(t.rentLessons, ['занятие', 'занятия', 'занятий'])}`, fmt(t.rentIncome), '', true) : ''}
+      ${moneyRow('Абонементы', fmt(t.subscriptionIncome))}${moneyRow('Прочие доходы', fmt(t.manualIncome))}</div>
+    <div class="eyebrow">Занятия по педагогам</div>${b.rows.length ? list(b.rows.map(r => teacherIncomeCell(r, ym))) : '<div class="empty">Занятий нет</div>'}
+    ${b.subscriptions.length ? `<div class="eyebrow">Абонементы</div>${list(b.subscriptions.map(x => cell({ t: esc(x.groupName), s: plural(x.students, ['ученик', 'ученика', 'учеников']), r: `<b>${fmt(x.income)}</b>`, go: 'a.profit.sub', p: { gid: x.groupId, ym } })))}` : ''}
+    ${b.finance.some(f => f.kind === 'income') ? `<div class="eyebrow">Прочие доходы</div>${list(b.finance.filter(f => f.kind === 'income').map(f => cell({ lead: '🏆', plain: true, t: esc(f.title), r: `<b>${fmt(f.amount)}</b>` })))}` : ''}
+    <div class="eyebrow">Занятия по дням</div>${dayCells(b.days, dayIncomeSub)}
+    <p class="hint" style="margin-top:8px">Абонементы и прочие доходы относятся к месяцу целиком и по дням не делятся.</p>` };
+};
+SCREENS['a.profit.profit'] = async ({ ym }) => {
+  const b = await api(`/profit/breakdown?ym=${ym}`); const t = b.totals;
+  return { title: `Прибыль за ${fmon(ym)}`, html: `
+    <div class="card pad money" style="display:grid;gap:6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;color:var(--ok)">${fmt(t.profit)}</div>
+      ${moneyRow('Выручка', fmt(t.totalIncome))}${moneyRow('занятия', fmt(t.lessonIncome), '', true)}${moneyRow('абонементы', fmt(t.subscriptionIncome), '', true)}${moneyRow('прочие доходы', fmt(t.manualIncome), '', true)}
+      ${moneyRow('− Зарплата педагогов', fmt(t.salary), 'var(--bad)')}${t.ownerIncome ? moneyRow('👑 руководитель остаётся в прибыли', fmt(t.ownerIncome), '', true) : ''}
+      ${moneyRow('− Расходы', fmt(t.manualExpenses), 'var(--bad)')}</div>
+    <div class="eyebrow">Зарплата по педагогам</div>${b.rows.length ? list(b.rows.map(r => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `выручка ${fmt(r.income)} → прибыль ${fmt(r.profit)}`, r: r.owner ? pill('в прибыли', 'warn') : `<b style="color:var(--bad)">− ${fmt(r.salary)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } }))) : '<div class="empty">Занятий нет</div>'}
+    ${b.finance.some(f => f.kind === 'expense') ? `<div class="eyebrow">Расходы</div>${list(b.finance.filter(f => f.kind === 'expense').map(f => cell({ lead: '📉', plain: true, t: esc(f.title), r: `<b style="color:var(--bad)">− ${fmt(f.amount)}</b>` })))}` : ''}
+    <div class="eyebrow">Прибыль по дням</div>${dayCells(b.days, dayProfitSub)}
+    <p class="hint" style="margin-top:8px">По дням учтены только занятия. Абонементы, прочие доходы и расходы добавляются к месяцу целиком.</p>` };
+};
 SCREENS['a.profit.day'] = async ({ date }) => {
   const days = []; for (let i = 0; i < 10; i++) { const x = new Date(); x.setDate(x.getDate() - i); days.push(x.toISOString().slice(0, 10)); }
-  const d = date || days[0];
+  const d = date || days[0]; if (!days.includes(d)) days.unshift(d);
   const p = await api(`/profit/day?date=${d}`);
   return { title: 'Прибыль за день', html: `<div class="chips">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.profit.day" data-p='${esc(JSON.stringify({ date: x }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div><div class="h2">${fdate(d)}</div>${p.rows.length ? `<div class="list">${p.rows.map(r => profitRow(r, d)).join('')}</div>${totalsCard(p.totals)}<p class="hint" style="margin-top:8px">За день — только занятия; абонементы и ручные записи считаются по месяцу.</p>` : '<div class="empty">Тарифицируемых занятий нет</div>'}` };
 };

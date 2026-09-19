@@ -113,16 +113,26 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
                       "total": sum(d.closed_total for d in targets)})
 
     # ── прибыль ──────────────────────────────────────────────────────────
-    async def profit(request: web.Request, user) -> web.Response:
-        period = request.query.get("ym") or current_period()
-        s = await profit_service.get_month_summary(period)
-        return _json({
+    def _month_payload(period: str, s) -> dict:
+        return {
             "period": period, "rows": _profit_rows(s),
             "subscriptions": [{"groupId": x.group_id, "groupName": x.group_name, "students": x.billed_students, "income": x.income}
                               for x in s.subscription_rows],
             "finance": [{"id": e.entry_id, "kind": e.kind, "title": e.title, "amount": e.amount} for e in s.finance_entries],
             "totals": _profit_totals(s),
-        })
+        }
+
+    async def profit(request: web.Request, user) -> web.Response:
+        period = request.query.get("ym") or current_period()
+        return _json(_month_payload(period, await profit_service.get_month_summary(period)))
+
+    async def profit_breakdown(request: web.Request, user) -> web.Response:
+        """Откуда сложились выручка и прибыль месяца: составляющие + занятия по дням."""
+        period = request.query.get("ym") or current_period()
+        payload = _month_payload(period, await profit_service.get_month_summary(period))
+        payload["days"] = [{"date": d.date, "income": d.income, "salary": d.salary, "rent": d.rent, "ownerIncome": d.owner_income,
+                            "profit": d.profit, "lessons": d.lessons} for d in await profit_service.get_day_breakdown(period)]
+        return _json(payload)
 
     async def profit_day(request: web.Request, user) -> web.Response:
         day = request.query.get("date") or date.today().isoformat()
@@ -330,7 +340,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
     routes = [
         ("POST", "/debtors/remind", debtors_remind),
         ("GET", "/profit", profit), ("GET", "/profit/day", profit_day), ("GET", "/profit/teacher/{tid}", profit_teacher),
-        ("GET", "/profit/subscription/{gid}", profit_subscription),
+        ("GET", "/profit/subscription/{gid}", profit_subscription), ("GET", "/profit/breakdown", profit_breakdown),
         ("POST", "/finance", finance_add), ("DELETE", "/finance/{eid}", finance_delete),
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),

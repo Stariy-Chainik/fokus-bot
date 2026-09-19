@@ -61,6 +61,21 @@ class SubscriptionProfitRow:
 
 
 @dataclass(frozen=True)
+class DayProfitRow:
+    """Занятия одного дня: выручка, зарплата, прибыль (абонементы и ручные записи — по месяцу)."""
+    date: str
+    income: int
+    salary: int
+    lessons: int
+    rent: int = 0
+    owner_income: int = 0
+
+    @property
+    def profit(self) -> int:
+        return self.income - self.salary
+
+
+@dataclass(frozen=True)
 class ProfitSummary:
     period: str
     teacher_rows: tuple[TeacherProfitRow, ...] = ()
@@ -284,6 +299,20 @@ class ProfitService:
             if row is not None:
                 rows.append(row)
         return ProfitSummary(period=period, teacher_rows=tuple(rows))
+
+    async def get_day_breakdown(self, period: str) -> tuple[DayProfitRow, ...]:
+        """Выручка/зарплата/прибыль по дням месяца — только занятия, тем же расчётом, что экран «за день»."""
+        days = sorted({ls.date for ls in await self._lesson_repo.get_all() if ls.date.startswith(period)})
+        rows: list[DayProfitRow] = []
+        for day in days:
+            s = await self.get_lesson_summary(day)
+            if not s.teacher_rows:
+                continue
+            rows.append(DayProfitRow(
+                date=day, income=s.lesson_income, salary=s.salary, rent=s.rent_income, owner_income=s.owner_income,
+                lessons=sum(r.group_lessons + r.individual_lessons for r in s.teacher_rows),
+            ))
+        return tuple(rows)
 
     async def get_month_summary(self, period: str) -> ProfitSummary:
         lesson_summary = await self.get_lesson_summary(period)

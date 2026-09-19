@@ -138,3 +138,15 @@ def test_profit_subscription_group_roster_and_payments(api):
     assert status == 200 and d["accrued"] == 0 and [x["status"] for x in d["students"]] == ["exempt", "exempt"]
     assert _call(app, "GET", f"/api/admin/profit/subscription/GRP-0001?ym={YM}")[0] == 404  # группа по посещению
     assert _call(app, "GET", f"/api/admin/profit/subscription/GRP-0404?ym={YM}")[0] == 404
+
+
+def test_profit_breakdown_explains_income_and_profit_by_days(api):
+    app, dp = api
+    status, b = _call(app, "GET", f"/api/admin/profit/breakdown?ym={YM}")
+    assert status == 200
+    assert [(d["date"][8:], d["income"], d["salary"], d["profit"], d["lessons"]) for d in b["days"]] == [
+        ("03", 2000, 1500, 500, 1), ("10", 2000, 1500, 500, 1), ("12", 1600, 1333, 267, 1),
+    ]
+    assert sum(d["income"] for d in b["days"]) == b["totals"]["lessonIncome"] == 5600
+    assert sum(d["profit"] for d in b["days"]) == b["totals"]["profit"] == 1267
+    assert [r["name"] for r in b["rows"]] == ["Река Станислав"] and b["subscriptions"] == [] and b["finance"] == []
