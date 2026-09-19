@@ -10,13 +10,18 @@ function applyTheme() { document.documentElement.dataset.theme = tg && tg.colorS
 applyTheme(); if (tg) tg.onEvent('themeChanged', applyTheme);
 
 /* ── API ─────────────────────────────────────────────────────────────── */
+/* Роль задаёт и префикс API, и набор вкладок: кабинет администратора (a.*) или педагога (t.*). */
+let ROLE = 'admin';
+const API_BASE = { admin: '/api/admin', teacher: '/api/teacher' };
+const ROLE_TITLE = { admin: 'Администратор', teacher: 'Педагог' };
+const ROLE_HOME = { admin: 'a.home', teacher: 't.home' };
 class ApiError extends Error { constructor(status, code) { super(code || `HTTP ${status}`); this.status = status; this.code = code; } }
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Accept': 'application/json' };
   if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
   else if (DEV) headers.Authorization = 'dev';
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const resp = await fetch('/api/admin' + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const resp = await fetch(API_BASE[ROLE] + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
   if (!resp.ok) throw new ApiError(resp.status, data && data.error);
   return data;
@@ -50,7 +55,10 @@ const restPill = x => x.total === 0 ? pill('нет начислений') : x.re
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
 /* ── навигация ───────────────────────────────────────────────────────── */
-const TABS = [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.school', 'Школа', 'teacher'], ['a.finance', 'Финансы', 'chart']];
+const TABS = {
+  admin: [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.school', 'Школа', 'teacher'], ['a.finance', 'Финансы', 'chart']],
+  teacher: [['t.home', 'Сводка', 'home'], ['t.lessons', 'Занятия', 'card'], ['t.groups', 'Группы', 'users'], ['t.money', 'Зарплата', 'chart']],
+};
 const ICON = {
   home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -546,7 +554,7 @@ async function render() {
   const seq = ++renderSeq; const s = cur();
   const content = document.getElementById('content');
   const rootN = state.stack[0].n;
-  document.getElementById('tabs').innerHTML = TABS.map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><svg viewBox="0 0 24 24">${ICON[ic]}</svg>${label}</button>`).join('');
+  document.getElementById('tabs').innerHTML = TABS[ROLE].map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><svg viewBox="0 0 24 24">${ICON[ic]}</svg>${label}</button>`).join('');
   const deep = state.stack.length > 1;
   document.getElementById('back').classList.toggle('on', deep && !tg);
   if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
@@ -555,7 +563,7 @@ async function render() {
   try { scr = await SCREENS[s.n](s.p || {}); }
   catch (e) { scr = { title: 'Ошибка', html: `<div class="card pad"><div style="font-weight:700">${esc(errText(e))}</div></div><div style="margin-top:12px">${btn('Повторить', 'retry', {}, 'sec')}</div>` }; }
   if (seq !== renderSeq) return;
-  document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">Администратор</span>`;
+  document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">${ROLE_TITLE[ROLE]}</span>`;
   content.innerHTML = `<div class="fade">${scr.html}</div>`; content.scrollTop = 0;
   const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4'); const qid = q ? q.id : null; const qkey = qid || 'q';
   if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
@@ -578,9 +586,22 @@ document.addEventListener('click', e => {
 document.getElementById('back').addEventListener('click', () => { closeSheet(); back(); });
 if (tg) { try { tg.BackButton.onClick(() => { closeSheet(); back(); }); } catch (_) { /* нет BackButton */ } }
 
+ACT.switchRole = async ({ to }) => {
+  const prev = ROLE; ROLE = to;
+  try { state.me = await api('/me'); state.ui = {}; root(ROLE_HOME[ROLE]); }
+  catch (e) { ROLE = prev; toast(errText(e)); }
+};
+
 (async () => {
-  try { state.me = await api('/me'); render(); }
+  try { state.me = await api('/me'); }
   catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 403) return fail(e);
+    ROLE = 'teacher';                       // не администратор — пробуем кабинет педагога
+    try { state.me = await api('/me'); } catch (e2) { return fail(e2); }
+  }
+  state.stack = [{ n: ROLE_HOME[ROLE] }];
+  render();
+  function fail(e) {
     document.getElementById('tabs').innerHTML = '';
     document.getElementById('content').innerHTML = `<div class="card pad" style="margin-top:20px"><div style="font-weight:800;font-size:16px">Нет доступа</div><div class="hint" style="margin-top:6px">${esc(errText(e))}</div></div>`;
   }

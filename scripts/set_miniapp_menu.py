@@ -1,10 +1,11 @@
-"""Кнопка меню «Кабинет» (Mini App) в чатах администраторов бота.
+"""Кнопка меню «Кабинет» (Mini App) в чатах сотрудников бота.
 
-    .venv/bin/python scripts/set_miniapp_menu.py            # поставить всем админам из листа users
-    .venv/bin/python scripts/set_miniapp_menu.py --reset     # вернуть стандартное меню
+    .venv/bin/python scripts/set_miniapp_menu.py            # админам и педагогам из листа users
+    .venv/bin/python scripts/set_miniapp_menu.py --admins   # только админам
+    .venv/bin/python scripts/set_miniapp_menu.py --reset    # вернуть стандартное меню
 
-Ставится через Bot API setChatMenuButton для каждого admin-чата отдельно — у родителей и
-педагогов меню не меняется. URL берётся из MINIAPP_URL.
+Ставится через Bot API setChatMenuButton для каждого чата отдельно — у родителей меню
+не меняется. URL берётся из MINIAPP_URL, роль внутри кабинета определяет сервер.
 """
 from __future__ import annotations
 
@@ -26,20 +27,22 @@ from bot.repositories.user_repo import UserRepository  # noqa: E402
 from config.settings import settings  # noqa: E402
 
 
-async def main(reset: bool) -> None:
+async def main(reset: bool, admins_only: bool) -> None:
     if not reset and not settings.miniapp_url:
         print("MINIAPP_URL пуст — нечего ставить", file=sys.stderr)
         sys.exit(2)
-    admins = await UserRepository(SheetsClient(settings), settings.sheet_users).get_admins()
+    users = await UserRepository(SheetsClient(settings), settings.sheet_users).get_all()
+    staff = [u for u in users if u.is_admin or (not admins_only and u.teacher_id)]
     bot = Bot(settings.bot_token)
     try:
-        for admin in admins:
+        for user in staff:
+            role = "админ" if user.is_admin else "педагог"
             button = MenuButtonDefault() if reset else MenuButtonWebApp(text="Кабинет", web_app=WebAppInfo(url=settings.miniapp_url))
             try:
-                await bot.set_chat_menu_button(chat_id=admin.tg_id, menu_button=button)
-                print(f"{admin.tg_id}: {'сброшено' if reset else 'кнопка «Кабинет» → ' + settings.miniapp_url}")
+                await bot.set_chat_menu_button(chat_id=user.tg_id, menu_button=button)
+                print(f"{user.tg_id} ({role}): {'сброшено' if reset else 'кнопка «Кабинет» → ' + settings.miniapp_url}")
             except Exception as exc:  # чат ещё не начат с ботом и т. п.
-                print(f"{admin.tg_id}: ошибка — {exc}")
+                print(f"{user.tg_id} ({role}): ошибка — {exc}")
     finally:
         await bot.session.close()
 
@@ -47,4 +50,6 @@ async def main(reset: bool) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--reset", action="store_true")
-    asyncio.run(main(parser.parse_args().reset))
+    parser.add_argument("--admins", action="store_true", help="только админам")
+    args = parser.parse_args()
+    asyncio.run(main(args.reset, args.admins))

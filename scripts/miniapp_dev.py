@@ -24,7 +24,9 @@ from aiohttp import web  # noqa: E402
 from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
 
 from bot.__main__ import _build_dispatcher  # noqa: E402
-from bot.api import register_admin_api, register_miniapp_api, register_miniapp_static  # noqa: E402
+from bot.api import (  # noqa: E402
+    register_admin_api, register_miniapp_api, register_miniapp_static, register_teacher_api,
+)
 from bot.services import rate_history  # noqa: E402
 from config.settings import settings  # noqa: E402
 
@@ -39,6 +41,7 @@ async def main(port: int) -> None:
     app = web.Application()
     register_miniapp_api(app, dp)
     register_admin_api(app, dp)
+    register_teacher_api(app, dp)
     register_miniapp_static(app)
     runner = web.AppRunner(app)
     await runner.setup()

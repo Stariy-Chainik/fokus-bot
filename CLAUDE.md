@@ -53,7 +53,7 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
    - Telegram: `/webhook/{bot_token}` if `WEBHOOK_URL` is set, otherwise polling.
    - YooKassa: `/yookassa-webhook` always registered on `PAYMENT_WEBHOOK_PORT` (default 8081).
 
-### Telegram Mini App (кабинет администратора — этап 1)
+### Telegram Mini App (кабинеты администратора и педагога)
 
 Фронт `miniapp/` (`index.html` + `app.js`, без сборки) раздаётся aiohttp-сервером бота по `/app/`
 ([bot/api/static.py](bot/api/static.py)); API `/api/admin/*` — [bot/api/admin.py](bot/api/admin.py), тонкий слой над
@@ -64,6 +64,13 @@ Telegram-поллинга: `MINIAPP_DEV_TG_ID=<tg_id> .venv/bin/python scripts/m
 http://localhost:8090/app/?dev=1 (данные — живая таблица). Тесты — `tests/test_admin_api.py`. План этапов,
 контракт API и что нужно для запуска в Telegram (домен + nginx + BotFather) — [docs/MINIAPP_PLAN.md](docs/MINIAPP_PLAN.md).
 Прототип всех кабинетов — `web/miniapp-prototype.html`.
+
+**Кабинет педагога** — `bot/api/teacher.py` (`/api/teacher/*`) + `miniapp/teacher.js` (экраны `t.*`):
+свои занятия (день/месяц, карточка, удаление), запись занятия общим с админом мастером
+(`bot/api/record.py`, но `bypass_period_lock=False`), мои группы с составом/парами/солистами,
+карточка ученика (только видимые через `TeacherVisibilityService`), зарплата по строкам
+`SalaryService` и сдача периода (правило «с 25-го»). Роль определяется на входе: `/api/admin/me`,
+при 403 — `/api/teacher/me`; у кого обе роли — переключатель на сводке. Тесты — `tests/test_teacher_api.py`.
 
 ### MAX front (кабинет родителя в мессенджере MAX)
 

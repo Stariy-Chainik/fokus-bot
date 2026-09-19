@@ -181,9 +181,12 @@ def _register_payment_webhook(app, dp: Dispatcher, bot: Bot) -> None:
 
 def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
     """Регистрирует HTTP API личного кабинета (Telegram Mini App) и его фронт (/app/)."""
-    from bot.api import register_admin_api, register_miniapp_api, register_miniapp_static
+    from bot.api import (
+        register_admin_api, register_miniapp_api, register_miniapp_static, register_teacher_api,
+    )
     register_miniapp_api(app, dp, bot)
     register_admin_api(app, dp, bot)
+    register_teacher_api(app, dp)
     register_miniapp_static(app)
 
 
