@@ -6,6 +6,7 @@ from .ids import (
 from .dates import now_str, format_date_display, period_month_from_date
 from .attendees import (
     AttendeeEntry, parse_attendees, serialize_attendees, attendee_ids,
+    free_attendee_label, has_amount_snapshots,
     build_group_attendees_csv,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "generate_submission_id", "generate_branch_id", "generate_group_id",
     "now_str", "format_date_display", "period_month_from_date",
     "AttendeeEntry", "parse_attendees", "serialize_attendees", "attendee_ids",
+    "free_attendee_label", "has_amount_snapshots",
     "build_group_attendees_csv",
 ]

@@ -1,6 +1,7 @@
 """API кабинета администратора: занятия за день, карточка, удаление с обходом замка периода."""
 import pytest
 
+from bot.models.enums import GroupBillingMode, LessonType
 from tests.fakes import mk_lesson
 from tests.test_admin_api import YM, _call, make_api
 
@@ -37,3 +38,17 @@ def test_delete_lesson_bypasses_period_lock(api):
     assert _call(app, "DELETE", "/api/admin/lessons/LES-OLD")[0] == 200
     assert _call(app, "GET", "/api/admin/lessons?date=2026-08-20")[1]["lessons"] == []
     assert _call(app, "DELETE", "/api/admin/lessons/LES-OLD")[0] == 404
+
+
+def test_lesson_card_says_why_a_visit_costs_nothing(api):
+    app, dp = api
+    teacher = dp["teacher_repo"].items[0]
+    # Группа «по посещению»: ноль у пришедшего — пробное занятие, а не абонемент.
+    dp["lesson_repo"].items.append(mk_lesson("LES-FREE", teacher, f"{YM}-14", duration=60, lesson_type=LessonType.GROUP,
+                                             attendees="STU-0001:60:800,STU-0002:60:0", group_id="GRP-0001"))
+    status, d = _call(app, "GET", "/api/admin/lessons/LES-FREE")
+    assert status == 200 and d["groupMode"] == "per_visit" and d["freeLabel"] == "пробное"
+    assert [(a["name"], a["amount"]) for a in d["attendees"]] == [("Иванов Иван", 800), ("Петрова Анна", 0)]
+
+    dp["group_repo"].items[0].billing_mode = GroupBillingMode.SUBSCRIPTION
+    assert _call(app, "GET", "/api/admin/lessons/LES-FREE")[1]["freeLabel"] == "абонемент"

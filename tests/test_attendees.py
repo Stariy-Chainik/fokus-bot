@@ -5,7 +5,8 @@
 from bot.models import Group
 from bot.models.enums import GroupBillingMode
 from bot.utils.attendees import (
-    AttendeeEntry, parse_attendees, serialize_attendees, attendee_ids,
+    AttendeeEntry, free_attendee_label, has_amount_snapshots,
+    parse_attendees, serialize_attendees, attendee_ids,
     build_group_attendees_csv,
 )
 
@@ -112,3 +113,25 @@ def test_build_empty_attendees_returns_none():
 def test_build_unknown_tier_value_falls_back_to_full():
     csv = build_group_attendees_csv(_per_visit_group(), ["STU-1"], {"STU-1": "garbage"})
     assert csv == "STU-1:60:700"
+
+
+def _group(mode: GroupBillingMode) -> Group:
+    return Group(group_id="GRP-0008", branch_id="BRN-0001", name="ЮБ сад ХГ", billing_mode=mode,
+                 price_short=500, duration_short=35, price_full=850, duration_full=60)
+
+
+def test_free_label_explains_why_nothing_is_charged():
+    # По посещениям платит пришедший, значит ноль с записанными суммами — пробное занятие.
+    assert free_attendee_label(_group(GroupBillingMode.PER_VISIT)) == "пробное"
+    # Старый формат CSV без сумм — сумма не записана, а не «бесплатно».
+    assert free_attendee_label(_group(GroupBillingMode.PER_VISIT), amounts_recorded=False) == "без суммы"
+    assert free_attendee_label(_group(GroupBillingMode.SUBSCRIPTION)) == "абонемент"
+    assert free_attendee_label(_group(GroupBillingMode.SUBSCRIPTION), amounts_recorded=False) == "абонемент"
+    assert free_attendee_label(_group(GroupBillingMode.NONE)) == "без оплаты"
+    assert free_attendee_label(None) == "абонемент"  # группа не найдена — как было
+
+
+def test_has_amount_snapshots_distinguishes_formats():
+    assert has_amount_snapshots("STU-0001:60:850,STU-0002:60:0") is True
+    assert has_amount_snapshots("STU-0001,STU-0002") is False
+    assert has_amount_snapshots(None) is False and has_amount_snapshots("") is False

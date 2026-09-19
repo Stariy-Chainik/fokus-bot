@@ -334,7 +334,7 @@ SCREENS['a.lesson'] = async ({ id }) => {
   const l = await api(`/lessons/${id}`);
   return { title: 'Занятие', html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(l.type === 'group' ? l.groupName || 'Группа' : l.attendees.map(a => a.name).join(' + '))}</div><div class="hint">${fdate(l.date)} · ${l.durationMin} мин · ${esc(l.teacherName)}${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>${l.locked ? '<div style="margin-top:8px">' + pill('🔒 период сдан', 'mute') + '</div>' : ''}</div>
-    ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({ lead: initials(a.name), t: esc(a.name), r: a.amount === null ? '' : a.amount ? `<b>${fmt(a.amount)}</b>` : 'абонемент', go: 'a.student', p: { id: a.studentId } })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
+    ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({ lead: initials(a.name), t: esc(a.name), r: a.amount === null ? '' : a.amount ? `<b>${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'), go: 'a.student', p: { id: a.studentId } })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
     <div class="card" style="margin-top:10px"><div class="total"><span>Зарплата педагога</span><span class="big">${fmt(l.earned)}</span></div></div>
     <div style="margin-top:12px">${btn(l.locked ? '🗑 Удалить (период сдан)' : '🗑 Удалить занятие', 'delLesson', { id, locked: l.locked }, 'danger')}</div>
     <p class="hint" style="margin-top:8px">Правка полей не поддерживается — как в боте: удалить и отметить заново.</p>` };

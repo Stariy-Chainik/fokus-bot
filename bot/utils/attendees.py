@@ -60,6 +60,26 @@ def serialize_attendees(entries: list[AttendeeEntry]) -> str:
     return ",".join(f"{e.student_id}:{e.duration_min}:{e.amount}" for e in entries)
 
 
+def free_attendee_label(group: "Group | None", amounts_recorded: bool = True) -> str:
+    """Подпись участнику занятия с amount=0 — почему с него ничего не начислено.
+
+    Абонемент: занятие входит в месячную оплату. Группа без оплаты: не тарифицируется.
+    По посещениям платит пришедший, поэтому ноль там — бесплатное (пробное) занятие;
+    но если в занятии вообще нет сумм (старый формат CSV), сумма просто не записана.
+    """
+    mode = group.billing_mode if group is not None else None
+    if mode == GroupBillingMode.NONE:
+        return "без оплаты"
+    if mode == GroupBillingMode.PER_VISIT:
+        return "пробное" if amounts_recorded else "без суммы"
+    return "абонемент"
+
+
+def has_amount_snapshots(raw: str | None) -> bool:
+    """В строке посещаемости записаны суммы (новый формат `id:мин:₽`), а не только id."""
+    return ":" in (raw or "")
+
+
 def attendee_ids(raw: str | None) -> list[str]:
     """Быстрый список id без полного разбора — для мест, где нужны только ученики."""
     return [e.student_id for e in parse_attendees(raw)]

@@ -9,7 +9,7 @@ from aiohttp import web
 from bot.models.enums import LessonType
 from bot.services.billing_service import calc_earned
 from bot.api.record import RecordError, record_create, record_options
-from bot.utils.attendees import parse_attendees
+from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,8 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
             "teacherId": ls.teacher_id, "teacherName": t.name if t else ls.teacher_name,
             "groupId": ls.group_id or "", "groupName": g.name if g else "",
+            "groupMode": g.billing_mode.value if g else "",
+            "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
             "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date[:7]) if t else 0,
             "locked": await _locked(ls),
