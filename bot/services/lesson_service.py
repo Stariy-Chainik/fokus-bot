@@ -170,14 +170,18 @@ class LessonService:
 
     # ─── Гость в сохранённом групповом занятии ───────────────────────────
 
-    async def add_guest(self, lesson: Lesson, student_id: str, group: Group | None) -> str | None:
+    async def add_guest(
+        self, lesson: Lesson, student_id: str, group: Group | None, trial: bool = False,
+    ) -> str | None:
         """Добавить ученика в сохранённое групповое занятие; None — уже отмечен.
 
-        Цена гостя — price_full PER_VISIT-группы, иначе 0. Тариф SHORT ученика не
-        учитывается (B7 в docs/FOUND_BUGS.md) — поведение сохранено при переносе из хендлера.
-        Возвращает новую строку attendees.
+        Цена гостя — price_full PER_VISIT-группы, иначе 0; `trial=True` — пробное,
+        всегда 0 ₽. Тариф SHORT ученика не учитывается (B7 в docs/FOUND_BUGS.md) —
+        поведение сохранено при переносе из хендлера. Возвращает новую строку attendees.
         """
-        amount = group.price_full if group and group.billing_mode == GroupBillingMode.PER_VISIT else 0
+        amount = 0 if trial else (
+            group.price_full if group and group.billing_mode == GroupBillingMode.PER_VISIT else 0
+        )
         existing = parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)
         if any(entry.student_id == student_id for entry in existing):
             return None

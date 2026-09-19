@@ -85,6 +85,9 @@ def test_add_guest_prices_and_duplicates():
     assert run(svc.add_guest(lesson, "STU-2", per_visit)) is None                       # уже отмечен
     assert run(svc.add_guest(lesson, "STU-3", mk_group("GRP-2"))) == "STU-1:60:850,STU-2:60:850,STU-3:60:0"
     assert run(svc.add_guest(mk_lesson("LES-2", t, "2026-09-02", 45, LessonType.GROUP, group_id="GRP-9"), "STU-1", None)) == "STU-1:45:0"
+    # Пробное: гость отмечен в занятии, но не начислен даже в PER_VISIT-группе.
+    trial_lesson = mk_lesson("LES-3", t, "2026-09-03", 60, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:60:850")
+    assert run(svc.add_guest(trial_lesson, "STU-5", per_visit, trial=True)) == "STU-1:60:850,STU-5:60:0"
 
 
 def test_can_submit_period_from_25th():

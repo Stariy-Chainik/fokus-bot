@@ -11,7 +11,7 @@ import logging
 from datetime import date
 
 from bot.models.enums import GroupBillingMode, LessonType
-from bot.utils.attendees import build_group_attendees_csv
+from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv
 from bot.utils.groups import hide_service_groups
 from config.settings import settings
 
@@ -103,7 +103,7 @@ async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> di
                 raise RecordError("bad_request", "Группа не выбрана")
             if kind == "rshare" and not (1 <= len(ids) <= 3):
                 raise RecordError("bad_request", "Отметьте от 1 до 3 участниц")
-            tiers = {sid: t for sid, t in (body.get("tiers") or {}).items() if t in ("short", "full")}
+            tiers = {sid: t for sid, t in (body.get("tiers") or {}).items() if t in ("short", "full", TRIAL_TIER)}
             if group.billing_mode == GroupBillingMode.PER_VISIT:
                 tiers = {sid: tiers.get(sid, students[sid].group_tier.value) for sid in ids}
             csv = build_group_attendees_csv(group, ids, tiers)

@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from bot.handlers.filters import TeacherOrAdmin
 from bot.models import Student, User
+from bot.models.enums import GroupBillingMode
 from bot.utils.groups import hide_service_groups
 from bot.repositories import (
     GroupRepository,
@@ -57,13 +58,20 @@ async def cb_lesson_guest_list(
         await callback.answer("Все ученики уже отмечены.", show_alert=True)
         return
 
-    rows = [
-        [InlineKeyboardButton(
+    group = await group_repo.get_by_id(lesson.group_id) if lesson.group_id else None
+    per_visit = bool(group and group.billing_mode == GroupBillingMode.PER_VISIT)
+    rows = []
+    for student in candidates:
+        row = [InlineKeyboardButton(
             text=student.name,
             callback_data=f"lesson_guest_pick:{lesson_id}:{student.student_id}",
         )]
-        for student in candidates
-    ]
+        if per_visit:  # пробное занятие: отметить, но не начислять
+            row.append(InlineKeyboardButton(
+                text="🆓 проб.",
+                callback_data=f"lesson_guest_trial:{lesson_id}:{student.student_id}",
+            ))
+        rows.append(row)
     rows.append([InlineKeyboardButton(
         text="« Назад",
         callback_data=f"lesson_detail:{lesson_id}",
@@ -73,6 +81,22 @@ async def cb_lesson_guest_list(
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("lesson_guest_trial:"), TeacherOrAdmin())
+async def cb_lesson_guest_trial(
+    callback: CallbackQuery,
+    user: User,
+    lesson_repo: LessonRepository,
+    group_repo: GroupRepository,
+    student_repo: StudentRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
+    lesson_service: LessonService,
+    state: FSMContext,
+) -> None:
+    """Гость на пробном: отмечаем в занятии, но не начисляем (0 ₽)."""
+    await _add_guest(callback, user, lesson_repo, group_repo, student_repo,
+                     submission_repo, lesson_service, trial=True)
 
 
 @router.callback_query(F.data.startswith("lesson_guest_pick:"), TeacherOrAdmin())
@@ -85,6 +109,20 @@ async def cb_lesson_guest_pick(
     submission_repo: TeacherPeriodSubmissionRepository,
     lesson_service: LessonService,
     state: FSMContext,
+) -> None:
+    await _add_guest(callback, user, lesson_repo, group_repo, student_repo,
+                     submission_repo, lesson_service, trial=False)
+
+
+async def _add_guest(
+    callback: CallbackQuery,
+    user: User,
+    lesson_repo: LessonRepository,
+    group_repo: GroupRepository,
+    student_repo: StudentRepository,
+    submission_repo: TeacherPeriodSubmissionRepository,
+    lesson_service: LessonService,
+    trial: bool,
 ) -> None:
     _, lesson_id, student_id = callback.data.split(":", 2)
     lesson = await lesson_repo.get_by_id(lesson_id)
@@ -104,12 +142,12 @@ async def cb_lesson_guest_pick(
         return
 
     group = await group_repo.get_by_id(lesson.group_id) if lesson.group_id else None
-    new_attendees = await lesson_service.add_guest(lesson, student_id, group)
+    new_attendees = await lesson_service.add_guest(lesson, student_id, group, trial=trial)
     if new_attendees is None:
         await callback.answer("Этот ученик уже отмечен.", show_alert=True)
         return
 
-    await callback.answer(f"✅ {student.name} добавлен(а).")
+    await callback.answer(f"✅ {student.name} добавлен(а){' — пробное, 0 ₽' if trial else ''}.")
     lesson.attendees = new_attendees
     await callback.message.edit_reply_markup(
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[

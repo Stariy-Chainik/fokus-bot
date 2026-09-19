@@ -75,3 +75,12 @@ def test_record_pair_shared_soloist_and_errors(api):
     # сданный период: у админа обходится
     body = {"teacherId": "TCH-0001", "kind": "soloist", "date": "2026-08-15", "durationMin": 45, "studentIds": ["STU-0003"]}
     assert _call(app, "POST", "/api/admin/record", json=body)[0] == 200
+
+
+def test_record_group_marks_trial_visit_free(api):
+    app, dp = api
+    body = {"teacherId": "TCH-0001", "kind": "group", "date": TODAY, "durationMin": 60, "groupId": "GRP-0001",
+            "studentIds": ["STU-0001", "STU-0002"], "tiers": {"STU-0002": "trial"}}
+    status, r = _call(app, "POST", "/api/admin/record", json=body)
+    assert status == 200 and r["attendees"] == 2
+    assert dp["lesson_repo"].items[-1].attendees == "STU-0001:60:800,STU-0002:60:0"

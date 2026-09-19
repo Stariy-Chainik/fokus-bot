@@ -220,7 +220,8 @@ async def _show_group_roster(
         text = (
             f"{_header(data)}Группа: <b>{group.name}</b>\n"
             f"Отметьте присутствующих ({len(members)} в составе).\n"
-            f"<i>Кнопка справа — текущий тариф (↕ нажмите чтобы сменить).</i>"
+            f"<i>Кнопка справа — тариф на это занятие (↕ сменить: полный → "
+            f"{'короткий → ' if group.price_short > 0 else ''}🆓 пробное).</i>"
         )
         kb = kb_group_roster_per_visit(
             members, set(), data["per_visit_tiers"],

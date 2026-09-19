@@ -3,6 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.keyboards.common import nav_row
 from bot.utils.paging import paginate
+from bot.utils.attendees import TRIAL_TIER
 
 from config.settings import settings
 
@@ -195,8 +196,9 @@ def kb_group_roster_per_visit(
 ) -> InlineKeyboardMarkup:  # price_short/price_full не показываем педагогу
     """
     Ростер группы с per-visit биллингом. Рядом с именем — тариф на это занятие.
-    Вторая кнопка в ряду переключает тариф разово (карточку не меняет).
-    tiers: dict[student_id -> "short" | "full"].
+    Вторая кнопка в ряду переключает тариф разово (карточку не меняет):
+    полный → короткий (если есть) → пробное (0 ₽) → полный.
+    tiers: dict[student_id -> "short" | "full" | "trial"].
     extra_students: ученики из других групп педагога (показываются ниже разделителя).
     show_add_other: показать кнопку «➕ Добавить из других групп».
     """
@@ -205,11 +207,16 @@ def kb_group_roster_per_visit(
     def _student_row(s) -> list:
         mark = "✅" if s.student_id in selected_ids else "⬜"
         tier = tiers.get(s.student_id, "full")
-        suffix = f"{duration_short}м" if has_short and tier == "short" else f"{duration_full}м"
-        row = [InlineKeyboardButton(text=f"{mark} {s.name}", callback_data=f"ms_toggle:{s.student_id}")]
-        if has_short:
-            row.append(InlineKeyboardButton(text=f"{suffix} ↕", callback_data=f"ms_tier:{s.student_id}"))
-        return row
+        if tier == TRIAL_TIER:
+            suffix = "🆓 проб."
+        elif has_short and tier == "short":
+            suffix = f"{duration_short}м"
+        else:
+            suffix = f"{duration_full}м"
+        return [
+            InlineKeyboardButton(text=f"{mark} {s.name}", callback_data=f"ms_toggle:{s.student_id}"),
+            InlineKeyboardButton(text=f"{suffix} ↕", callback_data=f"ms_tier:{s.student_id}"),
+        ]
 
     rows = [_student_row(s) for s in students]
 

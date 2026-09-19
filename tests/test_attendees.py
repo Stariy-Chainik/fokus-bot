@@ -5,7 +5,7 @@
 from bot.models import Group
 from bot.models.enums import GroupBillingMode
 from bot.utils.attendees import (
-    AttendeeEntry, free_attendee_label, has_amount_snapshots,
+    AttendeeEntry, free_attendee_label, has_amount_snapshots, next_visit_tier,
     parse_attendees, serialize_attendees, attendee_ids,
     build_group_attendees_csv,
 )
@@ -135,3 +135,18 @@ def test_has_amount_snapshots_distinguishes_formats():
     assert has_amount_snapshots("STU-0001:60:850,STU-0002:60:0") is True
     assert has_amount_snapshots("STU-0001,STU-0002") is False
     assert has_amount_snapshots(None) is False and has_amount_snapshots("") is False
+
+
+def test_trial_tier_records_attendance_without_charging():
+    csv = build_group_attendees_csv(_per_visit_group(), ["STU-1", "STU-2"], {"STU-2": "trial"})
+    assert csv == "STU-1:60:700,STU-2:60:0"          # пробная отмечена полной длительностью, но 0 ₽
+
+
+def test_visit_tier_cycles_to_trial():
+    assert next_visit_tier("full", has_short=True) == "short"
+    assert next_visit_tier("short", has_short=True) == "trial"
+    assert next_visit_tier("trial", has_short=True) == "full"
+    # Без короткого тарифа круг из двух: полный ↔ пробное.
+    assert next_visit_tier("full", has_short=False) == "trial"
+    assert next_visit_tier("trial", has_short=False) == "full"
+    assert next_visit_tier("short", has_short=False) == "trial"   # тариф карточки, которого нет в группе

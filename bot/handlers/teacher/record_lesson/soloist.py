@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery
 
 from bot.models import User, StudentGroupTier
 from bot.utils.groups import hide_service_groups
+from bot.utils.attendees import TRIAL_TIER, next_visit_tier
 from bot.repositories import (
     TeacherRepository, StudentRepository,
     GroupRepository, TeacherGroupRepository, StudentGroupRepository,
@@ -66,17 +67,17 @@ async def cb_ms_tier(
     student_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
     tiers = dict(data.get("per_visit_tiers") or {})
-    cur_tier = tiers.get(student_id, StudentGroupTier.FULL.value)
-    new_tier = (
-        StudentGroupTier.FULL.value if cur_tier == StudentGroupTier.SHORT.value
-        else StudentGroupTier.SHORT.value
-    )
+    group_id = data.get("selected_group_id")
+    group = await group_repo.get_by_id(group_id) if group_id else None
+    has_short = bool(group and group.price_short > 0)
+    new_tier = next_visit_tier(tiers.get(student_id, StudentGroupTier.FULL.value), has_short)
     tiers[student_id] = new_tier
     await state.update_data(per_visit_tiers=tiers)
     await _refresh_multi_select(
         callback, state, user, visibility, student_repo, group_repo, student_group_repo,
     )
-    await callback.answer(f"Тариф на это занятие: {'короткий' if new_tier == 'short' else 'полный'}")
+    labels = {TRIAL_TIER: "пробное (бесплатно)", StudentGroupTier.SHORT.value: "короткий"}
+    await callback.answer(f"Тариф на это занятие: {labels.get(new_tier, 'полный')}")
 
 
 @router.callback_query(F.data == "ms_all", TeacherOrAdmin())

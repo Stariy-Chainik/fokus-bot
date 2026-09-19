@@ -20,6 +20,17 @@ if TYPE_CHECKING:
     from bot.models import Group
 
 
+TRIAL_TIER = "trial"  # разовый «тариф» на занятие: пробное, 0 ₽ (в карточке ученика не хранится)
+
+
+def next_visit_tier(current: str, has_short: bool) -> str:
+    """Следующий тариф по кругу на экране посещаемости: полный → короткий → пробное."""
+    order = [StudentGroupTier.FULL.value, StudentGroupTier.SHORT.value, TRIAL_TIER] if has_short \
+        else [StudentGroupTier.FULL.value, TRIAL_TIER]
+    idx = order.index(current) if current in order else 0
+    return order[(idx + 1) % len(order)]
+
+
 @dataclass(frozen=True)
 class AttendeeEntry:
     student_id: str
@@ -91,14 +102,18 @@ def build_group_attendees_csv(
     """Собрать attendees для группового занятия на момент записи.
 
     PER_VISIT-группа → расширенный формат со снапшотом тарифа: по tier
-    ученика (default FULL) берутся duration/price short|full из группы.
+    ученика (default FULL) берутся duration/price short|full из группы;
+    tier "trial" — пробное занятие: длительность полная, сумма 0.
     Иначе — старый CSV из id, либо None при пустом списке.
     """
     if attendee_ids and group is not None and group.billing_mode == GroupBillingMode.PER_VISIT:
         entries: list[AttendeeEntry] = []
         for sid in attendee_ids:
             tier = tiers.get(sid, StudentGroupTier.FULL.value)
-            if tier == StudentGroupTier.SHORT.value:
+            if tier == TRIAL_TIER:  # пробное: пришёл, но не платит
+                dur = group.duration_full
+                amt = 0
+            elif tier == StudentGroupTier.SHORT.value:
                 dur = group.duration_short
                 amt = group.price_short
             else:
