@@ -15,6 +15,8 @@ def calc_earned(
     lesson_type: LessonType, duration_min: int, teacher: Teacher,
     group_id: str = "", attendees: str | None = None, period: str | None = None,
 ) -> int:
+    # period — дата занятия (YYYY-MM-DD) или его месяц; дата точнее, когда цена
+    # менялась в середине месяца.
     """earned = ставка × (duration_min / 45). Количество учеников не влияет.
 
     Ставка — из карточки педагога на месяц занятия, но у групп из
@@ -99,7 +101,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
     if lesson.teacher_id in settings.direct_pay_teacher_id_set:
         return rows
 
-    _, _, rate_for_student = effective_rates(teacher, lesson.date[:7])
+    _, _, rate_for_student = effective_rates(teacher, lesson.date)
     base_amount = round(rate_for_student * lesson.duration_min / MINUTES_PER_UNIT)
 
     slots = [

@@ -203,3 +203,24 @@ def test_group_salary_rate_overrides_teacher_card_rate(monkeypatch):
     assert calc_earned(LessonType.GROUP, 90, teacher, "GRP-0019") == 3000     # пропорционально, как везде
     assert calc_earned(LessonType.GROUP, 45, teacher, "GRP-0001") == 1350     # другая группа — ставка карточки
     assert calc_earned(LessonType.INDIVIDUAL, 45, teacher, "GRP-0019") == teacher.rate_for_teacher
+
+
+def test_rate_history_supports_mid_month_price_change():
+    """Цена выросла 4 сентября: занятия 1–3 считаются по старой, с 4-го — по новой."""
+    from bot.services import rate_history
+    teacher = _teacher(rate_group=1125, rate_for_teacher=1400, rate_for_student=2200)
+    rate_history.load([
+        rate_history.RateRow("TCH-0001", "2026-08", 1125, 1300, 1900),       # по конец августа
+        rate_history.RateRow("TCH-0001", "2026-09-03", 1125, 1300, 1900),    # и ещё три дня сентября
+    ])
+    try:
+        assert rate_history.effective_rates(teacher, "2026-08-20")[2] == 1900
+        assert rate_history.effective_rates(teacher, "2026-09-03")[2] == 1900
+        assert rate_history.effective_rates(teacher, "2026-09-04")[2] == 2200
+        # индивидуальное занятие: ставка педагога тоже берётся на дату
+        assert calc_earned(LessonType.INDIVIDUAL, 45, teacher, period="2026-09-03") == 1300
+        assert calc_earned(LessonType.INDIVIDUAL, 45, teacher, period="2026-09-10") == 1400
+        # запрос месяцем — ставки на конец месяца (как было)
+        assert rate_history.effective_rates(teacher, "2026-09")[2] == 2200
+    finally:
+        rate_history.load([])

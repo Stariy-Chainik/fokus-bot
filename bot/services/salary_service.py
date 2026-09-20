@@ -79,7 +79,7 @@ def compute_salary_lines(
         if in_shift:
             present_by_day[ls.date].add(ls.group_id)
         amount = 0 if in_shift else calc_earned(
-            ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date[:7],
+            ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date,
         )
         lines.append(SalaryLine(
             date=ls.date, kind="in_shift" if in_shift else "lesson",
@@ -88,7 +88,7 @@ def compute_salary_lines(
         ))
 
     for day in sorted(set(present_by_day) | set(overrides)):
-        rate_group = effective_rates(teacher, day[:7])[0]
+        rate_group = effective_rates(teacher, day)[0]
         if day in overrides:
             minutes, comment = overrides[day]
             kind, label = "override", f"Корректировка: {comment}" if comment else "Корректировка дня"

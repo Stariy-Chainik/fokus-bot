@@ -50,7 +50,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
                 "teacherName": t.name if t else ls.teacher_name, "type": ls.type.value,
                 "groupName": groups[ls.group_id].name if ls.group_id in groups else "",
                 "students": names, "durationMin": ls.duration_min,
-                "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date[:7]) if t else 0,
+                "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
                 "recordedAt": ls.recorded_at, "locked": await _locked(ls),
             })
         return _json({"date": day, "lessons": out, "earned": sum(x["earned"] for x in out)})
@@ -76,7 +76,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
-            "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date[:7]) if t else 0,
+            "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
             "locked": await _locked(ls),
         })
 

@@ -22,7 +22,7 @@ class TeacherRateHistoryRepository(BaseRepository):
         for r in await self._all_records():
             tid = str(r.get("teacher_id") or "").strip()
             until = str(r.get("until_period") or "").strip()
-            if not tid or len(until) != 7:
+            if not tid or len(until) not in (7, 10):   # YYYY-MM или YYYY-MM-DD
                 continue
             rows.append(RateRow(
                 teacher_id=tid, until_period=until,

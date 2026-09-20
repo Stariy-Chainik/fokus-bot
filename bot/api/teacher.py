@@ -64,7 +64,7 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
         "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
         "groupId": ls.group_id or "", "groupName": group_names.get(ls.group_id, ""),
         "students": who, "recordedAt": ls.recorded_at,
-        "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date[:7]),
+        "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
     }
 
 
@@ -178,7 +178,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
-            "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date[:7]),
+            "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
             "locked": ls.date[:7] in await _submitted(teacher.teacher_id),
         })
 

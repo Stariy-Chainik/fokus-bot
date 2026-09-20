@@ -205,7 +205,7 @@ def calculate_profit_lesson(
     rent = lesson_rent(lesson) if income == 0 else 0
     if income == 0 and rent == 0:
         return None
-    earned = calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date[:7])
+    earned = calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date)
     owner = is_owner(teacher.teacher_id)
     return ProfitLessonRow(
         lesson_id=lesson.lesson_id,

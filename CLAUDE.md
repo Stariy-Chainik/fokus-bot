@@ -290,8 +290,11 @@ amount (student invoice) = rate_for_student × (duration_min / 45)
 amount (PER_VISIT group) = group.price_full or group.price_short
   stored as snapshot in lesson.attendees at creation time: STU-001:60:700
 
-Ставки берутся на месяц занятия: `rate_history.effective_rates(teacher, period)` — при повышении цен
-  старые месяцы считаются по строкам листа teacher_rate_history (until_period ≥ period), иначе по карточке.
+Ставки берутся на дату занятия: `rate_history.effective_rates(teacher, ls.date)` — при повышении цен
+  прошлые занятия считаются по строкам листа teacher_rate_history. Граница `until_period` — месяц
+  (`YYYY-MM`, по конец месяца) или день (`YYYY-MM-DD`, цена выросла в середине месяца: на проде
+  `TCH-0009 | 2026-09-03` — Контарева, повышение для клиента с 4.09.2026). Берётся строка с наименьшей
+  границей ≥ даты; если такой нет — ставки из карточки педагога.
 
 earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные — Яковлева», 50%) =
   процент × сумма amounts из attendees; длительность не влияет

@@ -25,7 +25,7 @@ SCREENS['t.home'] = async () => {
     ${list([
       cell({ lead: '📋', plain: true, t: 'Мои занятия', s: 'сегодня, вчера, месяц', go: 't.lessons', p: {} }),
       cell({ lead: '👥', plain: true, t: 'Мои группы', s: `${plural(h.groups, ['группа', 'группы', 'групп'])}: состав, пары, солисты`, go: 't.groups', p: {} }),
-      cell({ lead: '💰', plain: true, t: 'Зарплата и сдача периода', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
+      cell({ lead: '💰', plain: true, t: 'Зарплата и период', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
     ])}
     ${!h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
     ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'выставить и отправить родителям', go: 't.bills', p: {} })])}` : ''}
