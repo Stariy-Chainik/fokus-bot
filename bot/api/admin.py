@@ -129,9 +129,10 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     # ── ученики ──────────────────────────────────────────────────────────
     async def students(request: web.Request, user) -> web.Response:
-        """Список с фильтрами: q — по имени, group — id группы, noparent=1 — без родителя в боте,
-        debt=1 — с долгом за закрытые месяцы (как в «Должниках»)."""
+        """Список с фильтрами: q — по имени, branch — id филиала, group — id группы,
+        noparent=1 — без родителя в боте, debt=1 — с долгом за закрытые месяцы (как в «Должниках»)."""
         q = request.query.get("q", "").strip().lower()
+        branch_id = request.query.get("branch", "").strip()
         group_id = request.query.get("group", "").strip()
         no_parent = request.query.get("noparent") == "1"
         with_debt = request.query.get("debt") == "1"
@@ -145,7 +146,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         out = []
         for s in sorted(await student_repo.get_all(), key=lambda x: x.name.lower()):
             gids = by_student.get(s.student_id, [])
-            if (q and q not in s.name.lower()) or (group_id and group_id not in gids) \
+            in_branch = not branch_id or any(g in groups and groups[g].branch_id == branch_id for g in gids)
+            if (q and q not in s.name.lower()) or (group_id and group_id not in gids) or not in_branch \
                     or (no_parent and s.parent_addrs) or (with_debt and s.student_id not in debtors):
                 continue
             out.append({

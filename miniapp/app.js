@@ -178,9 +178,10 @@ SCREENS['a.students'] = async () => {
   const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false });
   const q = state.ui.q || '';
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
-  const qs = `q=${encodeURIComponent(q)}&group=${encodeURIComponent(f.group)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`;
+  const branch = state.ui.gfBranch || '';        // выбранный филиал сужает список сам по себе
+  const qs = `q=${encodeURIComponent(q)}&branch=${encodeURIComponent(branch)}&group=${encodeURIComponent(f.group)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`;
   const d = await api(`/students?${qs}`);
-  const filtered = f.group || f.noparent || f.debt || q;
+  const filtered = branch || f.group || f.noparent || f.debt || q;
   return { title: 'Ученики', html: `
     ${stickyFilters(`
       <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
@@ -242,19 +243,25 @@ const ACT = {
 
 /* ── этап 2: финансы, история оплат, напоминание должникам ─────────────── */
 const field = (id, label, value = '', attrs = '') => `<label class="hint" for="${id}" style="display:block;margin:10px 0 4px">${label}</label><input class="search" style="margin:0" id="${id}" value="${esc(value)}" ${attrs}>`;
-/* Фильтр по группам: строка филиалов + строка групп, обе прокручиваются вбок.
-   branches — как отдаёт /pay/groups; act получает {v} с id группы ('' — все). */
+/* Фильтр по группам: строка филиалов, а строка групп — только после выбора филиала
+   (иначе это два десятка чипов вбок). branches — как отдаёт /pay/groups;
+   act получает {v} с id группы ('' — все). */
 const groupFilter = (branches, cur, act, branchKey = 'gfBranch') => {
   const all = branches.flatMap(b => b.groups.map(g => ({ ...g, branch: b.id, branchName: b.name })));
   const curGroup = all.find(g => g.id === cur);
   const branch = state.ui[branchKey] || (curGroup ? curGroup.branch : '');
-  const shown = branch ? all.filter(g => g.branch === branch) : all;
+  const shown = all.filter(g => g.branch === branch);
   const chip = (label, on, a, p) => `<button class="chip" aria-pressed="${on}" data-act="${a}" data-p='${esc(JSON.stringify(p))}'>${label}</button>`;
   return `
-    <div class="chips scroll">${chip('Все филиалы', !branch, 'gfBranch', { v: '', key: branchKey })}${branches.map(b => chip(esc(b.name), branch === b.id, 'gfBranch', { v: b.id, key: branchKey })).join('')}</div>
-    <div class="chips scroll">${chip('Все группы', !cur, act, { v: '' })}${shown.map(g => chip(`${esc(plainName(g.name))}${g.students ? ` · ${g.students}` : ''}`, cur === g.id, act, { v: g.id })).join('')}</div>`;
+    <div class="chips scroll">${chip('Все филиалы', !branch, 'gfBranch', { v: '', key: branchKey, act, cur })}${branches.map(b => chip(`${esc(b.name)} · ${b.groups.length}`, branch === b.id, 'gfBranch', { v: b.id, key: branchKey, act, cur })).join('')}</div>
+    ${branch ? `<div class="chips scroll">${chip('Все группы', !cur, act, { v: '' })}${shown.map(g => chip(`${esc(plainName(g.name))}${g.students ? ` · ${g.students}` : ''}`, cur === g.id, act, { v: g.id })).join('')}</div>` : ''}`;
 };
-ACT.gfBranch = ({ v, key }) => { state.ui[key || 'gfBranch'] = v; render(); };
+/* Смена филиала снимает выбранную группу — иначе список остался бы отфильтрован
+   по группе, которой в этом филиале нет. */
+ACT.gfBranch = ({ v, key, act, cur }) => {
+  state.ui[key || 'gfBranch'] = v;
+  if (cur && act && ACT[act]) ACT[act]({ v: '' }); else render();
+};
 
 const monthChips = (go, cur, p) => `<div class="chips">${lastPeriods(3).map(m => `<button class="chip" aria-pressed="${m === cur}" data-go="${go}" data-p='${esc(JSON.stringify({ ...p, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>`;
 const profitRow = (r, period) => `<button class="cell" data-go="a.profit.teacher" data-p='${esc(JSON.stringify({ period, tid: r.teacherId }))}'><span class="lead" style="${r.owner ? 'background:var(--warn-soft);color:var(--warn)' : ''}">${r.owner ? '👑' : initials(r.name)}</span><span><div class="t">${esc(r.name)}</div><div class="s">${r.groupLessons ? `👥 ${r.groupLessons}` : ''} ${r.individualLessons ? `👤 ${r.individualLessons}` : ''} · выручка ${fmt(r.income)} · зарплата ${fmt(r.salary)}${r.rent ? `<br>🏟 в т.ч. аренда зала ${fmt(r.rent)} (${r.rentLessons} зан.)` : ''}${r.owner ? `<br>👑 руководитель: ${fmt(r.ownerIncome)} остаются в прибыли` : ''}</div></span><span class="r"><b>${fmt(r.profit)}</b><br>${r.margin}%<span class="chev">›</span></span></button>`;
