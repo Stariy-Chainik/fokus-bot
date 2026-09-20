@@ -47,10 +47,11 @@ function lastPeriods(n) { const out = []; const d = new Date(); for (let i = 0; 
 /* Приветствие по времени суток и имя пользователя (из Telegram, иначе из профиля). */
 const hello = () => { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; };
 const myName = () => {
-  const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-  if (u && u.first_name) return u.first_name;
+  // имя из базы школы (в карточках фамилия первая), Telegram — если в базе пусто
   const full = (state.me && state.me.name) || '';
-  return full.split(' ')[1] || full || '';
+  if (full) return full.split(' ')[1] || full;
+  const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  return (u && u.first_name) || '';
 };
 /* Шапка кабинета: логотип школы, приветствие и строка роли. */
 const hero = sub => `<div class="hero"><img class="logo" src="logo.jpg" alt="Фокус" width="52" height="52">
@@ -75,6 +76,8 @@ const btn = (txt, act, p = {}, kind = '') => `<button class="btn ${kind}" data-a
 const goBtn = (txt, go, p = {}, kind = '') => `<button class="btn ${kind}" ${attr(go, p)}>${txt}</button>`;
 const kpi = (v, l, kind = '', go, p) => go ? `<button class="kpi ${kind}" ${attr(go, p)}><div class="v">${v}</div><div class="l">${l} ›</div></button>` : `<div class="kpi ${kind}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
 const restPill = x => x.total === 0 ? pill('нет начислений') : x.rest === 0 ? pill('✓ оплачено', 'ok') : x.paid ? pill(`к доплате ${fmt(x.rest)}`, 'warn') : pill(`к оплате ${fmt(x.rest)}`, 'warn');
+/* Пустое состояние: текст + кнопка, которая выводит из тупика. */
+const empty = (text, action = '') => `<div class="empty"><div>${text}</div>${action ? `<div style="margin-top:12px;max-width:260px;margin-inline:auto">${action}</div>` : ''}</div>`;
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
 /* ── навигация ───────────────────────────────────────────────────────── */
@@ -160,7 +163,7 @@ SCREENS['a.bill'] = async ({ ym, sid }) => {
   return { title: 'Счёт ученика', html: `
     <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}</div></div>
     ${d.rows.length ? d.rows.map(r => `<div class="grp"><span>${r.subscription ? '💳' : r.group ? '👥' : '👨‍🏫'} ${esc(r.name)}</span><span class="money">${fmt(r.total)}</span></div>${r.subscription ? '<div class="lesson-line"><span></span><span class="hint">фиксированная сумма за месяц</span><span></span></div>' : r.items.map(m => `<div class="lesson-line"><span class="mark ${m.paid ? 'paid' : ''}">${m.paid ? '✓' : ''}</span><span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></div>`).join('')}`).join('') : '<div class="empty">Начислений за месяц нет</div>'}
-    <div class="total"><span>Начислено ${fmt(d.total)}<br><span class="hint">оплачено ${fmt(d.paid)}</span></span><span class="big">${d.rest ? fmt(d.rest) : '✓'}</span></div></div>
+    <div class="total"><span>Начислено ${fmt(d.total)}<br><span class="hint">оплачено ${fmt(d.paid)}</span></span><span class="big ${d.rest ? 'bad' : 'ok'}">${d.rest ? fmt(d.rest) : '✓ оплачено'}</span></div></div>
     <div style="margin-top:12px">${btn('📨 Отправить родителям', 'sendBill', { ym, sid }, d.rows.length ? '' : 'sec')}${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym, sid }, 'ghost')}</div>` };
 };
 
@@ -183,7 +186,7 @@ SCREENS['a.students'] = async () => {
       ${groupFilter(state.ui.groupsCache, f.group, 'sfGroupPick')}
       <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${filtered ? `<button class="chip" data-act="sfReset" data-p='{}'>✕ Сбросить</button>` : ''}</div>`)}
     <p class="hint" style="margin:0 0 8px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
-    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: groupsShort(s.groups), r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
+    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: groupsShort(s.groups) + (s.hasParent ? '' : ' · без родителя'), go: 'a.student', p: { id: s.id } }))) : empty('Никого не нашли', filtered ? btn('✕ Сбросить фильтры', 'sfReset', {}, 'sec') : '')}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
 };
 SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
@@ -600,13 +603,19 @@ async function render() {
   const deep = state.stack.length > 1;
   document.getElementById('back').classList.toggle('on', deep && !tg);
   if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
-  content.innerHTML = skeleton();
+  const sameScreen = state.ui.lastScreen === s.n;
+  state.ui.lastScreen = s.n;
+  if (sameScreen && content.firstElementChild) content.classList.add('stale');
+  else content.innerHTML = skeleton();
   let scr;
   try { scr = await SCREENS[s.n](s.p || {}); }
   catch (e) { scr = { title: 'Ошибка', html: `<div class="card pad"><div style="font-weight:700">${esc(errText(e))}</div></div><div style="margin-top:12px">${btn('Повторить', 'retry', {}, 'sec')}</div>` }; }
   if (seq !== renderSeq) return;
   document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">${ROLE_TITLE[ROLE]}</span>`;
-  content.innerHTML = `<div class="fade">${scr.html}</div>`; content.scrollTop = 0;
+  const keepScroll = sameScreen ? content.scrollTop : 0;
+  content.classList.remove('stale');
+  content.innerHTML = `<div class="${sameScreen ? '' : 'fade'}">${scr.html}</div>`;
+  content.scrollTop = keepScroll;
   // выбранный чип в прокручиваемой строке — в зону видимости
   content.querySelectorAll('.chips.scroll').forEach(strip => {
     const on = strip.querySelector('.chip[aria-pressed="true"]');

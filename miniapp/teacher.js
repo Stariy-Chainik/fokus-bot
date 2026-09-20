@@ -210,6 +210,7 @@ SCREENS['t.bills.g'] = async ({ gid, ym }) => {
     ${d.students.length ? list(d.students.map(s => cell({
       lead: initials(s.name), t: esc(s.name),
       s: s.hasParent ? (s.rest ? `к оплате ${fmt(s.rest)}` : 'оплачено') : 'родитель не привязан',
+      cls: s.rest ? '' : '',
       r: `<b>${fmt(s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym },
     }))) : '<div class="empty">В группе никого нет</div>'}
     <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid, ym, count: toSend, name: d.group.name }, toSend ? '' : 'ghost')}</div>` };
@@ -223,7 +224,7 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
     ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => `
       <div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>
       ${r.items.map(i => `<div class="lesson-line"><span>${i.paid ? '✅' : '⬜'}</span><span>${fdate(i.date)} · ${i.durationMin} мин</span><span class="amt">${fmt(i.amount)}</span></div>`).join('')}`).join('')}
-      <div class="total"><span>К оплате</span><span class="big">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
+      <div class="total"><span>К оплате</span><span class="big ${b.rest ? 'bad' : 'ok'}">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
     ${b.rows.some(r => r.rest > 0) ? `<div class="eyebrow">Отметить оплату</div>${list(b.rows.filter(r => r.rest > 0).map(r => cell({
       lead: '💾', plain: true, t: esc(r.name), s: `остаток ${fmt(r.rest)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}`,
       ...(r.subscription

@@ -44,21 +44,22 @@
   .hero .logo { border-radius: 14px; flex: none; box-shadow: var(--shadow); background: #000; object-fit: cover; }
   .hero .hi { font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
   .h2 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 12px; text-wrap: balance; }
-  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+  .eyebrow { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 700; letter-spacing: .01em; color: var(--muted); margin: 18px 0 8px; }
+  .eyebrow::after { content: ''; flex: 1; height: 1px; background: var(--line); }
   .eyebrow:first-child { margin-top: 2px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
   .card + .card { margin-top: 10px; }
   .pad { padding: 12px 14px; }
   .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-  .cell { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 11px 14px; border: 0; background: transparent; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .cell { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 11px 14px; border: 0; background: transparent; border-bottom: 1px solid var(--line); cursor: pointer; }
   .cell:last-child { border-bottom: 0; }
   .cell.static { cursor: default; }
   .cell:not(.static):active { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .cell .lead { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; font-size: 13px; }
   .cell .lead.plain { background: transparent; width: 26px; font-size: 18px; }
-  .cell.nolead { grid-template-columns: 1fr auto; }
-  .cell .t { font-weight: 600; font-size: 14.5px; }
-  .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+  .cell.nolead { grid-template-columns: minmax(0, 1fr) auto; }
+  .cell .t { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .r { font-size: 13px; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .cell .r b { color: var(--ink); font-weight: 700; }
   .chev { color: var(--line-strong); margin-left: 6px; }
@@ -91,8 +92,12 @@
   .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .search { width: 100%; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; margin-bottom: 10px; }
   .money { font-variant-numeric: tabular-nums; }
+  .money.bad, .amt.bad, .r b.bad { color: var(--bad); }
+  .money.ok, .amt.ok, .r b.ok { color: var(--ok); }
+  .content.stale { opacity: .5; transition: opacity .12s ease-out; pointer-events: none; }
   .total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); font-weight: 700; }
   .total .big { font-size: 20px; font-weight: 800; }
+  .total .big.bad { color: var(--bad); } .total .big.ok { color: var(--ok); }
   .lesson-line { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); align-items: center; font-size: 13.5px; }
   .lesson-line:last-child { border-bottom: 0; }
   .lesson-line .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -103,6 +108,7 @@
   .mark.paid { background: var(--ok-soft); border-color: var(--ok-soft); color: var(--ok); }
   .hint { color: var(--muted); font-size: 13px; }
   .empty { text-align: center; color: var(--muted); padding: 30px 12px; }
+  .empty .btn { width: 100%; }
   .bill { font-size: 13.5px; }
   .bill .grp { padding: 10px 14px 6px; font-weight: 700; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
   .bill .grp:first-child { border-top: 0; }
