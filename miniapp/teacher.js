@@ -51,7 +51,7 @@ SCREENS['t.lessons'] = async ({ key }) => {
   return { title: 'Мои занятия', html: `
     <div class="chips">${chips.map(([v, n]) => `<button class="chip" aria-pressed="${k === v}" data-go="t.lessons" data-p='${esc(JSON.stringify({ key: v }))}' data-replace="1">${n}</button>`).join('')}</div>
     ${d.lessons.length ? `${list(d.lessons.map(tLessonCell))}<div class="card" style="margin-top:10px"><div class="total"><span>${plural(d.lessons.length, ['занятие', 'занятия', 'занятий'])}</span><span class="big">${fmt(d.earned)}</span></div></div>`
-      : '<div class="empty">Занятий нет</div>'}
+      : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие кнопкой ниже или выберите другой день</p>')}
     <div style="margin-top:12px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>` };
 };
 
@@ -79,7 +79,7 @@ SCREENS['t.groups'] = async () => {
   return { title: 'Мои группы', html: d.groups.length ? list(d.groups.map(g => cell({
     lead: '👥', plain: true, t: esc(g.name), s: `${esc(g.branchName)} · ${MODE[g.mode] || g.mode}`,
     r: plural(g.students, ['ученик', 'ученика', 'учеников']), go: 't.group', p: { id: g.id },
-  }))) : '<div class="empty">Групп нет</div>' };
+  }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>') };
 };
 
 SCREENS['t.group'] = async ({ id }) => {
@@ -126,7 +126,7 @@ SCREENS['t.money'] = async ({ ym }) => {
       lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
       s: x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.minutes ? `${x.minutes} мин` : '',
       r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
-    }))) : '<div class="empty">Начислений нет</div>'}` };
+    }))) : empty('Начислений нет', '<p class="hint" style="margin:0">Отметьте занятия — они появятся здесь</p>')}` };
 };
 
 /* ── Дневники спортсменов ────────────────────────────────────────────── */
@@ -137,7 +137,7 @@ SCREENS['t.diary'] = async () => {
     ${d.athletes.length ? list(d.athletes.map(a => cell({
       lead: initials(a.name), t: esc(a.name), s: a.unrated ? `🆕 ${plural(a.unrated, ['запись', 'записи', 'записей'])} без оценки` : 'всё оценено',
       r: a.unrated ? pill(String(a.unrated), 'warn') : '', go: 't.diary.s', p: { id: a.id },
-    }))) : '<div class="empty">У ваших учеников нет кабинета спортсмена</div>'}
+    }))) : empty('У ваших учеников нет кабинета спортсмена', '<p class="hint" style="margin:0">Спортсмен заводит его сам: /start → «Я спортсмен»</p>')}
     <p class="hint" style="margin-top:8px">Спортсмен сам записывает тренировки в боте, вы ставите оценку и выдаёте задания.</p>` };
 };
 
@@ -199,7 +199,7 @@ SCREENS['t.bills'] = async ({ ym }) => {
     ${d.groups.length ? list(d.groups.map(g => cell({
       lead: '👥', plain: true, t: esc(g.name), s: MODE[g.mode] || g.mode,
       r: plural(g.students, ['ученик', 'ученика', 'учеников']), go: 't.bills.g', p: { gid: g.id, ym: period },
-    }))) : '<div class="empty">Групп нет</div>'}` };
+    }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>')}` };
 };
 
 SCREENS['t.bills.g'] = async ({ gid, ym }) => {

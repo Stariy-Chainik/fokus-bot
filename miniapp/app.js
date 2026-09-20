@@ -75,7 +75,7 @@ const pill = (txt, kind = 'mute') => `<span class="pill ${kind}">${txt}</span>`;
 const btn = (txt, act, p = {}, kind = '') => `<button class="btn ${kind}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${txt}</button>`;
 const goBtn = (txt, go, p = {}, kind = '') => `<button class="btn ${kind}" ${attr(go, p)}>${txt}</button>`;
 const kpi = (v, l, kind = '', go, p) => go ? `<button class="kpi ${kind}" ${attr(go, p)}><div class="v">${v}</div><div class="l">${l} ›</div></button>` : `<div class="kpi ${kind}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
-const restPill = x => x.total === 0 ? pill('нет начислений') : x.rest === 0 ? pill('✓ оплачено', 'ok') : x.paid ? pill(`к доплате ${fmt(x.rest)}`, 'warn') : pill(`к оплате ${fmt(x.rest)}`, 'warn');
+const restPill = x => x.total === 0 ? pill('нет начислений') : x.rest === 0 ? pill('✓ оплачено', 'ok') : x.paid ? pill(`к доплате ${fmt(x.rest)}`, 'warn') : pill(`к оплате ${fmt(x.rest)}`, 'bad');
 /* Пустое состояние: текст + кнопка, которая выводит из тупика. */
 const empty = (text, action = '') => `<div class="empty"><div>${text}</div>${action ? `<div style="margin-top:12px;max-width:260px;margin-inline:auto">${action}</div>` : ''}</div>`;
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
@@ -129,7 +129,7 @@ SCREENS['a.pay.students'] = async ({ ym, g, gname, bill }) => {
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
   state.ui.payPick = { ym, bill };
   const d = await api(`/pay/students?ym=${ym}&group=${encodeURIComponent(g || '')}`);
-  return { title: gname || 'Ученики', html: `${stickyFilters(groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay') + `<p class="hint" style="margin:-2px 0 8px">${fmon(ym)} — выберите ученика</p>`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'warn') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
+  return { title: gname || 'Ученики', html: `${stickyFilters(groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay') + `<p class="hint" style="margin:-2px 0 8px">${fmon(ym)} — выберите ученика</p>`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'bad') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
 };
 
 SCREENS['a.pay.student'] = async ({ ym, sid }) => {
@@ -170,7 +170,7 @@ SCREENS['a.bill'] = async ({ ym, sid }) => {
 SCREENS['a.debtors'] = async () => {
   const d = await api('/debtors');
   const rows = d.debtors.filter(r => r.closedTotal || r.currentTotal); const targets = rows.filter(r => r.closedTotal && r.hasParent);
-  return { title: 'Должники', html: `<div class="hint" style="margin-bottom:10px">Долг = начислено − оплачено. Текущий месяц помечен * и в напоминание не входит.</div>${rows.length ? list(rows.map(r => cell({ lead: initials(r.name), t: esc(r.name), s: Object.entries(r.months).map(([ym, a]) => `${MON_NOM[+ym.slice(5) - 1]}${ym === d.period ? '*' : ''}: ${fmt(a)}`).join(' · ') + (r.hasParent ? '' : ' · родитель не привязан'), r: r.closedTotal ? pill(fmt(r.closedTotal), 'bad') : pill(fmt(r.currentTotal), 'warn'), go: 'a.student', p: { id: r.id } }))) : '<div class="empty">Должников нет</div>'}<div style="margin-top:12px">${btn(`📤 Напомнить всем (${targets.length})`, 'remind', { n: targets.length, total: targets.reduce((a, r) => a + r.closedTotal, 0) }, targets.length ? '' : 'sec')}</div>` };
+  return { title: 'Должники', html: `<div class="hint" style="margin-bottom:10px">Долг = начислено − оплачено. Текущий месяц помечен * и в напоминание не входит.</div>${rows.length ? list(rows.map(r => cell({ lead: initials(r.name), t: esc(r.name), s: Object.entries(r.months).map(([ym, a]) => `${MON_NOM[+ym.slice(5) - 1]}${ym === d.period ? '*' : ''}: ${fmt(a)}`).join(' · ') + (r.hasParent ? '' : ' · родитель не привязан'), r: r.closedTotal ? pill(fmt(r.closedTotal), 'bad') : pill(fmt(r.currentTotal), 'warn'), go: 'a.student', p: { id: r.id } }))) : empty('Должников нет', '<p class="hint" style="margin:0">Все закрытые месяцы оплачены</p>')}<div style="margin-top:12px">${btn(`📤 Напомнить всем (${targets.length})`, 'remind', { n: targets.length, total: targets.reduce((a, r) => a + r.closedTotal, 0) }, targets.length ? '' : 'sec')}</div>` };
 };
 
 SCREENS['a.students'] = async () => {
@@ -212,7 +212,7 @@ SCREENS['a.teacher'] = async ({ id }) => {
     <div class="kpis">${kpi(fmt(t.rates.group), 'ставка — группа / 45 мин')}${kpi(fmt(t.rates.teacher), 'ставка — инд. / 45 мин')}${kpi(fmt(t.rates.student), 'цена для ученика / 45 мин')}${kpi(fmt(t.salary), `начислено за ${MON_NOM[+t.period.slice(5) - 1].toLowerCase()}`)}</div>
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
-    <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : '<div class="empty">Ещё ничего не сдано</div>'}
+    <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Ещё ничего не сдано', '<p class="hint" style="margin:0">Педагог сдаёт период с 25-го числа</p>')}
     <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
 };
 
@@ -264,7 +264,7 @@ SCREENS['a.profit'] = async ({ ym }) => {
   const p = await api(`/profit?ym=${ym}`);
   return { title: `Прибыль за ${fmon(ym)}`, html: `
     ${monthChips('a.profit', ym, {})}<div class="chips" style="margin-top:-6px"><button class="chip" data-go="a.profit.day" data-p='{}'>📅 За день…</button></div>
-    ${p.totals.isEmpty ? '<div class="empty">Занятий нет</div>' : `
+    ${p.totals.isEmpty ? empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие или выберите другой день</p>') : `
     <div class="kpis">${kpi(fmt(p.totals.totalIncome), 'выручка', '', 'a.profit.income', { ym })}${kpi(fmt(p.totals.profit), 'прибыль', 'ok', 'a.profit.profit', { ym })}</div>
     <div class="eyebrow">Педагоги</div><div class="list">${p.rows.map(r => profitRow(r, ym)).join('')}</div>
     ${p.subscriptions.length ? `<div class="eyebrow">Абонементы</div>${list(p.subscriptions.map(x => cell({ t: esc(x.groupName), s: plural(x.students, ['ученик', 'ученика', 'учеников']), r: `<b>${fmt(x.income)}</b>`, go: 'a.profit.sub', p: { gid: x.groupId, ym } })))}` : ''}`}
@@ -273,7 +273,7 @@ SCREENS['a.profit'] = async ({ ym }) => {
 };
 const moneyRow = (label, v, cls = '', sub = false) => `<div style="display:flex;justify-content:space-between;gap:8px${sub ? ';padding-left:14px' : ''}" class="${sub ? 'hint' : ''}"><span>${label}</span><b class="money" style="color:${cls || 'inherit'}">${v}</b></div>`;
 const teacherIncomeCell = (r, ym) => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `${r.groupLessons ? `👥 ${r.groupLessons} ` : ''}${r.individualLessons ? `👤 ${r.individualLessons}` : ''}${r.rent ? ` · 🏟 аренда зала ${fmt(r.rent)}` : ''}`, r: `<b>${fmt(r.income)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } });
-const dayCells = (days, sub) => days.length ? list(days.map(d => cell({ lead: String(+d.date.slice(8)), t: fdate(d.date), s: sub(d), r: `<b>${fmt(sub === dayIncomeSub ? d.income : d.profit)}</b>`, go: 'a.profit.day', p: { date: d.date } }))) : '<div class="empty">Занятий нет</div>';
+const dayCells = (days, sub) => days.length ? list(days.map(d => cell({ lead: String(+d.date.slice(8)), t: fdate(d.date), s: sub(d), r: `<b>${fmt(sub === dayIncomeSub ? d.income : d.profit)}</b>`, go: 'a.profit.day', p: { date: d.date } }))) : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие или выберите другой день</p>');
 const dayIncomeSub = d => plural(d.lessons, ['занятие', 'занятия', 'занятий']) + (d.rent ? ` · аренда ${fmt(d.rent)}` : '');
 const dayProfitSub = d => `выручка ${fmt(d.income)} − зарплата ${fmt(d.salary)}`;
 SCREENS['a.profit.income'] = async ({ ym }) => {
@@ -282,7 +282,7 @@ SCREENS['a.profit.income'] = async ({ ym }) => {
     <div class="card pad money" style="display:grid;gap:6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em">${fmt(t.totalIncome)}</div>
       ${moneyRow('Занятия (оплата по педагогам)', fmt(t.lessonIncome))}${t.rentIncome ? moneyRow(`в т.ч. аренда зала, ${plural(t.rentLessons, ['занятие', 'занятия', 'занятий'])}`, fmt(t.rentIncome), '', true) : ''}
       ${moneyRow('Абонементы', fmt(t.subscriptionIncome))}${moneyRow('Прочие доходы', fmt(t.manualIncome))}</div>
-    <div class="eyebrow">Занятия по педагогам</div>${b.rows.length ? list(b.rows.map(r => teacherIncomeCell(r, ym))) : '<div class="empty">Занятий нет</div>'}
+    <div class="eyebrow">Занятия по педагогам</div>${b.rows.length ? list(b.rows.map(r => teacherIncomeCell(r, ym))) : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие или выберите другой день</p>')}
     ${b.subscriptions.length ? `<div class="eyebrow">Абонементы</div>${list(b.subscriptions.map(x => cell({ t: esc(x.groupName), s: plural(x.students, ['ученик', 'ученика', 'учеников']), r: `<b>${fmt(x.income)}</b>`, go: 'a.profit.sub', p: { gid: x.groupId, ym } })))}` : ''}
     ${b.finance.some(f => f.kind === 'income') ? `<div class="eyebrow">Прочие доходы</div>${list(b.finance.filter(f => f.kind === 'income').map(f => cell({ lead: '🏆', plain: true, t: esc(f.title), r: `<b>${fmt(f.amount)}</b>` })))}` : ''}
     <div class="eyebrow">Занятия по дням</div>${dayCells(b.days, dayIncomeSub)}
@@ -295,7 +295,7 @@ SCREENS['a.profit.profit'] = async ({ ym }) => {
       ${moneyRow('Выручка', fmt(t.totalIncome))}${moneyRow('занятия', fmt(t.lessonIncome), '', true)}${moneyRow('абонементы', fmt(t.subscriptionIncome), '', true)}${moneyRow('прочие доходы', fmt(t.manualIncome), '', true)}
       ${moneyRow('− Зарплата педагогов', fmt(t.salary), 'var(--bad)')}${t.ownerIncome ? moneyRow('👑 руководитель остаётся в прибыли', fmt(t.ownerIncome), '', true) : ''}
       ${moneyRow('− Расходы', fmt(t.manualExpenses), 'var(--bad)')}</div>
-    <div class="eyebrow">Зарплата по педагогам</div>${b.rows.length ? list(b.rows.map(r => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `выручка ${fmt(r.income)} → прибыль ${fmt(r.profit)}`, r: r.owner ? pill('в прибыли', 'warn') : `<b style="color:var(--bad)">− ${fmt(r.salary)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } }))) : '<div class="empty">Занятий нет</div>'}
+    <div class="eyebrow">Зарплата по педагогам</div>${b.rows.length ? list(b.rows.map(r => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `выручка ${fmt(r.income)} → прибыль ${fmt(r.profit)}`, r: r.owner ? pill('в прибыли', 'warn') : `<b style="color:var(--bad)">− ${fmt(r.salary)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } }))) : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие или выберите другой день</p>')}
     ${b.finance.some(f => f.kind === 'expense') ? `<div class="eyebrow">Расходы</div>${list(b.finance.filter(f => f.kind === 'expense').map(f => cell({ lead: '📉', plain: true, t: esc(f.title), r: `<b style="color:var(--bad)">− ${fmt(f.amount)}</b>` })))}` : ''}
     <div class="eyebrow">Прибыль по дням</div>${dayCells(b.days, dayProfitSub)}
     <p class="hint" style="margin-top:8px">По дням учтены только занятия. Абонементы, прочие доходы и расходы добавляются к месяцу целиком.</p>` };
@@ -348,11 +348,11 @@ SCREENS['a.payout'] = async ({ tid, ym }) => {
 SCREENS['a.payhist.search'] = async () => {
   const q = state.ui.q2 || '';
   const d = await api(`/payhist?q=${encodeURIComponent(q)}`);
-  return { title: 'История оплат', html: `<input class="search" id="q2" placeholder="Фамилия ученика" value="${esc(q)}" autocomplete="off">${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: plural(s.payments, ['оплата', 'оплаты', 'оплат']), go: 'a.payhist.months', p: { sid: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
+  return { title: 'История оплат', html: `${stickyFilters(`<input class="search" id="q2" placeholder="Фамилия ученика" value="${esc(q)}" autocomplete="off">`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: plural(s.payments, ['оплата', 'оплаты', 'оплат']), go: 'a.payhist.months', p: { sid: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
 };
 SCREENS['a.payhist.months'] = async ({ sid }) => {
   const d = await api(`/payhist/${sid}`);
-  return { title: d.student.name, html: `${d.months.length ? list(d.months.map(m => cell({ lead: m.pending ? '⏳' : m.paid ? '✅' : '•', plain: true, t: fmon(m.period), s: `оплачено ${fmt(m.paid)}${m.pending ? ` · ожидает ${fmt(m.pending)}` : ''}`, go: 'a.payhist.month', p: { sid, ym: m.period } }))) : '<div class="empty">Счетов и оплат пока нет</div>'}<div class="card" style="margin-top:10px"><div class="total"><span>Всего оплачено</span><span class="big">${fmt(d.totalPaid)}</span></div></div>` };
+  return { title: d.student.name, html: `${d.months.length ? list(d.months.map(m => cell({ lead: m.pending ? '⏳' : m.paid ? '✅' : '•', plain: true, t: fmon(m.period), s: `оплачено ${fmt(m.paid)}${m.pending ? ` · ожидает ${fmt(m.pending)}` : ''}`, go: 'a.payhist.month', p: { sid, ym: m.period } }))) : empty('Счетов и оплат пока нет', '<p class="hint" style="margin:0">Начисления появятся после первого занятия</p>')}<div class="card" style="margin-top:10px"><div class="total"><span>Всего оплачено</span><span class="big">${fmt(d.totalPaid)}</span></div></div>` };
 };
 SCREENS['a.payhist.month'] = async ({ sid, ym }) => {
   const d = await api(`/payhist/${sid}/${ym}`);
