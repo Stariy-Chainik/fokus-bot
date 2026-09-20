@@ -105,19 +105,23 @@ class PaymentService:
         self._group_repo = group_repo
         self._student_group_repo = student_group_repo
         self._sub_override_repo = subscription_override_repo
+        self._sub_since: dict[tuple[str, str], str] = {}   # постоянное правило действует с этого месяца
 
     async def _sub_override_map(self) -> dict[tuple[str, str, str], int]:
         """(group_id, period|'*', student_id|'') → amount.
 
-        ``period='*'`` — бессрочное персональное переопределение;
-        пустой student_id — вся группа.
+        ``period='*'`` — постоянное персональное правило; пустой student_id — вся группа.
+        У постоянного правила запоминается ещё и месяц создания (`_sub_since`):
+        оно действует с этого месяца и вперёд, прошлые месяцы не переписывает.
         """
         if self._sub_override_repo is None:
             return {}
-        return {
-            (o.group_id, o.period_month, o.student_id or ""): o.amount
-            for o in await self._sub_override_repo.get_all()
+        rows = await self._sub_override_repo.get_all()
+        self._sub_since = {
+            (o.group_id, o.student_id or ""): (o.created_at or "")[:7]
+            for o in rows if o.period_month == "*"
         }
+        return {(o.group_id, o.period_month, o.student_id or ""): o.amount for o in rows}
 
     async def subscription_revenue_breakdown(
         self, period_month: str,
@@ -243,18 +247,24 @@ class PaymentService:
                         group_id, pinned, pin_amount, effective_period)
         return pinned
 
-    @staticmethod
     def _sub_amount(
+        self,
         overrides: dict[tuple[str, str, str], int],
         group_id: str, period: str, student_id: str, default: int,
     ) -> int:
-        """Цена абонемента: ученик/месяц → ученик навсегда → группа/месяц → price_full."""
+        """Цена абонемента: ученик/месяц → постоянное правило ученика → группа/месяц → price_full.
+
+        Постоянное правило действует с месяца, когда его завели, и вперёд: закрытые
+        месяцы оно не переписывает (решение 2026-09-20).
+        """
         key_student = (group_id, period, student_id)
         if key_student in overrides:
             return overrides[key_student]
         key_student_permanent = (group_id, "*", student_id)
         if key_student_permanent in overrides:
-            return overrides[key_student_permanent]
+            since = getattr(self, "_sub_since", {}).get((group_id, student_id), "")
+            if not since or period >= since:
+                return overrides[key_student_permanent]
         key_group = (group_id, period, "")
         if key_group in overrides:
             return overrides[key_group]

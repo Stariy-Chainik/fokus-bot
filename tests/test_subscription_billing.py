@@ -313,8 +313,9 @@ def test_month_override_beats_permanent_student_override():
         ("GRP-0001", "*", "STU-A"): 0,
         ("GRP-0001", "2026-09", "STU-A"): 1500,
     }
-    assert PaymentService._sub_amount(overrides, "GRP-0001", "2026-09", "STU-A", 3000) == 1500
-    assert PaymentService._sub_amount(overrides, "GRP-0001", "2026-10", "STU-A", 3000) == 0
+    svc = _service([], [_sub_group()], [])
+    assert svc._sub_amount(overrides, "GRP-0001", "2026-09", "STU-A", 3000) == 1500
+    assert svc._sub_amount(overrides, "GRP-0001", "2026-10", "STU-A", 3000) == 0
 
 
 def test_override_applies_only_to_its_month():
@@ -524,3 +525,30 @@ def test_membership_covers_helper():
     assert not row.covers("2026-04") and row.covers("2026-05") and row.covers("2026-07")
     assert not row.covers("2026-08") and not row.is_active
     assert StudentGroup("STU-A", "GRP-0001").covers("2020-01")  # пустые поля — всегда
+
+
+def test_permanent_override_starts_from_its_own_month():
+    """Постоянное правило ученика действует с месяца, когда его завели: прошлое не переписывает."""
+    permanent = SubscriptionOverride(group_id="GRP-0001", period_month="*", student_id="STU-A",
+                                     amount=7000, created_at="2026-09-10 12:00:00")
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-08-05"),
+         _group_lesson("LES-2", "GRP-0001", "2026-09-05")],
+        [_sub_group(price=6000)],
+        [("STU-A", "GRP-0001")],
+        overrides=[permanent],
+    )
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-08"))["SUB:GRP-0001"].total == 6000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-09"))["SUB:GRP-0001"].total == 7000
+
+
+def test_permanent_override_without_created_at_applies_always():
+    """Старые правила без даты создания работают как раньше — на все месяцы."""
+    old_rule = SubscriptionOverride(group_id="GRP-0001", period_month="*", student_id="STU-A", amount=0)
+    svc = _service(
+        [_group_lesson("LES-1", "GRP-0001", "2026-08-05")],
+        [_sub_group(price=6000)],
+        [("STU-A", "GRP-0001")],
+        overrides=[old_rule],
+    )
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-08")) == {}
