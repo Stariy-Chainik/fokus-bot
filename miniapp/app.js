@@ -44,6 +44,18 @@ const MODE = { subscription: 'абонемент', per_visit: 'по посеще
 function lastPeriods(n) { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; }
 
 /* ── UI-кирпичи ──────────────────────────────────────────────────────── */
+/* Приветствие по времени суток и имя пользователя (из Telegram, иначе из профиля). */
+const hello = () => { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; };
+const myName = () => {
+  const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (u && u.first_name) return u.first_name;
+  const full = (state.me && state.me.name) || '';
+  return full.split(' ')[1] || full || '';
+};
+/* Шапка кабинета: логотип школы, приветствие и строка роли. */
+const hero = sub => `<div class="hero"><img class="logo" src="logo.jpg" alt="Фокус" width="52" height="52">
+  <div><div class="hi">${hello()}${myName() ? `, ${esc(myName())}` : ''}</div><div class="hint">${sub}</div></div></div>`;
+
 /* Имя группы без эмодзи — для чипов и других узких мест (в карточках эмодзи остаются). */
 const plainName = n => String(n || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B00}-\u{2BFF}]/gu, '').replace(/\s+/g, ' ').trim();
 /* Группы ученика в одну строку: первая + «ещё N». */
@@ -94,7 +106,7 @@ const SCREENS = {};
 SCREENS['a.home'] = async () => {
   const h = await api('/home');
   return { title: 'Школа сегодня', html: `
-    <div class="h2">${fdate(h.today)}</div>
+    ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
     <div class="eyebrow">Быстрые действия</div>
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}

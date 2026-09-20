@@ -108,7 +108,10 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     # ── профиль и сводка ─────────────────────────────────────────────────
     async def me(request: web.Request, user) -> web.Response:
-        return _json({"tgId": user.tg_id, "isAdmin": user.is_admin, "teacherId": user.teacher_id})
+        # имя — из карточки педагога, если админ ведёт занятия (для приветствия в кабинете)
+        teacher = await teacher_repo.get_by_id(user.teacher_id) if user.teacher_id else None
+        return _json({"tgId": user.tg_id, "isAdmin": user.is_admin, "teacherId": user.teacher_id,
+                      "name": teacher.name if teacher else ""})
 
     async def home(request: web.Request, user) -> web.Response:
         period = current_period()

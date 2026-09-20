@@ -11,7 +11,7 @@ SCREENS['t.home'] = async () => {
     ? pill('период сдан', 'ok')
     : h.canSubmit ? pill('можно сдавать', 'warn') : pill(`сдать с 25 ${MON_SHORT[+h.period.slice(5) - 1]}`, 'mute');
   return { title: 'Мой день', html: `
-    <div class="h2">${esc(h.name)}</div>
+    ${hero(`${esc(h.name)} · ${fdate(h.today)}`)}
     <div class="kpis">
       ${kpi(h.lessonsToday, 'занятий сегодня', '', 't.lessons', { key: h.today })}
       ${kpi(fmt(h.earnedToday), 'заработано сегодня', 'ok')}
