@@ -82,6 +82,8 @@
   .chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 8px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
   .chips.scroll::-webkit-scrollbar { display: none; }
   .chips.scroll .chip { flex: none; scroll-snap-align: start; }
+  .filters { position: sticky; top: -14px; z-index: 2; background: var(--bg); padding: 14px 0 2px; margin: -14px 0 0; }
+  .filters::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 8px; background: linear-gradient(var(--bg), transparent); }
   .chip { border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .search { width: 100%; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; margin-bottom: 10px; }

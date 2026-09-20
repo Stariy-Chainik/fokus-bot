@@ -44,6 +44,17 @@ const MODE = { subscription: 'абонемент', per_visit: 'по посеще
 function lastPeriods(n) { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; }
 
 /* ── UI-кирпичи ──────────────────────────────────────────────────────── */
+/* Имя группы без эмодзи — для чипов и других узких мест (в карточках эмодзи остаются). */
+const plainName = n => String(n || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B00}-\u{2BFF}]/gu, '').replace(/\s+/g, ' ').trim();
+/* Группы ученика в одну строку: первая + «ещё N». */
+const groupsShort = (groups, limit = 1) => {
+  const list_ = groups || [];
+  if (!list_.length) return 'без группы';
+  const head = list_.slice(0, limit).map(esc).join(', ');
+  return list_.length > limit ? `${head} · ещё ${list_.length - limit}` : head;
+};
+/* Панель поиска и фильтров, закреплённая при прокрутке списка. */
+const stickyFilters = inner => `<div class="filters">${inner}</div>`;
 const attr = (go, p) => go ? `data-go="${go}" data-p='${esc(JSON.stringify(p || {}))}'` : '';
 const cell = ({ lead, t, s, r, go, p, act, plain, cls = '' }) => `<button class="cell ${lead === undefined ? 'nolead' : ''} ${go || act ? '' : 'static'} ${cls}" ${go ? attr(go, p) : act ? `data-act="${act}" data-p='${esc(JSON.stringify(p || {}))}'` : ''}>${lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : ''}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
 const list = rows => `<div class="list">${rows.join('')}</div>`;
@@ -103,7 +114,7 @@ SCREENS['a.pay.students'] = async ({ ym, g, gname, bill }) => {
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
   state.ui.payPick = { ym, bill };
   const d = await api(`/pay/students?ym=${ym}&group=${encodeURIComponent(g || '')}`);
-  return { title: gname || 'Ученики', html: `${groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay')}<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите ученика</div>${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'warn') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
+  return { title: gname || 'Ученики', html: `${stickyFilters(groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay') + `<p class="hint" style="margin:-2px 0 8px">${fmon(ym)} — выберите ученика</p>`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'warn') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
 };
 
 SCREENS['a.pay.student'] = async ({ ym, sid }) => {
@@ -155,11 +166,12 @@ SCREENS['a.students'] = async () => {
   const d = await api(`/students?${qs}`);
   const filtered = f.group || f.noparent || f.debt || q;
   return { title: 'Ученики', html: `
-    <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
-    ${groupFilter(state.ui.groupsCache, f.group, 'sfGroupPick')}
-    <div class="chips"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${filtered ? `<button class="chip" data-act="sfReset" data-p='{}'>✕ Сбросить</button>` : ''}</div>
-    <p class="hint" style="margin:-4px 0 10px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
-    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: esc(s.groups.join(', ')) || 'без группы', r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
+    ${stickyFilters(`
+      <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
+      ${groupFilter(state.ui.groupsCache, f.group, 'sfGroupPick')}
+      <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${filtered ? `<button class="chip" data-act="sfReset" data-p='{}'>✕ Сбросить</button>` : ''}</div>`)}
+    <p class="hint" style="margin:0 0 8px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
+    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: groupsShort(s.groups), r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
 };
 SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
@@ -224,7 +236,7 @@ const groupFilter = (branches, cur, act, branchKey = 'gfBranch') => {
   const chip = (label, on, a, p) => `<button class="chip" aria-pressed="${on}" data-act="${a}" data-p='${esc(JSON.stringify(p))}'>${label}</button>`;
   return `
     <div class="chips scroll">${chip('Все филиалы', !branch, 'gfBranch', { v: '', key: branchKey })}${branches.map(b => chip(esc(b.name), branch === b.id, 'gfBranch', { v: b.id, key: branchKey })).join('')}</div>
-    <div class="chips scroll">${chip('Все группы', !cur, act, { v: '' })}${shown.map(g => chip(`${esc(g.name)}${g.students ? ` · ${g.students}` : ''}`, cur === g.id, act, { v: g.id })).join('')}</div>`;
+    <div class="chips scroll">${chip('Все группы', !cur, act, { v: '' })}${shown.map(g => chip(`${esc(plainName(g.name))}${g.students ? ` · ${g.students}` : ''}`, cur === g.id, act, { v: g.id })).join('')}</div>`;
 };
 ACT.gfBranch = ({ v, key }) => { state.ui[key || 'gfBranch'] = v; render(); };
 
