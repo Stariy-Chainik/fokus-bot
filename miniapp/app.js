@@ -176,29 +176,46 @@ SCREENS['a.debtors'] = async () => {
   return { title: 'Должники', html: `<div class="hint" style="margin-bottom:10px">Долг = начислено − оплачено. Текущий месяц помечен * и в напоминание не входит.</div>${rows.length ? list(rows.map(r => cell({ lead: initials(r.name), t: esc(r.name), s: Object.entries(r.months).map(([ym, a]) => `${MON_NOM[+ym.slice(5) - 1]}${ym === d.period ? '*' : ''}: ${fmt(a)}`).join(' · ') + (r.hasParent ? '' : ' · родитель не привязан'), r: r.closedTotal ? pill(fmt(r.closedTotal), 'bad') : pill(fmt(r.currentTotal), 'warn'), go: 'a.student', p: { id: r.id } }))) : empty('Должников нет', '<p class="hint" style="margin:0">Все закрытые месяцы оплачены</p>')}<div style="margin-top:12px">${btn(`📤 Напомнить всем (${targets.length})`, 'remind', { n: targets.length, total: targets.reduce((a, r) => a + r.closedTotal, 0) }, targets.length ? '' : 'sec')}</div>` };
 };
 
+/* Ученики: сначала филиал → группы → состав группы. Поиск и быстрые фильтры
+   («без родителя», «с долгом») показывают плоский список по всей школе. */
+const stuCell = s => cell({ lead: initials(s.name), t: esc(s.name),
+  s: groupsShort(s.groups) + (s.hasParent ? '' : ' · без родителя'), go: 'a.student', p: { id: s.id } });
+
 SCREENS['a.students'] = async () => {
   const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false });
   const q = state.ui.q || '';
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
-  const branch = state.ui.gfBranch || '';        // выбранный филиал сужает список сам по себе
-  const qs = `q=${encodeURIComponent(q)}&branch=${encodeURIComponent(branch)}&group=${encodeURIComponent(f.group)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`;
-  const d = await api(`/students?${qs}`);
-  const filtered = branch || f.group || f.noparent || f.debt || q;
-  // сверху только поиск: выбранные фильтры показываем чипами с ✕, остальное — в шторке
-  const gname = state.ui.groupsCache.flatMap(b => b.groups).find(g => g.id === f.group);
-  const bname = state.ui.groupsCache.find(b => b.id === branch);
-  const active = [
-    bname && !gname ? [plainName(bname.name), 'sfPick', { k: 'branch', v: '' }] : null,
-    gname ? [plainName(gname.name), 'sfPick', { k: 'group', v: '' }] : null,
-    f.noparent ? ['Без родителя', 'sfToggle', { k: 'noparent' }] : null,
-    f.debt ? ['С долгом', 'sfToggle', { k: 'debt' }] : null,
-  ].filter(Boolean);
-  return { title: 'Ученики', html: `
-    ${stickyFilters(`
-      <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
-      <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${active.length > 0}" data-act="sfSheet" data-p='{}'>⚙️ Фильтры${active.length ? ` · ${active.length}` : ''}</button>${active.map(([label, act, p]) => `<button class="chip" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${esc(label)} ✕</button>`).join('')}</div>`)}
-    <p class="hint" style="margin:0 0 8px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
-    ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: groupsShort(s.groups) + (s.hasParent ? '' : ' · без родителя'), go: 'a.student', p: { id: s.id } }))) : empty('Никого не нашли', filtered ? btn('✕ Сбросить фильтры', 'sfReset', {}, 'sec') : '')}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
+  const flat = !!(q || f.noparent || f.debt);            // ищем по всей школе, мимо филиалов
+  const d = await api(`/students?q=${encodeURIComponent(q)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`);
+  const head = stickyFilters(`
+    <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
+    <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${flat ? '<button class="chip" data-act="sfReset" data-p=\'{}\'>✕ Сбросить</button>' : ''}</div>`);
+  const body = flat
+    ? `<p class="hint" style="margin:0 0 8px">Показано ${d.students.length} из ${d.total}</p>
+       ${d.students.length ? list(d.students.map(stuCell)) : empty('Никого не нашли', btn('✕ Сбросить', 'sfReset', {}, 'sec'))}`
+    : `<p class="hint" style="margin:0 0 8px">${plural(d.total, ['ученик', 'ученика', 'учеников'])} в школе — выберите филиал</p>
+       ${list(state.ui.groupsCache.map(b => cell({ lead: '🏢', plain: true, t: esc(b.name),
+         s: plural(b.groups.length, ['группа', 'группы', 'групп']),
+         go: 'a.students.b', p: { id: b.id, name: b.name } })))}`;
+  return { title: 'Ученики', html: `${head}${body}
+    <div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
+};
+
+SCREENS['a.students.b'] = async ({ id, name }) => {
+  const b = (state.ui.groupsCache || []).find(x => x.id === id) || { groups: [] };
+  return { title: name || 'Филиал', html: `
+    ${b.groups.length ? list(b.groups.map(g => cell({ lead: '💃', plain: true, t: esc(plainName(g.name)),
+      s: MODE[g.mode] || '', r: plural(g.students || 0, ['ученик', 'ученика', 'учеников']),
+      go: 'a.students.g', p: { id: g.id, name: g.name } })))
+      : empty('В филиале нет групп')}
+    <p class="hint" style="margin-top:10px">Ученик может быть в нескольких группах — тогда он виден в каждой.</p>` };
+};
+
+SCREENS['a.students.g'] = async ({ id, name }) => {
+  const d = await api(`/students?group=${encodeURIComponent(id)}`);
+  return { title: plainName(name) || 'Группа', html: `
+    <p class="hint" style="margin:0 0 8px">${plural(d.students.length, ['ученик', 'ученика', 'учеников'])} в группе</p>
+    ${d.students.length ? list(d.students.map(stuCell)) : empty('В группе никого нет')}` };
 };
 SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
@@ -649,37 +666,9 @@ ACT.payGroupPick = ({ v }) => {
   state.stack.pop();
   go('a.pay.students', { ym, g: v, gname: g ? g.name : 'Все ученики', bill });
 };
-ACT.sfGroupPick = ({ v }) => { state.ui.sf.group = v; render(); };
-ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; sfApply(); };
-ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; state.ui.gfBranch = ''; closeSheet(); render(); };
-/* Выбор филиала/группы из шторки: филиал сбрасывает группу, чтобы фильтры не спорили. */
-ACT.sfPick = ({ k, v }) => {
-  if (k === 'branch') { state.ui.gfBranch = v; state.ui.sf.group = ''; }
-  else { state.ui.sf.group = v; if (v) state.ui.gfBranch = (state.ui.groupsCache.find(b => b.groups.some(g => g.id === v)) || {}).id || ''; }
-  sfApply();
-};
-/* Список под шторкой обновляем всегда, саму шторку — пока она открыта. */
-function sfApply() { const open = !!document.querySelector('.sheet-wrap'); render(); if (open) ACT.sfSheet({}); }
-ACT.sfDone = () => { closeSheet(); render(); };
-/* Фильтры учеников живут в шторке: сверху экрана остаётся только поиск. */
-ACT.sfSheet = () => {
-  const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false });
-  const branches = state.ui.groupsCache || [];
-  const branch = state.ui.gfBranch || '';
-  const groups = branches.filter(b => b.id === branch).flatMap(b => b.groups);
-  const opt = (label, on, act, p, sub) => `<button class="cell" data-act="${act}" data-p='${esc(JSON.stringify(p))}'><span class="lead plain">${on ? '✅' : '⬜'}</span><span><div class="t">${esc(label)}</div>${sub ? `<div class="s">${esc(sub)}</div>` : ''}</span><span class="r"></span></button>`;
-  closeSheet();
-  sheet(`<h3>Фильтры</h3>
-    <div class="eyebrow">Филиал</div>
-    ${list([opt('Все филиалы', !branch, 'sfPick', { k: 'branch', v: '' })]
-      .concat(branches.map(b => opt(b.name, branch === b.id, 'sfPick', { k: 'branch', v: b.id }, plural(b.groups.length, ['группа', 'группы', 'групп'])))))}
-    ${branch ? `<div class="eyebrow">Группа</div>${list([opt('Все группы филиала', !f.group, 'sfPick', { k: 'group', v: '' })]
-      .concat(groups.map(g => opt(plainName(g.name), f.group === g.id, 'sfPick', { k: 'group', v: g.id }, g.students ? plural(g.students, ['ученик', 'ученика', 'учеников']) : ''))))}` : ''}
-    <div class="eyebrow">Ещё</div>
-    ${list([opt('Без родителя в боте', f.noparent, 'sfToggle', { k: 'noparent' }),
-            opt('С долгом за закрытые месяцы', f.debt, 'sfToggle', { k: 'debt' })])}
-    <div style="margin-top:12px">${btn('Готово', 'sfDone', {})}${btn('✕ Сбросить всё', 'sfReset', {}, 'ghost')}</div>`);
-};
+/* Быстрые фильтры на экране «Ученики»: показывают плоский список по всей школе. */
+ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };
+ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; render(); };
 
 document.addEventListener('click', e => {
   const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');
