@@ -226,14 +226,33 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
       <div class="total"><span>К оплате</span><span class="big">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
     ${b.rows.some(r => r.rest > 0) ? `<div class="eyebrow">Отметить оплату</div>${list(b.rows.filter(r => r.rest > 0).map(r => cell({
       lead: '💾', plain: true, t: esc(r.name), s: `остаток ${fmt(r.rest)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}`,
-      r: pill('отметить', 'acc'), act: 'tPayAsk', p: { sid, ym, key: r.key, name: r.name, rest: r.rest, student: b.student.name },
+      ...(r.subscription
+        ? { r: pill('отметить', 'acc'), act: 'tPayAsk', p: { sid, ym, key: r.key, name: r.name, rest: r.rest, student: b.student.name } }
+        : { r: pill('занятия', 'acc'), go: 't.pay.select', p: { sid, ym, key: r.key } }),
     })))}` : ''}
     <div style="margin-top:12px">${b.student.hasParent
       ? btn('📨 Отправить родителю', 'tBillSend', { sid, ym, name: b.student.name }, b.total ? '' : 'ghost')
       : '<div class="card pad hint">Родитель не привязан к ученику — отправлять некому.</div>'}</div>` };
 };
 
+SCREENS['t.pay.select'] = async ({ sid, ym, key }) => {
+  const d = await api(`/bills/student/${sid}/marks?ym=${ym}&key=${encodeURIComponent(key)}`);
+  const ui = state.ui.tsel || (state.ui.tsel = {}); const k = key + sid + ym;
+  if (ui.key !== k) { ui.key = k; ui.picked = new Set(); }
+  const chosen = d.marks.filter(m => !m.paid && ui.picked.has(m.lessonId));
+  const total = chosen.reduce((a, m) => a + m.amount, 0);
+  return { title: d.ledger.name, html: `
+    <div class="hint" style="margin-bottom:10px">${esc(d.student.name)} · ${fmon(ym)} · начислено ${fmt(d.ledger.accrued)}, оплачено ${fmt(d.ledger.paid)}. Отметьте занятия, за которые приняли деньги.</div>
+    <div class="list">${d.marks.map(m => m.paid
+      ? `<div class="lesson-line"><span class="mark paid">✓</span><span>${fdate(m.date)} · ${m.durationMin} мин<div class="d">оплачено</div></span><span class="amt">${fmt(m.amount)}</span></div>`
+      : `<button class="lesson-line pick" data-act="tPick" data-p='${esc(JSON.stringify({ id: m.lessonId }))}'><span class="mark ${ui.picked.has(m.lessonId) ? 'on' : ''}">${ui.picked.has(m.lessonId) ? '✓' : ''}</span><span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></button>`).join('')}</div>
+    <div style="margin-top:12px">${btn(total ? `✅ Отметить оплату ${fmt(total)}` : 'Выберите занятия', 'tPayAsk',
+      { sid, ym, key, name: d.ledger.name, rest: total || d.ledger.remainder, student: d.student.name, picked: total > 0 }, total ? '' : 'sec')}</div>
+    <p class="hint" style="margin-top:10px">Сумма закрывает самые ранние неоплаченные занятия этого начисления — как в боте.</p>` };
+};
+
 /* ── действия ────────────────────────────────────────────────────────── */
+ACT.tPick = ({ id }) => { const s = state.ui.tsel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); };
 ACT.tGroupTab = ({ v }) => { state.ui.tGroupTab = v; render(); };
 ACT.tGradeAsk = ({ id, sid, name, grade }) => sheet(`<h3>Оценить тренировку</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/5` : ''}</div>
   <div class="chips" style="margin-top:12px">${[1, 2, 3, 4, 5].map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
@@ -256,9 +275,9 @@ ACT.tTaskAdd = async ({ sid }) => {
   catch (e) { toast(errText(e)); }
 };
 ACT.tTaskClose = async ({ id }) => { try { await api(`/diary/tasks/${id}/close`, { method: 'POST' }); render(); toast('Задание закрыто'); } catch (e) { toast(errText(e)); } };
-ACT.tPayAsk = ({ sid, ym, key, name, rest, student }) => {
+ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
   state.ui.tPayMethod = 'cash';
-  sheet(`<h3>Отметить оплату</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}. Остаток ${fmt(rest)}.</div>
+  sheet(`<h3>Отметить оплату</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}. ${picked ? 'За выбранные занятия' : 'Остаток'} ${fmt(rest)}.</div>
     ${field('pay-a', 'Сумма, ₽', String(rest), 'inputmode="numeric"')}
     <div class="hint" style="margin:10px 0 4px">Способ оплаты</div>
     <div class="chips">${[['cash', '💵 Наличные'], ['receipt_bank', '🏦 Перевод'], ['admin_manual', '👤 Вручную']].map(([v, n]) => `<button class="chip" id="pm-${v}" aria-pressed="${v === 'cash'}" data-act="tPayMethod" data-p='${esc(JSON.stringify({ v }))}'>${n}</button>`).join('')}</div>
@@ -270,6 +289,7 @@ ACT.tPayDo = async ({ sid, ym, key }) => {
   if (!amount) { toast('Укажите сумму'); return; }
   try {
     const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, method: state.ui.tPayMethod || 'cash' } });
+    if (state.ui.tsel) state.ui.tsel.key = '';
     closeSheet(); render(); toast(r.credited ? `Зачтено ${fmt(r.credited)}` : 'Закрывать нечего — остатков нет');
   } catch (e) { closeSheet(); toast(errText(e)); }
 };
