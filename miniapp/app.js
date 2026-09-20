@@ -10,11 +10,12 @@ function applyTheme() { document.documentElement.dataset.theme = tg && tg.colorS
 applyTheme(); if (tg) tg.onEvent('themeChanged', applyTheme);
 
 /* ── API ─────────────────────────────────────────────────────────────── */
-/* Роль задаёт и префикс API, и набор вкладок: кабинет администратора (a.*) или педагога (t.*). */
+/* Роль задаёт и префикс API, и набор вкладок: администратор (a.*), педагог (t.*),
+   родитель (p.*) или спортсмен (s.*). */
 let ROLE = 'admin';
-const API_BASE = { admin: '/api/admin', teacher: '/api/teacher', parent: '/api/parent' };
-const ROLE_TITLE = { admin: 'Администратор', teacher: 'Педагог', parent: 'Родитель' };
-const ROLE_HOME = { admin: 'a.home', teacher: 't.home', parent: 'p.home' };
+const API_BASE = { admin: '/api/admin', teacher: '/api/teacher', parent: '/api/parent', athlete: '/api/athlete' };
+const ROLE_TITLE = { admin: 'Администратор', teacher: 'Педагог', parent: 'Родитель', athlete: 'Спортсмен' };
+const ROLE_HOME = { admin: 'a.home', teacher: 't.home', parent: 'p.home', athlete: 's.home' };
 class ApiError extends Error { constructor(status, code) { super(code || `HTTP ${status}`); this.status = status; this.code = code; } }
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Accept': 'application/json' };
@@ -85,6 +86,7 @@ const TABS = {
   admin: [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.school', 'Школа', 'teacher'], ['a.finance', 'Финансы', 'chart']],
   teacher: [['t.home', 'Сводка', 'home'], ['t.lessons', 'Занятия', 'card'], ['t.groups', 'Группы', 'users'], ['t.diary', 'Дневник', 'book'], ['t.money', 'Зарплата', 'chart']],
   parent: [['p.home', 'Мои дети', 'home'], ['p.bills', 'Счета', 'card'], ['p.lessons', 'Занятия', 'users'], ['p.diary', 'Дневник', 'book']],
+  athlete: [['s.home', 'Дневник', 'home'], ['s.entries', 'Тренировки', 'book'], ['s.tasks', 'Задания', 'card'], ['s.rating', 'Рейтинг', 'chart']],
 };
 const ICON = {
   home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
@@ -663,9 +665,9 @@ ACT.switchRole = async ({ to }) => {
 };
 
 (async () => {
-  // роль подбираем по доступу: администратор → педагог → родитель
+  // роль подбираем по доступу: администратор → педагог → родитель → спортсмен
   let last = null;
-  for (const role of ['admin', 'teacher', 'parent']) {
+  for (const role of ['admin', 'teacher', 'parent', 'athlete']) {
     ROLE = role;
     try { state.me = await api('/me'); last = null; break; }
     catch (e) { last = e; if (!(e instanceof ApiError) || e.status !== 403) break; }
