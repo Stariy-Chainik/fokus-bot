@@ -100,8 +100,10 @@ SCREENS['a.pay.groups'] = async ({ ym, bill }) => {
 };
 
 SCREENS['a.pay.students'] = async ({ ym, g, gname, bill }) => {
+  if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
+  state.ui.payPick = { ym, bill };
   const d = await api(`/pay/students?ym=${ym}&group=${encodeURIComponent(g || '')}`);
-  return { title: gname || 'Ученики', html: `<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите ученика</div>${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'warn') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
+  return { title: gname || 'Ученики', html: `${groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay')}<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите ученика</div>${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'warn') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
 };
 
 SCREENS['a.pay.student'] = async ({ ym, sid }) => {
@@ -154,7 +156,7 @@ SCREENS['a.students'] = async () => {
   const filtered = f.group || f.noparent || f.debt || q;
   return { title: 'Ученики', html: `
     <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
-    <select class="search" id="sf-group" data-act="sfGroup"><option value="">Все группы</option>${state.ui.groupsCache.map(b => `<optgroup label="${esc(b.name)}">${b.groups.map(g => `<option value="${g.id}" ${f.group === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</optgroup>`).join('')}</select>
+    ${groupFilter(state.ui.groupsCache, f.group, 'sfGroupPick')}
     <div class="chips"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${filtered ? `<button class="chip" data-act="sfReset" data-p='{}'>✕ Сбросить</button>` : ''}</div>
     <p class="hint" style="margin:-4px 0 10px">${filtered ? `Показано ${d.students.length} из ${d.total}` : plural(d.total, ['ученик', 'ученика', 'учеников'])}</p>
     ${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: esc(s.groups.join(', ')) || 'без группы', r: s.hasParent ? '' : pill('без родителя', 'warn'), go: 'a.student', p: { id: s.id } }))) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('➕ Добавить ученика', 'a.student.add', {}, 'sec')}</div>` };
@@ -212,6 +214,20 @@ const ACT = {
 
 /* ── этап 2: финансы, история оплат, напоминание должникам ─────────────── */
 const field = (id, label, value = '', attrs = '') => `<label class="hint" for="${id}" style="display:block;margin:10px 0 4px">${label}</label><input class="search" style="margin:0" id="${id}" value="${esc(value)}" ${attrs}>`;
+/* Фильтр по группам: строка филиалов + строка групп, обе прокручиваются вбок.
+   branches — как отдаёт /pay/groups; act получает {v} с id группы ('' — все). */
+const groupFilter = (branches, cur, act, branchKey = 'gfBranch') => {
+  const all = branches.flatMap(b => b.groups.map(g => ({ ...g, branch: b.id, branchName: b.name })));
+  const curGroup = all.find(g => g.id === cur);
+  const branch = state.ui[branchKey] || (curGroup ? curGroup.branch : '');
+  const shown = branch ? all.filter(g => g.branch === branch) : all;
+  const chip = (label, on, a, p) => `<button class="chip" aria-pressed="${on}" data-act="${a}" data-p='${esc(JSON.stringify(p))}'>${label}</button>`;
+  return `
+    <div class="chips scroll">${chip('Все филиалы', !branch, 'gfBranch', { v: '', key: branchKey })}${branches.map(b => chip(esc(b.name), branch === b.id, 'gfBranch', { v: b.id, key: branchKey })).join('')}</div>
+    <div class="chips scroll">${chip('Все группы', !cur, act, { v: '' })}${shown.map(g => chip(`${esc(g.name)}${g.students ? ` · ${g.students}` : ''}`, cur === g.id, act, { v: g.id })).join('')}</div>`;
+};
+ACT.gfBranch = ({ v, key }) => { state.ui[key || 'gfBranch'] = v; render(); };
+
 const monthChips = (go, cur, p) => `<div class="chips">${lastPeriods(3).map(m => `<button class="chip" aria-pressed="${m === cur}" data-go="${go}" data-p='${esc(JSON.stringify({ ...p, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>`;
 const profitRow = (r, period) => `<button class="cell" data-go="a.profit.teacher" data-p='${esc(JSON.stringify({ period, tid: r.teacherId }))}'><span class="lead" style="${r.owner ? 'background:var(--warn-soft);color:var(--warn)' : ''}">${r.owner ? '👑' : initials(r.name)}</span><span><div class="t">${esc(r.name)}</div><div class="s">${r.groupLessons ? `👥 ${r.groupLessons}` : ''} ${r.individualLessons ? `👤 ${r.individualLessons}` : ''} · выручка ${fmt(r.income)} · зарплата ${fmt(r.salary)}${r.rent ? `<br>🏟 в т.ч. аренда зала ${fmt(r.rent)} (${r.rentLessons} зан.)` : ''}${r.owner ? `<br>👑 руководитель: ${fmt(r.ownerIncome)} остаются в прибыли` : ''}</div></span><span class="r"><b>${fmt(r.profit)}</b><br>${r.margin}%<span class="chev">›</span></span></button>`;
 const totalsCard = t => `<div class="card" style="margin-top:14px"><div class="pad money" style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between"><span>Выручка</span><b>${fmt(t.totalIncome)}</b></div>${t.rentIncome ? `<div style="display:flex;justify-content:space-between" class="hint"><span>в т.ч. аренда зала</span><span>${fmt(t.rentIncome)} (${t.rentLessons} зан.)</span></div>` : ''}<div style="display:flex;justify-content:space-between"><span>Зарплата</span><b>${fmt(t.salary)}</b></div>${t.ownerIncome ? `<div style="display:flex;justify-content:space-between" class="hint"><span>👑 руководитель в прибыли</span><span>${fmt(t.ownerIncome)}</span></div>` : ''}${t.manualExpenses ? `<div style="display:flex;justify-content:space-between"><span>Расходы</span><b>${fmt(t.manualExpenses)}</b></div>` : ''}</div><div class="total"><span>Прибыль</span><span class="big" style="color:var(--ok)">${fmt(t.profit)}</span></div></div>`;
@@ -567,13 +583,24 @@ async function render() {
   if (seq !== renderSeq) return;
   document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">${ROLE_TITLE[ROLE]}</span>`;
   content.innerHTML = `<div class="fade">${scr.html}</div>`; content.scrollTop = 0;
+  // выбранный чип в прокручиваемой строке — в зону видимости
+  content.querySelectorAll('.chips.scroll').forEach(strip => {
+    const on = strip.querySelector('.chip[aria-pressed="true"]');
+    if (on && on !== strip.firstElementChild) strip.scrollLeft = Math.max(0, on.offsetLeft - 12);
+  });
   const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4'); const qid = q ? q.id : null; const qkey = qid || 'q';
   if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
 }
 ACT.retry = () => render();
+ACT.payGroupPick = ({ v }) => {
+  const { ym, bill } = state.ui.payPick || {};
+  const g = (state.ui.groupsCache || []).flatMap(b => b.groups).find(x => x.id === v);
+  state.stack.pop();
+  go('a.pay.students', { ym, g: v, gname: g ? g.name : 'Все ученики', bill });
+};
+ACT.sfGroupPick = ({ v }) => { state.ui.sf.group = v; render(); };
 ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };
-ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; render(); };
-document.addEventListener('change', e => { if (e.target.id === 'sf-group') { state.ui.sf.group = e.target.value; render(); } });
+ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; state.ui.gfBranch = ''; render(); };
 
 document.addEventListener('click', e => {
   const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');

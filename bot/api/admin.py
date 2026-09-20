@@ -217,10 +217,15 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     async def pay_groups(request: web.Request, user) -> web.Response:
         branches = sorted(await branch_repo.get_all(), key=lambda b: b.name)
         groups = await group_repo.get_all()
+        counts: dict[str, int] = {}
+        for gids in (await student_group_repo.get_map_by_student()).values():
+            for gid in gids:
+                counts[gid] = counts.get(gid, 0) + 1
         out = []
         for b in branches:
             out.append({"id": b.branch_id, "name": b.name, "groups": [
-                {"id": g.group_id, "name": g.name, "mode": _mode(g), "price": g.price_full}
+                {"id": g.group_id, "name": g.name, "mode": _mode(g), "price": g.price_full,
+                 "students": counts.get(g.group_id, 0)}
                 for g in sorted(groups, key=lambda g: (g.sort_order, g.name)) if g.branch_id == b.branch_id
             ]})
         return _json({"branches": out})

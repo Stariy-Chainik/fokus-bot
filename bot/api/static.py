@@ -20,7 +20,15 @@ def register_miniapp_static(app: web.Application, directory: Path = MINIAPP_DIR)
     async def index(_request: web.Request) -> web.StreamResponse:
         return web.FileResponse(directory / "index.html", headers=_NO_CACHE)
 
+    async def asset(request: web.Request) -> web.StreamResponse:
+        """Файлы кабинета — без кеша: после деплоя у всех сразу новая версия."""
+        name = request.match_info["name"]
+        path = (directory / name).resolve()
+        if directory.resolve() not in path.parents or not path.is_file():
+            raise web.HTTPNotFound
+        return web.FileResponse(path, headers=_NO_CACHE)
+
     app.router.add_get("/app", index)
     app.router.add_get("/app/", index)
-    app.router.add_static("/app/", directory, show_index=False)
-    logger.info("Mini App: фронт раздаётся из %s по /app/", directory)
+    app.router.add_get("/app/{name:[A-Za-z0-9_.-]+}", asset)
+    logger.info("Mini App: фронт раздаётся из %s по /app/ (без кеша)", directory)
