@@ -448,6 +448,7 @@ async def cb_pay_select_apply(
         credited, rows_count = await payment_service.record_payment(
             student_id, student.name if student else student_id, period, amount,
             callback.from_user.id, [teacher_id], "отмечено вручную", ADMIN_MANUAL,
+            lesson_ids=list(data.get("psel_chosen") or []),
         )
         await state.update_data(psel_chosen=[])
         if credited > 0:

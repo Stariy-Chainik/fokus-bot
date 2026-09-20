@@ -288,7 +288,7 @@ ACT.tPayDo = async ({ sid, ym, key }) => {
   const amount = +val('pay-a');
   if (!amount) { toast('Укажите сумму'); return; }
   try {
-    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, method: state.ui.tPayMethod || 'cash' } });
+    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, method: state.ui.tPayMethod || 'cash', lessonIds: [...((state.ui.tsel && state.ui.tsel.picked) || [])] } });
     if (state.ui.tsel) state.ui.tsel.key = '';
     closeSheet(); render(); toast(r.credited ? `Зачтено ${fmt(r.credited)}` : 'Закрывать нечего — остатков нет');
   } catch (e) { closeSheet(); toast(errText(e)); }

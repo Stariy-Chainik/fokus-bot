@@ -89,13 +89,17 @@ async def unpaid_for(student, period_month: str, payment_service) -> tuple[int, 
 
 
 def selected_from(data: dict, student_id: str, period_month: str, unpaid: list) -> list:
-    """Выбранные педагоги из FSM-данных (валидные), по умолчанию — все неоплаченные."""
+    """Выбранные педагоги из FSM-данных (валидные), по умолчанию — все неоплаченные.
+
+    Если родитель выбрал отдельные занятия (`pay_amounts`), сумма педагога — за них.
+    """
+    amounts = data.get("pay_amounts") or {}
     if data.get("pay_sel_key") == f"{student_id}:{period_month}":
         chosen = set(data.get("pay_sel") or [])
-        sel = [u for u in unpaid if u["tid"] in chosen]
+        sel = [{**u, "amount": amounts.get(u["tid"], u["amount"])} for u in unpaid if u["tid"] in chosen]
         if sel:
             return sel
-    return unpaid
+    return [{**u, "amount": amounts.get(u["tid"], u["amount"])} for u in unpaid]
 
 
 def selection_fsm_data(sel: list, unpaid: list) -> dict:

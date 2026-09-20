@@ -12,7 +12,9 @@ from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
 from .billing_service import build_billing_rows
-from .payment_ledger import BillAggregate, StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons
+from .payment_ledger import (
+    BillAggregate, StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons, paid_lesson_ids,
+)
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
 logger = logging.getLogger(__name__)
@@ -421,21 +423,39 @@ class PaymentService:
         ledger = ledgers.get(teacher_id)
         if ledger is None:
             return [], None
-        return lesson_marks(ledger.items, ledger.paid), ledger
+        rows = await self._payment_repo.get_by_student_and_period(student.student_id, period_month)
+        return lesson_marks(ledger.items, ledger.paid, paid_lesson_ids(rows).get(teacher_id, set())), ledger
+
+    async def set_payment_intent(
+        self, student, period_month: str, teacher_id: str, lesson_ids: list,
+    ) -> bool:
+        """Запомнить на строке-остатке, за какие занятия платит родитель.
+
+        Любое подтверждение (ЮКасса, чек, наличные) зачтёт оплату именно на них —
+        `record_payment` читает намерение со строки-остатка.
+        """
+        ledger = (await self.ledger_for(student, period_month)).get(teacher_id)
+        if ledger is None or ledger.pending is None:
+            return False
+        return await self._payment_repo.set_lesson_ids(ledger.pending.payment_id, "|".join(lesson_ids))
 
     async def record_payment(
         self, student_id: str, student_name: str, period_month: str, amount: int,
         confirmed_by_tg_id: int, teacher_ids: list | None = None, comment: str | None = None,
-        payment_method: str = "",
+        payment_method: str = "", lesson_ids: list | None = None,
     ) -> tuple[int, int]:
         """Зачесть оплату на сумму amount по остаткам педагогов месяца.
 
         teacher_ids — какие остатки закрывать и в каком порядке (None — все, по имени).
+        lesson_ids — занятия, за которые платят (плательщик выбрал их на экране): они
+        запоминаются в строке оплаты и получают ✅ именно они, а не самые ранние.
+        Учитываются, только когда оплата адресована одному начислению.
         Остаток закрывается целиком (строка → paid) или частично (новая paid-строка на
         зачтённую сумму, остаток уменьшается). Лишнее — переплата отдельной строкой.
         Возвращает (зачтено ₽, строк). Так сумма в чеке/платеже совпадает с учётом,
         даже если остаток вырос после новых занятий.
         """
+        linked = "|".join(lesson_ids) if lesson_ids and teacher_ids and len(teacher_ids) == 1 else ""
         if not payment_method:
             payment_method = YOOKASSA if confirmed_by_tg_id == 0 else ADMIN_MANUAL
         student = Student(student_id=student_id, name=student_name)
@@ -452,16 +472,23 @@ class PaymentService:
             if pending is None or pending.total_amount <= 0:
                 continue
             pay = min(left, pending.total_amount)
+            # Занятия оплаты: явно переданные с экрана или намерение, которое
+            # оставил плательщик на строке-остатке (родитель выбрал занятия).
+            row_ids = linked or (getattr(pending, "lesson_ids", "") or "")
             if pay == pending.total_amount:
                 await self._payment_repo.confirm(
                     pending.payment_id, confirmed_by_tg_id, payment_method,
                 )
+                if row_ids:
+                    await self._payment_repo.set_lesson_ids(pending.payment_id, row_ids)
             else:
                 await self._add_paid_row(
                     student, period_month, tid, ledgers[tid].name, pay,
-                    confirmed_by_tg_id, comment, payment_method,
+                    confirmed_by_tg_id, comment, payment_method, row_ids,
                 )
                 await self._payment_repo.update_amount(pending.payment_id, pending.total_amount - pay)
+                if not linked and row_ids:  # намерение израсходовано
+                    await self._payment_repo.set_lesson_ids(pending.payment_id, "")
             left -= pay
             credited += pay
             rows += 1
@@ -479,6 +506,7 @@ class PaymentService:
     async def _add_paid_row(
         self, student: Student, period_month: str, teacher_id: str, teacher_name: str,
         amount: int, confirmed_by_tg_id: int, comment: str | None, payment_method: str,
+        lesson_ids: str = "",
     ) -> StudentPeriodPayment:
         now = now_str()
         payment = StudentPeriodPayment(
@@ -487,6 +515,7 @@ class PaymentService:
             total_amount=amount, status=PaymentStatus.PAID, paid_at=now,
             confirmed_by_tg_id=confirmed_by_tg_id, comment=comment, created_at=now, updated_at=now,
             teacher_id=teacher_id, teacher_name=teacher_name, payment_method=payment_method,
+            lesson_ids=lesson_ids,
         )
         await self._payment_repo.add(payment)
         return payment
@@ -614,6 +643,7 @@ class PaymentService:
         customer_phone: str = "",
         customer_email: str = "",
         teacher_ids: list | None = None,
+        lesson_ids: list | None = None,
     ) -> tuple:
         """Создаёт платёж в ЮКасса, возвращает (confirmation_url, payment_id).
 
@@ -659,6 +689,8 @@ class PaymentService:
                 "period_month": period_month,
                 # выборочная оплата: подтверждаем только этих педагогов
                 **({"teacher_ids": ",".join(teacher_ids)} if teacher_ids else {}),
+                # и только эти занятия, если родитель выбрал их на экране
+                **({"lesson_ids": "|".join(lesson_ids)} if lesson_ids else {}),
             },
         }, idempotency_key)
         return payment.confirmation.confirmation_url, payment.id

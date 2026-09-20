@@ -78,6 +78,7 @@ async def process_yookassa_event(
         return 200
 
     teacher_ids = [t for t in (meta.get("teacher_ids") or "").split(",") if t]
+    lesson_ids = [x for x in (meta.get("lesson_ids") or "").split("|") if x]
     amount = getattr(getattr(payment, "amount", None), "value", "?")
     description = getattr(payment, "description", "") or ""
     student_name = description.split(" — ")[0].strip() or student_id
@@ -87,7 +88,7 @@ async def process_yookassa_event(
         amount_int = 0
     _, count = await payment_service.record_payment(
         student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
-        yookassa_method(payment),
+        yookassa_method(payment), lesson_ids=lesson_ids or None,
     )
     if count > 0:
         msg = (

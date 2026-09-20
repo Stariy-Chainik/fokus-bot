@@ -58,14 +58,35 @@ class TeacherLedger:
             return 0
 
 
-def lesson_paid_marks(amounts: list[int], paid: int) -> list[bool]:
-    """amounts — суммы занятий в порядке дат; занятие оплачено, если хватает накопленной оплаты."""
+def lesson_paid_marks(amounts: list[int], paid: int, linked: list[bool] | None = None) -> list[bool]:
+    """Отметки оплаты занятий в порядке дат.
+
+    linked — занятия, прямо указанные в оплате (плательщик выбрал именно их): они
+    оплачены всегда, их суммы вычитаются из оплаты. Остальные закрываются накопительно
+    с самых ранних — как было до появления выбора занятий.
+    """
+    linked = linked or [False] * len(amounts)
+    left = paid - sum(a for a, ok in zip(amounts, linked, strict=False) if ok)
     marks: list[bool] = []
     cumulative = 0
-    for amount in amounts:
+    for amount, is_linked in zip(amounts, linked, strict=False):
+        if is_linked:
+            marks.append(True)
+            continue
         cumulative += amount
-        marks.append(cumulative <= paid)
+        marks.append(cumulative <= left)
     return marks
+
+
+def paid_lesson_ids(rows) -> dict[str, set[str]]:
+    """teacher_id → занятия, прямо закрытые оплатами (колонка lesson_ids у paid-строк)."""
+    out: dict[str, set[str]] = {}
+    for p in rows:
+        status = getattr(p.status, "value", p.status)
+        ids = getattr(p, "lesson_id_list", None)
+        if status == "paid" and ids:
+            out.setdefault(p.teacher_id, set()).update(ids)
+    return out
 
 
 def paid_sums(rows) -> dict[str, int]:
@@ -86,13 +107,15 @@ def ledger_totals(ledgers: dict) -> tuple[int, int, int]:
     return accrued, paid, remainder
 
 
-def lesson_marks(items: list, paid: int) -> list[dict]:
+def lesson_marks(items: list, paid: int, linked_ids: set | None = None) -> list[dict]:
     """Занятия педагога за месяц с отметкой оплаты: [{lesson_id, date, duration_min, amount, paid}].
 
-    Порядок — по дате; оплата накопительная (любой платёж закрывает самые ранние занятия).
+    Порядок — по дате. Занятия из linked_ids (их выбрал плательщик) отмечены явно,
+    остальные закрываются накопительно с самых ранних.
     """
     ordered = sorted(items, key=lambda b: (b.date, b.lesson_id))
-    marks = lesson_paid_marks([b.amount for b in ordered], paid)
+    linked = [b.lesson_id in (linked_ids or set()) for b in ordered]
+    marks = lesson_paid_marks([b.amount for b in ordered], paid, linked)
     return [
         {"lesson_id": b.lesson_id, "date": b.date, "duration_min": b.duration_min,
          "amount": b.amount, "lesson_type": b.lesson_type, "paid": ok}
@@ -129,6 +152,7 @@ def mark_student_lessons(
 
     ordered = sorted(month_lessons, key=lambda ls: ls.date)
     paid_by = paid_sums(payment_rows)
+    linked_by = paid_lesson_ids(payment_rows)
     amounts: dict[str, int] = {}
     for ls in ordered:
         teacher = teachers_by_id.get(ls.teacher_id)
@@ -143,7 +167,8 @@ def mark_student_lessons(
     paid_mark: dict[str, bool] = {}
     for teacher_id, group in by_teacher.items():
         chrono = sorted(group, key=lambda x: (x.date, x.lesson_id))
-        marks = lesson_paid_marks([amounts[x.lesson_id] for x in chrono], paid_by.get(teacher_id, 0))
+        linked = [x.lesson_id in linked_by.get(teacher_id, set()) for x in chrono]
+        marks = lesson_paid_marks([amounts[x.lesson_id] for x in chrono], paid_by.get(teacher_id, 0), linked)
         for ls, ok in zip(chrono, marks, strict=False):
             paid_mark[ls.lesson_id] = ok
     return StudentMonthLessons(

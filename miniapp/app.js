@@ -196,7 +196,7 @@ const ACT = {
   confirmSel: ({ ym, sid, key, total, name, student }) => { if (!total) return; state.ui.method = state.ui.method || 'cash'; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div><div class="chips">${[['cash', 'Наличные'], ['receipt_bank', 'По реквизитам'], ['receipt_sbp', 'СБП']].map(([k, n]) => `<button class="chip" aria-pressed="${state.ui.method === k}" data-act="method" data-p='{"k":"${k}"}'>${n}</button>`).join('')}</div>${btn('✅ Подтвердить', 'doConfirm', { ym, sid, key, amount: total })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
   method: ({ k }) => { state.ui.method = k; document.querySelectorAll('.sheet .chip').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).k === k))); },
   doConfirm: async ({ ym, sid, key, amount }) => {
-    try { const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, method: state.ui.method || 'cash' } }); closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена`); }
+    try { const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, method: state.ui.method || 'cash', lessonIds: [...((state.ui.sel && state.ui.sel.picked) || [])] } }); closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена`); }
     catch (e) { toast(errText(e)); }
   },
   confirmInvoice: async ({ pendingId, amount }) => {

@@ -16,6 +16,7 @@ def _run(coro):
 class _FakePaymentService:
     def __init__(self):
         self.confirmed: list[tuple[str, str]] = []
+        self.lesson_ids = []
         self.payment_methods: list[str] = []
 
     async def confirm_period(self, student_id, period_month, confirmed_by_tg_id):
@@ -24,9 +25,10 @@ class _FakePaymentService:
 
     async def record_payment(
         self, student_id, student_name, period_month, amount, confirmed_by_tg_id,
-        teacher_ids=None, comment=None, payment_method="",
+        teacher_ids=None, comment=None, payment_method="", lesson_ids=None,
     ):
         self.payment_methods.append(payment_method)
+        self.lesson_ids.append(lesson_ids)
         n = await self.confirm_period(student_id, period_month, confirmed_by_tg_id)
         return amount, n
 
@@ -36,11 +38,12 @@ class _FakeUserRepo:
         return []  # уведомления в этих тестах не проверяем
 
 
-def _api_payment(status="succeeded", student_id="STU-0001", period="2026-07", amount="500.00", method="sbp"):
+def _api_payment(status="succeeded", student_id="STU-0001", period="2026-07", amount="500.00", method="sbp",
+                 extra_meta=None):
     """Объект платежа, как его возвращает API ЮКассы (усечённо)."""
     return SimpleNamespace(
         status=status,
-        metadata={"student_id": student_id, "period_month": period},
+        metadata={"student_id": student_id, "period_month": period, **(extra_meta or {})},
         amount=SimpleNamespace(value=amount),
         payment_method=SimpleNamespace(type=method),
     )
@@ -157,3 +160,16 @@ def test_missing_metadata_in_api_payment_does_not_confirm():
     ))
     assert status == 200
     assert svc.confirmed == []
+
+
+def test_selected_lessons_from_metadata_reach_the_ledger():
+    """Родитель выбрал занятия: их id едут в metadata и зачитываются именно на них."""
+    svc = _FakePaymentService()
+    event = _event(meta={"student_id": "STU-0001", "period_month": "2026-09",
+                         "teacher_ids": "TCH-0001", "lesson_ids": "LES-5|LES-7"})
+    assert _run(process_yookassa_event(
+        event, svc, bot=None, user_repo=_FakeUserRepo(),
+        fetch_payment=_fetch_returning(_api_payment(
+            extra_meta={"teacher_ids": "TCH-0001", "lesson_ids": "LES-5|LES-7"})),
+    )) == 200
+    assert svc.lesson_ids == [["LES-5", "LES-7"]]

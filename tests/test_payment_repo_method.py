@@ -52,11 +52,27 @@ def test_row_parser_reads_method_and_legacy_blank():
     assert _row_to_payment(values).confirmed_by_tg_id == 0
 
 
-def test_add_appends_method_as_column_14():
+def test_add_appends_method_and_lessons_as_columns_14_15():
     repo = _Repo()
-    asyncio.run(repo.add(_payment("receipt_bank")))
-    assert len(repo.appended[0]) == 14
-    assert repo.appended[0][13] == "receipt_bank"
+    payment = _payment("receipt_bank")
+    payment.lesson_ids = "LES-1|LES-2"
+    asyncio.run(repo.add(payment))
+    assert len(repo.appended[0]) == 15
+    assert repo.appended[0][13] == "receipt_bank" and repo.appended[0][14] == "LES-1|LES-2"
+
+
+def test_row_parser_reads_lessons_in_both_separators():
+    values = {
+        "payment_id": "PAY-1", "student_id": "STU-1", "student_name": "Алиса",
+        "period_month": "2026-09", "total_amount": 1300, "status": "paid", "paid_at": "",
+        "confirmed_by_tg_id": "", "comment": None, "created_at": "x", "updated_at": "x",
+        "teacher_id": "T1", "teacher_name": "Мария", "lesson_ids": "LES-1|LES-2",
+    }
+    assert _row_to_payment(values).lesson_id_list == ["LES-1", "LES-2"]
+    values["lesson_ids"] = "LES-3"
+    assert _row_to_payment(values).lesson_id_list == ["LES-3"]
+    values["lesson_ids"] = ""
+    assert _row_to_payment(values).lesson_id_list == []
 
 
 def test_add_preserves_zero_as_automatic_confirmation_actor():

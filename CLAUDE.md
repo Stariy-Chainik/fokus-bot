@@ -168,7 +168,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `TeacherRepository` | `teachers` | Teacher cards + 3 rates (group / for_teacher / for_student) |
 | `StudentRepository` | `students` | Students; partners (symmetric); parent_tg_ids (pipe-separated); client_id; tier |
 | `LessonRepository` | `lessons` | All lessons; query by teacher/period/student; individual_lesson_exists guard |
-| `PaymentRepository` | `student_payments` | `StudentPeriodPayment` rows; confirm single or batch-per-period |
+| `PaymentRepository` | `student_payments` | `StudentPeriodPayment` rows; confirm single or batch-per-period; `lesson_ids` (кол. 15, `LES-…` через `|`) — за какие занятия принята оплата (у строки-остатка это намерение плательщика), `set_lesson_ids()` |
 | `TeacherPeriodSubmissionRepository` | `teacher_submissions` | "Period submitted" rows — used as a lock |
 | `BranchRepository` | `branches` | School branches |
 | `GroupRepository` | `groups` | Groups; billing_mode + per-tier prices/durations + `archived` (кол. 12): архивная группа скрыта из списков (`get_all()` / `get_by_branch()` по умолчанию без них), но доступна по `get_by_id` и через `include_archived=True` — история занятий, счетов и зарплат не меняется |
@@ -305,7 +305,7 @@ earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные 
 
 **Накопительный счёт (с 2026-09-11).** Строки `StudentPeriodPayment` в листе `student_period_payments` — по связке `(student, teacher_id, period_month)` их может быть **несколько**: N строк `PAID` (каждая — один платёж со своей суммой) и не более одной `PENDING` — **остаток** = начислено − оплачено (может быть 0 — платить нечего). `PaymentService.ledger_for(student, period)` → `{teacher_id: TeacherLedger(accrued, paid, remainder, overpaid, pending, paid_rows, items, subscription)}` ([bot/services/payment_ledger.py](bot/services/payment_ledger.py)) синхронизирует строку-остаток при каждом открытии счёта; `get_or_create_invoices_for_student_period()` возвращает оплаченные строки + остаток. `PaymentRepository.get_by_student_period_teacher()` возвращает **только** строку-остаток, `get_rows_for()` — все. Так родитель может платить после каждого урока: каждое подтверждение закрывает остаток, следующий урок создаёт новый.
 
-**Lessons have no payment status field.** ✅/⬜ в «Занятиях» считается на лету: оплаты по `(месяц, педагог)` складываются, уроки идут по датам, галочка ставится, пока хватает оплаченной суммы (`lesson_paid_marks`). Внизу экрана «Не оплачено: N ₽» и кнопка «💳 Оплатить» (`client_pay:{sid}:{period}[:{teacher_id}]` — при фильтре по педагогу он предвыбран).
+**Lessons have no payment status field.** ✅/⬜ считается на лету. Если оплата принята за конкретные занятия (колонка `lesson_ids`, плательщик выбрал их на экране) — галочки стоят именно у них; остальная сумма закрывает уроки по датам, с самых ранних (`lesson_paid_marks(amounts, paid, linked)`), как было раньше. Выбор занятий есть у админа (бот и кабинет), у педагога со счетами и у родителя (экран «🧾 Выбрать занятия» перед способом оплаты: сумма считается по выбранным, а намерение пишется в строку-остаток, поэтому любой способ подтверждения зачтёт именно их). Внизу экрана «Не оплачено: N ₽» и кнопка «💳 Оплатить» (`client_pay:{sid}:{period}[:{teacher_id}]` — при фильтре по педагогу он предвыбран).
 
 **Bill detail** ([my_bills/viewing.py](bot/handlers/client/my_bills/viewing.py) → `parent_views.bill_detail`):
 - По педагогу: «Итого X — оплачено» / «оплачено P, к доплате R» / «переплата» (если урок удалили после оплаты — учитывается вручную в следующем месяце).
@@ -467,6 +467,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
 | `setup_group_archive.py [--apply]` | Идемпотентно добавляет колонку `groups.archived` (архив групп). |
 | `setup_joined_period.py [--apply]` | Идемпотентно добавляет `student_groups.joined_period` и `left_period`, проставляет существующим строкам первый месяц занятий их группы (поведение счётов не меняется). |
+| `setup_payment_lessons.py [--apply]` | Идемпотентно добавляет колонку `student_period_payments.lesson_ids` (занятия, за которые принята оплата). |
 | `setup_diary_sheets.py` | Идемпотентно создаёт листы `training_entries`, `athlete_tasks` и колонку `students.athlete_tg_id` (9-я) для кабинета спортсмена. |
 | `send_bills_grp0004.py` | Template script for ad-hoc bill mailings to one group. Parametrized at the top (`GROUP_ID`, `PERIOD`, `RECIPIENT`). |
 

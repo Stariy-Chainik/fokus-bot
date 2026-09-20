@@ -152,6 +152,30 @@ def teacher_select_screen(student_id: str, period_month: str, who: str, unpaid: 
     return text, rows
 
 
+def lesson_select_screen(student_id: str, period_month: str, who: str, name: str,
+                        marks: list, chosen: set) -> tuple:
+    """Родитель выбирает занятия, за которые платит сейчас: ⬜/✅, оплаченные — без кнопки."""
+    rows = []
+    total = 0
+    for i, m in enumerate(marks):
+        if m["paid"]:
+            rows.append([cb(f"✅ {format_date_display(m['date'])} — {m['amount']} руб. (оплачено)", "noop")])
+            continue
+        mark = "☑️" if m["lesson_id"] in chosen else "⬜"
+        if m["lesson_id"] in chosen:
+            total += m["amount"]
+        rows.append([cb(f"{mark} {format_date_display(m['date'])} · {m['duration_min']} мин — {m['amount']} руб.",
+                        f"plsn:{i}")])
+    if total:
+        rows.append([cb(f"➡️ Оплатить выбранное: {total} руб.", "plsngo")])
+    rows.append([cb("Оплатить всё", "plsnall")])
+    rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
+    who_part = f" — {who}" if who else ""
+    text = (f"<b>🧾 {name} · {period_label(period_month)}{who_part}</b>\n"
+            f"Отметьте занятия, за которые платите сейчас. Можно оплатить всё сразу.")
+    return text, rows
+
+
 def methods_screen(student_id: str, period_month: str, who: str, sel: list, yookassa: bool,
                    cash: bool = False, bank: bool = True, sbp: bool = False) -> tuple:
     total = sum(u["amount"] for u in sel)

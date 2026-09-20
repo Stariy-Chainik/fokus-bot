@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 from bot.models import StudentPeriodPayment, Student
 from bot.models.enums import PaymentStatus
-from bot.services.payment_ledger import BillAggregate, lesson_paid_marks, paid_sums, TeacherLedger, ledger_totals
+from bot.services.payment_ledger import (
+    BillAggregate, lesson_marks, lesson_paid_marks, paid_lesson_ids, paid_sums, TeacherLedger, ledger_totals,
+)
 from bot.services.payment_service import PaymentService
 
 
@@ -245,3 +247,34 @@ def test_mark_student_lessons_shares_and_cumulative_marks():
     assert {k: (m.amount, m.paid) for k, m in month.marks.items()} == {
         "L1": (2000, True), "L3": (1334, False), "L2": (800, False), "L4": (0, False), "L5": (0, False)}
     assert month.mark("L404") == month.mark("L4")
+
+
+def _item(lesson_id: str, date: str, amount: int):
+    return SimpleNamespace(lesson_id=lesson_id, date=date, duration_min=45, amount=amount, lesson_type="individual")
+
+
+def test_chosen_lessons_get_the_checkmark_not_the_earliest():
+    """Плательщик выбрал занятия 3 и 4 — ✅ именно у них, а не у самых ранних."""
+    items = [_item("LES-1", "2026-09-01", 1900), _item("LES-2", "2026-09-03", 1900),
+             _item("LES-3", "2026-09-05", 1900), _item("LES-4", "2026-09-08", 1900)]
+    marks = lesson_marks(items, paid=3800, linked_ids={"LES-3", "LES-4"})
+    assert [(m["lesson_id"], m["paid"]) for m in marks] == [
+        ("LES-1", False), ("LES-2", False), ("LES-3", True), ("LES-4", True)]
+    # без выбора — прежнее поведение: закрываются самые ранние
+    assert [m["paid"] for m in lesson_marks(items, paid=3800)] == [True, True, False, False]
+
+
+def test_linked_and_unlinked_payments_live_together():
+    """Одна оплата за выбранное занятие, вторая просто суммой — обе учитываются."""
+    items = [_item("LES-1", "2026-09-01", 1000), _item("LES-2", "2026-09-03", 1000),
+             _item("LES-3", "2026-09-05", 1000)]
+    marks = lesson_marks(items, paid=2000, linked_ids={"LES-3"})
+    assert [m["paid"] for m in marks] == [True, False, True]   # 1000 закрыли LES-3, остаток — с начала
+
+
+def test_paid_lesson_ids_reads_only_paid_rows():
+    rows = [SimpleNamespace(teacher_id="T1", status=PaymentStatus.PAID, lesson_id_list=["LES-1", "LES-2"]),
+            SimpleNamespace(teacher_id="T1", status=PaymentStatus.PAID, lesson_id_list=[]),
+            SimpleNamespace(teacher_id="T1", status=PaymentStatus.PENDING, lesson_id_list=["LES-9"]),
+            SimpleNamespace(teacher_id="T2", status="paid", lesson_id_list=["LES-5"])]
+    assert paid_lesson_ids(rows) == {"T1": {"LES-1", "LES-2"}, "T2": {"LES-5"}}

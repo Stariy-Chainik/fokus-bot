@@ -30,7 +30,7 @@ from bot.services.parent_views import (
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens import cb as cb_btn
 from bot.screens.parent_bills import (
-    bill_back_rows, teacher_select_screen, methods_screen, cash_screen, bank_screen,
+    bill_back_rows, teacher_select_screen, methods_screen, cash_screen, bank_screen, lesson_select_screen,
     sbp_screen, online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
 )
 from bot.services.cloudkassir_service import CloudKassirService
@@ -81,9 +81,30 @@ _yookassa_on = lambda: bool(settings.yookassa_shop_id and settings.yookassa_secr
 
 
 async def _show_methods(callback: CallbackQuery, student_id: str, period_month: str, sel: list, who: str) -> None:
-    await _edit(callback, methods_screen(
+    text, rows = methods_screen(
         student_id, period_month, who, sel, _yookassa_on(),
         cash=settings.payment_cash_enabled,
+    )
+    if len(sel) == 1 and not str(sel[0]["tid"]).startswith("SUB:"):
+        rows.insert(0, [cb_btn("🧾 Выбрать занятия", f"plsel:{sel[0]['tid']}")])
+    await _edit(callback, (text, rows))
+
+
+async def _show_lesson_select(
+    callback: CallbackQuery, state: FSMContext, student, period_month: str, teacher_id: str,
+    payment_service: PaymentService,
+) -> None:
+    """Экран «за какие занятия платим»: отметки ⬜/☑️ и сумма выбранного."""
+    marks, ledger = await payment_service.teacher_lesson_marks(student, period_month, teacher_id)
+    if ledger is None or not marks:
+        await callback.answer("У этого начисления нет занятий — оплачивается целиком", show_alert=True)
+        return
+    data = await state.get_data()
+    key = f"{student.student_id}:{period_month}:{teacher_id}"
+    chosen = set(data.get("pay_lessons") or []) if data.get("pay_lessons_key") == key else set()
+    await state.update_data(pay_lessons_key=key, pay_lessons=list(chosen), pay_lessons_tid=teacher_id)
+    await _edit(callback, lesson_select_screen(
+        student.student_id, period_month, data.get("pay_student_name") or "", ledger.name, marks, chosen,
     ))
 
 
@@ -101,6 +122,79 @@ async def _show_teacher_select(
     await _edit(callback, teacher_select_screen(
         student_id, period_month, data.get("pay_student_name") or "", unpaid, chosen,
     ))
+
+
+@router.callback_query(F.data.startswith("plsel:"))
+async def cb_pay_lesson_select(
+    callback: CallbackQuery, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    teacher_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    student_id, period_month = (data.get("pay_sel_key") or ":").split(":")[:2]
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    student = next((s for s in students if s.student_id == student_id), None)
+    if student is None:
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    await _show_lesson_select(callback, state, student, period_month, teacher_id, payment_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("plsn:"))
+async def cb_pay_lesson_toggle(
+    callback: CallbackQuery, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    data = await state.get_data()
+    student_id, period_month, teacher_id = (data.get("pay_lessons_key") or "::").split(":")[:3]
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    student = next((s for s in students if s.student_id == student_id), None)
+    if student is None:
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    marks, _ledger = await payment_service.teacher_lesson_marks(student, period_month, teacher_id)
+    index = int(callback.data.split(":", 1)[1])
+    unpaid_marks = [m for m in marks]
+    if not 0 <= index < len(unpaid_marks) or unpaid_marks[index]["paid"]:
+        await callback.answer()
+        return
+    chosen = set(data.get("pay_lessons") or [])
+    lesson_id = unpaid_marks[index]["lesson_id"]
+    chosen.symmetric_difference_update({lesson_id})
+    await state.update_data(pay_lessons=list(chosen))
+    await _show_lesson_select(callback, state, student, period_month, teacher_id, payment_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"plsngo", "plsnall"}))
+async def cb_pay_lesson_apply(
+    callback: CallbackQuery, state: FSMContext,
+    student_repo: StudentRepository, payment_service: PaymentService,
+) -> None:
+    """Сохраняем выбор: сумма к оплате и намерение на строке-остатке."""
+    data = await state.get_data()
+    student_id, period_month, teacher_id = (data.get("pay_lessons_key") or "::").split(":")[:3]
+    students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
+    student = next((s for s in students if s.student_id == student_id), None)
+    if student is None:
+        await callback.answer("Экран устарел, откройте счёт заново", show_alert=True)
+        return
+    whole = callback.data == "plsnall"
+    chosen = [] if whole else list(data.get("pay_lessons") or [])
+    marks, ledger = await payment_service.teacher_lesson_marks(student, period_month, teacher_id)
+    amount = sum(m["amount"] for m in marks if m["lesson_id"] in set(chosen)) if chosen else 0
+    await payment_service.set_payment_intent(student, period_month, teacher_id, chosen)
+    amounts = dict(data.get("pay_amounts") or {})
+    if chosen:
+        amounts[teacher_id] = amount
+    else:
+        amounts.pop(teacher_id, None)
+    await state.update_data(pay_amounts=amounts, pay_lessons=chosen)
+    _total, unpaid = await unpaid_for(student, period_month, payment_service)
+    sel = selected_from(await state.get_data(), student_id, period_month, unpaid)
+    await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "")
+    await callback.answer("Оплатить всё" if whole else f"К оплате: {amount} руб.")
 
 
 @router.callback_query(F.data.startswith("client_pay:"))
@@ -178,10 +272,13 @@ async def cb_pay_method(
     if result is None:
         return
     student, _, unpaid = result
-    sel = selected_from(await state.get_data(), student_id, period_month, unpaid)
+    data = await state.get_data()
+    sel = selected_from(data, student_id, period_month, unpaid)
     total = sum(u["amount"] for u in sel)
     sel_tids = [u["tid"] for u in sel]
-    partial = len(sel) < len(unpaid)
+    # выбранные занятия учитываем, только если платим одному педагогу
+    sel_lessons = list(data.get("pay_lessons") or []) if len(sel) == 1 and data.get("pay_lessons_tid") == sel[0]["tid"] else []
+    partial = len(sel) < len(unpaid) or bool(sel_lessons)
     await state.update_data(**selection_fsm_data(sel, unpaid))
 
     if method == "cash":
@@ -211,6 +308,7 @@ async def cb_pay_method(
                 student.student_id, student.name, period_month, total, sbp=(method == "ysbp"),
                 customer_phone=phone, customer_email=email,
                 teacher_ids=sel_tids if partial else None,
+                lesson_ids=sel_lessons or None,
             )
             start_payment_watch(
                 payment_id, student.student_id, student.name, period_month,

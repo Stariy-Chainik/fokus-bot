@@ -24,6 +24,7 @@ def _row_to_payment(row: dict) -> StudentPeriodPayment:
         teacher_id=str(row.get("teacher_id") or ""),
         teacher_name=str(row.get("teacher_name") or ""),
         payment_method=str(row.get("payment_method") or ""),
+        lesson_ids=str(row.get("lesson_ids") or ""),
     )
 
 
@@ -84,8 +85,18 @@ class PaymentRepository(BaseRepository):
             payment.teacher_id,
             payment.teacher_name,
             payment.payment_method,
+            payment.lesson_ids,
         ])
         return payment
+
+    async def set_lesson_ids(self, payment_id: str, lesson_ids: str) -> bool:
+        """Записать занятия оплаты (или намерение плательщика у строки-остатка)."""
+        async with self._locked_row(payment_id=payment_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, 15, lesson_ids)
+            await self._update_cell(row_idx, 11, now_str())
+        return True
 
     async def update_amount(self, payment_id: str, new_amount: int) -> bool:
         ts_now = now_str()

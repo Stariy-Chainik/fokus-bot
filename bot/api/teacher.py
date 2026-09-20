@@ -594,6 +594,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         period = (body or {}).get("ym") or current_period()
         key, amount = (body or {}).get("key"), (body or {}).get("amount")
         method = (body or {}).get("method") or ADMIN_MANUAL
+        lessons = [x for x in ((body or {}).get("lessonIds") or []) if isinstance(x, str)]
         if not isinstance(key, str) or not key or not isinstance(amount, int) or amount <= 0:
             return _json({"error": "bad_request", "message": "Нужны начисление и сумма"}, status=400)
         if method not in (ADMIN_MANUAL, CASH, RECEIPT_BANK):
@@ -610,7 +611,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         try:
             credited, rows = await payment_service.record_payment(
                 sid, s.name, period, amount, user.tg_id, [key],
-                f"отметил педагог {teacher.name}", method,
+                f"отметил педагог {teacher.name}", method, lesson_ids=lessons,
             )
         finally:
             _paying.discard(guard)

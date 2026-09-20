@@ -283,6 +283,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         sid, period, key = body.get("studentId"), body.get("periodMonth"), body.get("key")
         amount = body.get("amount")
         method = body.get("method") or ADMIN_MANUAL
+        lessons = [x for x in (body.get("lessonIds") or []) if isinstance(x, str)]
         if not all(isinstance(x, str) and x for x in (sid, period, key)) or not isinstance(amount, int) or amount <= 0:
             return _json({"error": "bad_request"}, status=400)
         student = await student_repo.get_by_id(sid)
@@ -295,6 +296,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         try:
             credited, rows = await payment_service.record_payment(
                 sid, student.name, period, amount, user.tg_id, [key], "отмечено вручную", method,
+                lesson_ids=lessons,
             )
         finally:
             _confirming.discard(guard_key)

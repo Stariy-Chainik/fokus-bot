@@ -215,6 +215,14 @@ class StudentPeriodPayment:
     teacher_id: str = ""
     teacher_name: str = ""
     payment_method: str = ""  # cash | receipt_bank | receipt_unknown | yookassa_* | provider_online | admin_manual
+    # Занятия, за которые приняли эту оплату (LES-id через «|»). У строки-остатка —
+    # намерение: какие занятия выбрал плательщик. Пусто — оплата закрывает занятия
+    # по датам, с самых ранних (поведение до 20.09.2026).
+    lesson_ids: str = ""
+
+    @property
+    def lesson_id_list(self) -> list[str]:
+        return [x for x in (self.lesson_ids or "").replace(",", "|").split("|") if x]
 
 
 @dataclass
