@@ -76,10 +76,19 @@ SCREENS['t.lesson'] = async ({ id }) => {
 /* ── Группы, ученики ─────────────────────────────────────────────────── */
 SCREENS['t.groups'] = async () => {
   const d = await api('/groups');
-  return { title: 'Мои группы', html: d.groups.length ? list(d.groups.map(g => cell({
+  // фильтр по филиалам — чипы показываем только когда филиалов больше одного
+  const branches = [];
+  d.groups.forEach(g => { if (!branches.some(b => b[0] === g.branchId)) branches.push([g.branchId, g.branchName]); });
+  const cur = branches.some(b => b[0] === state.ui.tGroupBranch) ? state.ui.tGroupBranch : '';
+  const shown = cur ? d.groups.filter(g => g.branchId === cur) : d.groups;
+  const chips = branches.length > 1
+    ? stickyFilters(chipsAct('tGroupBranch', cur, [['', `Все (${d.groups.length})`],
+        ...branches.map(([id, name]) => [id, `${plainName(name)} (${d.groups.filter(g => g.branchId === id).length})`])]))
+    : '';
+  return { title: 'Мои группы', html: chips + (shown.length ? list(shown.map(g => cell({
     lead: '👥', plain: true, t: esc(g.name), s: `${esc(g.branchName)} · ${MODE[g.mode] || g.mode}`,
     r: plural(g.students, ['ученик', 'ученика', 'учеников']), go: 't.group', p: { id: g.id },
-  }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>') };
+  }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>')) };
 };
 
 SCREENS['t.group'] = async ({ id }) => {
@@ -255,6 +264,7 @@ SCREENS['t.pay.select'] = async ({ sid, ym, key }) => {
 /* ── действия ────────────────────────────────────────────────────────── */
 ACT.tPick = ({ id }) => { const s = state.ui.tsel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); };
 ACT.tGroupTab = ({ v }) => { state.ui.tGroupTab = v; render(); };
+ACT.tGroupBranch = ({ v }) => { state.ui.tGroupBranch = v; render(); };
 ACT.tGradeAsk = ({ id, sid, name, grade }) => sheet(`<h3>Оценить тренировку</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/5` : ''}</div>
   <div class="chips" style="margin-top:12px">${[1, 2, 3, 4, 5].map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
   ${field('gcomment', 'Комментарий (необязательно)', '', 'placeholder="Что получилось, что подтянуть"')}

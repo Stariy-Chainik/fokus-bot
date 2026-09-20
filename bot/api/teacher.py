@@ -219,7 +219,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
         counts = {gid: len(await student_group_repo.get_students_for_group(gid)) for gid in gids}
         out = [{
-            "id": g.group_id, "name": g.name, "branchName": branches.get(g.branch_id, ""),
+            "id": g.group_id, "name": g.name,
+            "branchId": g.branch_id, "branchName": branches.get(g.branch_id, ""),
             "mode": g.billing_mode.value, "priceFull": g.price_full, "students": counts.get(g.group_id, 0),
         } for g in sorted(await group_repo.get_all(), key=lambda g: (branches.get(g.branch_id, ""), g.sort_order, g.name))
             if g.group_id in gids]
