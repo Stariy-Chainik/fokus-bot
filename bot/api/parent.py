@@ -221,13 +221,20 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
 
         ledgers = await payment_service.ledger_for(student, period)
         chosen = {k: v for k, v in ledgers.items() if not keys or k in keys}
-        if lesson_ids and len(chosen) == 1:
-            key = next(iter(chosen))
-            marks = payment_ledger.lesson_marks(chosen[key].items, chosen[key].paid)
-            amount = sum(m["amount"] for m in marks if m["lesson_id"] in set(lesson_ids) and not m["paid"])
-            await payment_service.set_payment_intent(student, period, key, lesson_ids)
-        else:
-            amount = sum(v.remainder for v in chosen.values())
+        # плательщик мог отметить отдельные занятия: у такой позиции берём только их,
+        # у остальных — весь остаток (абонемент всегда целиком)
+        picked = set(lesson_ids)
+        amount = 0
+        for key, ledger in chosen.items():
+            marks = payment_ledger.lesson_marks(ledger.items, ledger.paid)
+            mine = [m for m in marks if m["lesson_id"] in picked and not m["paid"]]
+            if mine:
+                amount += sum(m["amount"] for m in mine)
+                await payment_service.set_payment_intent(student, period, key, [m["lesson_id"] for m in mine])
+            else:
+                amount += ledger.remainder
+                if ledger.pending and ledger.pending.lesson_ids:      # снимаем прошлое намерение
+                    await payment_service.set_payment_intent(student, period, key, [])
         if amount <= 0:
             return _json({"error": "nothing_to_pay"}, status=409)
 

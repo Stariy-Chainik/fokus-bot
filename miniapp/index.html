@@ -118,6 +118,8 @@
   .bill { font-size: 13.5px; }
   .bill .grp { padding: 10px 14px 6px; font-weight: 700; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
   .bill .grp:first-child { border-top: 0; }
+  .bill button.grp { width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; font: inherit; font-weight: 700; cursor: pointer; align-items: center; }
+  .bill button.grp > span:first-child { display: flex; align-items: center; gap: 8px; }
   .sheet-wrap { position: fixed; inset: 0; background: rgba(15,8,11,.45); display: flex; align-items: flex-end; z-index: 5; }
   .sheet { width: 100%; background: var(--card); border-radius: 22px 22px 0 0; padding: 10px 16px calc(24px + env(safe-area-inset-bottom)); max-height: 88%; overflow-y: auto; }
   .sheet .grab { width: 40px; height: 4px; background: var(--line-strong); border-radius: 2px; margin: 0 auto 12px; }

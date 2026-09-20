@@ -6,7 +6,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot.api import register_parent_api
-from bot.models.enums import PaymentStatus
+from bot.models.enums import GroupBillingMode, PaymentStatus
 from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake, mk_entry, mk_payment
@@ -123,3 +123,35 @@ def test_bank_details_include_qr(api, monkeypatch):
     status, r = _call(app, "POST", "/api/parent/pay",
                       json={"studentId": "STU-0001", "ym": YM, "method": "bank"})
     assert status == 200 and r["qr"].startswith("data:image/png;base64,")
+
+
+def _sub_mode(dp, price=6000):
+    """Группу ученика переводим на абонемент — в счёте появляется позиция SUB:GRP-0001."""
+    group = dp["group_repo"].items[0]
+    group.billing_mode = GroupBillingMode.SUBSCRIPTION
+    group.price_full = price
+
+
+def test_parent_pays_only_the_subscription(api):
+    app, dp = api
+    _sub_mode(dp)
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/parent/pay", bot=bot, json={
+        "studentId": "STU-0001", "ym": YM, "method": "cash", "keys": ["SUB:GRP-0001"]})
+    assert status == 200 and r["amount"] == 6000              # ровно абонемент, без занятий педагога
+
+
+def test_parent_mixes_subscription_and_one_lesson(api):
+    app, dp = api
+    _sub_mode(dp)
+    status, d = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")
+    teacher = next(r for r in d["rows"] if r["key"] == "TCH-0001")
+    lesson = next(x for x in teacher["lessons"] if not x["paid"])
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/parent/pay", bot=bot, json={
+        "studentId": "STU-0001", "ym": YM, "method": "cash",
+        "keys": ["SUB:GRP-0001", "TCH-0001"], "lessonIds": [lesson["id"]]})
+    assert status == 200 and r["amount"] == 6000 + lesson["amount"]
+    pending = [p for p in dp["payment_repo"].rows
+               if p.teacher_id == "TCH-0001" and p.status != PaymentStatus.PAID]
+    assert pending and pending[0].lesson_ids == lesson["id"]   # намерение — только отмеченное занятие
