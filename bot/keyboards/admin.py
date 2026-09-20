@@ -1,7 +1,6 @@
 from __future__ import annotations
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config.settings import settings
 
 from bot.keyboards.common import nav_row
 from bot.utils.paging import Page
@@ -24,8 +23,6 @@ def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📓 Дневники спортсменов", callback_data="admin:diary")],
         [InlineKeyboardButton(text="🔧 Диагностика", callback_data="admin:diagnostics")],
     ]
-    if settings.miniapp_url:
-        rows.insert(0, [InlineKeyboardButton(text="🖥 Открыть кабинет", web_app=WebAppInfo(url=settings.miniapp_url))])
     if can_switch_role:
         rows.append([InlineKeyboardButton(text="🔄 Режим педагога", callback_data="mode:teacher")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

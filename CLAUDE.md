@@ -78,8 +78,7 @@ http://localhost:8090/app/?dev=1 (данные — живая таблица). �
 ребёнка только на чтение (`p.diary`). Оплата: ЮКасса (карта/СБП, ссылка открывается `tg.openLink`, слежение —
 `start_payment_watch`), наличные (уведомление админам, как в боте), реквизиты/СБП — текст + QR, чек родитель
 присылает в бот. Родитель определяется по `students.parent_tg_ids`, видит только своих детей; имя в приветствии —
-из карточки клиента. Вход: `/api/admin/me` → 403 → `/api/teacher/me` → 403 → `/api/parent/me`; в боте меню родителя
-показывает «🖥 Открыть кабинет» (`Btn` вида `app` → `WebAppInfo`) при заданном `MINIAPP_URL`.
+из карточки клиента. Вход: `/api/admin/me` → 403 → `/api/teacher/me` → 403 → `/api/parent/me`.
 Тесты — `tests/test_parent_api.py`.
 
 **Кабинет спортсмена** — `bot/api/athlete.py` (`/api/athlete/*`) + `miniapp/athlete.js` (экраны `s.*`): сводка
@@ -87,8 +86,7 @@ http://localhost:8090/app/?dev=1 (данные — живая таблица). �
 темы, задания педагога, комментарий), записи месяца с удалением неоценённых (`s.entries`), открытые задания
 с «сделано N раз» (`s.tasks`) и рейтинг с фильтром по танцу и подсветкой своей строки (`s.rating`). Всё считает
 `DiaryService`, поэтому очки и места совпадают с ботом; оценки ставит только педагог. Спортсмен определяется по
-`students.athlete_tg_id`; в меню бота — «🖥 Открыть кабинет» при заданном `MINIAPP_URL`.
-Тесты — `tests/test_athlete_api.py`.
+`students.athlete_tg_id`. Тесты — `tests/test_athlete_api.py`.
 
 ### MAX front (кабинет родителя в мессенджере MAX)
 
@@ -536,7 +534,7 @@ Optional — MAX (кабинет родителя):
 
 Optional — Mini App:
 - `MINIAPP_DEV_TG_ID` — tg_id, под которым API кабинета принимает заголовок `Authorization: dev` (только для локальной разработки; на проде пусто).
-- `MINIAPP_URL` — публичный HTTPS-адрес страницы кабинета (на проде `https://fokus.178-104-240-252.sslip.io/app/`, HTTPS через Caddy в `/opt/n8n/Caddyfile`); задан → в меню админа кнопка «🖥 Открыть кабинет», а `scripts/set_miniapp_menu.py` ставит кнопку меню «Кабинет» в чатах админов.
+- `MINIAPP_URL` — публичный HTTPS-адрес страницы кабинета (на проде `https://fokus.178-104-240-252.sslip.io/app/`, HTTPS через Caddy в `/opt/n8n/Caddyfile`); задан → `scripts/set_miniapp_menu.py` ставит кнопку меню «Кабинет» в чатах (по умолчанию всем: админам, педагогам, родителям, спортсменам; `--staff` / `--admins` — уже. Отдельной кнопки в меню бота нет: кабинет открывается только кнопкой меню чата).
 
 Optional — infrastructure:
 - `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)

@@ -16,7 +16,7 @@ def to_max_markup(rows):
     b = InlineKeyboardBuilder()
     for row in rows:
         buttons = [
-            LinkButton(text=btn.label, url=btn.value) if btn.kind in ("url", "app")   # Mini App в MAX — обычная ссылка
+            LinkButton(text=btn.label, url=btn.value) if btn.kind == "url"
             else CallbackButton(text=btn.label, payload=btn.value)
             for btn in row
         ]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import date, timedelta
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.utils.dates import format_date_display
 
@@ -15,12 +15,7 @@ def athlete_welcome_text(student) -> str:
 
 
 def kb_athlete_menu(can_switch_parent: bool = False) -> InlineKeyboardMarkup:
-    from config.settings import settings
-    rows = []
-    if settings.miniapp_url:            # кабинет спортсмена (Mini App) — первым рядом
-        rows.append([InlineKeyboardButton(text="🖥 Открыть кабинет",
-                                          web_app=WebAppInfo(url=settings.miniapp_url))])
-    rows += [
+    rows = [
         [InlineKeyboardButton(text="➕ Записать тренировку", callback_data="ath:log")],
         [InlineKeyboardButton(text="📓 Мои тренировки", callback_data="ath:entries")],
         [InlineKeyboardButton(text="📋 Мои задания", callback_data="ath:tasks")],

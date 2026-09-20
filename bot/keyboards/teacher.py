@@ -1,5 +1,5 @@
 from __future__ import annotations
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.keyboards.common import nav_row
 from bot.utils.paging import paginate
@@ -22,10 +22,6 @@ def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None
     if teacher_id and teacher_id in settings.billing_teacher_id_set:
         rows.append([InlineKeyboardButton(text="🧾 Счета моих групп", callback_data="teacher:bills")])
     rows.append([InlineKeyboardButton(text="📤 Сдать период", callback_data="teacher:submit_period")])
-    if settings.miniapp_url:  # кабинет педагога в Mini App — первой кнопкой, как у админа
-        rows.insert(0, [InlineKeyboardButton(
-            text="🖥 Открыть кабинет", web_app=WebAppInfo(url=settings.miniapp_url),
-        )])
     if can_switch_role:
         rows.append([InlineKeyboardButton(text="🔄 Режим администратора", callback_data="mode:admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

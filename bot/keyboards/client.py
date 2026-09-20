@@ -18,7 +18,6 @@ def kb_client_menu(can_switch_athlete: bool = False) -> InlineKeyboardMarkup:
     from config.settings import settings
     markup = to_aiogram_markup(menu_rows(
         can_switch_athlete, receipt_email=settings.parent_receipt_email,
-        app_url=settings.miniapp_url,
     ))
     assert markup is not None  # меню всегда содержит кнопки
     return markup
