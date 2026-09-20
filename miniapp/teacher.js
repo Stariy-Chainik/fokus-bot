@@ -161,7 +161,7 @@ SCREENS['t.diary.s'] = async ({ id, ym }) => {
     <div class="eyebrow">Записи</div>
     ${d.entries.length ? list(d.entries.map(e => tEntryCell(e, id))) : '<div class="empty">В этом месяце записей нет</div>'}
     <div class="eyebrow">Задания</div>
-    ${d.openTasks.length ? list(d.openTasks.map(t => cell({ lead: '📋', plain: true, t: esc(t.exercise), s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}` }))) : '<div class="empty">Открытых заданий нет</div>'}
+    ${d.openTasks.length ? list(d.openTasks.map(t => cell({ lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise), s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}` }))) : '<div class="empty">Открытых заданий нет</div>'}
     <div style="margin-top:12px">${btn('➕ Выдать задание', 'tTaskForm', { sid: id })}${goBtn('📋 Все задания', 't.diary.tasks', { sid: id }, 'sec')}</div>` };
 };
 
@@ -170,7 +170,7 @@ SCREENS['t.diary.tasks'] = async ({ sid }) => {
   return { title: 'Задания', html: `
     <div class="h2">${esc(d.student.name)}</div>
     ${d.tasks.length ? list(d.tasks.map(t => cell({
-      lead: t.status === 'open' ? '📋' : '✅', plain: true, t: esc(t.exercise),
+      lead: t.status === 'open' ? '📋' : '✅', plain: true, cls: 'wrap', t: esc(t.exercise),
       s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}${t.doneTimes ? ` · сделано ${t.doneTimes} раз${t.lastDone ? `, последний ${fdate(t.lastDone)}` : ''}` : ''}`,
       r: t.status === 'open' ? `<button class="chip" data-act="tTaskClose" data-p='${esc(JSON.stringify({ id: t.id, sid }))}'>Закрыть</button>` : pill('закрыто', 'mute'),
     }))) : '<div class="empty">Заданий нет</div>'}

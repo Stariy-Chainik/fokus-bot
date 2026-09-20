@@ -60,6 +60,7 @@
   .cell.nolead { grid-template-columns: minmax(0, 1fr) auto; }
   .cell .t { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell.wrap .t, .cell.wrap .s { white-space: normal; overflow: visible; }
   .cell .r { font-size: 13px; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .cell .r b { color: var(--ink); font-weight: 700; }
   .chev { color: var(--line-strong); margin-left: 6px; }
@@ -138,5 +139,6 @@
   </div>
   <script src="app.js"></script>
   <script src="teacher.js"></script>
+  <script src="parent.js"></script>
 </body>
 </html>

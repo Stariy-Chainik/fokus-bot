@@ -290,6 +290,13 @@ class PaymentRepoFake:
         self.added.append(payment)
         return payment
 
+    async def set_lesson_ids(self, payment_id, lesson_ids):
+        for r in self.rows:
+            if r.payment_id == payment_id:
+                r.lesson_ids = lesson_ids
+                return True
+        return False
+
     async def update_amount(self, payment_id, amount):
         self.updated.append((payment_id, amount))
         for r in self.rows:

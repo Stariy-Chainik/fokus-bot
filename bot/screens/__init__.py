@@ -4,6 +4,6 @@
 Адаптеры: `bot/screens/adapters.py::to_aiogram_markup` (Telegram),
 `bot/max/render.py::to_max_markup` (MAX).
 """
-from .types import Btn, Rows, Screen, cb, url
+from .types import Btn, Rows, Screen, app, cb, url
 
-__all__ = ["Btn", "Rows", "Screen", "cb", "url"]
+__all__ = ["Btn", "Rows", "Screen", "app", "cb", "url"]

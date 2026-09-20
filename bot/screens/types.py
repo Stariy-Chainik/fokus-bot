@@ -5,8 +5,8 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Btn:
     label: str
-    kind: str      # "cb" | "url"
-    value: str     # callback payload или URL
+    kind: str      # "cb" | "url" | "app" (Mini App, только Telegram)
+    value: str     # callback payload, URL или адрес Mini App
 
 
 Rows = list  # list[list[Btn]]
@@ -19,3 +19,7 @@ def cb(label: str, data: str) -> Btn:
 
 def url(label: str, link: str) -> Btn:
     return Btn(label, "url", link)
+
+
+def app(label: str, link: str) -> Btn:
+    return Btn(label, "app", link)
