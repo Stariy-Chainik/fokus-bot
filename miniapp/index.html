@@ -91,7 +91,11 @@
   .filters::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 8px; background: linear-gradient(var(--bg), transparent); }
   .chip { border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  .search { width: 100%; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; margin-bottom: 10px; }
+  .search { width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 16px; margin-bottom: 10px; }   /* 16px: иначе iOS зумит страницу при фокусе */
+  /* iOS: системный date-инпут не сжимается под контейнер и вылезает за правый край — снимаем нативный вид */
+  input[type="date"], input[type="time"], input[type="datetime-local"] { -webkit-appearance: none; appearance: none; display: block; height: 44px; }
+  input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+  input[type="date"]::-webkit-calendar-picker-indicator { margin-left: auto; opacity: .6; }
   .money { font-variant-numeric: tabular-nums; }
   .money.bad, .amt.bad, .r b.bad { color: var(--bad); }
   .money.ok, .amt.ok, .r b.ok { color: var(--ok); }
