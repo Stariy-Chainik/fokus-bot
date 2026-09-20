@@ -63,17 +63,37 @@ SCREENS['p.bill'] = async ({ ym }) => {
       ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`).join('')}
       <div class="total"><span>К оплате</span><span class="big ${b.rest ? 'bad' : 'ok'}">${b.rest ? fmt(b.rest) : '✓ оплачено'}</span></div></div>`
       : empty('За этот месяц начислений нет')}
-    ${b.rest ? `<div style="margin-top:12px">${btn(`💳 Оплатить ${fmt(b.rest)}`, 'pPayAsk', { ym, rest: b.rest })}
-      ${b.rows.filter(r => !r.subscription && r.rest).length ? goBtn('🧾 Выбрать занятия', 'p.pick', { ym }, 'sec') : ''}</div>` : ''}` };
+    ${b.rest ? `<div style="margin-top:12px">${btn(`💳 Оплатить всё ${fmt(b.rest)}`, 'pPayAsk', { ym, rest: b.rest })}
+      ${b.rows.filter(r => r.rest).length > 1 || b.rows.some(r => !r.subscription && r.rest)
+        ? goBtn(b.rows.filter(r => r.rest).length > 1 ? '🧾 Оплатить часть' : '🧾 Выбрать занятия', 'p.pick', { ym }, 'sec') : ''}</div>` : ''}` };
 };
 
-/* Выбор занятий: платим ровно за отмеченные. */
-SCREENS['p.pick'] = async ({ ym }) => {
+/* Оплата части счёта: сначала позиция (педагог или абонемент), потом занятия. */
+SCREENS['p.pick'] = async ({ ym, key }) => {
   const b = await api(`/bill/${kid()}/${ym}`);
-  const row = b.rows.find(r => !r.subscription && r.rest) || b.rows[0];
+  const open = b.rows.filter(r => r.rest);
+  if (!key && open.length > 1) {
+    return { title: 'За что платим?', html: `
+      <div class="hint" style="margin-bottom:10px">${esc(b.student.name)} · ${MON_NOM[+ym.slice(5) - 1]}. Выберите, что оплачиваете сейчас.</div>
+      ${list(open.map(r => cell({
+        lead: r.subscription ? '💳' : '👨‍🏫', plain: true, t: esc(r.name),
+        s: r.paid ? `оплачено ${fmt(r.paid)} из ${fmt(r.accrued)}` : `начислено ${fmt(r.accrued)}`,
+        r: `<b>${fmt(r.rest)}</b>`, go: 'p.pick', p: { ym, key: r.key },
+      })))}
+      <div style="margin-top:12px">${btn(`💳 Оплатить всё ${fmt(b.rest)}`, 'pPayAsk', { ym, rest: b.rest }, 'sec')}</div>` };
+  }
+  const row = open.find(r => r.key === key) || open[0] || b.rows[0];
+  if (row.subscription || !row.lessons.length) {
+    return { title: esc(row.name), html: `
+      <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(row.name)}</div>
+        <div class="hint">${MON_NOM[+ym.slice(5) - 1]} · начислено ${fmt(row.accrued)}${row.paid ? ` · оплачено ${fmt(row.paid)}` : ''}</div>
+        <div class="money" style="font-size:26px;font-weight:800;margin-top:8px">${fmt(row.rest)}</div></div>
+      <p class="hint" style="margin-top:10px">Абонемент оплачивается целиком за месяц.</p>
+      <div style="margin-top:12px">${btn(`💳 Оплатить ${fmt(row.rest)}`, 'pPayAsk', { ym, rest: row.rest, key: row.key })}</div>` };
+  }
   const ui = state.ui.psel || (state.ui.psel = {});
-  const key = `${kid()}:${ym}:${row.key}`;
-  if (ui.key !== key) { ui.key = key; ui.picked = new Set(); }
+  const selKey = `${kid()}:${ym}:${row.key}`;                 // смена позиции сбрасывает отметки
+  if (ui.key !== selKey) { ui.key = selKey; ui.picked = new Set(); }
   const total = row.lessons.filter(l => !l.paid && ui.picked.has(l.id)).reduce((a, l) => a + l.amount, 0);
   return { title: 'Выбрать занятия', html: `
     <div class="hint" style="margin-bottom:10px">${esc(row.name)} · ${MON_NOM[+ym.slice(5) - 1]}. Отметьте занятия, за которые платите сейчас.</div>
@@ -89,13 +109,13 @@ ACT.pPick = ({ id }) => { const s = state.ui.psel.picked; s.has(id) ? s.delete(i
 ACT.pPayAsk = ({ ym, rest, key, picked }) => {
   if (!rest) { toast('Нечего оплачивать'); return; }
   const m = (state.me && state.me.methods) || {};
+  // тот же набор, что в боте: СБП онлайн → наличные → реквизиты (карта и СБП по чеку не показываются)
   const rows = [];
   if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { ym, rest, key, picked, method: 'ysbp' }));
-  if (m.yookassa) rows.push(btn('💳 Картой онлайн', 'pPayDo', { ym, rest, key, picked, method: 'yookassa' }, 'sec'));
+  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, key, picked, method: 'cash' }, 'sec'));
   if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { ym, rest, key, picked, method: 'bank' }, 'ghost'));
-  if (m.sbp) rows.push(btn('📱 СБП по реквизитам', 'pPayDo', { ym, rest, key, picked, method: 'sbp' }, 'ghost'));
-  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, key, picked, method: 'cash' }, 'ghost'));
   sheet(`<h3>Оплата ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${MON_NOM[+ym.slice(5) - 1]}${picked ? ' · за выбранные занятия' : ''}</div>
+    <p class="hint" style="margin-top:10px">СБП онлайн — оплата зачтётся сама, чек не нужен. По реквизитам — после перевода пришлите чек в бот.</p>
     <div style="margin-top:12px">${rows.join('') || '<div class="hint">Способы оплаты не настроены — напишите администратору.</div>'}
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
