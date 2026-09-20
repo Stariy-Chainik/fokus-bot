@@ -26,6 +26,7 @@ from bot.models.enums import LessonType
 from bot.services import LessonService, payment_ledger
 from bot.services.billing_service import calc_earned
 from bot.services.diary_service import place_icon
+from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.rosters import group_members
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 PREFIX = "/api/teacher"
 _submitting = InProgressGuard()
+_paying = InProgressGuard()
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -560,6 +562,63 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                       "groups": await _student_group_names(sid, student_group_repo, group_repo)})
 
     @billing_only
+    async def bills_marks(request: web.Request, user, teacher) -> web.Response:
+        """Занятия ученика по одному начислению с ✅/⬜ — как экран отметки оплат у админа."""
+        sid = request.match_info["sid"]
+        period = request.query.get("ym") or current_period()
+        key = request.query.get("key", "")
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        marks, ledger = await payment_service.teacher_lesson_marks(s, period, key)
+        if ledger is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json({
+            "student": {"id": sid, "name": s.name}, "period": period,
+            "ledger": {"key": key, "name": ledger.name, "group": ledger.group, "accrued": ledger.accrued,
+                       "paid": ledger.paid, "remainder": ledger.remainder},
+            "marks": [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
+                       "amount": m["amount"], "paid": m["paid"]} for m in marks],
+        })
+
+    @billing_only
+    async def bills_pay(request: web.Request, user, teacher) -> web.Response:
+        """Отметить оплату ученика своей группы: сумма зачитывается в остаток начисления."""
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        period = (body or {}).get("ym") or current_period()
+        key, amount = (body or {}).get("key"), (body or {}).get("amount")
+        method = (body or {}).get("method") or ADMIN_MANUAL
+        if not isinstance(key, str) or not key or not isinstance(amount, int) or amount <= 0:
+            return _json({"error": "bad_request", "message": "Нужны начисление и сумма"}, status=400)
+        if method not in (ADMIN_MANUAL, CASH, RECEIPT_BANK):
+            return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        guard = f"{sid}:{period}:{key}"
+        if guard in _paying:
+            return _json({"error": "in_progress"}, status=409)
+        _paying.add(guard)
+        try:
+            credited, rows = await payment_service.record_payment(
+                sid, s.name, period, amount, user.tg_id, [key],
+                f"отметил педагог {teacher.name}", method,
+            )
+        finally:
+            _paying.discard(guard)
+        logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
+                    teacher.teacher_id, credited, sid, period, key)
+        return _json({"credited": credited, "rows": rows})
+
+    @billing_only
     async def bills_student_send(request: web.Request, user, teacher) -> web.Response:
         if bot is None:
             return _json({"error": "bot_unavailable"}, status=503)
@@ -621,6 +680,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/bills", bills_groups), ("GET", "/bills/group/{gid}", bills_group),
         ("POST", "/bills/group/{gid}/send", bills_group_send),
         ("GET", "/bills/student/{sid}", bills_student), ("POST", "/bills/student/{sid}/send", bills_student_send),
+        ("GET", "/bills/student/{sid}/marks", bills_marks), ("POST", "/bills/student/{sid}/pay", bills_pay),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

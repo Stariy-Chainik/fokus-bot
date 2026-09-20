@@ -7,7 +7,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot.api import register_teacher_api
-from bot.models.enums import LessonType
+from bot.models.enums import LessonType, PaymentStatus
 from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import (
@@ -211,3 +211,26 @@ def test_bills_send_needs_bot(api, monkeypatch):
     assert _call(app, "POST", f"/api/teacher/bills/student/STU-0001/send?ym={YM}")[0] == 503   # бот не передан
     status, r = _call(app, "POST", f"/api/teacher/bills/student/STU-0001/send?ym={YM}", bot=FakeBot())
     assert status == 200 and r["recipients"] >= 1                     # у Иванова привязан родитель
+
+
+def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
+    app, dp = api
+    assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                 json={"ym": YM, "key": "TCH-0001", "amount": 1000})[0] == 403   # без права счетов
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+
+    status, m = _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0001")
+    assert status == 200 and [x["paid"] for x in m["marks"]] == [False, False, False]
+    assert m["ledger"]["remainder"] == 4800
+
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "cash"})
+    assert status == 200 and r["credited"] == 2000
+    assert [p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID] == [2000]
+
+    status, m2 = _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0001")
+    assert m2["ledger"]["paid"] == 2000 and [x["paid"] for x in m2["marks"]] == [True, False, False]
+    assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                 json={"ym": YM, "key": "TCH-0001", "amount": 0})[0] == 400
+    assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                 json={"ym": YM, "key": "TCH-0001", "amount": 100, "method": "yookassa"})[0] == 400
