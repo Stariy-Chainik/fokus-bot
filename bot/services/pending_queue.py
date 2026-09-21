@@ -15,7 +15,7 @@ from bot.repositories.pending_action_repo import (
 logger = logging.getLogger(__name__)
 
 __all__ = ["KIND_CASH", "KIND_CHILD", "KIND_RECEIPT", "OPEN", "DONE", "REJECTED",
-           "queue_action", "close_actions"]
+           "queue_action", "close_actions", "claim_action"]
 
 
 async def queue_action(
@@ -52,3 +52,14 @@ async def close_actions(
     except Exception as exc:
         logger.error("Очередь решений: не закрыли %s %s: %s", student_id, period_month, exc)
         return 0
+
+
+async def claim_action(pending_repo, action_id: str, status: str = DONE, decided_by_tg_id: int = 0) -> bool:
+    """Занять решение один раз (идемпотентность подтверждений). False — уже решено."""
+    if pending_repo is None or not action_id:
+        return True                               # очередь недоступна — работаем по-старому
+    try:
+        return await pending_repo.claim(action_id, status, decided_by_tg_id)
+    except Exception as exc:
+        logger.error("Очередь решений: не заняли %s: %s", action_id, exc)
+        return True                               # лист недоступен — не блокируем оплату

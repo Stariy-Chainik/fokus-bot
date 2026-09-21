@@ -14,7 +14,9 @@ import logging
 
 from aiohttp import web
 
-from bot.repositories.pending_action_repo import DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, REJECTED
+from bot.repositories.pending_action_repo import (
+    DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
+)
 from bot.services.parent_notifier import parse_addr
 from bot.services.parent_views import METHOD_LABELS
 from bot.utils.dates import period_label
@@ -101,12 +103,16 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         except Exception:
             body = {}
         approve = bool(body.get("approve"))
+        force = bool(body.get("force"))            # согласие зачесть сумму больше остатка
         student = await student_repo.get_by_id(action.student_id)
         if student is None:
             return _json({"error": "not_found"}, status=404)
+        if action.status != OPEN:
+            return _json({"error": "already_decided", "status": action.status}, status=409)
 
         if not approve:
-            await pending_repo.close(action.action_id, REJECTED, user.tg_id)
+            if not await pending_repo.claim(action.action_id, REJECTED, user.tg_id):
+                return _json({"error": "already_decided"}, status=409)
             await _notify_parent(action, student, approved=False)
             return _json({"ok": True, "status": REJECTED})
 
@@ -114,22 +120,34 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             addr = parse_addr(action.parent_addr)
             if addr is None:
                 return _json({"error": "bad_request"}, status=400)
+            if not await pending_repo.claim(action.action_id, DONE, user.tg_id):
+                return _json({"error": "already_decided"}, status=409)
             await student_repo.add_parent(action.student_id, addr)
-            await pending_repo.close(action.action_id, DONE, user.tg_id)
             await _notify_parent(action, student, approved=True)
             logger.info("Очередь решений: админ %s привязал родителя %s к %s",
                         user.tg_id, action.parent_addr, action.student_id)
             return _json({"ok": True, "status": DONE})
 
+        # сумма больше остатка — переплату проводим только по явному подтверждению
+        ledgers = await payment_service.ledger_for(student, action.period_month)
+        rest = sum(v.remainder for v in ledgers.values())
+        amount = int(body.get("amount") or action.amount)
+        if amount > rest and not force:
+            return _json({"error": "overpay", "needsConfirm": True,
+                          "amount": amount, "rest": rest}, status=409)
+
+        if not await pending_repo.claim(action.action_id, DONE, user.tg_id):
+            return _json({"error": "already_decided"}, status=409)
         credited, rows = await payment_service.record_payment(
-            action.student_id, student.name, action.period_month, action.amount,
+            action.student_id, student.name, action.period_month, amount,
             user.tg_id, None, "из очереди решений", action.method or "",
         )
         await pending_repo.close_for_period(action.student_id, action.period_month, DONE, user.tg_id)
         await _notify_parent(action, student, approved=True, credited=credited)
         logger.info("Очередь решений: админ %s зачёл %d руб. — %s %s",
                     user.tg_id, credited, action.student_id, action.period_month)
-        return _json({"ok": True, "status": DONE, "credited": credited, "rows": rows})
+        return _json({"ok": True, "status": DONE, "credited": credited, "rows": rows,
+                      "overpaid": max(0, credited - rest)})
 
     async def _notify_parent(action, student, approved: bool, credited: int = 0) -> None:
         notifier = (getattr(dp, "workflow_data", dp)).get("notifier")

@@ -19,11 +19,13 @@ from bot.models.enums import PaymentStatus
 from bot.repositories import StudentRepository, ClientRepository, UserRepository
 from bot.services import PaymentService
 from bot.services.payment_methods import (
-    CASH, RECEIPT_UNKNOWN, from_callback_code,
+    CASH, RECEIPT_UNKNOWN, callback_code, from_callback_code,
 )
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import resolve_notifier, parse_addr, tg_addr
-from bot.services.pending_queue import DONE, KIND_CASH, KIND_RECEIPT, REJECTED, close_actions, queue_action
+from bot.services.pending_queue import (
+    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, queue_action,
+)
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
     client_contact, qr_png, breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
@@ -345,11 +347,12 @@ async def cb_cash_notify(
     ledgers = await payment_service.ledger_for(student, period_month)
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     msg = cash_notice(student.name, period_month, total, breakdown)
-    await queue_action(pending_repo, KIND_CASH, student, period_month,    # очередь решений в кабинете
-                       amount=total, method=CASH, parent_addr=str(callback.from_user.id))
+    action = await queue_action(pending_repo, KIND_CASH, student, period_month,   # очередь решений
+                                amount=total, method=CASH, parent_addr=str(callback.from_user.id))
     kb = to_aiogram_markup(admin_confirm_rows(
         student_id, period_month, sel_pids, partial,
         tg_addr(callback.from_user.id), total, CASH,
+        action_id=action.action_id if action else "",
     ))
     for admin in await user_repo.get_admins():
         try:
@@ -412,16 +415,17 @@ async def on_receipt_photo(
     sel_tids = data.get("receipt_sel_tids") or list(bills_map)
     caption = receipt_caption(method, student_name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, sel_tids, ledgers=ledgers)))
-    confirm_kb = to_aiogram_markup(admin_confirm_rows(
-        student_id, period_month, sel_pids, sel_partial,
-        tg_addr(message.from_user.id), total, method,
-    ))
-    await queue_action(                                                   # очередь решений в кабинете
+    action = await queue_action(                                          # очередь решений в кабинете
         pending_repo, KIND_RECEIPT, student, period_month, amount=total, method=method,
         parent_addr=str(message.from_user.id), student_id=student_id, student_name=student_name,
         file_id=(message.photo[-1].file_id if message.photo else message.document.file_id),
         file_type="photo" if message.photo else "document",
     )
+    confirm_kb = to_aiogram_markup(admin_confirm_rows(
+        student_id, period_month, sel_pids, sel_partial,
+        tg_addr(message.from_user.id), total, method,
+        action_id=action.action_id if action else "",
+    ))
     for admin in await user_repo.get_admins():
         try:
             if message.photo:
@@ -727,3 +731,131 @@ async def cb_receipt_pick(
                                 student, period_month, total, cast(str, kind), file_id, callback.from_user.id)
     await _edit(callback, receipt_sent_screen(student_id, period_month))
     await callback.answer()
+
+
+# ─── Подтверждение по строке очереди: одно решение на одно уведомление ────────
+
+def _parse_pact(data: str) -> tuple[str, int, str, bool]:
+    """`pact:{action_id}[:{сумма}]:{код способа}[:f]` → (action_id, сумма, способ, force)."""
+    parts = data.split(":")
+    force = parts[-1] == "f"
+    if force:
+        parts = parts[:-1]
+    action_id = parts[1]
+    method = from_callback_code(parts[-1]) if len(parts) > 2 else RECEIPT_UNKNOWN
+    amount = int(parts[2]) if len(parts) > 3 and parts[2].isdigit() else 0
+    return action_id, amount, method, force
+
+
+async def _edit_admin_msg(callback: CallbackQuery, suffix: str, keep_rows=None) -> None:
+    text = (callback.message.caption or callback.message.text or "") + suffix
+    markup = to_aiogram_markup(keep_rows) if keep_rows else None
+    try:
+        if callback.message.caption is not None:
+            await callback.message.edit_caption(caption=text, reply_markup=markup)
+        else:
+            await callback.message.edit_text(text, reply_markup=markup)
+    except TelegramBadRequest:
+        pass
+
+
+@router.callback_query(F.data.startswith("pact:"), AdminOnly())
+async def cb_action_confirm(
+    callback: CallbackQuery, user: User, payment_service: PaymentService,
+    student_repo: StudentRepository, client_repo: ClientRepository,
+    cloudkassir_service: CloudKassirService, pending_repo=None,
+) -> None:
+    """Подтверждение оплаты по строке очереди: повторные нажатия ничего не зачитывают."""
+    action_id, amount, method, force = _parse_pact(callback.data or "")
+    action = await pending_repo.get_by_id(action_id) if pending_repo else None
+    if action is None:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if action.status != OPEN:
+        await _edit_admin_msg(callback, f"\n\n↩️ Уже обработано ({action.status}) — повтор не зачтён")
+        await callback.answer("Эта оплата уже обработана", show_alert=True)
+        return
+
+    student = await student_repo.get_by_id(action.student_id)
+    if student is None:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    claimed = amount or action.amount
+    ledgers = await payment_service.ledger_for(student, action.period_month)
+    rest = sum(ledger.remainder for ledger in ledgers.values())
+
+    # Заявлено больше, чем осталось: переплата — только осознанно, отдельной кнопкой
+    if claimed > rest and not force:
+        code = callback_code(method)
+        rows = [
+            [cb_btn(f"✅ Зачесть остаток {rest} руб.", f"pact:{action_id}:{rest}:{code}:f")],
+            [cb_btn(f"💸 Всё равно зачесть {claimed} руб. (переплата)", f"pact:{action_id}:{claimed}:{code}:f")],
+            [cb_btn("❌ Не подтверждать", f"pnay:{action_id}")],
+        ]
+        await _edit_admin_msg(
+            callback,
+            f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб."
+            f"\nВыберите, что зачесть — переплата останется на счёте ученика.",
+            keep_rows=rows,
+        )
+        await callback.answer("Сумма больше остатка", show_alert=True)
+        return
+
+    if not await claim_action(pending_repo, action_id, DONE, callback.from_user.id):
+        await _edit_admin_msg(callback, "\n\n↩️ Уже обработано — повтор не зачтён")
+        await callback.answer("Эта оплата уже обработана", show_alert=True)
+        return
+
+    credited, count = await payment_service.record_payment(
+        action.student_id, student.name, action.period_month, claimed,
+        callback.from_user.id, None, "из уведомления", action.method or method,
+    )
+    over = max(0, claimed - rest)
+    await _edit_admin_msg(
+        callback,
+        f"\n\n✅ Оплата подтверждена: {credited} руб." + (f" (в т.ч. переплата {over})" if over else ""),
+    )
+    addr = parse_addr(action.parent_addr) if action.parent_addr else None
+    if addr is not None:
+        await resolve_notifier(callback.bot).send(
+            addr,
+            f"✅ Оплата {credited} руб. за {_period_label(action.period_month)} ({student.name}) подтверждена.",
+            rows=bill_back_rows(action.student_id, action.period_month),
+        )
+    logger.info("Админ %s подтвердил %s: %d руб. (%d строк)", callback.from_user.id, action_id, credited, count)
+    await callback.answer("Оплата подтверждена")
+
+    if credited > 0 and cloudkassir_service._public_id and student.client_id:
+        client = await client_repo.get_by_id(student.client_id)
+        if client and client.phone:
+            await cloudkassir_service.send_income_receipt(
+                client.phone, student.name, action.period_month, credited,
+            )
+
+
+@router.callback_query(F.data.startswith("pnay:"), AdminOnly())
+async def cb_action_reject(
+    callback: CallbackQuery, user: User, student_repo: StudentRepository, pending_repo=None,
+) -> None:
+    action_id = (callback.data or "").split(":", 1)[-1]
+    action = await pending_repo.get_by_id(action_id) if pending_repo else None
+    if action is None:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if not await claim_action(pending_repo, action_id, REJECTED, callback.from_user.id):
+        await _edit_admin_msg(callback, "\n\n↩️ Уже обработано — повтор не учтён")
+        await callback.answer("Эта заявка уже обработана", show_alert=True)
+        return
+    student = await student_repo.get_by_id(action.student_id)
+    name = student.name if student else action.student_name
+    await _edit_admin_msg(callback, "\n\n❌ Оплата не подтверждена")
+    addr = parse_addr(action.parent_addr) if action.parent_addr else None
+    if addr is not None:
+        await resolve_notifier(callback.bot).send(
+            addr,
+            f"❌ Оплата за {_period_label(action.period_month)} ({name}) не подтверждена администратором.\n"
+            f"Проверьте сумму или свяжитесь со школой.",
+            rows=bill_back_rows(action.student_id, action.period_month),
+        )
+    logger.info("Админ %s отклонил %s", callback.from_user.id, action_id)
+    await callback.answer("Не подтверждено")

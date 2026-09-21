@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,6 +98,26 @@ class PendingActionRepository(BaseRepository):
         ])
         return PendingAction(action_id, kind, student_id, student_name, period_month, amount,
                              method, parent_addr, file_id, file_type, comment, now)
+
+    async def claim(self, action_id: str, status: str, decided_by_tg_id: int = 0) -> bool:
+        """Занять решение: `open` → status, один раз. False — кто-то решил раньше.
+
+        Проверка и запись под замком листа, статус перечитывается с живого листа,
+        поэтому три копии одного уведомления в чате дадут ровно одно зачисление.
+        """
+        async with self._locked_row(action_id=action_id) as row_idx:
+            if row_idx is None:
+                return False
+            live = await asyncio.to_thread(self._sync_row_values, row_idx)
+            current = live[_STATUS_COL - 1] if len(live) >= _STATUS_COL else ""
+            if (current or OPEN) != OPEN:
+                logger.info("Очередь решений: %s уже %s — повтор не проводим", action_id, current)
+                return False
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            await self._update_cell(row_idx, _STATUS_COL, status)
+            await self._update_cell(row_idx, _DECIDED_AT_COL, now)
+            await self._update_cell(row_idx, _DECIDED_BY_COL, decided_by_tg_id)
+        return True
 
     async def close(self, action_id: str, status: str, decided_by_tg_id: int = 0) -> bool:
         async with self._locked_row(action_id=action_id) as row_idx:

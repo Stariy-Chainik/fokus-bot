@@ -250,11 +250,12 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             open_keys = [k for k, v in ledgers.items() if v.remainder > 0]
             partial = len(chosen) < len(open_keys) or amount < sum(v.remainder for v in chosen.values())
             pids = ".".join(str(v.pending_pid) for v in chosen.values() if v.pending_pid)
+            action = await queue_action(_dp_get(dp, "pending_repo"), KIND_CASH, student, period,
+                                        amount=amount, method=CASH, parent_addr=str(tg_id))
             rows = admin_confirm_rows(student.student_id, period, pids, partial,
-                                      ("tg", tg_id), amount, CASH)
+                                      ("tg", tg_id), amount, CASH,
+                                      action_id=action.action_id if action else "")
             text = cash_notice(student.name, period, amount, breakdown)
-            await queue_action(_dp_get(dp, "pending_repo"), KIND_CASH, student, period,
-                               amount=amount, method=CASH, parent_addr=str(tg_id))
             admins = [u.tg_id for u in await user_repo.get_admins()]
             await notify(bot, admins, text, reply_markup=to_aiogram_markup(rows))
             logger.info("Кабинет родителя: наличные %s ₽ — %s %s", amount, student.student_id, period)

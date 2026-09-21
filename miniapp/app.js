@@ -16,7 +16,7 @@ let ROLE = 'admin';
 const API_BASE = { admin: '/api/admin', teacher: '/api/teacher', parent: '/api/parent', athlete: '/api/athlete' };
 const ROLE_TITLE = { admin: 'Администратор', teacher: 'Педагог', parent: 'Родитель', athlete: 'Спортсмен' };
 const ROLE_HOME = { admin: 'a.home', teacher: 't.home', parent: 'p.home', athlete: 's.home' };
-class ApiError extends Error { constructor(status, code) { super(code || `HTTP ${status}`); this.status = status; this.code = code; } }
+class ApiError extends Error { constructor(status, code, data) { super(code || `HTTP ${status}`); this.status = status; this.code = code; this.data = data; } }
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Accept': 'application/json' };
   if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
@@ -24,7 +24,7 @@ async function api(path, { method = 'GET', body } = {}) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const resp = await fetch(API_BASE[ROLE] + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
-  if (!resp.ok) throw new ApiError(resp.status, data && data.error);
+  if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);   // тело нужно, напр. при переплате
   return data;
 }
 const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.' };
@@ -696,13 +696,24 @@ async function loadAuthImage(img) {
   } catch (_) { img.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Чек не загрузился — посмотрите его в чате бота' })); }
 }
 /* Решение из очереди: подтвердить оплату / привязать ребёнка или отклонить. */
-ACT.inboxDecide = async ({ id, approve }) => {
+ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   try {
-    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve } });
-    render();
-    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена` : 'Готово') : 'Отклонено');
-  } catch (e) { toast(errText(e)); }
+    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force } });
+    closeSheet(); render();
+    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : 'Готово') : 'Отклонено');
+  } catch (e) {
+    // сумма больше остатка — спрашиваем, что зачесть; повтор решения — сообщаем и обновляем
+    if (e.status === 409 && e.data && e.data.needsConfirm) return inboxOverpay(id, e.data);
+    if (e.status === 409) { render(); toast('Эта заявка уже обработана'); return; }
+    toast(errText(e));
+  }
 };
+function inboxOverpay(id, d) {
+  sheet(`<h3>Сумма больше остатка</h3><div class="hint">Заявлено ${fmt(d.amount)}, к оплате осталось ${fmt(d.rest)}. Переплата останется на счёте ученика.</div>
+    <div style="margin-top:12px">${btn(`✅ Зачесть остаток ${fmt(d.rest)}`, 'inboxDecide', { id, approve: true, amount: d.rest, force: true })}
+    ${btn(`💸 Зачесть ${fmt(d.amount)} с переплатой`, 'inboxDecide', { id, approve: true, amount: d.amount, force: true }, 'sec')}
+    ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+}
 ACT.retry = () => render();
 ACT.payGroupPick = ({ v }) => {
   const { ym, bill } = state.ui.payPick || {};
