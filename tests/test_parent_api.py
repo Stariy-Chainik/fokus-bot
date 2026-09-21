@@ -159,3 +159,13 @@ def test_parent_mixes_subscription_and_one_lesson(api):
     pending = [p for p in dp["payment_repo"].rows
                if p.teacher_id == "TCH-0001" and p.status != PaymentStatus.PAID]
     assert pending and pending[0].lesson_ids == lesson["id"]   # намерение — только отмеченное занятие
+
+
+def test_lessons_and_bill_agree_on_the_rest(api):
+    """«Занятия» и «Счета» считают остаток одинаково — иначе родитель видит разные суммы."""
+    app, dp = api
+    _sub_mode(dp)                                   # с абонементом расхождение было заметнее всего
+    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
+    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
+    assert les["rest"] == bill["rest"] and les["accrued"] == bill["accrued"]
+    assert les["rest"] != les["unpaid"]             # по одним занятиям сумма была бы меньше
