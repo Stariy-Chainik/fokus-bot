@@ -629,19 +629,42 @@ SCREENS['a.record.w'] = async ({ tid, name }) => {
       }
     }
     if (w.kind === 'rshare') { const pool = []; const seen = new Set(); o.groups.filter(g => g.id !== o.rshareGroupId).forEach(g => g.roster.forEach(s => { if (!seen.has(s.id)) { seen.add(s.id); pool.push({ ...s, group: g.name }); } })); return { title: 'Участницы', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">Отметьте от 1 до 3 участниц. Отмечено: ${w.ids.size}</div>${list(pool.map(s => pick(s.id, w.ids.has(s.id), s.name, esc(s.group), 'rwToggle', { v: s.id, max: 3 })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` }; }
-    if (w.kind === 'pair') return { title: 'Пары', html: stepBar(3, total) + rwHeader(w) + (o.pairs.length ? `<div class="hint" style="margin-bottom:8px">Отметьте пары, которые занимались.</div>${list(o.pairs.map(p => pick(p.aId, w.ids.has(p.aId), `${p.aName} ↔ ${p.bName}`, '', 'rwToggle', { v: p.aId })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` : '<div class="empty">У педагога нет сформированных пар</div>') };
+    if (w.kind === 'pair') {
+      const shownPairs = rwFilterList(o, w, o.pairs, p => [p.aId, p.bId]);
+      return { title: 'Пары', html: stepBar(3, total) + rwHeader(w) + (o.pairs.length ? `<div class="hint" style="margin-bottom:8px">Отметьте пары, которые занимались.</div>${rwGroupChips(o, w, o.pairs, p => [p.aId, p.bId])}${shownPairs.length ? list(shownPairs.map(p => pick(p.aId, w.ids.has(p.aId), `${p.aName} ↔ ${p.bName}`, '', 'rwToggle', { v: p.aId }))) : '<div class="empty">В этой группе пар нет</div>'}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` : '<div class="empty">У педагога нет сформированных пар</div>') };
+    }
     const max = w.kind === 'shared' ? 4 : 99;
-    return { title: w.kind === 'shared' ? 'Солисты вместе' : 'Солисты', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">${w.kind === 'shared' ? 'Отметьте от 2 до 4 учеников — одно занятие, счёт делится поровну.' : 'Отметьте учеников — каждому запишется своё занятие. Можно отметить и ученика из пары, если он пришёл один.'} Отмечено: ${w.ids.size}</div>${list(o.students.map(s => pick(s.id, w.ids.has(s.id), s.name, s.partnerId ? 'в паре' : '', 'rwToggle', { v: s.id, max })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
+    const shownStudents = rwFilterList(o, w, o.students, s => [s.id]);
+    return { title: w.kind === 'shared' ? 'Солисты вместе' : 'Солисты', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">${w.kind === 'shared' ? 'Отметьте от 2 до 4 учеников — одно занятие, счёт делится поровну.' : 'Отметьте учеников — каждому запишется своё занятие. Можно отметить и ученика из пары, если он пришёл один.'} Отмечено: ${w.ids.size}</div>${rwGroupChips(o, w, o.students, s => [s.id])}${shownStudents.length ? list(shownStudents.map(s => pick(s.id, w.ids.has(s.id), s.name, s.partnerId ? 'в паре' : '', 'rwToggle', { v: s.id, max }))) : '<div class="empty">В этой группе никого нет</div>'}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
   }
   // подтверждение
   const g = w.gid ? o.groups.find(x => x.id === w.gid) : null;
   const names = w.kind === 'pair' ? o.pairs.filter(p => w.ids.has(p.aId)).map(p => `${p.aName} ↔ ${p.bName}`) : [...w.ids].map(id => { const all = [...o.students, ...o.groups.flatMap(x => x.roster)]; const s = all.find(x => x.id === id); return s ? s.name : id; });
   return { title: 'Проверьте', html: stepBar(4, total) + `<div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g ? g.name : KIND_LABEL[w.kind])}</div><div class="hint">${esc(w.name)} · ${fdate(w.date)} · ${w.dur} мин</div></div>${names.length ? `<div class="eyebrow">${w.kind === 'pair' ? 'Пары' : 'Ученики'} · ${names.length}</div>${list(names.map(n => cell({ t: esc(n) })))}` : g ? '<p class="hint" style="margin-top:8px">Без отметки посещаемости — ' + (g.mode === 'per_visit' ? 'счета никому не выставятся' : MODE[g.mode]) + '.</p>' : ''}<div style="margin-top:12px">${btn('💾 Сохранить занятие', 'rwSave', {})}${btn('Отмена', 'rwCancel', {}, 'ghost')}</div>` };
 };
+
+/* Фильтр по группам на шагах выбора учеников: состав берём из o.groups[].roster,
+   поэтому API не нужен. idsOf(item) — какие ученики стоят за строкой (пара — двое). */
+function rwRoster(o, gid) { const g = o.groups.find(x => x.id === gid); return new Set((g ? g.roster : []).map(s => s.id)); }
+function rwFilterList(o, w, items, idsOf) {
+  if (!w.fgid) return items;
+  const ids = rwRoster(o, w.fgid);
+  return items.filter(it => idsOf(it).some(id => ids.has(id)));
+}
+function rwGroupChips(o, w, items, idsOf) {
+  const counts = o.groups.map(g => {
+    const ids = new Set(g.roster.map(s => s.id));
+    return [g, items.filter(it => idsOf(it).some(id => ids.has(id))).length];
+  }).filter(([, n]) => n > 0);
+  if (counts.length < 2) return '';                       // одна группа — фильтровать нечего
+  const chip = (v, label, on) => `<button class="chip" aria-pressed="${on}" data-act="rwFilter" data-p='${esc(JSON.stringify({ v }))}'>${label}</button>`;
+  return `<div class="chips scroll">${chip('', `Все · ${items.length}`, !w.fgid)}${counts.map(([g, n]) => chip(g.id, `${esc(plainName(g.name))} · ${n}`, w.fgid === g.id)).join('')}</div>`;
+}
 function yesterdayOf(today) { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
 Object.assign(ACT, {
   rwDate: ({ v }) => { rw().date = v; render(); },
-  rwKind: ({ v }) => { const w = rw(); w.kind = v; w.ids = new Set(); w.tiers = {}; w.gid = v === 'rshare' ? w.opts.rshareGroupId : null; w.ask = null; if (v === 'rshare') { w.dur = 60; w.step = 3; } else w.step = 2; render(); },
+  rwFilter: ({ v }) => { rw().fgid = v; render(); },
+  rwKind: ({ v }) => { const w = rw(); w.kind = v; w.ids = new Set(); w.tiers = {}; w.fgid = ''; w.gid = v === 'rshare' ? w.opts.rshareGroupId : null; w.ask = null; if (v === 'rshare') { w.dur = 60; w.step = 3; } else w.step = 2; render(); },
   rwDur: ({ v }) => { const w = rw(); w.dur = v; w.step = 3; if (w.kind === 'group' && w.opts.groups.length === 1) { w.gid = w.opts.groups[0].id; } render(); },
   rwGroup: ({ v }) => { const w = rw(); w.gid = v; w.ask = null; w.ids = new Set(); const g = w.opts.groups.find(x => x.id === v); if (g.mode !== 'per_visit') { w.step = 4; } render(); },
   rwAsk: ({ v }) => { const w = rw(); w.ask = v; if (!v) { w.ids = new Set(); w.step = 4; } render(); },
