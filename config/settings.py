@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     def athlete_group_id_set(self) -> set:
         return {g.strip() for g in self.athlete_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Группы, где школа предпочитает наличные: в кабинете родителя этот способ
+    # показывается первым и подписан как удобный (остальные способы остаются).
+    cash_preferred_group_ids: str = Field(
+        default="GRP-0001,GRP-0004,GRP-0002", alias="CASH_PREFERRED_GROUP_IDS",
+    )
+
+    @property
+    def cash_preferred_group_id_set(self) -> set:
+        return {g.strip() for g in self.cash_preferred_group_ids.replace("|", ",").split(",") if g.strip()}
+
     # Педагоги, чьи ИНДИВИДУАЛЬНЫЕ занятия родители оплачивают напрямую педагогу
     # (мимо школы): не попадают в счета/долги/прибыль, зарплата школы = 0.
     direct_pay_teacher_ids: str = Field(default="", alias="DIRECT_PAY_TEACHER_IDS")

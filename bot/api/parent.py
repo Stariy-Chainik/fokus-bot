@@ -81,6 +81,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
 
     # ── профиль и сводка ─────────────────────────────────────────────────
     async def me(request: web.Request, tg_id, children) -> web.Response:
+        student_group_repo = dp["student_group_repo"]
+        cash_groups = settings.cash_preferred_group_id_set
         name = ""
         for s in children:                               # имя родителя — из карточки клиента школы
             if s.client_id:
@@ -90,7 +92,12 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     break
         return _json({
             "tgId": tg_id, "name": name, "period": current_period(),
-            "children": [{"id": s.student_id, "name": s.name} for s in children],
+            "children": [{
+                "id": s.student_id, "name": s.name,
+                # в этих группах школа просит наличные — кабинет ставит способ первым
+                "cashPreferred": bool(cash_groups & set(
+                    await student_group_repo.get_groups_for_student(s.student_id))),
+            } for s in children],
             "methods": {
                 "yookassa": bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
                 "cash": bool(settings.payment_cash_enabled),

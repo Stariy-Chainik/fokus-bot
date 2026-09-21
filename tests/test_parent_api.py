@@ -169,3 +169,12 @@ def test_lessons_and_bill_agree_on_the_rest(api):
     bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
     assert les["rest"] == bill["rest"] and les["accrued"] == bill["accrued"]
     assert les["rest"] != les["unpaid"]             # по одним занятиям сумма была бы меньше
+
+
+def test_cash_is_marked_preferred_for_sport_groups(api, monkeypatch):
+    """В спортивных группах школа просит наличные — кабинет помечает ребёнка флагом."""
+    app, dp = api
+    monkeypatch.setattr(settings, "cash_preferred_group_ids", "GRP-0001")
+    assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashPreferred"] is True
+    monkeypatch.setattr(settings, "cash_preferred_group_ids", "GRP-9999")
+    assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashPreferred"] is False
