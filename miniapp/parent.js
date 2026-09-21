@@ -167,19 +167,28 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
 SCREENS['p.lessons'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const d = await api(`/lessons/${kid()}?ym=${period}`);
+  const type = state.ui.pLesType || '';                 // '' | group | individual
+  const shown = type ? d.lessons.filter(l => l.type === type) : d.lessons;
+  const n = t => d.lessons.filter(l => l.type === t).length;
+  const typeChips = n('group') && n('individual')       // фильтр нужен, только если есть и те и другие
+    ? chipsAct('pLesType', type, [['', `Все · ${d.lessons.length}`], ['group', `Группы · ${n('group')}`], ['individual', `Индивидуальные · ${n('individual')}`]])
+    : '';
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
     ${monthChips('p.lessons', period, {})}
-    ${d.lessons.length ? list(d.lessons.map(l => cell({
+    ${typeChips}
+    ${shown.length ? list(shown.map(l => cell({
       lead: l.paid ? '✅' : '⬜', plain: true,
       t: esc(l.group || l.teacher),
       s: `${fdate(l.date)} · ${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
       r: l.amount ? `<b>${fmt(l.amount)}</b>` : 'абонемент',
-    }))) : empty('В этом месяце занятий не было')}
-    ${d.unpaid ? `<div class="card" style="margin-top:10px"><div class="total"><span>Не оплачено</span><span class="big bad">${fmt(d.unpaid)}</span></div></div>
+    }))) : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
+    ${d.unpaid ? `<div class="card" style="margin-top:10px"><div class="total"><span>Не оплачено за месяц</span><span class="big bad">${fmt(d.unpaid)}</span></div></div>
       <div style="margin-top:12px">${goBtn('🧾 Открыть счёт', 'p.bill', { ym: period })}</div>` : ''}
     <p class="hint" style="margin-top:8px">✅ — занятие закрыто оплатой. Абонементные занятия входят в месячную оплату.</p>` };
 };
+
+ACT.pLesType = ({ v }) => { state.ui.pLesType = v; render(); };
 
 /* ── Дневник ─────────────────────────────────────────────────────────── */
 SCREENS['p.diary'] = async ({ ym }) => {
