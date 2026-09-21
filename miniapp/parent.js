@@ -196,7 +196,7 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
 /* ── Занятия ─────────────────────────────────────────────────────────── */
 /* Календарь месяца: точка на занятие, цвет — группа или индивидуальное. Тап ведёт к дню в журнале. */
 const WD_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
-function calendar(period, byDay) {
+function calendar(period, byDay, picked = '') {
   const [y, m] = period.split('-').map(Number);
   const days = new Date(y, m, 0).getDate();
   const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;      // неделя с понедельника
@@ -207,9 +207,9 @@ function calendar(period, byDay) {
     const date = `${period}-${String(day).padStart(2, '0')}`;
     const items = byDay[date] || [];
     const dots = items.slice(0, 4).map(l => `<i class="${l.type === 'group' ? '' : 'solo'}"></i>`).join('');
-    const cls = `d${items.length ? '' : ' empty'}${date === today ? ' today' : ''}`;
+    const cls = `d${items.length ? '' : ' empty'}${date === today ? ' today' : ''}${date === picked ? ' on' : ''}`;
     cells.push(items.length
-      ? `<button class="${cls}" data-act="pGoDay" data-p='${esc(JSON.stringify({ d: date }))}'>${day}<span class="dots">${dots}</span></button>`
+      ? `<button class="${cls}" data-act="pDayPick" data-p='${esc(JSON.stringify({ d: date }))}'>${day}<span class="dots">${dots}</span></button>`
       : `<div class="${cls}">${day}</div>`);
   }
   return `<div class="cal">${cells.join('')}</div>`;
@@ -221,10 +221,9 @@ function byTeacher(items) {
   const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 4);
   return top.length ? `<br>${top.map(([k, v]) => `${esc(plainName(k))} — ${v}`).join(' · ')}` : '';
 }
-ACT.pGoDay = ({ d }) => {
-  const el = document.getElementById(`d-${d}`);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
+/* Тап по дню календаря показывает только его занятия; повторный тап возвращает месяц. */
+ACT.pDayPick = ({ d }) => { state.ui.pDay = state.ui.pDay === d ? '' : d; render(); };
+ACT.pDayReset = () => { state.ui.pDay = ''; render(); };
 
 SCREENS['p.lessons'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
@@ -245,24 +244,28 @@ SCREENS['p.lessons'] = async ({ ym }) => {
     s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
     r: l.paid ? pill('оплачено', 'ok') : '',
   })))}`;
-  const minutes = shown.reduce((a, l) => a + l.durationMin, 0);
+  const day = byDay[state.ui.pDay] ? state.ui.pDay : '';      // день из календаря (если он есть в месяце)
+  const inView = day ? byDay[day] : shown;
+  const minutes = inView.reduce((a, l) => a + l.durationMin, 0);
   const hours = `${Math.floor(minutes / 60)} ч${minutes % 60 ? ` ${minutes % 60} мин` : ''}`;
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
     ${monthChips('p.lessons', period, {})}
     ${typeChips}
     ${shown.length ? `<div class="card pad" style="margin-bottom:10px">
-        <div style="font-weight:700">${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · ${hours}</div>
-        <div class="hint">${n('group')} в группах, ${n('individual')} индивидуальных${byTeacher(shown)}</div>
-        <div style="margin-top:10px">${calendar(period, byDay)}</div>
+        <div style="font-weight:700">${day ? `${fdate(day)} · ` : ''}${plural(inView.length, ['занятие', 'занятия', 'занятий'])} · ${hours}</div>
+        <div class="hint">${day ? 'показан один день — нажмите ещё раз, чтобы вернуть месяц'
+          : `${n('group')} в группах, ${n('individual')} индивидуальных${byTeacher(shown)}`}</div>
+        <div style="margin-top:10px">${calendar(period, byDay, day)}</div>
         <div class="hint" style="margin-top:6px"><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle"></i> группа · <i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);vertical-align:middle"></i> индивидуальное</div>
-      </div>${days.map(dayBlock).join('')}`
+        ${day ? `<div style="margin-top:10px">${btn('✕ Весь месяц', 'pDayReset', {}, 'ghost')}</div>` : ''}
+      </div>${(day ? [day] : days).map(dayBlock).join('')}`
       : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
     ${d.unpaid ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — ${fmt(d.unpaid)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
     <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
 };
 
-ACT.pLesType = ({ v }) => { state.ui.pLesType = v; render(); };
+ACT.pLesType = ({ v }) => { state.ui.pLesType = v; state.ui.pDay = ''; render(); };
 
 /* ── Дневник ─────────────────────────────────────────────────────────── */
 SCREENS['p.diary'] = async ({ ym }) => {
