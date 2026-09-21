@@ -194,6 +194,38 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
 };
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */
+/* Календарь месяца: точка на занятие, цвет — группа или индивидуальное. Тап ведёт к дню в журнале. */
+const WD_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+function calendar(period, byDay) {
+  const [y, m] = period.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;      // неделя с понедельника
+  const today = new Date().toISOString().slice(0, 10);
+  const cells = WD_SHORT.map(w => `<div class="wd">${w}</div>`);
+  for (let i = 0; i < lead; i++) cells.push('<div class="d empty"></div>');
+  for (let day = 1; day <= days; day++) {
+    const date = `${period}-${String(day).padStart(2, '0')}`;
+    const items = byDay[date] || [];
+    const dots = items.slice(0, 4).map(l => `<i class="${l.type === 'group' ? '' : 'solo'}"></i>`).join('');
+    const cls = `d${items.length ? '' : ' empty'}${date === today ? ' today' : ''}`;
+    cells.push(items.length
+      ? `<button class="${cls}" data-act="pGoDay" data-p='${esc(JSON.stringify({ d: date }))}'>${day}<span class="dots">${dots}</span></button>`
+      : `<div class="${cls}">${day}</div>`);
+  }
+  return `<div class="cal">${cells.join('')}</div>`;
+}
+/* Строка «у кого занимались»: педагог/группа — сколько раз. */
+function byTeacher(items) {
+  const cnt = {};
+  items.forEach(l => { const k = l.group || l.teacher; cnt[k] = (cnt[k] || 0) + 1; });
+  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  return top.length ? `<br>${top.map(([k, v]) => `${esc(plainName(k))} — ${v}`).join(' · ')}` : '';
+}
+ACT.pGoDay = ({ d }) => {
+  const el = document.getElementById(`d-${d}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
 SCREENS['p.lessons'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const d = await api(`/lessons/${kid()}?ym=${period}`);
@@ -207,17 +239,24 @@ SCREENS['p.lessons'] = async ({ ym }) => {
   const byDay = {};
   shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
   const days = Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1));     // свежие сверху
-  const dayBlock = day => `<div class="eyebrow">${fdate(day)}</div>${list(byDay[day].map(l => cell({
+  const dayBlock = day => `<div class="eyebrow" id="d-${day}">${fdate(day)}</div>${list(byDay[day].map(l => cell({
     lead: l.type === 'group' ? '👥' : '👤', plain: true,
     t: esc(l.group || l.teacher),
     s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
     r: l.paid ? pill('оплачено', 'ok') : '',
   })))}`;
+  const minutes = shown.reduce((a, l) => a + l.durationMin, 0);
+  const hours = `${Math.floor(minutes / 60)} ч${minutes % 60 ? ` ${minutes % 60} мин` : ''}`;
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
     ${monthChips('p.lessons', period, {})}
     ${typeChips}
-    ${shown.length ? `<p class="hint" style="margin:0 0 8px">${plural(shown.length, ['занятие', 'занятия', 'занятий'])} за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</p>${days.map(dayBlock).join('')}`
+    ${shown.length ? `<div class="card pad" style="margin-bottom:10px">
+        <div style="font-weight:700">${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · ${hours}</div>
+        <div class="hint">${n('group')} в группах, ${n('individual')} индивидуальных${byTeacher(shown)}</div>
+        <div style="margin-top:10px">${calendar(period, byDay)}</div>
+        <div class="hint" style="margin-top:6px"><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle"></i> группа · <i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);vertical-align:middle"></i> индивидуальное</div>
+      </div>${days.map(dayBlock).join('')}`
       : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
     ${d.unpaid ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — ${fmt(d.unpaid)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
     <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
