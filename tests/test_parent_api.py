@@ -178,3 +178,16 @@ def test_cash_is_marked_preferred_for_sport_groups(api, monkeypatch):
     assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashPreferred"] is True
     monkeypatch.setattr(settings, "cash_preferred_group_ids", "GRP-9999")
     assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashPreferred"] is False
+
+
+def test_cash_can_be_switched_off_for_a_group(api, monkeypatch):
+    """В части групп наличные не принимают — способ не показывается родителю."""
+    app, dp = api
+    monkeypatch.setattr(settings, "cash_disabled_group_ids", "GRP-0001")
+    child = _call(app, "GET", "/api/parent/me")[1]["children"][0]
+    assert child["cashAllowed"] is False and child["cashPreferred"] is False
+    bot = FakeBot()
+    assert _call(app, "POST", "/api/parent/pay", bot=bot,
+                 json={"studentId": "STU-0001", "ym": YM, "method": "cash"})[0] == 200  # API не запрещаем
+    monkeypatch.setattr(settings, "cash_disabled_group_ids", "")
+    assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashAllowed"] is True

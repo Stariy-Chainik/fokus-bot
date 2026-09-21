@@ -168,8 +168,10 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
   // тот же набор, что в боте: СБП онлайн → наличные → реквизиты (карта и СБП по чеку не показываются)
   const rows = [];
   // порядок способов: наличные → по реквизитам с чеком → СБП онлайн
-  const cashPreferred = ((state.me.children || []).find(c => c.id === kid()) || {}).cashPreferred;
-  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }));
+  const child = (state.me.children || []).find(c => c.id === kid()) || {};
+  const cashPreferred = child.cashPreferred;
+  const cashOn = m.cash && child.cashAllowed !== false;     // в части групп наличные не принимают
+  if (cashOn) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }));
   if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { ym, rest, sel, method: 'bank' }, 'ghost'));
   if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { ym, rest, sel, method: 'ysbp' }, 'ghost'));
   sheet(`<h3>Оплата ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${MON_NOM[+ym.slice(5) - 1]}${part ? ' · за отмеченное' : ''}</div>

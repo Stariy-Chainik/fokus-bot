@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     def cash_preferred_group_id_set(self) -> set:
         return {g.strip() for g in self.cash_preferred_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Группы, где наличные не принимаются: способ не показывается родителю совсем.
+    cash_disabled_group_ids: str = Field(default="", alias="CASH_DISABLED_GROUP_IDS")
+
+    @property
+    def cash_disabled_group_id_set(self) -> set:
+        return {g.strip() for g in self.cash_disabled_group_ids.replace("|", ",").split(",") if g.strip()}
+
     # Педагоги, чьи ИНДИВИДУАЛЬНЫЕ занятия родители оплачивают напрямую педагогу
     # (мимо школы): не попадают в счета/долги/прибыль, зарплата школы = 0.
     direct_pay_teacher_ids: str = Field(default="", alias="DIRECT_PAY_TEACHER_IDS")

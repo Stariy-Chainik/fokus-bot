@@ -29,6 +29,7 @@ from bot.services.pending_queue import (
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
     client_contact, qr_png, breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
+    cash_options,
 )
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens import cb as cb_btn
@@ -83,10 +84,13 @@ async def _get_student_and_total(
 _yookassa_on = lambda: bool(settings.yookassa_shop_id and settings.yookassa_secret_key)  # noqa: E731
 
 
-async def _show_methods(callback: CallbackQuery, student_id: str, period_month: str, sel: list, who: str) -> None:
+async def _show_methods(callback: CallbackQuery, student_id: str, period_month: str, sel: list, who: str,
+                        student_group_repo=None) -> None:
+    cash = settings.payment_cash_enabled
+    if student_group_repo is not None:                 # в части групп наличные не принимаем
+        cash, _preferred = await cash_options(student_id, student_group_repo)
     text, rows = methods_screen(
-        student_id, period_month, who, sel, _yookassa_on(),
-        cash=settings.payment_cash_enabled,
+        student_id, period_month, who, sel, _yookassa_on(), cash=cash,
     )
     if len(sel) == 1 and not str(sel[0]["tid"]).startswith("SUB:"):
         rows.insert(0, [cb_btn("🧾 Выбрать занятия", f"plsel:{sel[0]['tid']}")])
@@ -173,7 +177,7 @@ async def cb_pay_lesson_toggle(
 @router.callback_query(F.data.in_({"plsngo", "plsnall"}))
 async def cb_pay_lesson_apply(
     callback: CallbackQuery, state: FSMContext,
-    student_repo: StudentRepository, payment_service: PaymentService,
+    student_repo: StudentRepository, payment_service: PaymentService, student_group_repo=None,
 ) -> None:
     """Сохраняем выбор: сумма к оплате и намерение на строке-остатке."""
     data = await state.get_data()
@@ -196,14 +200,14 @@ async def cb_pay_lesson_apply(
     await state.update_data(pay_amounts=amounts, pay_lessons=chosen)
     _total, unpaid = await unpaid_for(student, period_month, payment_service)
     sel = selected_from(await state.get_data(), student_id, period_month, unpaid)
-    await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "")
+    await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "", student_group_repo)
     await callback.answer("Оплатить всё" if whole else f"К оплате: {amount} руб.")
 
 
 @router.callback_query(F.data.startswith("client_pay:"))
 async def cb_client_pay(
     callback: CallbackQuery, state: FSMContext,
-    student_repo: StudentRepository, payment_service: PaymentService,
+    student_repo: StudentRepository, payment_service: PaymentService, student_group_repo=None,
 ) -> None:
     try:
         cb = ClientPayCb.unpack(callback.data)
@@ -220,11 +224,11 @@ async def cb_client_pay(
     if preselect and any(u["tid"] == preselect for u in unpaid):
         sel = [u for u in unpaid if u["tid"] == preselect]
         await state.update_data(pay_sel_key=f"{student_id}:{period_month}", pay_sel=[preselect], pay_unpaid=unpaid)
-        await _show_methods(callback, student_id, period_month, sel, student.name)
+        await _show_methods(callback, student_id, period_month, sel, student.name, student_group_repo)
     elif len(unpaid) > 1:
         await _show_teacher_select(callback, state, student_id, period_month, unpaid)
     else:
-        await _show_methods(callback, student_id, period_month, unpaid, student.name)
+        await _show_methods(callback, student_id, period_month, unpaid, student.name, student_group_repo)
     await callback.answer()
 
 
@@ -246,7 +250,7 @@ async def cb_pay_select_toggle(callback: CallbackQuery, state: FSMContext) -> No
 
 
 @router.callback_query(F.data == "pselgo")
-async def cb_pay_select_go(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_pay_select_go(callback: CallbackQuery, state: FSMContext, student_group_repo=None) -> None:
     data = await state.get_data()
     unpaid = data.get("pay_unpaid") or []
     key = data.get("pay_sel_key") or ""
@@ -255,7 +259,7 @@ async def cb_pay_select_go(callback: CallbackQuery, state: FSMContext) -> None:
         return
     student_id, period_month = key.split(":", 1)
     sel = selected_from(data, student_id, period_month, unpaid)
-    await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "")
+    await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "", student_group_repo)
     await callback.answer()
 
 

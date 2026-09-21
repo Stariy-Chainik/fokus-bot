@@ -113,6 +113,18 @@ def selection_fsm_data(sel: list, unpaid: list) -> dict:
     }
 
 
+async def cash_options(student_id: str, student_group_repo) -> tuple[bool, bool]:
+    """(наличные разрешены, наличные предпочтительны) для ученика.
+
+    Школа принимает наличные не везде: `CASH_DISABLED_GROUP_IDS` убирает способ
+    совсем, `CASH_PREFERRED_GROUP_IDS` ставит его первым (спортивные группы).
+    """
+    from config.settings import settings
+    gids = set(await student_group_repo.get_groups_for_student(student_id))
+    allowed = settings.payment_cash_enabled and not (gids & settings.cash_disabled_group_id_set)
+    return allowed, bool(allowed and gids & settings.cash_preferred_group_id_set)
+
+
 async def client_contact(student, client_repo) -> tuple[str, str]:
     """(телефон, email) клиента для фискального чека ЮКассы."""
     if not student.client_id:
