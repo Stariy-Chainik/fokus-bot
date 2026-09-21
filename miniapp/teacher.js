@@ -24,22 +24,23 @@ SCREENS['t.home'] = async () => {
     <div class="eyebrow">Разделы</div>
     ${list([
       cell({ lead: '📋', plain: true, t: 'Мои занятия', s: 'сегодня, вчера, месяц', go: 't.lessons', p: {} }),
-      cell({ lead: '👥', plain: true, t: 'Мои группы', s: `${plural(h.groups, ['группа', 'группы', 'групп'])}: состав, пары, солисты`, go: 't.groups', p: {} }),
+      cell({ lead: '👥', plain: true, t: 'Мои группы', s: `${plural(h.groups, ['группа', 'группы', 'групп'])}: состав, пары${state.me.canBill ? ', оплата' : ', солисты'}`, go: 't.groups', p: {} }),
       cell({ lead: '💰', plain: true, t: 'Зарплата и период', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
     ])}
     ${!h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
-    ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'выставить и отправить родителям', go: 't.bills', p: {} })])}` : ''}
+    ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'группа → вкладка «Оплата» → ученик', go: 't.groups', p: {} })])}` : ''}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */
 const tKey = () => state.ui.tKey || new Date().toISOString().slice(0, 10);
-const tLessonCell = x => cell({
+const tLessonCell = (x, withDate = false) => cell({
   lead: x.type === 'group' ? '👥' : '👤', plain: true,
   t: esc(x.type === 'group' ? (x.groupName || 'Группа') : x.students.join(' + ') || '—'),
-  s: `${fdate(x.date)} · ${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.locked ? ' · 🔒' : ''}`,
+  s: `${withDate ? `${fdate(x.date)} · ` : ''}${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.locked ? ' · 🔒' : ''}`,
   r: `<b>${fmt(x.earned)}</b>`, go: 't.lesson', p: { id: x.id },
 });
+/* Журнал: занятия сгруппированы по дням, у каждого дня свой итог. */
 SCREENS['t.lessons'] = async ({ key }) => {
   const k = key || tKey();
   state.ui.tKey = k;
@@ -48,10 +49,25 @@ SCREENS['t.lessons'] = async ({ key }) => {
   const ym = k.slice(0, 7);
   const d = await api(`/lessons?${k.length === 10 ? 'date' : 'ym'}=${k}`);
   const chips = [[d0, 'Сегодня'], [d1, 'Вчера'], [ym, MON_NOM[+ym.slice(5) - 1]]];
+  const type = state.ui.tLesType || '';
+  const n = t => d.lessons.filter(l => l.type === t).length;
+  const shown = type ? d.lessons.filter(l => l.type === type) : d.lessons;
+  const earned = shown.reduce((a, l) => a + l.earned, 0);
+  const byDay = {};
+  shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
+  const days = Object.keys(byDay).sort();
+  const dayBlock = day => {
+    const items = byDay[day];
+    const sum = items.reduce((a, l) => a + l.earned, 0);
+    return `<div class="eyebrow">${fdate(day)}</div>${list(items.map(l => tLessonCell(l)))}
+      <div class="hint" style="text-align:right;margin:6px 2px 0">${plural(items.length, ['занятие', 'занятия', 'занятий'])} · ${fmt(sum)}</div>`;
+  };
   return { title: 'Мои занятия', html: `
-    <div class="chips">${chips.map(([v, n]) => `<button class="chip" aria-pressed="${k === v}" data-go="t.lessons" data-p='${esc(JSON.stringify({ key: v }))}' data-replace="1">${n}</button>`).join('')}</div>
-    ${d.lessons.length ? `${list(d.lessons.map(tLessonCell))}<div class="card" style="margin-top:10px"><div class="total"><span>${plural(d.lessons.length, ['занятие', 'занятия', 'занятий'])}</span><span class="big">${fmt(d.earned)}</span></div></div>`
-      : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие кнопкой ниже или выберите другой день</p>')}
+    ${stickyFilters(`<div class="chips">${chips.map(([v, nm]) => `<button class="chip" aria-pressed="${k === v}" data-go="t.lessons" data-p='${esc(JSON.stringify({ key: v }))}' data-replace="1">${nm}</button>`).join('')}</div>
+      ${n('group') && n('individual') ? chipsAct('tLesType', type, [['', `Все · ${d.lessons.length}`], ['group', `Группы · ${n('group')}`], ['individual', `Индивидуальные · ${n('individual')}`]]) : ''}`)}
+    ${shown.length ? `${days.map(dayBlock).join('')}
+      <div class="card" style="margin-top:12px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · заработано</span><span class="big">${fmt(earned)}</span></div></div>`
+      : empty(type ? 'Таких занятий нет' : 'Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие кнопкой ниже или выберите другой день</p>')}
     <div style="margin-top:12px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>` };
 };
 
@@ -91,9 +107,10 @@ SCREENS['t.groups'] = async () => {
   }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>')) };
 };
 
-SCREENS['t.group'] = async ({ id }) => {
+SCREENS['t.group'] = async ({ id, ym }) => {
   const g = await api(`/groups/${id}`);
   const tab = state.ui.tGroupTab || 'all';
+  if (tab === 'pay' && state.me.canBill) return tGroupPay(g, id, ym);
   const rows = tab === 'pairs'
     ? (g.pairs.length ? list(g.pairs.map(p => cell({ lead: '💃', plain: true, t: `${esc(p.aName)} ↔ ${esc(p.bName)}`, go: 't.student', p: { id: p.aId } }))) : '<div class="empty">Пар нет</div>')
     : tab === 'solo'
@@ -101,9 +118,29 @@ SCREENS['t.group'] = async ({ id }) => {
       : (g.students.length ? list(g.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.partnerId ? 'в паре' : 'солист', go: 't.student', p: { id: s.id } }))) : '<div class="empty">В группе никого нет</div>');
   return { title: g.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div></div>
-    ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`]])}
+    ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`],
+      ...(state.me.canBill ? [['pay', '💳 Оплата']] : [])])}
     ${rows}` };
 };
+
+/* Оплата группы: счета учеников за месяц — раньше это был отдельный раздел «Счета групп». */
+async function tGroupPay(g, id, ym) {
+  const period = ym || lastPeriods(1)[0];
+  const d = await api(`/bills/group/${id}?ym=${period}`);
+  const toSend = d.students.filter(s => s.total > 0).length;
+  const rest = d.students.reduce((a, s) => a + (s.rest || 0), 0);
+  return { title: g.name, html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div>
+      <div class="hint">${fmon(period)} · начислено ${fmt(d.students.reduce((a, s) => a + s.total, 0))}${rest ? ` · к оплате ${fmt(rest)}` : ' · всё оплачено'}</div></div>
+    ${chipsAct('tGroupTab', 'pay', [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`], ['pay', '💳 Оплата']])}
+    ${monthChips('t.group', period, { id })}
+    ${d.students.length ? list(d.students.map(s => cell({
+      lead: initials(s.name), t: esc(s.name),
+      s: s.hasParent ? (s.rest ? `к оплате ${fmt(s.rest)}` : 'оплачено') : 'родитель не привязан',
+      r: `<b>${fmt(s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym: period },
+    }))) : '<div class="empty">В группе никого нет</div>'}
+    <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid: id, ym: period, count: toSend, name: g.name }, toSend ? '' : 'ghost')}</div>` };
+}
 
 SCREENS['t.student'] = async ({ id, ym }) => {
   const s = await api(`/students/${id}${ym ? `?ym=${ym}` : ''}`);
@@ -112,7 +149,8 @@ SCREENS['t.student'] = async ({ id, ym }) => {
       <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div></div>
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
-    ${s.lessons.length ? list(s.lessons.map(tLessonCell)) : '<div class="empty">В этом месяце занятий не было</div>'}` };
+    ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}
+    ${state.me.canBill ? `<div style="margin-top:12px">${goBtn(`🧾 Счёт за ${MON_NOM[+(s.period).slice(5) - 1].toLowerCase()}`, 't.bill', { sid: id, ym: s.period }, 'sec')}</div>` : ''}` };
 };
 
 /* ── Зарплата и сдача периода ────────────────────────────────────────── */
@@ -200,31 +238,6 @@ SCREENS['t.rating'] = async ({ ym }) => {
 };
 
 /* ── Счета своих групп (BILLING_TEACHER_IDS) ─────────────────────────── */
-SCREENS['t.bills'] = async ({ ym }) => {
-  const period = ym || lastPeriods(1)[0];
-  const d = await api(`/bills?ym=${period}`);
-  return { title: 'Счета групп', html: `
-    ${monthChips('t.bills', period, {})}
-    ${d.groups.length ? list(d.groups.map(g => cell({
-      lead: '👥', plain: true, t: esc(g.name), s: MODE[g.mode] || g.mode,
-      r: plural(g.students, ['ученик', 'ученика', 'учеников']), go: 't.bills.g', p: { gid: g.id, ym: period },
-    }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>')}` };
-};
-
-SCREENS['t.bills.g'] = async ({ gid, ym }) => {
-  const d = await api(`/bills/group/${gid}?ym=${ym}`);
-  const toSend = d.students.filter(s => s.total > 0).length;
-  return { title: d.group.name, html: `
-    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.group.name)}</div><div class="hint">${fmon(ym)} · начислено ${fmt(d.students.reduce((a, s) => a + s.total, 0))}</div></div>
-    ${d.students.length ? list(d.students.map(s => cell({
-      lead: initials(s.name), t: esc(s.name),
-      s: s.hasParent ? (s.rest ? `к оплате ${fmt(s.rest)}` : 'оплачено') : 'родитель не привязан',
-      cls: s.rest ? '' : '',
-      r: `<b>${fmt(s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym },
-    }))) : '<div class="empty">В группе никого нет</div>'}
-    <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid, ym, count: toSend, name: d.group.name }, toSend ? '' : 'ghost')}</div>` };
-};
-
 SCREENS['t.bill'] = async ({ sid, ym }) => {
   const b = await api(`/bills/student/${sid}?ym=${ym}`);
   return { title: b.student.name, html: `
@@ -264,6 +277,7 @@ SCREENS['t.pay.select'] = async ({ sid, ym, key }) => {
 /* ── действия ────────────────────────────────────────────────────────── */
 ACT.tPick = ({ id }) => { const s = state.ui.tsel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); };
 ACT.tGroupTab = ({ v }) => { state.ui.tGroupTab = v; render(); };
+ACT.tLesType = ({ v }) => { state.ui.tLesType = v; render(); };
 ACT.tGroupBranch = ({ v }) => { state.ui.tGroupBranch = v; render(); };
 ACT.tGradeAsk = ({ id, sid, name, grade }) => sheet(`<h3>Оценить тренировку</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/5` : ''}</div>
   <div class="chips" style="margin-top:12px">${[1, 2, 3, 4, 5].map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>

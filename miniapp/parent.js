@@ -102,14 +102,27 @@ SCREENS['p.bill'] = async ({ ym }) => {
   return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
       <div class="hint">начислено ${fmt(b.accrued)}${b.paid ? ` · оплачено ${fmt(b.paid)}` : ''}</div></div>
-    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => `
-      ${head(r)}
-      ${r.subscription ? `<div class="lesson-line"><span></span><span class="hint">абонемент за месяц, целиком</span><span></span></div>` : r.lessons.map(l => line(r, l)).join('')}
-      ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`).join('')}
+    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => {
+      const open = !!(state.ui.bopen || {})[r.key];
+      const unpaid = r.lessons.filter(l => !l.paid).length;
+      return `${head(r)}
+      ${r.subscription ? `<div class="lesson-line"><span></span><span class="hint">абонемент за месяц, целиком</span><span></span></div>`
+        : open ? r.lessons.map(l => line(r, l)).join('')
+        : `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])}${unpaid ? `, ${unpaid} не оплачено` : ''} — показать</span><span class="hint">▾</span></button>`}
+      ${open && !r.subscription ? `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">свернуть</span><span class="hint">▴</span></button>` : ''}
+      ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`;
+    }).join('')}
       <div class="total"><span>К оплате</span><span class="big ${total ? 'bad' : 'ok'}">${b.rest ? fmt(total) : '✓ оплачено'}</span></div></div>`
       : empty('За этот месяц начислений нет')}
     ${b.rest ? `<div style="margin-top:12px">${btn(total ? `💳 Оплатить ${fmt(total)}` : 'Отметьте, что оплачиваете', 'pPayAsk', { ym, rest: total, sel: true }, total ? '' : 'sec')}</div>
       <p class="hint" style="margin-top:8px">Снимите галочки с того, что платите позже — сумма пересчитается.</p>` : ''}` };
+};
+
+/* Раскрыть/свернуть занятия позиции: по умолчанию в счёте видны только суммы. */
+ACT.bToggleRow = ({ key }) => {
+  const o = (state.ui.bopen = state.ui.bopen || {});
+  o[key] = !o[key];
+  render();
 };
 
 /* Позиция целиком ⇄ снята. Занятие: первый тап переводит позицию в частичный выбор. */
@@ -173,19 +186,24 @@ SCREENS['p.lessons'] = async ({ ym }) => {
   const typeChips = n('group') && n('individual')       // фильтр нужен, только если есть и те и другие
     ? chipsAct('pLesType', type, [['', `Все · ${d.lessons.length}`], ['group', `Группы · ${n('group')}`], ['individual', `Индивидуальные · ${n('individual')}`]])
     : '';
+  // журнал посещений: что было, по дням. Деньги и оплата — во вкладке «Счета»
+  const byDay = {};
+  shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
+  const days = Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1));     // свежие сверху
+  const dayBlock = day => `<div class="eyebrow">${fdate(day)}</div>${list(byDay[day].map(l => cell({
+    lead: l.type === 'group' ? '👥' : '👤', plain: true,
+    t: esc(l.group || l.teacher),
+    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
+    r: l.paid ? pill('оплачено', 'ok') : '',
+  })))}`;
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
     ${monthChips('p.lessons', period, {})}
     ${typeChips}
-    ${shown.length ? list(shown.map(l => cell({
-      lead: l.paid ? '✅' : '⬜', plain: true,
-      t: esc(l.group || l.teacher),
-      s: `${fdate(l.date)} · ${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
-      r: l.amount ? `<b>${fmt(l.amount)}</b>` : 'абонемент',
-    }))) : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
-    ${d.unpaid ? `<div class="card" style="margin-top:10px"><div class="total"><span>Не оплачено за месяц</span><span class="big bad">${fmt(d.unpaid)}</span></div></div>
-      <div style="margin-top:12px">${goBtn('🧾 Открыть счёт', 'p.bill', { ym: period })}</div>` : ''}
-    <p class="hint" style="margin-top:8px">✅ — занятие закрыто оплатой. Абонементные занятия входят в месячную оплату.</p>` };
+    ${shown.length ? `<p class="hint" style="margin:0 0 8px">${plural(shown.length, ['занятие', 'занятия', 'занятий'])} за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</p>${days.map(dayBlock).join('')}`
+      : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
+    ${d.unpaid ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — ${fmt(d.unpaid)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
+    <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
 };
 
 ACT.pLesType = ({ v }) => { state.ui.pLesType = v; render(); };
