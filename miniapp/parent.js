@@ -39,17 +39,27 @@ ACT.pOpen = ({ id, screen }) => { state.ui.kid = id; go(screen, {}); };
 /* ── Счета ───────────────────────────────────────────────────────────── */
 SCREENS['p.bills'] = async () => {
   const d = await api(`/bills?student=${kid()}`);
+  // по умолчанию — только то, что нужно оплатить; закрытые месяцы прячем за кнопкой
+  const open = d.months.filter(m => m.rest);
+  const closed = d.months.filter(m => !m.rest);
+  const showAll = !!state.ui.pAllBills;
+  const shown = showAll ? d.months : open;
+  const monthCell = m => cell({
+    lead: m.rest ? (m.paid ? '⏳' : '⬜') : '✅', plain: true,
+    t: `${MON_NOM[+m.ym.slice(5) - 1]} ${m.ym.slice(0, 4)}`,
+    s: m.rest ? (m.paid ? `оплачено ${fmt(m.paid)}, к доплате ${fmt(m.rest)}` : `к оплате ${fmt(m.rest)}`) : 'оплачено полностью',
+    r: `<b class="${m.rest ? 'bad' : 'ok'}">${fmt(m.rest || m.accrued)}</b>`,
+    go: 'p.bill', p: { ym: m.ym },
+  });
   return { title: 'Счета', html: `
     ${kidChips('p.bills')}
     <div class="h2">${esc(d.student.name)}</div>
-    ${d.months.length ? list(d.months.map(m => cell({
-      lead: m.rest ? (m.paid ? '⏳' : '⬜') : '✅', plain: true,
-      t: `${MON_NOM[+m.ym.slice(5) - 1]} ${m.ym.slice(0, 4)}`,
-      s: m.rest ? (m.paid ? `оплачено ${fmt(m.paid)}, к доплате ${fmt(m.rest)}` : `к оплате ${fmt(m.rest)}`) : 'оплачено полностью',
-      r: `<b class="${m.rest ? 'bad' : 'ok'}">${fmt(m.rest || m.accrued)}</b>`,
-      go: 'p.bill', p: { ym: m.ym },
-    }))) : empty('Счетов пока нет', '<p class="hint" style="margin:0">Они появятся после первых занятий</p>')}` };
+    ${shown.length ? list(shown.map(monthCell))
+      : d.months.length ? empty('Всё оплачено', '<p class="hint" style="margin:0">Новый счёт появится после следующих занятий</p>')
+      : empty('Счетов пока нет', '<p class="hint" style="margin:0">Они появятся после первых занятий</p>')}
+    ${closed.length ? `<div style="margin-top:12px">${btn(showAll ? 'Скрыть оплаченные' : `📜 Оплаченные месяцы · ${closed.length}`, 'pAllBills', {}, 'ghost')}</div>` : ''}` };
 };
+ACT.pAllBills = () => { state.ui.pAllBills = !state.ui.pAllBills; render(); };
 
 /* Счёт: позиции и занятия отмечаются прямо здесь, сумма считается на лету.
    По умолчанию отмечено всё неоплаченное — тогда это обычная оплата счёта целиком. */
