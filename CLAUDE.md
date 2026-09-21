@@ -53,6 +53,10 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
    - Telegram: `/webhook/{bot_token}` if `WEBHOOK_URL` is set, otherwise polling.
    - YooKassa: `/yookassa-webhook` always registered on `PAYMENT_WEBHOOK_PORT` (default 8081).
 
+> **Прогрев кеша.** `_cache_warmer` (в `bot/__main__.py`, раз в 240 с при TTL кеша 300 с) фоном читает основные
+> листы. Без него первый запрос после простоя читает Google Sheets по-настоящему — 8–10 секунд, и Mini App успевает
+> отвалиться по таймауту, а родитель жмёт «оплатить» повторно.
+
 ### Telegram Mini App (кабинеты администратора и педагога)
 
 Фронт `miniapp/` (`index.html` + `app.js`, без сборки) раздаётся aiohttp-сервером бота по `/app/`

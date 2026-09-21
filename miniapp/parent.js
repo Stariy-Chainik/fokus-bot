@@ -176,6 +176,11 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
 ACT.pPayDo = async ({ ym, method, sel }) => {
+  if (state.ui.paying) { toast('Отправляем, подождите…'); return; }
+  state.ui.paying = true;
+  // блокируем кнопки: запрос к таблицам может идти несколько секунд
+  const sheetEl = document.querySelector('.sheet');
+  if (sheetEl) sheetEl.querySelectorAll('.btn').forEach(b => { b.disabled = true; if (b.dataset.act === 'pPayDo') b.textContent = 'Отправляем…'; });
   const body = { studentId: kid(), ym, method };
   if (sel && state.ui.bsel) {                        // что отмечено в счёте: позиции и занятия внутри них
     const st = state.ui.bsel.sel;
@@ -189,8 +194,9 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
     if (r.details) { sheet(`<h3>Реквизиты · ${fmt(r.amount)}</h3>
     ${r.qr ? `<img src="${r.qr}" alt="QR для оплаты" style="display:block;width:180px;max-width:60%;margin:12px auto;border-radius:10px;background:#fff;padding:8px">` : ''}
     <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div><div style="margin-top:12px">${btn('Понятно', 'closeSheet', {}, 'sec')}</div>`); return; }
-    if (r.ok) { render(); toast('Администратор получил уведомление'); return; }
+    if (r.ok) { render(); toast(r.duplicate ? 'Уведомление уже отправлено' : 'Администратор получил уведомление'); return; }
   } catch (e) { closeSheet(); toast(errText(e)); }
+  finally { state.ui.paying = false; }
 };
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */
@@ -261,7 +267,7 @@ SCREENS['p.lessons'] = async ({ ym }) => {
         ${day ? `<div style="margin-top:10px">${btn('✕ Весь месяц', 'pDayReset', {}, 'ghost')}</div>` : ''}
       </div>${(day ? [day] : days).map(dayBlock).join('')}`
       : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
-    ${d.unpaid ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — ${fmt(d.unpaid)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
+    ${d.rest ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — к оплате ${fmt(d.rest)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
     <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
 };
 

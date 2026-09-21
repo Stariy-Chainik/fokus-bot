@@ -195,6 +195,26 @@ def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
     register_miniapp_static(app)
 
 
+async def _cache_warmer(dp: Dispatcher, interval_sec: int = 240) -> None:
+    """Держит горячим кеш основных листов (TTL 300 с).
+
+    Без прогрева первый запрос после простоя читает Google Sheets по-настоящему —
+    это 8–10 секунд, и Mini App успевает отвалиться по таймауту, а родитель жмёт
+    «оплатить» второй раз. Фоновое чтение делает такие запросы мгновенными.
+    """
+    keys = ("lesson_repo", "payment_repo", "student_repo", "teacher_repo",
+            "group_repo", "student_group_repo", "teacher_group_repo", "branch_repo")
+    while True:
+        for key in keys:
+            repo = dp.workflow_data.get(key)
+            try:
+                if repo is not None:
+                    await repo.get_all()
+            except Exception as exc:                     # прогрев не критичен
+                logger.debug("Прогрев кеша %s: %s", key, exc)
+        await asyncio.sleep(interval_sec)
+
+
 async def _rate_history_refresher(dp: Dispatcher, interval_sec: int = 300) -> None:
     """Держит в памяти историю ставок педагогов (лист teacher_rate_history)."""
     from bot.services import rate_history
@@ -284,6 +304,7 @@ async def main() -> None:
 
     # История ставок педагогов: первая загрузка до старта, дальше — фоновое обновление
     refresher = asyncio.create_task(_rate_history_refresher(dp))
+    warmer = asyncio.create_task(_cache_warmer(dp))      # кеш листов держим горячим
     await asyncio.sleep(0)  # дать задаче выполнить первую загрузку
 
     # Бот в MAX (кабинет родителя) — в том же процессе, на тех же репозиториях
@@ -307,6 +328,7 @@ async def main() -> None:
             await _run_polling(bot, dp)
     finally:
         refresher.cancel()
+        warmer.cancel()
         if max_task is not None:
             max_task.cancel()
 

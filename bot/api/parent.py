@@ -172,9 +172,13 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 "type": ls.type.value, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
                 "group": groups.get(ls.group_id, ""), "amount": mark.amount, "paid": mark.paid,
             })
+        # «к оплате» берём из того же леджера, что и счёт: иначе абонемент и доплаты
+        # не попадали бы в сумму и цифры на двух вкладках расходились
+        totals = await _totals(student, period)
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
             "lessons": out, "unpaid": sum(x["amount"] for x in out if not x["paid"]),
+            "rest": totals["rest"], "accrued": totals["accrued"], "paid": totals["paid"],
         })
 
     async def diary(request: web.Request, tg_id, children) -> web.Response:
@@ -247,12 +251,27 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if method == "cash":
             if bot is None:
                 return _json({"error": "bot_unavailable"}, status=503)
+            # повторный тап (запрос к таблицам идёт несколько секунд) не должен слать
+            # админам второе уведомление: одна открытая заявка на ученика и месяц
+            pending_repo = _dp_get(dp, "pending_repo")
+            if pending_repo is not None:
+                try:
+                    already = [a for a in await pending_repo.get_open()
+                               if a.student_id == student.student_id and a.period_month == period
+                               and a.kind == KIND_CASH]
+                except Exception:
+                    already = []
+                if already:
+                    logger.info("Кабинет родителя: наличные уже заявлены (%s) — повтор не шлём",
+                                already[0].action_id)
+                    return _json({"ok": True, "amount": already[0].amount,
+                                  "notified": 0, "duplicate": True})
             # админу — те же кнопки, что из бота: подтверждает он одним нажатием,
             # частичная оплата зачитывается только на выбранные строки-остатки
             open_keys = [k for k, v in ledgers.items() if v.remainder > 0]
             partial = len(chosen) < len(open_keys) or amount < sum(v.remainder for v in chosen.values())
             pids = ".".join(str(v.pending_pid) for v in chosen.values() if v.pending_pid)
-            action = await queue_action(_dp_get(dp, "pending_repo"), KIND_CASH, student, period,
+            action = await queue_action(pending_repo, KIND_CASH, student, period,
                                         amount=amount, method=CASH, parent_addr=str(tg_id))
             rows = admin_confirm_rows(student.student_id, period, pids, partial,
                                       ("tg", tg_id), amount, CASH,
