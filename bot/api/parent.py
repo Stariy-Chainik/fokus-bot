@@ -21,7 +21,9 @@ from aiohttp import web
 from bot.api.admin import auth_tg_id
 from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
-from bot.services.parent_views import cash_notice, client_contact, qr_png
+from bot.screens.adapters import to_aiogram_markup
+from bot.services.parent_views import admin_confirm_rows, cash_notice, client_contact, qr_png
+from bot.services.payment_methods import CASH
 from bot.utils.dates import current_period, last_periods
 from bot.utils.notify import notify
 from config.settings import settings
@@ -242,9 +244,16 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if method == "cash":
             if bot is None:
                 return _json({"error": "bot_unavailable"}, status=503)
+            # админу — те же кнопки, что из бота: подтверждает он одним нажатием,
+            # частичная оплата зачитывается только на выбранные строки-остатки
+            open_keys = [k for k, v in ledgers.items() if v.remainder > 0]
+            partial = len(chosen) < len(open_keys) or amount < sum(v.remainder for v in chosen.values())
+            pids = ".".join(str(v.pending_pid) for v in chosen.values() if v.pending_pid)
+            rows = admin_confirm_rows(student.student_id, period, pids, partial,
+                                      ("tg", tg_id), amount, CASH)
             text = cash_notice(student.name, period, amount, breakdown)
             admins = [u.tg_id for u in await user_repo.get_admins()]
-            await notify(bot, admins, text)
+            await notify(bot, admins, text, reply_markup=to_aiogram_markup(rows))
             logger.info("Кабинет родителя: наличные %s ₽ — %s %s", amount, student.student_id, period)
             return _json({"ok": True, "amount": amount, "notified": len(admins)})
 

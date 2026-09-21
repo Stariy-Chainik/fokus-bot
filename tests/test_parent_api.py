@@ -88,6 +88,10 @@ def test_cash_payment_notifies_admin(api):
                       json={"studentId": "STU-0001", "ym": YM, "method": "cash"}, bot=bot)
     assert status == 200 and r["amount"] == 4800 and r["notified"] == 1
     assert bot.sent and "наличными" in bot.sent[0][1]
+    # у админа кнопка подтверждения — как в боте, а не голый текст
+    kb = bot.sent[0][2] if len(bot.sent[0]) > 2 else None
+    buttons = [b.text for row in (kb.inline_keyboard if kb else []) for b in row]
+    assert "✅ Подтвердить оплату" in buttons
     # без бота уведомить некому
     assert _call(app, "POST", "/api/parent/pay", json={"studentId": "STU-0001", "ym": YM, "method": "cash"})[0] == 503
     assert _call(app, "POST", "/api/parent/pay",
