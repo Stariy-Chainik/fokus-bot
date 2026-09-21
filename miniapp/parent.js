@@ -87,32 +87,49 @@ SCREENS['p.bill'] = async ({ ym }) => {
   const mark = on => `<span class="mark ${on ? 'on' : ''}">${on ? '✓' : ''}</span>`;
   const line = (r, l) => {
     const pick = sel[r.key];
-    if (l.paid) return `<div class="lesson-line"><span class="mark paid">✓</span><span>${fdate(l.date)} · ${l.durationMin} мин<div class="d">оплачено</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
+    const what = `${l.type === 'group' ? '👥' : '👤'} ${fdate(l.date)} · ${l.durationMin} мин`;
+    if (l.paid) return `<div class="lesson-line"><span class="mark paid">✓</span><span>${what}<div class="d">оплачено</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
     const on = !!pick && (pick.all || pick.lessons.has(l.id));
-    return `<button class="lesson-line pick" data-act="bPickLesson" data-p='${esc(JSON.stringify({ key: r.key, id: l.id }))}'>${mark(on)}<span>${fdate(l.date)} · ${l.durationMin} мин</span><span class="amt">${fmt(l.amount)}</span></button>`;
+    return `<button class="lesson-line pick" data-act="bPickLesson" data-p='${esc(JSON.stringify({ key: r.key, id: l.id }))}'>${mark(on)}<span>${what}</span><span class="amt">${fmt(l.amount)}</span></button>`;
   };
   const head = r => {
     const pick = sel[r.key];
     const on = !!pick && (pick.all || pick.lessons.size > 0);
     const money = `${fmt(r.accrued)}${r.rest ? '' : ' ✓'}`;
-    if (!r.rest) return `<div class="grp"><span>${r.subscription ? '💳' : '👨‍🏫'} ${esc(r.name)}</span><span class="money">${money}</span></div>`;
+    const icon = r.subscription ? '💳' : (r.lessons.some(l => l.type === 'group') ? '👥' : '👨‍🏫');
+    if (!r.rest) return `<div class="grp"><span>${icon} ${esc(r.name)}</span><span class="money">${money}</span></div>`;
     return `<button class="grp pick" data-act="bPickRow" data-p='${esc(JSON.stringify({ key: r.key }))}'>
-      <span>${mark(on)} ${r.subscription ? '💳' : '👨‍🏫'} ${esc(r.name)}</span><span class="money">${money}</span></button>`;
+      <span>${mark(on)} ${icon} ${esc(r.name)}</span><span class="money">${money}</span></button>`;
   };
-  return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
-    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
-      <div class="hint">начислено ${fmt(b.accrued)}${b.paid ? ` · оплачено ${fmt(b.paid)}` : ''}</div></div>
-    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => {
-      const open = !!(state.ui.bopen || {})[r.key];
-      const unpaid = r.lessons.filter(l => !l.paid).length;
-      return `${head(r)}
+  // блок позиции: заголовок с галочкой, свёрнутые занятия, переплата
+  const block = r => {
+    const open = !!(state.ui.bopen || {})[r.key];
+    const unpaid = r.lessons.filter(l => !l.paid).length;
+    return `${head(r)}
       ${r.subscription ? `<div class="lesson-line"><span></span><span class="hint">абонемент за месяц, целиком</span><span></span></div>`
         : open ? r.lessons.map(l => line(r, l)).join('')
         : `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])}${unpaid ? `, ${unpaid} не оплачено` : ''} — показать</span><span class="hint">▾</span></button>`}
       ${open && !r.subscription ? `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">свернуть</span><span class="hint">▴</span></button>` : ''}
       ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`;
-    }).join('')}
-      <div class="total"><span>К оплате</span><span class="big ${total ? 'bad' : 'ok'}">${b.rest ? fmt(total) : '✓ оплачено'}</span></div></div>`
+  };
+  // позиции раскладываем по смыслу: абонемент → группы → индивидуальные, у каждого раздела свой итог
+  const kind = r => r.subscription ? 'sub' : (r.lessons.filter(l => l.type === 'group').length >= r.lessons.length / 2 ? 'group' : 'solo');
+  const parts = [['sub', 'Абонемент'], ['group', 'Групповые занятия'], ['solo', 'Индивидуальные и парные']];
+  const lessonsAll = b.rows.flatMap(r => r.lessons);
+  const nGroup = lessonsAll.filter(l => l.type === 'group').length;
+  const section = ([id, title]) => {
+    const rows = b.rows.filter(r => kind(r) === id);
+    if (!rows.length) return '';
+    const sum = rows.reduce((a, r) => a + r.accrued, 0);
+    return `<div class="eyebrow" style="display:flex;justify-content:space-between"><span>${title}</span><span class="money">${fmt(sum)}</span></div>
+      <div class="card bill">${rows.map(block).join('')}</div>`;
+  };
+  return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
+      <div class="hint">начислено ${fmt(b.accrued)}${b.paid ? ` · оплачено ${fmt(b.paid)}` : ''}</div>
+      ${lessonsAll.length ? `<div class="hint">${plural(lessonsAll.length, ['занятие', 'занятия', 'занятий'])} за месяц: ${nGroup} в группах, ${lessonsAll.length - nGroup} индивидуальных</div>` : ''}</div>
+    ${b.rows.length ? `${parts.map(section).join('')}
+      <div class="card" style="margin-top:10px"><div class="total"><span>К оплате</span><span class="big ${total ? 'bad' : 'ok'}">${b.rest ? fmt(total) : '✓ оплачено'}</span></div></div>`
       : empty('За этот месяц начислений нет')}
     ${b.rest ? `<div style="margin-top:12px">${btn(total ? `💳 Оплатить ${fmt(total)}` : 'Отметьте, что оплачиваете', 'pPayAsk', { ym, rest: total, sel: true }, total ? '' : 'sec')}</div>
       <p class="hint" style="margin-top:8px">Снимите галочки с того, что платите позже — сумма пересчитается.</p>` : ''}` };

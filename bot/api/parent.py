@@ -145,7 +145,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 "accrued": ledger.accrued, "paid": ledger.paid, "rest": ledger.remainder,
                 "overpaid": ledger.overpaid,
                 "lessons": [{"id": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
-                             "amount": m["amount"], "paid": m["paid"]} for m in marks],
+                             "amount": m["amount"], "paid": m["paid"],
+                             "type": m.get("lesson_type") or ""}      # group | pair | soloist
+                            for m in marks],
             })
         accrued, paid, rest = payment_ledger.ledger_totals(ledgers)
         return _json({
