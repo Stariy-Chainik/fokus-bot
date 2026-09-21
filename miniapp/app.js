@@ -144,13 +144,6 @@ SCREENS['a.inbox'] = async () => {
       lead: '🧑‍🏫', plain: true, cls: 'wrap', t: esc(r.student), s: `${esc(r.comment)} · ${esc(r.createdAt)}`,
     })))}<p class="hint" style="margin-top:8px">Заявки педагогов на новых учеников принимаются в чате бота.</p>` : ''}` };
 };
-ACT.inboxDecide = async ({ id, approve }) => {
-  try {
-    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve } });
-    render();
-    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена` : 'Готово') : 'Отклонено');
-  } catch (e) { toast(errText(e)); }
-};
 
 SCREENS['a.pay'] = async ({ bill }) => ({ title: bill ? 'Счёт ученика' : 'Подтвердить оплату', html: `<div class="h2">Выберите месяц</div>${list(lastPeriods(3).map((ym, i) => cell({ t: fmon(ym), s: i === 0 ? 'текущий месяц' : 'закрыт', go: 'a.pay.groups', p: { ym, bill } })))}` });
 
@@ -702,6 +695,14 @@ async function loadAuthImage(img) {
     img.src = URL.createObjectURL(await resp.blob());
   } catch (_) { img.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Чек не загрузился — посмотрите его в чате бота' })); }
 }
+/* Решение из очереди: подтвердить оплату / привязать ребёнка или отклонить. */
+ACT.inboxDecide = async ({ id, approve }) => {
+  try {
+    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve } });
+    render();
+    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена` : 'Готово') : 'Отклонено');
+  } catch (e) { toast(errText(e)); }
+};
 ACT.retry = () => render();
 ACT.payGroupPick = ({ v }) => {
   const { ym, bill } = state.ui.payPick || {};
