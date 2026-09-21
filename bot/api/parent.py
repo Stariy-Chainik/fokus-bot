@@ -24,6 +24,7 @@ from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.parent_views import admin_confirm_rows, cash_notice, client_contact, qr_png
 from bot.services.payment_methods import CASH
+from bot.services.pending_queue import KIND_CASH, queue_action
 from bot.utils.dates import current_period, last_periods
 from bot.utils.notify import notify
 from config.settings import settings
@@ -252,6 +253,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             rows = admin_confirm_rows(student.student_id, period, pids, partial,
                                       ("tg", tg_id), amount, CASH)
             text = cash_notice(student.name, period, amount, breakdown)
+            await queue_action(_dp_get(dp, "pending_repo"), KIND_CASH, student, period,
+                               amount=amount, method=CASH, parent_addr=str(tg_id))
             admins = [u.tg_id for u in await user_repo.get_admins()]
             await notify(bot, admins, text, reply_markup=to_aiogram_markup(rows))
             logger.info("Кабинет родителя: наличные %s ₽ — %s %s", amount, student.student_id, period)

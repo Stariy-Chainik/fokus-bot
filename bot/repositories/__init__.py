@@ -15,6 +15,7 @@ from .subscription_override_repo import SubscriptionOverrideRepository
 from .finance_entry_repo import FinanceEntryRepository
 from .training_entry_repo import TrainingEntryRepository
 from .athlete_task_repo import AthleteTaskRepository
+from .pending_action_repo import PendingActionRepository
 
 __all__ = [
     "SheetsClient",
@@ -34,4 +35,5 @@ __all__ = [
     "FinanceEntryRepository",
     "TrainingEntryRepository",
     "AthleteTaskRepository",
+    "PendingActionRepository",
 ]

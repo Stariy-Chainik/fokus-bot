@@ -9,6 +9,7 @@ from bot.models import User
 from bot.repositories import StudentRepository
 from bot.screens.parent_menu import menu_rows
 from bot.services.parent_notifier import resolve_notifier, parse_addr
+from bot.services.pending_queue import DONE, KIND_CHILD, REJECTED, close_actions
 from bot.keyboards.admin import kb_back
 from bot.handlers.filters import AdminOnly
 
@@ -22,6 +23,7 @@ async def cb_admin_child_ok(
     callback: CallbackQuery,
     user: User,
     student_repo: StudentRepository,
+    pending_repo=None,
 ) -> None:
 
     _, parent_raw, student_id = callback.data.split(":", 2)
@@ -33,6 +35,7 @@ async def cb_admin_child_ok(
         return
 
     await student_repo.add_parent(student_id, parent_addr)
+    await close_actions(pending_repo, student_id, "", DONE, callback.from_user.id, kinds=(KIND_CHILD,))
     logger.info("Админ одобрил: %s → student_id=%s", parent_raw, student_id)
 
     await resolve_notifier(callback.bot).send(
@@ -53,6 +56,7 @@ async def cb_admin_child_no(
     callback: CallbackQuery,
     user: User,
     student_repo: StudentRepository,
+    pending_repo=None,
 ) -> None:
 
     _, parent_raw, student_id = callback.data.split(":", 2)
@@ -60,6 +64,7 @@ async def cb_admin_child_no(
 
     student = await student_repo.get_by_id(student_id)
     student_name = student.name if student else student_id
+    await close_actions(pending_repo, student_id, "", REJECTED, callback.from_user.id, kinds=(KIND_CHILD,))
     logger.info("Админ отклонил: %s → student_id=%s", parent_raw, student_id)
 
     if parent_addr:

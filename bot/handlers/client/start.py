@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramAPIError
 from bot.models import User
 from bot.repositories import StudentRepository, UserRepository
 from bot.keyboards.client import kb_client_menu, kb_admin_approve_child
+from bot.services.pending_queue import KIND_CHILD, queue_action
 from bot.states import ClientRegStates
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,7 @@ async def cb_add_child_request(
     state: FSMContext,
     student_repo: StudentRepository,
     user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
@@ -193,6 +195,8 @@ async def cb_add_child_request(
         except TelegramAPIError as exc:
             logger.warning("Не удалось отправить админу заявку на второго ребёнка tg_id=%s: %s", admin.tg_id, exc)
 
+    await queue_action(pending_repo, KIND_CHILD, student, parent_addr=str(tg_id),   # очередь решений
+                       comment=sender_name)
     logger.info("Запрос на добавление: tg_id=%s → student_id=%s", tg_id, student_id)
     await callback.message.edit_text(
         "✅ Заявка отправлена администратору.\n\nОжидайте подтверждения.",

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Кабинет спортсмена: дневник тренировок и задания педагога
     sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
     sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")
+    sheet_pending_actions: str = Field(default="pending_actions", alias="SHEET_PENDING_ACTIONS")
 
     # Payments — Telegram Payments (legacy)
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")

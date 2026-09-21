@@ -756,6 +756,19 @@ class StudentRepoWritable(StudentRepoFake):
         if s: s.athlete_tg_id = tg_id  # noqa: E701
         return s is not None
 
+    async def add_parent(self, sid, addr):
+        """Привязка родителя: ('tg'|'max', id) — как StudentRepository.add_parent."""
+        s = self._find(sid)
+        if s is None:
+            return False
+        kind, ident = addr
+        if kind == "tg":
+            if int(ident) not in s.parent_tg_ids:
+                s.parent_tg_ids = [*s.parent_tg_ids, int(ident)]
+        elif int(ident) not in s.parent_max_ids:
+            s.parent_max_ids = [*s.parent_max_ids, int(ident)]
+        return True
+
 
 class ClientRepoWritable(ClientRepoFake):
     async def create(self, name, created_by_tg_id, phone="", tg_id=None, max_id=None):

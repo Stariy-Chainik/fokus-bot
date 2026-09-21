@@ -23,6 +23,7 @@ from bot.services.payment_methods import (
 )
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import resolve_notifier, parse_addr, tg_addr
+from bot.services.pending_queue import DONE, KIND_CASH, KIND_RECEIPT, REJECTED, close_actions, queue_action
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
     client_contact, qr_png, breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
@@ -328,6 +329,7 @@ async def cb_pay_method(
 async def cb_cash_notify(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     cb = CashNotifyCb.unpack(callback.data)
     student_id, period_month = cb.student_id, cb.period_month
@@ -343,6 +345,8 @@ async def cb_cash_notify(
     ledgers = await payment_service.ledger_for(student, period_month)
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     msg = cash_notice(student.name, period_month, total, breakdown)
+    await queue_action(pending_repo, KIND_CASH, student, period_month,    # очередь решений в кабинете
+                       amount=total, method=CASH, parent_addr=str(callback.from_user.id))
     kb = to_aiogram_markup(admin_confirm_rows(
         student_id, period_month, sel_pids, partial,
         tg_addr(callback.from_user.id), total, CASH,
@@ -380,6 +384,7 @@ async def cb_receipt_upload(
 async def on_receipt_photo(
     message: Message, state: FSMContext,
     payment_service: PaymentService, student_repo: StudentRepository, user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     data = await state.get_data()
     student_id = data["receipt_student_id"]
@@ -411,6 +416,12 @@ async def on_receipt_photo(
         student_id, period_month, sel_pids, sel_partial,
         tg_addr(message.from_user.id), total, method,
     ))
+    await queue_action(                                                   # очередь решений в кабинете
+        pending_repo, KIND_RECEIPT, student, period_month, amount=total, method=method,
+        parent_addr=str(message.from_user.id), student_id=student_id, student_name=student_name,
+        file_id=(message.photo[-1].file_id if message.photo else message.document.file_id),
+        file_type="photo" if message.photo else "document",
+    )
     for admin in await user_repo.get_admins():
         try:
             if message.photo:
@@ -429,6 +440,7 @@ async def cb_receipt_reject(
     callback: CallbackQuery,
     user: User,
     student_repo: StudentRepository,
+    pending_repo=None,
 ) -> None:
     """Админ не подтверждает оплату: счёт остаётся неоплаченным, родителю — уведомление."""
     cb = ReceiptRejectCb.unpack(callback.data)
@@ -456,6 +468,7 @@ async def cb_receipt_reject(
         logger.warning("Не удалось уведомить родителя %s об отказе", parent_raw)
     logger.info("Админ %s не подтвердил оплату student=%s period=%s",
                 callback.from_user.id, student_id, period_month)
+    await close_actions(pending_repo, student_id, period_month, REJECTED, callback.from_user.id)
     await callback.answer("Оплата не подтверждена")
 
 
@@ -467,6 +480,7 @@ async def cb_receipt_confirm_partial(
     student_repo: StudentRepository,
     client_repo: ClientRepository,
     cloudkassir_service: CloudKassirService,
+    pending_repo=None,
 ) -> None:
     """Подтверждение выборочной оплаты: только перечисленные счета PAY-…"""
     cb = ReceiptConfirmPartialCb.unpack(callback.data)
@@ -515,6 +529,7 @@ async def cb_receipt_confirm_partial(
             await callback.message.edit_text(old_text + suffix, reply_markup=None)
     except TelegramBadRequest:
         pass
+    await close_actions(pending_repo, student_id, period_month, DONE, callback.from_user.id)
     await callback.answer("Оплата подтверждена")
 
     student = await student_repo.get_by_id(student_id)
@@ -537,6 +552,7 @@ async def cb_receipt_confirm(
     student_repo: StudentRepository,
     client_repo: ClientRepository,
     cloudkassir_service: CloudKassirService,
+    pending_repo=None,
 ) -> None:
     cb = ReceiptConfirmCb.unpack(callback.data)
     student_id, period_month = cb.student_id, cb.period_month
@@ -575,6 +591,7 @@ async def cb_receipt_confirm(
                 )
         except TelegramBadRequest:
             pass
+        await close_actions(pending_repo, student_id, period_month, DONE, callback.from_user.id)
         await callback.answer("Оплата подтверждена")
 
         # Фискальный чек через CloudKassir

@@ -15,6 +15,7 @@ DI_KEYS = {
     "salary_override_repo", "salary_service", "lesson_service", "payment_service", "profit_service",
     "diagnostics_service", "visibility", "student_service", "student_request_service",
     "cloudkassir_service", "notifier", "training_entry_repo", "athlete_task_repo", "diary_service",
+    "pending_repo",
 }
 
 

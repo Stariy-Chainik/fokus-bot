@@ -110,16 +110,47 @@ const val = id => { const el = document.getElementById(id); return el ? el.value
 const SCREENS = {};
 
 SCREENS['a.home'] = async () => {
-  const h = await api('/home');
+  const [h, inbox] = await Promise.all([api('/home'), api('/inbox').catch(() => ({ total: 0 }))]);
   return { title: 'Школа сегодня', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
+    ${inbox.total ? `<div style="margin-bottom:12px">${goBtn(`📥 Ждут решения · ${inbox.total}`, 'a.inbox', {}, '')}</div>` : ''}
     <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
     <div class="eyebrow">Быстрые действия</div>
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
 
-SCREENS['a.payhub'] = async () => ({ title: 'Оплаты', html: `<div class="eyebrow">Принять оплату</div>${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}<div class="eyebrow">Контроль</div>${list([cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })])}` });
+SCREENS['a.payhub'] = async () => {
+  const inbox = await api('/inbox').catch(() => ({ total: 0 }));
+  return { title: 'Оплаты', html: `${inbox.total ? `${list([cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })])}` : ''}<div class="eyebrow">Принять оплату</div>${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}<div class="eyebrow">Контроль</div>${list([cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })])}` };
+};
+
+/* Очередь решений: чеки, наличные и заявки, которые ждут администратора. */
+SCREENS['a.inbox'] = async () => {
+  const d = await api('/inbox');
+  const card = a => `<div class="card pad" style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+      <div><div style="font-weight:700">${esc(a.title)}</div>
+        <div class="hint">${esc(a.student)}${a.periodLabel ? ` · ${esc(a.periodLabel)}` : ''}${a.method ? ` · ${esc(a.method)}` : ''}${a.comment ? ` · ${esc(a.comment)}` : ''}</div>
+        <div class="hint">${esc(a.createdAt)}${a.rest != null ? ` · остаток по счёту ${fmt(a.rest)}` : ''}</div></div>
+      ${a.amount ? `<div class="money" style="font-weight:800;white-space:nowrap">${fmt(a.amount)}</div>` : ''}
+    </div>
+    ${a.hasFile ? `<img data-file="/inbox/${a.id}/file" alt="Чек" style="display:block;width:100%;max-height:320px;object-fit:contain;border-radius:10px;margin-top:10px;background:var(--bg)">` : ''}
+    <div style="margin-top:10px">${btn(a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`, 'inboxDecide', { id: a.id, approve: true })}${btn('❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>
+  </div>`;
+  return { title: 'Ждут решения', html: `
+    ${d.items.length ? d.items.map(card).join('') : empty('Ничего не ждёт решения', '<p class="hint" style="margin:0">Сюда попадают чеки, наличные и заявки родителей</p>')}
+    ${d.requests.length ? `<div class="eyebrow">Заявки педагогов</div>${list(d.requests.map(r => cell({
+      lead: '🧑‍🏫', plain: true, cls: 'wrap', t: esc(r.student), s: `${esc(r.comment)} · ${esc(r.createdAt)}`,
+    })))}<p class="hint" style="margin-top:8px">Заявки педагогов на новых учеников принимаются в чате бота.</p>` : ''}` };
+};
+ACT.inboxDecide = async ({ id, approve }) => {
+  try {
+    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve } });
+    render();
+    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена` : 'Готово') : 'Отклонено');
+  } catch (e) { toast(errText(e)); }
+};
 
 SCREENS['a.pay'] = async ({ bill }) => ({ title: bill ? 'Счёт ученика' : 'Подтвердить оплату', html: `<div class="h2">Выберите месяц</div>${list(lastPeriods(3).map((ym, i) => cell({ t: fmon(ym), s: i === 0 ? 'текущий месяц' : 'закрыт', go: 'a.pay.groups', p: { ym, bill } })))}` });
 
@@ -656,8 +687,20 @@ async function render() {
     const on = strip.querySelector('.chip[aria-pressed="true"]');
     if (on && on !== strip.firstElementChild) strip.scrollLeft = Math.max(0, on.offsetLeft - 12);
   });
+  content.querySelectorAll('img[data-file]').forEach(loadAuthImage);   // чеки — только с авторизацией
   const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4'); const qid = q ? q.id : null; const qkey = qid || 'q';
   if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
+}
+/* <img> не умеет слать Authorization, поэтому тянем файл fetch'ем и подставляем blob. */
+async function loadAuthImage(img) {
+  const headers = {};
+  if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
+  else if (DEV) headers.Authorization = 'dev';
+  try {
+    const resp = await fetch(API_BASE[ROLE] + img.dataset.file, { headers });
+    if (!resp.ok) throw new Error(resp.status);
+    img.src = URL.createObjectURL(await resp.blob());
+  } catch (_) { img.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Чек не загрузился — посмотрите его в чате бота' })); }
 }
 ACT.retry = () => render();
 ACT.payGroupPick = ({ v }) => {

@@ -20,6 +20,7 @@ from bot.services.parent_views import (
     period_label, unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
     breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
+from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, queue_action
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import (
     teacher_select_screen, methods_screen, cash_screen, bank_screen, sbp_screen,
@@ -169,7 +170,8 @@ async def _notify_admins_tg(tg_bot, user_repo, text: str, rows, *, photo: bytes 
 
 
 @router.message_callback(F.callback.payload.startswith("cash_notify:"))
-async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
+                         pending_repo=None):
     _, student_id, period_month = event.callback.payload.split(":", 2)
     res = await _student_and_unpaid(event, max_uid, student_repo, payment_service, student_id, period_month)
     if res is None:
@@ -182,6 +184,8 @@ async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo,
     bills_map = await payment_service.compute_bills_for_student_period(student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
+    await queue_action(pending_repo, KIND_CASH, student, period_month,        # очередь решений в кабинете
+                       amount=total, method=CASH, parent_addr=f"m{max_uid}")
     await _notify_admins_tg(tg_bot, user_repo, cash_notice(student.name, period_month, total, breakdown),
                             admin_confirm_rows(
                                 student_id, period_month, sel_pids, partial,
@@ -212,7 +216,8 @@ def _receipt_attachment(message):
 
 
 @router.message_created(MaxParentStates.waiting_receipt)
-async def on_receipt_message(event: MessageCreated, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+async def on_receipt_message(event: MessageCreated, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
+                             pending_repo=None):
     att = _receipt_attachment(event.message)
     if att is None:
         await event.message.answer("Отправьте фото или файл чека.")
@@ -241,6 +246,10 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
         student_id, period_month, sel_pids, sel_partial,
         max_addr(max_uid), total, method,
     )
+    await queue_action(pending_repo, KIND_RECEIPT, student, period_month,     # очередь решений в кабинете
+                       amount=total, method=method, parent_addr=f"m{max_uid}",
+                       student_id=student_id, student_name=student_name,
+                       comment="чек пришёл в MAX — смотрите в чате бота")
     kind, url, filename = att
     try:
         blob = await event.bot.download_bytes(url)

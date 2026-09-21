@@ -200,6 +200,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `TeacherRateHistoryRepository` | `teacher_rate_history` | История ставок: `until_period` — «ставки действуют по этот месяц включительно»; для периода берётся ближайшая граница ≥ period, иначе карточка педагога. Кэш в памяти (`bot/services/rate_history.py`), обновляется фоном раз в 5 мин |
 | `TrainingEntryRepository` | `training_entries` | Дневник спортсмена: `(entry_id TE-, student_id, date, minutes, topics\|, task_ids\|, comment, grade 1–5, grade_comment, graded_by)`; оценку ставит педагог |
 | `AthleteTaskRepository` | `athlete_tasks` | Задания педагога спортсмену: `(task_id TK-, student_id, teacher_id, exercise, minutes, comment, source teacher\|lecture, status open\|closed)`; открыто до закрытия педагогом |
+| `PendingActionRepository` | `pending_actions` | Очередь решений администратора: `(action_id ACT-, kind cash\|receipt\|child, student_id, period_month, amount, method, parent_addr, file_id, status open\|done\|rejected)`. Пишется, когда родитель сообщает об оплате или присылает чек (бот, кабинет, MAX); закрывается любым решением — кнопкой в чате или в кабинете ([bot/services/pending_queue.py](bot/services/pending_queue.py)) |
 | `SubscriptionOverrideRepository` | `subscription_overrides` | Переопределение цены абонемента на месяц: `(group_id, period, student_id?)` → amount; пустой student_id = вся группа |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).
@@ -403,6 +404,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | Branches/Groups | `admin:branches` | CRUD branches, groups, billing modes, prices; bulk bill send per group |
 | Edit lessons | `admin:edit_lesson` | Pick teacher → date/month/all → view+delete (bypasses period lock) |
 | Diagnostics | `admin:diagnostics` | Cache and data health checks |
+| **Очередь решений** | кабинет: «📥 Ждут решения» | Чеки, наличные и заявки родителей из листа `pending_actions` + заявки педагогов из `student_requests`; решение здесь зачитывает оплату (`record_payment`) или привязывает родителя и закрывает строку, поэтому кнопки в чате и кабинет не расходятся ([bot/api/admin_inbox.py](bot/api/admin_inbox.py)) |
 | Record for teacher | `admin:record_lesson` | Proxy: pick teacher → full lesson FSM (bypasses period lock) |
 
 ### Teacher
@@ -488,6 +490,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
 | `setup_group_archive.py [--apply]` | Идемпотентно добавляет колонку `groups.archived` (архив групп). |
 | `setup_joined_period.py [--apply]` | Идемпотентно добавляет `student_groups.joined_period` и `left_period`, проставляет существующим строкам первый месяц занятий их группы (поведение счётов не меняется). |
+| `setup_pending_actions.py` | Идемпотентно создаёт лист `pending_actions` (очередь решений администратора). |
 | `setup_payment_lessons.py [--apply]` | Идемпотентно добавляет колонку `student_period_payments.lesson_ids` (занятия, за которые принята оплата). |
 | `setup_diary_sheets.py` | Идемпотентно создаёт листы `training_entries`, `athlete_tasks` и колонку `students.athlete_tg_id` (9-я) для кабинета спортсмена. |
 | `send_bills_grp0004.py` | Template script for ad-hoc bill mailings to one group. Parametrized at the top (`GROUP_ID`, `PERIOD`, `RECIPIENT`). |

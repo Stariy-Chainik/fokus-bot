@@ -27,7 +27,7 @@ from bot.repositories import (
     StudentGroupRepository,
     StudentRequestRepository,
     ClientRepository, SubscriptionOverrideRepository, FinanceEntryRepository,
-    TrainingEntryRepository, AthleteTaskRepository,
+    TrainingEntryRepository, AthleteTaskRepository, PendingActionRepository,
 )
 from bot.services import (
     LessonService, PaymentService, DiagnosticsService, TeacherVisibilityService,
@@ -91,6 +91,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     salary_override_repo = SalaryOverrideRepository(sheets_client, settings.sheet_salary_overrides)
     training_entry_repo = TrainingEntryRepository(sheets_client, settings.sheet_training_entries)
     athlete_task_repo = AthleteTaskRepository(sheets_client, settings.sheet_athlete_tasks)
+    pending_repo = PendingActionRepository(sheets_client, settings.sheet_pending_actions)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
@@ -155,6 +156,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["notifier"] = notifier
     dp["training_entry_repo"] = training_entry_repo
     dp["athlete_task_repo"] = athlete_task_repo
+    dp["pending_repo"] = pending_repo
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
