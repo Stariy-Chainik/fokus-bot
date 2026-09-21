@@ -167,15 +167,13 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
   const part = sel && state.ui.bsel && bsum(state.ui.bsel.rows || [], state.ui.bsel.sel) < (state.ui.bsel.rows || []).reduce((a, r) => a + r.rest, 0);
   // тот же набор, что в боте: СБП онлайн → наличные → реквизиты (карта и СБП по чеку не показываются)
   const rows = [];
-  // в спортивных группах школа просит наличные — тогда этот способ идёт первым
-  const cashFirst = m.cash && ((state.me.children || []).find(c => c.id === kid()) || {}).cashPreferred;
-  if (cashFirst) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }));
-  if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { ym, rest, sel, method: 'ysbp' }, cashFirst ? 'ghost' : ''));
-  // остальные способы равнозначны, поэтому выглядят одинаково
-  if (m.cash && !cashFirst) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }, 'ghost'));
+  // порядок способов: наличные → по реквизитам с чеком → СБП онлайн
+  const cashPreferred = ((state.me.children || []).find(c => c.id === kid()) || {}).cashPreferred;
+  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }));
   if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { ym, rest, sel, method: 'bank' }, 'ghost'));
+  if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { ym, rest, sel, method: 'ysbp' }, 'ghost'));
   sheet(`<h3>Оплата ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${MON_NOM[+ym.slice(5) - 1]}${part ? ' · за отмеченное' : ''}</div>
-    <p class="hint" style="margin-top:10px">${cashFirst ? 'В этой группе удобнее наличными — передайте администратору или педагогу, он подтвердит оплату. ' : ''}СБП онлайн — оплата зачтётся сама, чек не нужен. По реквизитам — после перевода пришлите чек в бот.</p>
+    <p class="hint" style="margin-top:10px">${cashPreferred ? 'В этой группе удобнее наличными — передайте администратору или педагогу. ' : ''}По реквизитам — после перевода пришлите чек в бот. СБП онлайн — оплата зачтётся сама, чек не нужен.</p>
     <div style="margin-top:12px">${rows.join('') || '<div class="hint">Способы оплаты не настроены — напишите администратору.</div>'}
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };

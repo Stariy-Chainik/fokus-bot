@@ -185,19 +185,19 @@ def methods_screen(student_id: str, period_month: str, who: str, sel: list, yook
         lines.append(f"  • {u['name']} — {u['amount']} руб.")
     lines.append(f"Сумма: <b>{total} руб.</b>\n\nВыберите способ оплаты:")
     lines.append(
-        "\n<i>📱 СБП онлайн — оплата подтверждается автоматически, чек прикреплять не нужно.\n"
-        "🏦 По реквизитам — после перевода обязательно прикрепите чек, "
-        "иначе оплата не будет зачтена.</i>"
+        "\n<i>💵 Наличные — передайте администратору или педагогу, он подтвердит оплату.\n"
+        "🏦 По реквизитам — после перевода обязательно прикрепите чек, иначе оплата не будет зачтена.\n"
+        "📱 СБП онлайн — оплата подтверждается автоматически, чек прикреплять не нужно.</i>"
     )
-    rows = []
-    if yookassa:
-        rows.append([cb("📱 СБП онлайн", f"pay_method:ysbp:{student_id}:{period_month}")])
+    rows = []                       # порядок: наличные → по реквизитам с чеком → СБП онлайн
     if cash:
         rows.append([cb("💵 Наличные", f"pay_method:cash:{student_id}:{period_month}")])
     if bank:
         rows.append([cb("🏦 По реквизитам", f"pay_method:bank:{student_id}:{period_month}")])
     if sbp:
         rows.append([cb("📱 СБП", f"pay_method:sbp:{student_id}:{period_month}")])
+    if yookassa:
+        rows.append([cb("📱 СБП онлайн", f"pay_method:ysbp:{student_id}:{period_month}")])
     rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
     return "\n".join(lines), rows
 

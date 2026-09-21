@@ -343,7 +343,9 @@ earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные 
 - "К оплате" = сумма остатков; «Оплатить» скрыта, когда остатков нет. Список месяцев: ✅ всё оплачено, ⏳ есть остаток (подпись «к доплате N», если уже платили).
 - «Должники» (`compute_debt_map`) считают долг как начислено − оплачено, поэтому доплата после новых уроков попадает в должников и напоминания.
 
-**Payment methods** (each configured via ENV — invisible if the corresponding setting is empty):
+**Payment methods** — порядок на экране выбора: **наличные → по реквизитам с чеком → СБП онлайн**
+(решение владельца 21.09.2026; один и тот же `methods_screen` в боте, MAX и кабинете).
+Каждый способ настраивается через ENV — без настройки способа не видно:
 1. 💵 Наличные — родитель жмёт «📨 Уведомить об оплате», админ подтверждает кнопкой (`PAYMENT_CASH_ENABLED`, по умолчанию включено; флаг передаётся в `methods_screen(cash=…)` из Telegram- и MAX-хендлеров).
 2. 🏦 По реквизитам — shows QR + bank details; client uploads receipt (`PAYMENT_BANK_DETAILS`).
 3. 📱 СБП — shows SBP details; client uploads receipt (`PAYMENT_SBP_DETAILS`).
