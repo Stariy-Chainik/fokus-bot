@@ -168,7 +168,8 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
   // тот же набор, что в боте: СБП онлайн → наличные → реквизиты (карта и СБП по чеку не показываются)
   const rows = [];
   if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { ym, rest, sel, method: 'ysbp' }));
-  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }, 'sec'));
+  // остальные способы равнозначны, поэтому выглядят одинаково
+  if (m.cash) rows.push(btn('💵 Наличные', 'pPayDo', { ym, rest, sel, method: 'cash' }, 'ghost'));
   if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { ym, rest, sel, method: 'bank' }, 'ghost'));
   sheet(`<h3>Оплата ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${MON_NOM[+ym.slice(5) - 1]}${part ? ' · за отмеченное' : ''}</div>
     <p class="hint" style="margin-top:10px">СБП онлайн — оплата зачтётся сама, чек не нужен. По реквизитам — после перевода пришлите чек в бот.</p>
