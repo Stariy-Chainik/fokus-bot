@@ -42,6 +42,12 @@ def _json(data, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
+def _visible_periods(count: int) -> list:
+    """Месяцы для родителя: не раньше PARENT_BILLS_SINCE_PERIOD (до него — архив школы)."""
+    since = settings.parent_bills_since_period
+    return [ym for ym in last_periods(count) if not since or ym >= since]
+
+
 def _dp_get(dp, key: str):
     data = getattr(dp, "workflow_data", dp)
     return data.get(key) if hasattr(data, "get") else None
@@ -114,7 +120,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         kids, rest_total = [], 0
         for s in children:
             months = []
-            for ym in last_periods(3):
+            for ym in _visible_periods(3):
                 t = await _totals(s, ym)
                 if t["accrued"] or t["paid"]:
                     months.append({"ym": ym, **t})
@@ -130,7 +136,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         sid = request.query.get("student") or ""
         student = _child(children, sid) or children[0]
         months = []
-        for ym in last_periods(6):
+        for ym in _visible_periods(6):
             t = await _totals(student, ym)
             if t["accrued"] or t["paid"]:
                 months.append({"ym": ym, **t})

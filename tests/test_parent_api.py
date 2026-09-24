@@ -203,3 +203,16 @@ def test_direct_pay_teacher_is_shown_in_the_bill_but_not_charged(api, monkeypatc
     assert direct[0]["accrued"] > 0 and direct[0]["rest"] == 0
     assert all(x["type"] == "individual" for x in direct[0]["lessons"])
     assert bill["accrued"] == sum(r["accrued"] for r in bill["rows"] if not r.get("direct"))
+
+
+def test_bills_start_from_the_configured_month(api, monkeypatch):
+    """Месяцы до PARENT_BILLS_SINCE_PERIOD родителю не показываем — это архив школы."""
+    app, _dp = api
+    monkeypatch.setattr(settings, "parent_bills_since_period", "")
+    all_months = _call(app, "GET", "/api/parent/bills")[1]["months"]
+    monkeypatch.setattr(settings, "parent_bills_since_period", YM)
+    from_sep = _call(app, "GET", "/api/parent/bills")[1]["months"]
+    assert [m["ym"] for m in from_sep] == [YM] and all(m["ym"] >= YM for m in from_sep)
+    assert len(from_sep) <= len(all_months)
+    monkeypatch.setattr(settings, "parent_bills_since_period", "2099-01")
+    assert _call(app, "GET", "/api/parent/bills")[1]["months"] == []

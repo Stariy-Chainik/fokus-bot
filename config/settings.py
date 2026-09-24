@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # Долги считаются начиная с этого периода (YYYY-MM); пусто — за всё время.
     # Нужен, чтобы месяцы до внедрения учёта оплат не показывались как «долг».
     debtors_since_period: str = Field(default="", alias="DEBTORS_SINCE_PERIOD")
+    # С какого месяца родитель видит счета в кабинете (раньше — архив школы, не его дело)
+    parent_bills_since_period: str = Field(default="2026-09", alias="PARENT_BILLS_SINCE_PERIOD")
 
     # Секрет для ссылок-приглашений в группу (t.me/bot?start=g_...).
     # Пусто — используется BOT_TOKEN. Смена секрета отзывает все ссылки.
