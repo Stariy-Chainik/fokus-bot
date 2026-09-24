@@ -114,6 +114,8 @@
   .money { font-variant-numeric: tabular-nums; }
   .money.bad, .amt.bad, .r b.bad { color: var(--bad); }
   .money.ok, .amt.ok, .r b.ok { color: var(--ok); }
+  /* Прямая оплата педагогу: деньги не школы — приглушаем, чтобы не путать с начислением */
+  .r b.direct, .amt.direct, .total .big.direct { color: var(--muted); font-weight: 700; }
   .content.stale { opacity: .5; transition: opacity .12s ease-out; pointer-events: none; }
   .total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); font-weight: 700; }
   .total .big { font-size: 20px; font-weight: 800; }

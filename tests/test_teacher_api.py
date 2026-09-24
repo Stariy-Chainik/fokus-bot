@@ -234,3 +234,50 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
                  json={"ym": YM, "key": "TCH-0001", "amount": 0})[0] == 400
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
                  json={"ym": YM, "key": "TCH-0001", "amount": 100, "method": "yookassa"})[0] == 400
+
+
+def test_direct_pay_lessons_show_parent_amount_not_zero(api, monkeypatch):
+    """Занятия с прямой оплатой: школа начисляет 0, но педагог видит сумму родителя и аренду."""
+    app, _dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    monkeypatch.setattr(settings, "hall_rent_since_period", "")
+
+    lessons = _call(app, "GET", f"/api/teacher/lessons?ym={YM}")[1]["lessons"]
+    solo = [x for x in lessons if x["type"] == "individual"]
+    assert solo and all(x["direct"] and x["earned"] == 0 for x in solo)
+    assert all(x["directAmount"] > 0 and x["rent"] == 500 for x in solo)
+    assert [x["direct"] for x in lessons if x["type"] == "group"] == [False]   # группы — как обычно
+
+    card = _call(app, "GET", f"/api/teacher/lessons/{solo[0]['id']}")[1]
+    assert card["direct"] and card["directAmount"] == solo[0]["directAmount"] and card["rent"] == 500
+    assert card["attendees"][0]["amount"] > 0                    # доля ученика, а не пусто
+
+    home = _call(app, "GET", "/api/teacher/home")[1]
+    assert home["directMonth"] == sum(x["directAmount"] for x in lessons)
+
+
+def test_stats_direct_block_sums_by_student(api, monkeypatch):
+    """Блок «Прямая оплата»: сколько должны родители по ученикам и сколько аренды школе."""
+    app, _dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    monkeypatch.setattr(settings, "hall_rent_since_period", "")
+
+    st = _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]
+    d = st["direct"]
+    assert d["lessons"] == 2 and d["rent"] == 1000 and d["rentPerLesson"] == 500
+    assert d["total"] == sum(x["amount"] for x in d["students"]) > 0
+    assert [x["name"] for x in d["students"]] == ["Иванов Иван"]
+    # строки прямой оплаты помечены — кабинет сворачивает их в одну
+    assert sum(1 for ln in st["lines"] if ln["direct"]) == 2
+    assert all(ln["amount"] == 0 for ln in st["lines"] if ln["direct"])
+
+
+def test_no_direct_block_for_ordinary_teacher(api):
+    """У обычного педагога блока прямой оплаты нет — экран не меняется."""
+    app, _dp = api
+    st = _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]
+    assert st["direct"] is None and not any(ln["direct"] for ln in st["lines"])
+    assert all(x["direct"] is False and x["directAmount"] == 0
+               for x in _call(app, "GET", f"/api/teacher/lessons?ym={YM}")[1]["lessons"])

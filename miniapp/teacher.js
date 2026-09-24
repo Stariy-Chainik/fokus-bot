@@ -14,11 +14,11 @@ SCREENS['t.home'] = async () => {
     ${hero(`${esc(h.name)} · ${fdate(h.today)}`)}
     <div class="kpis">
       ${kpi(h.lessonsToday, 'занятий сегодня', '', 't.lessons', { key: h.today })}
-      ${kpi(fmt(h.earnedToday), 'заработано сегодня', 'ok')}
+      ${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok')}
     </div>
     <div class="kpis" style="margin-top:10px">
       ${kpi(h.lessonsMonth, `занятий за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, '', 't.lessons', { key: h.period })}
-      ${kpi(fmt(h.earnedMonth), 'зарплата за месяц', '', 't.money', { ym: h.period })}
+      ${kpi(fmt(h.earnedMonth), h.directMonth ? `зарплата · ещё ${fmt(h.directMonth)} напрямую` : 'зарплата за месяц', '', 't.money', { ym: h.period })}
     </div>
     <div style="margin-top:14px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
     <div class="eyebrow">Разделы</div>
@@ -34,12 +34,24 @@ SCREENS['t.home'] = async () => {
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */
 const tKey = () => state.ui.tKey || new Date().toISOString().slice(0, 10);
+/* Занятие с прямой оплатой: школа не начисляет, поэтому показываем сумму родителя. */
 const tLessonCell = (x, withDate = false) => cell({
   lead: x.type === 'group' ? '👥' : '👤', plain: true,
   t: esc(x.type === 'group' ? (x.groupName || 'Группа') : x.students.join(' + ') || '—'),
-  s: `${withDate ? `${fdate(x.date)} · ` : ''}${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.locked ? ' · 🔒' : ''}`,
-  r: `<b>${fmt(x.earned)}</b>`, go: 't.lesson', p: { id: x.id },
+  s: `${withDate ? `${fdate(x.date)} · ` : ''}${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.direct ? ' · платит родитель' : ''}${x.locked ? ' · 🔒' : ''}`,
+  r: x.direct ? `<b class="direct">${fmt(x.directAmount)}</b>` : `<b>${fmt(x.earned)}</b>`,
+  go: 't.lesson', p: { id: x.id },
 });
+/* Итог списка занятий: деньги школы и деньги родителей — разными строками. */
+const tSums = items => ({
+  school: items.reduce((a, l) => a + l.earned, 0),
+  direct: items.reduce((a, l) => a + (l.directAmount || 0), 0),
+});
+const tSumLine = items => {
+  const { school, direct } = tSums(items);
+  if (!direct) return fmt(school);
+  return school ? `${fmt(school)} от школы · ${fmt(direct)} напрямую` : `${fmt(direct)} напрямую`;
+};
 /* Журнал: занятия сгруппированы по дням, у каждого дня свой итог. */
 SCREENS['t.lessons'] = async ({ key }) => {
   const k = key || tKey();
@@ -52,21 +64,21 @@ SCREENS['t.lessons'] = async ({ key }) => {
   const type = state.ui.tLesType || '';
   const n = t => d.lessons.filter(l => l.type === t).length;
   const shown = type ? d.lessons.filter(l => l.type === type) : d.lessons;
-  const earned = shown.reduce((a, l) => a + l.earned, 0);
+  const sums = tSums(shown);
   const byDay = {};
   shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
   const days = Object.keys(byDay).sort();
   const dayBlock = day => {
     const items = byDay[day];
-    const sum = items.reduce((a, l) => a + l.earned, 0);
     return `<div class="eyebrow">${fdate(day)}</div>${list(items.map(l => tLessonCell(l)))}
-      <div class="hint" style="text-align:right;margin:6px 2px 0">${plural(items.length, ['занятие', 'занятия', 'занятий'])} · ${fmt(sum)}</div>`;
+      <div class="hint" style="text-align:right;margin:6px 2px 0">${plural(items.length, ['занятие', 'занятия', 'занятий'])} · ${tSumLine(items)}</div>`;
   };
   return { title: 'Мои занятия', html: `
     ${stickyFilters(`<div class="chips">${chips.map(([v, nm]) => `<button class="chip" aria-pressed="${k === v}" data-go="t.lessons" data-p='${esc(JSON.stringify({ key: v }))}' data-replace="1">${nm}</button>`).join('')}</div>
       ${n('group') && n('individual') ? chipsAct('tLesType', type, [['', `Все · ${d.lessons.length}`], ['group', `Группы · ${n('group')}`], ['individual', `Индивидуальные · ${n('individual')}`]]) : ''}`)}
     ${shown.length ? `${days.map(dayBlock).join('')}
-      <div class="card" style="margin-top:12px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · заработано</span><span class="big">${fmt(earned)}</span></div></div>`
+      <div class="card" style="margin-top:12px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · начислит школа</span><span class="big">${fmt(sums.school)}</span></div>
+        ${sums.direct ? `<div class="total"><span>оплачивают родители напрямую</span><span class="big direct">${fmt(sums.direct)}</span></div>` : ''}</div>`
       : empty(type ? 'Таких занятий нет' : 'Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие кнопкой ниже или выберите другой день</p>')}
     <div style="margin-top:12px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>` };
 };
@@ -78,11 +90,15 @@ SCREENS['t.lesson'] = async ({ id }) => {
       <div class="hint">${fdate(l.date)} · ${l.durationMin} мин${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>
       ${l.locked ? `<div style="margin-top:8px">${pill('🔒 период сдан', 'mute')}</div>` : ''}</div>
     ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({
-      lead: initials(a.name), t: esc(a.name),
-      r: a.amount === null ? '' : a.amount ? `<b>${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'),
+      lead: initials(a.name), t: esc(a.name), s: l.direct ? 'платит напрямую' : '',
+      r: a.amount === null ? '' : a.amount ? `<b class="${l.direct ? 'direct' : ''}">${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'),
       go: 't.student', p: { id: a.studentId },
     })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
-    <div class="card" style="margin-top:10px"><div class="total"><span>Мне начислено</span><span class="big">${fmt(l.earned)}</span></div></div>
+    <div class="card" style="margin-top:10px">${l.direct
+      ? `<div class="total"><span>Платят родители напрямую</span><span class="big direct">${fmt(l.directAmount)}</span></div>
+         ${l.rent ? `<div class="total"><span>Аренда зала школе</span><span class="big">${fmt(l.rent)}</span></div>` : ''}
+         <div class="pad hint" style="padding-top:0">Школа это занятие не начисляет и оплату по нему не отслеживает.</div>`
+      : `<div class="total"><span>Мне начислено</span><span class="big">${fmt(l.earned)}</span></div>`}</div>
     <div style="margin-top:12px">${l.locked
       ? `<div class="card pad hint">Период сдан — занятие меняет только администратор.</div>`
       : btn('🗑 Удалить занятие', 'tDelLesson', { id }, 'danger')}</div>
@@ -159,6 +175,8 @@ SCREENS['t.money'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const [st, sub] = [await api(`/stats?ym=${period}`), await api(`/submit?ym=${period}`)];
   const state_ = sub.submitted ? pill('период сдан', 'ok') : sub.canSubmit ? pill('можно сдать', 'warn') : pill('сдаётся с 25-го', 'mute');
+  const d = st.direct && st.direct.lessons ? st.direct : null;   // блок прямой оплаты
+  const paid = st.lines.filter(x => !x.direct);                  // строки, которые платит школа
   return { title: 'Зарплата', html: `
     ${monthChips('t.money', period, {})}
     <div class="card pad"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em">${fmt(st.total)}</div>
@@ -169,11 +187,29 @@ SCREENS['t.money'] = async ({ ym }) => {
       : btn(sub.canSubmit ? `📤 Сдать ${MON_NOM[+period.slice(5) - 1].toLowerCase()} (${plural(sub.lessons, ['занятие', 'занятия', 'занятий'])}, ${fmt(sub.total)})` : `Сдать период можно с 25 ${MON_SHORT[+period.slice(5) - 1]}`,
         'tSubmitAsk', { ym: period, lessons: sub.lessons, total: sub.total }, sub.canSubmit ? '' : 'ghost')}</div>
     <div class="eyebrow">Начисления</div>
-    ${st.lines.length ? list(st.lines.map(x => cell({
-      lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
-      s: x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.minutes ? `${x.minutes} мин` : '',
-      r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
-    }))) : empty('Начислений нет', '<p class="hint" style="margin:0">Отметьте занятия — они появятся здесь</p>')}` };
+    ${paid.length || d ? list([
+      ...paid.map(x => cell({
+        lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
+        s: x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.minutes ? `${x.minutes} мин` : '',
+        r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
+      })),
+      // Занятия прямой оплаты одной строкой: их 59 из 63, нулями список не засыпаем
+      ...(d && d.lessons ? [cell({
+        lead: '🤝', plain: true, t: 'Индивидуальные — прямая оплата',
+        s: `${plural(d.lessons, ['занятие', 'занятия', 'занятий'])} · школа не начисляет`,
+        r: '<b>0 ₽</b>', go: 't.lessons', p: { key: period },
+      })] : []),
+    ]) : empty('Начислений нет', '<p class="hint" style="margin:0">Отметьте занятия — они появятся здесь</p>')}
+    ${d ? `<div class="eyebrow">Прямая оплата</div>
+      <div class="card">
+        <div class="total"><span>Родители платят вам за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</span><span class="big direct">${fmt(d.total)}</span></div>
+        ${d.rent ? `<div class="total"><span>Аренда зала школе${d.rentPerLesson ? ` · ${fmt(d.rentPerLesson)} × ${d.lessons}` : ''}</span><span class="big">${fmt(d.rent)}</span></div>` : ''}
+        <div class="pad hint" style="padding-top:0">Школа эти занятия не начисляет и оплату по ним не отслеживает — суммы справочные.</div>
+      </div>
+      ${d.students.length ? list(d.students.map(x => cell({
+        lead: initials(x.name), t: esc(x.name), s: plural(x.lessons, ['занятие', 'занятия', 'занятий']),
+        r: `<b class="direct">${fmt(x.amount)}</b>`, go: 't.student', p: { id: x.id, ym: period },
+      }))) : ''}` : ''}` };
 };
 
 /* ── Дневники спортсменов ────────────────────────────────────────────── */

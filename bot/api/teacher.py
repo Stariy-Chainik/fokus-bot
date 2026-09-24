@@ -24,9 +24,10 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import LessonType
 from bot.services import LessonService, payment_ledger
-from bot.services.billing_service import calc_earned
+from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
+from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
@@ -54,8 +55,53 @@ def _dp_get(dp, key: str):
     return data.get(key) if hasattr(data, "get") else None
 
 
+def is_direct(ls, teacher) -> bool:
+    """Занятие, которое родитель оплачивает педагогу напрямую (DIRECT_PAY_TEACHER_IDS)."""
+    return (ls.type == LessonType.INDIVIDUAL
+            and teacher.teacher_id in settings.direct_pay_teacher_id_set)
+
+
+def direct_amount(ls, teacher) -> int:
+    """Сколько родители платят педагогу за это занятие лично (школа его не начисляет)."""
+    if not is_direct(ls, teacher):
+        return 0
+    return sum(row.amount for row in build_billing_rows(ls, teacher, include_direct=True))
+
+
+def _direct_summary(lessons: list, teacher, student_names: dict) -> dict | None:
+    """Блок «Прямая оплата» в зарплате: сколько должны родители и сколько аренды школе.
+
+    None — педагог не из DIRECT_PAY_TEACHER_IDS: блока в кабинете нет.
+    """
+    if teacher.teacher_id not in settings.direct_pay_teacher_id_set:
+        return None
+    direct = [ls for ls in lessons if is_direct(ls, teacher)]
+    by_student: dict[str, dict] = {}
+    for ls in direct:
+        for row in build_billing_rows(ls, teacher, include_direct=True):
+            item = by_student.setdefault(
+                row.student_id,
+                {"id": row.student_id, "name": student_names.get(row.student_id, row.student_id),
+                 "lessons": 0, "amount": 0},
+            )
+            item["lessons"] += 1
+            item["amount"] += row.amount
+    rent = sum(lesson_rent(ls) for ls in direct)
+    return {
+        "lessons": len(direct),
+        "total": sum(item["amount"] for item in by_student.values()),
+        "rent": rent,
+        "rentPerLesson": settings.hall_rent_map.get(teacher.teacher_id, 0),
+        "students": sorted(by_student.values(), key=lambda x: -x["amount"]),
+    }
+
+
 def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
-    """Строка списка занятий: кто занимался и сколько начислено педагогу."""
+    """Строка списка занятий: кто занимался и сколько начислено педагогу.
+
+    У занятий с прямой оплатой школа начисляет 0 — вместо пустого нуля отдаём
+    сумму, которую платит родитель, и аренду зала, которую педагог перечисляет школе.
+    """
     if ls.type == LessonType.GROUP:
         who = [student_names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
     else:
@@ -65,6 +111,8 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
         "groupId": ls.group_id or "", "groupName": group_names.get(ls.group_id, ""),
         "students": who, "recordedAt": ls.recorded_at,
         "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
+        "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
+        "rent": lesson_rent(ls),
     }
 
 
@@ -132,6 +180,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "lessonsToday": len(today_lessons), "lessonsMonth": len(month),
             "earnedMonth": await salary_service.total_for(teacher, period),
             "earnedToday": await salary_service.total_for(teacher, today),
+            # прямая оплата: школа не начисляет, но на сводке это не должно выглядеть нулём
+            "directMonth": sum(direct_amount(ls, teacher) for ls in month),
+            "directToday": sum(direct_amount(ls, teacher) for ls in today_lessons),
             "periodSubmitted": period in submitted, "prevSubmitted": prev in submitted,
             "canSubmit": LessonService.can_submit_period(date.today(), period),
             "groups": len(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))),
@@ -170,7 +221,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         else:
             ids = [i for i in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id) if i]
             slots = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
-            attendees = [{"studentId": i, "name": names.get(i, n), "durationMin": ls.duration_min, "amount": None}
+            # У прямой оплаты показываем долю каждого ученика — её платят педагогу лично.
+            shares = ({row.student_id: row.amount
+                       for row in build_billing_rows(ls, teacher, include_direct=True)}
+                      if is_direct(ls, teacher) else {})
+            attendees = [{"studentId": i, "name": names.get(i, n), "durationMin": ls.duration_min,
+                          "amount": shares.get(i) if shares else None}
                          for i, n in zip(ids, slots, strict=False)]
         return _json({
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
@@ -179,6 +235,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
             "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
+            "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
+            "rent": lesson_rent(ls),
             "locked": ls.date[:7] in await _submitted(teacher.teacher_id),
         })
 
@@ -303,7 +361,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "individualLessons": sum(1 for ls in rows if ls.type != LessonType.GROUP),
             "submitted": ym in submitted,
             "lines": [{"date": ln.date, "kind": ln.kind, "label": label_for(ln),
-                       "minutes": ln.minutes, "amount": ln.amount, "lessonId": ln.lesson_id} for ln in lines],
+                       "minutes": ln.minutes, "amount": ln.amount, "lessonId": ln.lesson_id,
+                       "direct": is_direct(by_id[ln.lesson_id], teacher) if ln.lesson_id in by_id else False}
+                      for ln in lines],
+            "direct": _direct_summary(rows, teacher, names),
         })
 
     async def submit_preview(request: web.Request, user, teacher) -> web.Response:
