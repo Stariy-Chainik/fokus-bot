@@ -204,3 +204,17 @@ def test_direct_payment_lessons_are_marked_and_not_billed(api, monkeypatch):
     billed = [x for r in bill["rows"] for x in r["lessons"]]
     assert not [x for x in billed if x["id"] in {d["id"] for d in direct}]   # их нет в счёте
     assert [x for x in billed if x["type"] == "group"]                        # группы педагога — как обычно
+
+
+def test_direct_payment_amount_is_shown_apart_from_the_bill(api, monkeypatch):
+    """Сумму педагогу считаем и показываем отдельно — в счёт школы она не попадает."""
+    app, dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
+    direct = [x for x in les["lessons"] if x["direct"]]
+    assert direct and all(x["directAmount"] > 0 for x in direct)
+    assert les["directTotal"] == sum(x["directAmount"] for x in direct)
+    assert les["direct"][0]["teacher"] == "Река Станислав"
+    # счёт школы этих денег не видит
+    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
+    assert bill["accrued"] == les["accrued"] and les["directTotal"] not in (bill["rest"], bill["accrued"])

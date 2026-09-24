@@ -51,12 +51,16 @@ def calc_earned(
     return round(rate * duration_min / MINUTES_PER_UNIT)
 
 
-def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
+def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
     """
     Строит виртуальные billing-строки.
     Не пишет ничего в БД. billing_id пустой — это computed view.
     Для пары: сумма двух строк точно равна полной стоимости урока.
     Для группы per_visit: строка на каждого ученика с amount>0 из attendees.
+
+    include_direct=True — посчитать и занятия педагогов с прямой оплатой
+    (DIRECT_PAY_TEACHER_IDS). Такие строки нужны только чтобы показать родителю,
+    сколько он должен педагогу лично; в счета, долги и прибыль школы они не идут.
     """
     rows: list[Billing] = []
 
@@ -98,7 +102,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher) -> list[Billing]:
 
     # Индивидуальные занятия педагога с прямой оплатой — не начисляются школой.
     from config.settings import settings
-    if lesson.teacher_id in settings.direct_pay_teacher_id_set:
+    if lesson.teacher_id in settings.direct_pay_teacher_id_set and not include_direct:
         return rows
 
     _, _, rate_for_student = effective_rates(teacher, lesson.date)

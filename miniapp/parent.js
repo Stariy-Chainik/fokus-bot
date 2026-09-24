@@ -251,8 +251,8 @@ SCREENS['p.lessons'] = async ({ ym }) => {
   const dayBlock = day => `<div class="eyebrow" id="d-${day}">${fdate(day)}</div>${list(byDay[day].map(l => cell({
     lead: l.type === 'group' ? '👥' : '👤', plain: true, cls: l.direct ? 'wrap' : '',
     t: esc(l.group || l.teacher),
-    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}${l.direct ? '<br>оплата педагогу напрямую — в счёт школы не входит' : ''}`,
-    r: l.paid ? pill('оплачено', 'ok') : '',
+    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}${l.direct ? '<br>оплата педагогу напрямую' : ''}`,
+    r: l.direct ? `<span class="hint">${fmt(l.directAmount)}</span>` : l.paid ? pill('оплачено', 'ok') : '',
   })))}`;
   const day = byDay[state.ui.pDay] ? state.ui.pDay : '';      // день из календаря (если он есть в месяце)
   const inView = day ? byDay[day] : shown;
@@ -271,7 +271,12 @@ SCREENS['p.lessons'] = async ({ ym }) => {
         ${day ? `<div style="margin-top:10px">${btn('✕ Весь месяц', 'pDayReset', {}, 'ghost')}</div>` : ''}
       </div>${(day ? [day] : days).map(dayBlock).join('')}`
       : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
-    ${d.rest ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — к оплате ${fmt(d.rest)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
+    ${d.directTotal ? `<div class="card pad" style="margin-top:14px">
+        <div style="font-weight:700">Педагогу напрямую · ${fmt(d.directTotal)}</div>
+        ${d.direct.map(x => `<div class="hint" style="display:flex;justify-content:space-between"><span>${esc(x.teacher)}</span><span class="money">${fmt(x.amount)}</span></div>`).join('')}
+        <p class="hint" style="margin:8px 0 0">Эти занятия вы оплачиваете педагогу лично — в счёт школы они не входят. Школа такие оплаты не отслеживает, статус уточняйте у педагога.</p>
+      </div>` : ''}
+    ${d.rest ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт школы за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — к оплате ${fmt(d.rest)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
     <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
 };
 
