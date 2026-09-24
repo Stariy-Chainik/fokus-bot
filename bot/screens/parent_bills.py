@@ -21,6 +21,7 @@ class BillDetail:
     paid_total: int = 0
     unpaid_total: int = 0
     overpaid_total: int = 0
+    direct_total: int = 0        # оплачивается педагогу напрямую, вне счёта школы
     payment_ids: list = field(default_factory=list)
 
     @property
@@ -28,14 +29,22 @@ class BillDetail:
         return self.unpaid_total > 0
 
 
-def render_bill_detail(period_month: str, ledgers_by_student: list) -> BillDetail:
-    """ledgers_by_student — [(student, {teacher_id: TeacherLedger})]; чистая сборка текста счёта."""
+def render_bill_detail(
+    period_month: str, ledgers_by_student: list, direct_by_student: dict | None = None,
+) -> BillDetail:
+    """ledgers_by_student — [(student, {teacher_id: TeacherLedger})]; чистая сборка текста счёта.
+
+    direct_by_student — {student_id: [DirectPayRow]}: занятия педагогов с прямой оплатой.
+    Показываем их отдельным блоком (как в кабинете), но в суммы счёта не берём —
+    эти деньги родитель платит педагогу лично.
+    """
     students = [student for student, _ in ledgers_by_student]
+    direct_by_student = direct_by_student or {}
     d = BillDetail()
     title_who = f" — {students[0].name}" if len(students) == 1 else " — все дети"
     d.lines.append(f"<b>📋 {period_label(period_month)}{title_who}</b>\n")
     for student, ledgers in ledgers_by_student:
-        if not ledgers:
+        if not ledgers and not direct_by_student.get(student.student_id):
             continue
         if len(students) > 1:
             d.lines.append(f"<b>{student.name}:</b>")
@@ -81,7 +90,17 @@ def render_bill_detail(period_month: str, ledgers_by_student: list) -> BillDetai
             d.paid_total += ledger.paid
             d.unpaid_total += ledger.remainder
             d.overpaid_total += ledger.overpaid
-    if d.grand_total == 0:
+        for row in direct_by_student.get(student.student_id, []):
+            d.lines.append(f"<b>Педагог: {row.name} — оплата напрямую</b>")
+            for item in row.lessons:
+                d.lines.append(
+                    f"    {format_date_display(item.date)}  {item.duration_min} мин"
+                    f"  — {item.amount} руб."
+                )
+            d.lines.append(f"  <i>Итого: {row.total} руб. — оплачивается педагогу напрямую</i>")
+            d.lines.append("  <i>в «К оплате» не входит, школа эти занятия не отслеживает</i>\n")
+            d.direct_total += row.total
+    if d.grand_total == 0 and not d.direct_total:
         d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
     elif d.unpaid_total > 0:
         if d.paid_total:

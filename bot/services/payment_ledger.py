@@ -176,3 +176,51 @@ def mark_student_lessons(
         marks={ls.lesson_id: LessonPaymentMark(amounts.get(ls.lesson_id, 0), paid_mark.get(ls.lesson_id, False))
                for ls in ordered},
     )
+
+
+@dataclass(frozen=True)
+class DirectPayLesson:
+    lesson_id: str
+    date: str
+    duration_min: int
+    amount: int
+
+
+@dataclass(frozen=True)
+class DirectPayRow:
+    """Занятия педагога с прямой оплатой (DIRECT_PAY_TEACHER_IDS) за месяц.
+
+    Школа их не начисляет: в счёте они показаны отдельно, чтобы родитель видел
+    сумму, но в «К оплате» не входят — эти деньги идут педагогу лично.
+    """
+    teacher_id: str
+    name: str
+    total: int
+    lessons: list
+
+
+def direct_pay_rows(student_id: str, month_lessons: list, teachers_by_id: dict) -> list:
+    """Строки прямой оплаты за месяц — по педагогу, занятия по дате.
+
+    Одна точка расчёта для всех фронтов: бот, MAX и кабинет показывают одни суммы.
+    """
+    from config.settings import settings
+    from bot.models.enums import LessonType
+    from bot.services.billing_service import build_billing_rows
+
+    direct_ids = settings.direct_pay_teacher_id_set
+    if not direct_ids:
+        return []
+    by_teacher: dict[str, list] = {}
+    for ls in sorted(month_lessons, key=lambda x: (x.date, x.lesson_id)):
+        teacher = teachers_by_id.get(ls.teacher_id)
+        if ls.type != LessonType.INDIVIDUAL or ls.teacher_id not in direct_ids or teacher is None:
+            continue
+        amount = sum(row.amount for row in build_billing_rows(ls, teacher, include_direct=True)
+                     if row.student_id == student_id)
+        by_teacher.setdefault(ls.teacher_id, []).append(
+            DirectPayLesson(ls.lesson_id, ls.date, ls.duration_min, amount))
+    return [
+        DirectPayRow(tid, teachers_by_id[tid].name, sum(item.amount for item in items), items)
+        for tid, items in by_teacher.items()
+    ]

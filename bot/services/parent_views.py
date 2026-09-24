@@ -69,9 +69,17 @@ async def bills_periods(students: list, payment_service, show_older: bool = Fals
 # ─── Детализация счёта ───────────────────────────────────────────────────────
 
 async def bill_detail(students: list, period_month: str, payment_service) -> BillDetail:
-    """Счета по педагогам за месяц (с синхронизацией остатков) → экран из bot/screens."""
+    """Счета по педагогам за месяц (с синхронизацией остатков) → экран из bot/screens.
+
+    Отдельно добавляем занятия педагогов с прямой оплатой: родитель видит их
+    суммы так же, как в кабинете, но платит за них педагогу лично.
+    """
     ledgers_by_student = [(student, await payment_service.ledger_for(student, period_month)) for student in students]
-    return render_bill_detail(period_month, ledgers_by_student)
+    direct_by_student = {
+        student.student_id: await payment_service.direct_pay_rows(student.student_id, period_month)
+        for student in students
+    }
+    return render_bill_detail(period_month, ledgers_by_student, direct_by_student)
 
 
 # ─── Оплата ──────────────────────────────────────────────────────────────────

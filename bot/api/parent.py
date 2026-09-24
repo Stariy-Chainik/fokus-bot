@@ -19,8 +19,6 @@ from base64 import b64encode
 from aiohttp import web
 
 from bot.api.admin import auth_tg_id
-from bot.models.enums import LessonType
-from bot.services.billing_service import build_billing_rows
 from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
@@ -167,26 +165,16 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             })
         # Педагоги с прямой оплатой: в счёте видны как все (занятия и суммы),
         # но их строки не выбираются и в «К оплате» не входят — платят им лично.
-        if settings.direct_pay_teacher_id_set:
-            month = await payment_service.student_lesson_marks(student.student_id, period)
-            cards = {t.teacher_id: t for t in await teacher_repo.get_all()}
-            by_teacher: dict[str, list] = {}
-            for ls in month.lessons:
-                if (ls.type == LessonType.INDIVIDUAL
-                        and ls.teacher_id in settings.direct_pay_teacher_id_set
-                        and ls.teacher_id in cards):
-                    amount = sum(r.amount for r in build_billing_rows(ls, cards[ls.teacher_id], include_direct=True)
-                                 if r.student_id == student.student_id)
-                    by_teacher.setdefault(ls.teacher_id, []).append((ls, amount))
-            for tid, items in by_teacher.items():
-                rows.append({
-                    "key": f"DIRECT:{tid}", "name": cards[tid].name, "subscription": False,
-                    "direct": True,                       # платит родитель лично педагогу
-                    "accrued": sum(a for _ls, a in items), "paid": 0, "rest": 0, "overpaid": 0,
-                    "lessons": [{"id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
-                                 "amount": a, "paid": False, "type": ls.type.value}
-                                for ls, a in sorted(items, key=lambda x: x[0].date)],
-                })
+        # Расчёт общий с ботом и MAX (`PaymentService.direct_pay_rows`).
+        for direct in await payment_service.direct_pay_rows(student.student_id, period):
+            rows.append({
+                "key": f"DIRECT:{direct.teacher_id}", "name": direct.name, "subscription": False,
+                "direct": True,                       # платит родитель лично педагогу
+                "accrued": direct.total, "paid": 0, "rest": 0, "overpaid": 0,
+                "lessons": [{"id": item.lesson_id, "date": item.date, "durationMin": item.duration_min,
+                             "amount": item.amount, "paid": False, "type": "individual"}
+                            for item in direct.lessons],
+            })
         accrued, paid, rest = payment_ledger.ledger_totals(ledgers)
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,

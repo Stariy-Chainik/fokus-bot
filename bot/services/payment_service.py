@@ -13,7 +13,8 @@ from bot.repositories import (
 )
 from .billing_service import build_billing_rows
 from .payment_ledger import (
-    BillAggregate, StudentMonthLessons, TeacherLedger, lesson_marks, mark_student_lessons, paid_lesson_ids,
+    BillAggregate, StudentMonthLessons, TeacherLedger, direct_pay_rows, lesson_marks,
+    mark_student_lessons, paid_lesson_ids,
 )
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
@@ -424,6 +425,16 @@ class PaymentService:
         teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
         rows = await self._payment_repo.get_by_student_and_period(student_id, period_month)
         return mark_student_lessons(student_id, lessons, teachers, rows)
+
+    async def direct_pay_rows(self, student_id: str, period_month: str) -> list:
+        """Занятия педагогов с прямой оплатой за месяц (DIRECT_PAY_TEACHER_IDS).
+
+        Школа их не начисляет; строки нужны только чтобы показать родителю сумму,
+        которую он платит педагогу лично — одинаково в боте, MAX и кабинете.
+        """
+        lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
+        teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
+        return direct_pay_rows(student_id, lessons, teachers)
 
     async def teacher_lesson_marks(
         self, student, period_month: str, teacher_id: str,

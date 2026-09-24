@@ -54,6 +54,10 @@ def test_bill_detail_screen_pay_button_only_when_can_pay():
     assert kb[0][0].value == "cl_bills_stu:STU-1"
 
 
+def _student(name: str = "Алиса", student_id: str = "STU-0001"):
+    return SimpleNamespace(name=name, student_id=student_id)
+
+
 def test_bill_detail_shows_unpaid_lessons_first_and_paid_lessons_below():
     items = [
         SimpleNamespace(lesson_id="LES-1", date="2026-09-05", duration_min=60, amount=1300),
@@ -69,7 +73,10 @@ def test_bill_detail_shows_unpaid_lessons_first_and_paid_lessons_below():
         async def ledger_for(self, student, period_month):
             return {"T1": ledger}
 
-    detail = asyncio.run(bill_detail([SimpleNamespace(name="Алиса")], "2026-09", _Service()))
+        async def direct_pay_rows(self, student_id, period_month):
+            return []
+
+    detail = asyncio.run(bill_detail([_student()], "2026-09", _Service()))
     text = "\n".join(detail.lines)
 
     assert "<b>⬜ К оплате:</b>" in text
@@ -91,7 +98,10 @@ def test_bill_detail_subscription_has_binary_status_only():
         async def ledger_for(self, student, period_month):
             return {"SUB:G1": ledger}
 
-    detail = asyncio.run(bill_detail([SimpleNamespace(name="Алиса")], "2026-09", _Service()))
+        async def direct_pay_rows(self, student_id, period_month):
+            return []
+
+    detail = asyncio.run(bill_detail([_student()], "2026-09", _Service()))
     text = "\n".join(detail.lines)
 
     assert "<b>💳 Абонемент ⬜</b>" in text
@@ -190,3 +200,51 @@ def test_admin_lesson_selection_screen():
     # ничего не выбрано — кнопки подтверждения нет
     _, rows_empty, total_empty = _sel_screen("Зотов Антон", ledger, marks, set())
     assert total_empty == 0 and all(r[0].callback_data != "pslgo" for r in rows_empty)
+
+
+def test_bill_detail_shows_direct_pay_teacher_outside_the_total():
+    """Педагог с прямой оплатой виден в счёте бота так же, как в кабинете, но вне «К оплате»."""
+    from bot.services.payment_ledger import DirectPayLesson, DirectPayRow
+
+    ledger = TeacherLedger("T1", "Мария Иванова", accrued=1300, paid=0,
+                           items=[SimpleNamespace(lesson_id="LES-1", date="2026-09-05",
+                                                  duration_min=60, amount=1300)],
+                           pending=SimpleNamespace(payment_id="PAY-000003"))
+    direct = DirectPayRow("T2", "Клецова Ангелина", 2334, [
+        DirectPayLesson("LES-9", "2026-09-02", 60, 1334),
+        DirectPayLesson("LES-10", "2026-09-09", 45, 1000),
+    ])
+
+    class _Service:
+        async def ledger_for(self, student, period_month):
+            return {"T1": ledger}
+
+        async def direct_pay_rows(self, student_id, period_month):
+            return [direct]
+
+    detail = asyncio.run(bill_detail([_student()], "2026-09", _Service()))
+    text = "\n".join(detail.lines)
+
+    assert "Клецова Ангелина" in text and "02.09.2026  60 мин  — 1334 руб." in text
+    assert "оплачивается педагогу напрямую" in text
+    assert detail.direct_total == 2334
+    assert detail.grand_total == 1300 and detail.unpaid_total == 1300   # прямая оплата вне сумм школы
+    assert "К оплате: 1300 руб." in text
+
+
+def test_bill_detail_with_only_direct_lessons_is_not_empty():
+    """Месяц, где у ребёнка только занятия с прямой оплатой, не выглядит пустым."""
+    from bot.services.payment_ledger import DirectPayLesson, DirectPayRow
+
+    class _Service:
+        async def ledger_for(self, student, period_month):
+            return {}
+
+        async def direct_pay_rows(self, student_id, period_month):
+            return [DirectPayRow("T2", "Клецова Ангелина", 1000,
+                                 [DirectPayLesson("LES-9", "2026-09-02", 45, 1000)])]
+
+    detail = asyncio.run(bill_detail([_student()], "2026-09", _Service()))
+    text = "\n".join(detail.lines)
+    assert "Занятий не найдено" not in text and "Клецова Ангелина" in text
+    assert detail.can_pay is False
