@@ -171,6 +171,26 @@ class Settings(BaseSettings):
                     out[gid.strip()] = int(minutes.strip())
         return out
 
+    # Персональная цена ученика у педагога — вместо rate_for_student (₽ за 45 мин).
+    # Зарплату педагога не меняет. Формат: TCH-XXXX:STU-XXXX:ставка[:с какого месяца],
+    # месяц YYYY-MM включительно; без месяца — за всё время.
+    # Прод: Прудникова Дарья и Таня ProAm у Никишина — 3500 ₽ с сентября 2026.
+    student_lesson_rates: str = Field(
+        default="TCH-0005:STU-0019:3500:2026-09,TCH-0005:STU-0031:3500:2026-09",
+        alias="STUDENT_LESSON_RATES",
+    )
+
+    @property
+    def student_rate_map(self) -> dict:
+        """{(teacher_id, student_id): (ставка, «с какого месяца» или "")}"""
+        out: dict = {}
+        for chunk in self.student_lesson_rates.replace("|", ",").split(","):
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) >= 3 and parts[0] and parts[1] and parts[2].isdigit():
+                since = parts[3] if len(parts) > 3 else ""
+                out[(parts[0], parts[1])] = (int(parts[2]), since)
+        return out
+
     # Своя ставка педагога за занятия конкретной группы (₽ за 45 мин, как rate_group).
     # Формат: GRP-0019:1500 — «БП Джаз»: 60 мин = 2000 ₽.
     group_salary_rates: str = Field(default="", alias="GROUP_SALARY_RATES")

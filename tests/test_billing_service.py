@@ -224,3 +224,40 @@ def test_rate_history_supports_mid_month_price_change():
         assert rate_history.effective_rates(teacher, "2026-09")[2] == 2200
     finally:
         rate_history.load([])
+
+
+def test_personal_student_rate_replaces_client_rate(monkeypatch):
+    """Персональная цена ученика у педагога: счёт по ней, зарплата педагога прежняя."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "student_lesson_rates", "TCH-0001:STU-1:3500")
+    t = _teacher(rate_group=2500, rate_for_teacher=2500, rate_for_student=3000)
+
+    mine = _lesson(student_1_id="STU-1", student_1_name="Прудникова Дарья")
+    other = _lesson(student_1_id="STU-2", student_1_name="Другой Ученик")
+    assert [r.amount for r in build_billing_rows(mine, t)] == [3500]
+    assert [r.amount for r in build_billing_rows(other, t)] == [3000]      # остальным прежняя цена
+    assert calc_earned(LessonType.INDIVIDUAL, 45, t) == 2500               # зарплата не меняется
+
+    hour = _lesson(duration_min=60, student_1_id="STU-1", student_1_name="Прудникова Дарья")
+    assert [r.amount for r in build_billing_rows(hour, t)] == [4667]       # ставка за 45 мин
+
+
+def test_personal_rate_starts_from_its_month(monkeypatch):
+    """Месяц в настройке защищает уже оплаченные периоды от пересчёта."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "student_lesson_rates", "TCH-0001:STU-1:3500:2026-09")
+    t = _teacher(rate_group=2500, rate_for_teacher=2500, rate_for_student=3000)
+    before = _lesson(date="2026-05-01", student_1_id="STU-1", student_1_name="Прудникова Дарья")
+    after = _lesson(date="2026-09-01", student_1_id="STU-1", student_1_name="Прудникова Дарья")
+    assert [r.amount for r in build_billing_rows(before, t)] == [3000]
+    assert [r.amount for r in build_billing_rows(after, t)] == [3500]
+
+
+def test_personal_rate_in_a_pair_charges_each_their_own_half(monkeypatch):
+    """В паре каждый платит половину своей цены."""
+    from config.settings import settings
+    monkeypatch.setattr(settings, "student_lesson_rates", "TCH-0001:STU-1:3500")
+    t = _teacher(rate_group=2500, rate_for_teacher=2500, rate_for_student=3000)
+    pair = _lesson(student_1_id="STU-1", student_1_name="Прудникова Дарья",
+                   student_2_id="STU-2", student_2_name="Другой Ученик")
+    assert [r.amount for r in build_billing_rows(pair, t)] == [1750, 1500]

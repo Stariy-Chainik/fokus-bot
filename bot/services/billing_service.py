@@ -51,6 +51,23 @@ def calc_earned(
     return round(rate * duration_min / MINUTES_PER_UNIT)
 
 
+def student_rate(teacher_id: str, student_id: str, date: str, default: int) -> int:
+    """Персональная цена ученика у педагога (STUDENT_LESSON_RATES) или обычная ставка.
+
+    Ставка за 45 минут, как rate_for_student: 60-минутное занятие дороже
+    пропорционально. Действует с месяца, указанного в настройке (пусто — всегда),
+    поэтому уже оплаченные месяцы не пересчитываются. Зарплату не меняет.
+    """
+    from config.settings import settings
+    row = settings.student_rate_map.get((teacher_id, student_id))
+    if row is None:
+        return default
+    rate, since = row
+    if since and date[:7] < since:
+        return default
+    return rate
+
+
 def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
     """
     Строит виртуальные billing-строки.
@@ -119,6 +136,16 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = 
         return rows
 
     n = len(participants)
+    rates = [student_rate(lesson.teacher_id, sid, lesson.date, rate_for_student)
+             for sid, _ in participants]
+    if any(rate != rate_for_student for rate in rates):
+        # У кого-то своя цена (STUDENT_LESSON_RATES): каждый платит свою долю,
+        # а не половину общей стоимости урока.
+        for (sid, sname), rate in zip(participants, rates, strict=False):
+            amount = round(rate * lesson.duration_min / MINUTES_PER_UNIT / n)
+            rows.append(_make(sid, sname, amount, lesson.duration_min))
+        return rows
+
     per = base_amount // n
     remainder = base_amount - per * n
     for i, (sid, sname) in enumerate(participants):
