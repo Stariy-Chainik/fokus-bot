@@ -119,7 +119,9 @@ SCREENS['p.bill'] = async ({ ym }) => {
     : (r.lessons.filter(l => l.type === 'group').length >= r.lessons.length / 2 ? 'group' : 'solo');
   const parts = [['sub', 'Абонемент'], ['group', 'Групповые занятия'], ['solo', 'Индивидуальные и парные'],
                  ['direct', 'Оплачивается педагогу напрямую']];
-  const lessonsAll = b.rows.flatMap(r => r.lessons);
+  // считаем только поштучные занятия: абонемент идёт строкой за месяц,
+  // прямая оплата — мимо школы. Полное расписание — во вкладке «Занятия»
+  const lessonsAll = b.rows.filter(r => !r.subscription && !r.direct).flatMap(r => r.lessons);
   const nGroup = lessonsAll.filter(l => l.type === 'group').length;
   const section = ([id, title]) => {
     const rows = b.rows.filter(r => kind(r) === id);
@@ -132,7 +134,7 @@ SCREENS['p.bill'] = async ({ ym }) => {
   return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
       <div class="hint">начислено ${fmt(b.accrued)}${b.paid ? ` · оплачено ${fmt(b.paid)}` : ''}</div>
-      ${lessonsAll.length ? `<div class="hint">${plural(lessonsAll.length, ['занятие', 'занятия', 'занятий'])} за месяц: ${nGroup} в группах, ${lessonsAll.length - nGroup} индивидуальных</div>` : ''}</div>
+      ${lessonsAll.length ? `<div class="hint">${plural(lessonsAll.length, ['занятие оплачивается', 'занятия оплачиваются', 'занятий оплачиваются'])} поштучно: ${nGroup} в группах, ${lessonsAll.length - nGroup} индивидуальных</div>` : ''}</div>
     ${b.rows.length ? `${parts.map(section).join('')}
       <div class="card" style="margin-top:10px"><div class="total"><span>К оплате</span><span class="big ${total ? 'bad' : 'ok'}">${b.rest ? fmt(total) : '✓ оплачено'}</span></div></div>`
       : empty('За этот месяц начислений нет')}
