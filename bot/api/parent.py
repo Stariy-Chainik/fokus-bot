@@ -159,6 +159,28 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                              "type": m.get("lesson_type") or ""}      # group | pair | soloist
                             for m in marks],
             })
+        # Педагоги с прямой оплатой: в счёте видны как все (занятия и суммы),
+        # но их строки не выбираются и в «К оплате» не входят — платят им лично.
+        if settings.direct_pay_teacher_id_set:
+            month = await payment_service.student_lesson_marks(student.student_id, period)
+            cards = {t.teacher_id: t for t in await teacher_repo.get_all()}
+            by_teacher: dict[str, list] = {}
+            for ls in month.lessons:
+                if (ls.type == LessonType.INDIVIDUAL
+                        and ls.teacher_id in settings.direct_pay_teacher_id_set
+                        and ls.teacher_id in cards):
+                    amount = sum(r.amount for r in build_billing_rows(ls, cards[ls.teacher_id], include_direct=True)
+                                 if r.student_id == student.student_id)
+                    by_teacher.setdefault(ls.teacher_id, []).append((ls, amount))
+            for tid, items in by_teacher.items():
+                rows.append({
+                    "key": f"DIRECT:{tid}", "name": cards[tid].name, "subscription": False,
+                    "direct": True,                       # платит родитель лично педагогу
+                    "accrued": sum(a for _ls, a in items), "paid": 0, "rest": 0, "overpaid": 0,
+                    "lessons": [{"id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
+                                 "amount": a, "paid": False, "type": ls.type.value}
+                                for ls, a in sorted(items, key=lambda x: x[0].date)],
+                })
         accrued, paid, rest = payment_ledger.ledger_totals(ledgers)
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
@@ -175,37 +197,16 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
         out = []
-        teacher_cards = {t.teacher_id: t for t in await teacher_repo.get_all()}
-        direct_total: dict[str, int] = {}
-        for ls in month.lessons:
-            mark = month.mark(ls.lesson_id)
-            # прямая оплата педагогу: школа её не начисляет, но родителю нужно знать сумму
-            direct = (ls.type == LessonType.INDIVIDUAL
-                      and ls.teacher_id in settings.direct_pay_teacher_id_set)
-            direct_amount = 0
-            if direct and ls.teacher_id in teacher_cards:
-                rows = build_billing_rows(ls, teacher_cards[ls.teacher_id], include_direct=True)
-                direct_amount = sum(r.amount for r in rows if r.student_id == student.student_id)
-                name = teachers.get(ls.teacher_id, ls.teacher_name)
-                direct_total[name] = direct_total.get(name, 0) + direct_amount
+        for ls in month.lessons:                      # экран «Занятия» — расписание, без денег
             out.append({
                 "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
-                "type": ls.type.value, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
-                "group": groups.get(ls.group_id, ""), "amount": mark.amount, "paid": mark.paid,
-                # оплата мимо школы: в счёт не попадает, родитель платит педагогу сам
-                "direct": direct, "directAmount": direct_amount,
-                "directTeacher": teachers.get(ls.teacher_id, ls.teacher_name) if direct else "",
+                "type": ls.type.value, "teacherId": ls.teacher_id,
+                "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
+                "group": groups.get(ls.group_id, ""),
             })
-        # «к оплате» берём из того же леджера, что и счёт: иначе абонемент и доплаты
-        # не попадали бы в сумму и цифры на двух вкладках расходились
-        totals = await _totals(student, period)
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
-            "lessons": out, "unpaid": sum(x["amount"] for x in out if not x["paid"]),
-            "rest": totals["rest"], "accrued": totals["accrued"], "paid": totals["paid"],
-            # суммы мимо школы — отдельным блоком, вне счёта и без оплаты в кабинете
-            "direct": [{"teacher": k, "amount": v} for k, v in sorted(direct_total.items()) if v],
-            "directTotal": sum(direct_total.values()),
+            "lessons": out,
         })
 
     async def diary(request: web.Request, tg_id, children) -> web.Response:

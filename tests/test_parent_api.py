@@ -71,7 +71,7 @@ def test_paid_lessons_are_marked(api):
     assert [x["paid"] for x in d["rows"][0]["lessons"]] == [True, False, False]
 
     status, les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")
-    assert status == 200 and len(les["lessons"]) == 3 and les["unpaid"] == 2800
+    assert status == 200 and len(les["lessons"]) == 3      # расписание без сумм
 
 
 def test_diary_is_read_only_for_parent(api):
@@ -161,16 +161,6 @@ def test_parent_mixes_subscription_and_one_lesson(api):
     assert pending and pending[0].lesson_ids == lesson["id"]   # намерение — только отмеченное занятие
 
 
-def test_lessons_and_bill_agree_on_the_rest(api):
-    """«Занятия» и «Счета» считают остаток одинаково — иначе родитель видит разные суммы."""
-    app, dp = api
-    _sub_mode(dp)                                   # с абонементом расхождение было заметнее всего
-    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
-    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
-    assert les["rest"] == bill["rest"] and les["accrued"] == bill["accrued"]
-    assert les["rest"] != les["unpaid"]             # по одним занятиям сумма была бы меньше
-
-
 def test_cash_is_marked_preferred_for_sport_groups(api, monkeypatch):
     """В спортивных группах школа просит наличные — кабинет помечает ребёнка флагом."""
     app, dp = api
@@ -193,28 +183,23 @@ def test_cash_can_be_switched_off_for_a_group(api, monkeypatch):
     assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashAllowed"] is True
 
 
-def test_direct_payment_lessons_are_marked_and_not_billed(api, monkeypatch):
-    """Занятия с прямой оплатой педагогу помечены и в счёт школы не попадают."""
-    app, dp = api
+def test_lessons_tab_has_no_money(api, monkeypatch):
+    """Вкладка «Занятия» — расписание: ни сумм, ни статусов оплаты."""
+    app, _dp = api
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
     les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
-    direct = [x for x in les["lessons"] if x["direct"]]
-    assert direct and all(x["type"] == "individual" for x in direct)
-    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
-    billed = [x for r in bill["rows"] for x in r["lessons"]]
-    assert not [x for x in billed if x["id"] in {d["id"] for d in direct}]   # их нет в счёте
-    assert [x for x in billed if x["type"] == "group"]                        # группы педагога — как обычно
+    assert les["lessons"] and not any(k in les["lessons"][0] for k in ("amount", "paid", "directAmount"))
+    assert not any(k in les for k in ("rest", "unpaid", "directTotal"))
+    assert les["lessons"][0]["teacherId"]                  # по нему фильтруют чипы педагогов
 
 
-def test_direct_payment_amount_is_shown_apart_from_the_bill(api, monkeypatch):
-    """Сумму педагогу считаем и показываем отдельно — в счёт школы она не попадает."""
-    app, dp = api
+def test_direct_pay_teacher_is_shown_in_the_bill_but_not_charged(api, monkeypatch):
+    """Педагог с прямой оплатой виден в счёте как все, но в «К оплате» не входит."""
+    app, _dp = api
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
-    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
-    direct = [x for x in les["lessons"] if x["direct"]]
-    assert direct and all(x["directAmount"] > 0 for x in direct)
-    assert les["directTotal"] == sum(x["directAmount"] for x in direct)
-    assert les["direct"][0]["teacher"] == "Река Станислав"
-    # счёт школы этих денег не видит
     bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
-    assert bill["accrued"] == les["accrued"] and les["directTotal"] not in (bill["rest"], bill["accrued"])
+    direct = [r for r in bill["rows"] if r.get("direct")]
+    assert len(direct) == 1 and direct[0]["name"] == "Река Станислав"
+    assert direct[0]["accrued"] > 0 and direct[0]["rest"] == 0
+    assert all(x["type"] == "individual" for x in direct[0]["lessons"])
+    assert bill["accrued"] == sum(r["accrued"] for r in bill["rows"] if not r.get("direct"))

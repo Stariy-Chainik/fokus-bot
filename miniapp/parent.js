@@ -95,8 +95,8 @@ SCREENS['p.bill'] = async ({ ym }) => {
   const head = r => {
     const pick = sel[r.key];
     const on = !!pick && (pick.all || pick.lessons.size > 0);
-    const money = `${fmt(r.accrued)}${r.rest ? '' : ' ✓'}`;
-    const icon = r.subscription ? '💳' : (r.lessons.some(l => l.type === 'group') ? '👥' : '👨‍🏫');
+    const money = `${fmt(r.accrued)}${r.direct || r.rest ? '' : ' ✓'}`;
+    const icon = r.direct ? '🤝' : r.subscription ? '💳' : (r.lessons.some(l => l.type === 'group') ? '👥' : '👨‍🏫');
     if (!r.rest) return `<div class="grp"><span>${icon} ${esc(r.name)}</span><span class="money">${money}</span></div>`;
     return `<button class="grp pick" data-act="bPickRow" data-p='${esc(JSON.stringify({ key: r.key }))}'>
       <span>${mark(on)} ${icon} ${esc(r.name)}</span><span class="money">${money}</span></button>`;
@@ -113,8 +113,10 @@ SCREENS['p.bill'] = async ({ ym }) => {
       ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`;
   };
   // позиции раскладываем по смыслу: абонемент → группы → индивидуальные, у каждого раздела свой итог
-  const kind = r => r.subscription ? 'sub' : (r.lessons.filter(l => l.type === 'group').length >= r.lessons.length / 2 ? 'group' : 'solo');
-  const parts = [['sub', 'Абонемент'], ['group', 'Групповые занятия'], ['solo', 'Индивидуальные и парные']];
+  const kind = r => r.direct ? 'direct' : r.subscription ? 'sub'
+    : (r.lessons.filter(l => l.type === 'group').length >= r.lessons.length / 2 ? 'group' : 'solo');
+  const parts = [['sub', 'Абонемент'], ['group', 'Групповые занятия'], ['solo', 'Индивидуальные и парные'],
+                 ['direct', 'Оплачивается педагогу напрямую']];
   const lessonsAll = b.rows.flatMap(r => r.lessons);
   const nGroup = lessonsAll.filter(l => l.type === 'group').length;
   const section = ([id, title]) => {
@@ -122,7 +124,8 @@ SCREENS['p.bill'] = async ({ ym }) => {
     if (!rows.length) return '';
     const sum = rows.reduce((a, r) => a + r.accrued, 0);
     return `<div class="eyebrow" style="display:flex;justify-content:space-between"><span>${title}</span><span class="money">${fmt(sum)}</span></div>
-      <div class="card bill">${rows.map(block).join('')}</div>`;
+      <div class="card bill">${rows.map(block).join('')}</div>
+      ${id === 'direct' ? '<p class="hint" style="margin:6px 2px 0">Эти занятия вы оплачиваете педагогу лично — в сумму «К оплате» они не входят, школа их не отслеживает.</p>' : ''}`;
   };
   return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
@@ -224,63 +227,48 @@ function calendar(period, byDay, picked = '') {
   }
   return `<div class="cal">${cells.join('')}</div>`;
 }
-/* Строка «у кого занимались»: педагог/группа — сколько раз. */
-function byTeacher(items) {
-  const cnt = {};
-  items.forEach(l => { const k = l.group || l.teacher; cnt[k] = (cnt[k] || 0) + 1; });
-  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  return top.length ? `<br>${top.map(([k, v]) => `${esc(plainName(k))} — ${v}`).join(' · ')}` : '';
-}
-/* Тап по дню календаря показывает только его занятия; повторный тап возвращает месяц. */
 ACT.pDayPick = ({ d }) => { state.ui.pDay = state.ui.pDay === d ? '' : d; render(); };
 ACT.pDayReset = () => { state.ui.pDay = ''; render(); };
 
 SCREENS['p.lessons'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const d = await api(`/lessons/${kid()}?ym=${period}`);
-  const type = state.ui.pLesType || '';                 // '' | group | individual
-  const shown = type ? d.lessons.filter(l => l.type === type) : d.lessons;
-  const n = t => d.lessons.filter(l => l.type === t).length;
-  const typeChips = n('group') && n('individual')       // фильтр нужен, только если есть и те и другие
-    ? chipsAct('pLesType', type, [['', `Все · ${d.lessons.length}`], ['group', `Группы · ${n('group')}`], ['individual', `Индивидуальные · ${n('individual')}`]])
+  // здесь только расписание: ни сумм, ни статусов оплаты — деньги живут в «Счетах»
+  const teachers = [];
+  d.lessons.forEach(l => { if (!teachers.some(t => t[0] === l.teacherId)) teachers.push([l.teacherId, l.teacher]); });
+  const cur = teachers.some(t => t[0] === state.ui.pTeacher) ? state.ui.pTeacher : '';
+  const shown = cur ? d.lessons.filter(l => l.teacherId === cur) : d.lessons;
+  const chips = teachers.length > 1
+    ? chipsAct('pTeacher', cur, [['', `Все · ${d.lessons.length}`],
+        ...teachers.map(([id, name]) => [id, `${esc(plainName(name))} · ${d.lessons.filter(l => l.teacherId === id).length}`])])
     : '';
-  // журнал посещений: что было, по дням. Деньги и оплата — во вкладке «Счета»
   const byDay = {};
   shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
-  const days = Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1));     // свежие сверху
-  const dayBlock = day => `<div class="eyebrow" id="d-${day}">${fdate(day)}</div>${list(byDay[day].map(l => cell({
-    lead: l.type === 'group' ? '👥' : '👤', plain: true, cls: l.direct ? 'wrap' : '',
-    t: esc(l.group || l.teacher),
-    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}${l.direct ? '<br>оплата педагогу напрямую' : ''}`,
-    r: l.direct ? `<span class="hint">${fmt(l.directAmount)}</span>` : l.paid ? pill('оплачено', 'ok') : '',
-  })))}`;
-  const day = byDay[state.ui.pDay] ? state.ui.pDay : '';      // день из календаря (если он есть в месяце)
+  const day = byDay[state.ui.pDay] ? state.ui.pDay : '';
   const inView = day ? byDay[day] : shown;
+  const days = Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1));
   const minutes = inView.reduce((a, l) => a + l.durationMin, 0);
   const hours = `${Math.floor(minutes / 60)} ч${minutes % 60 ? ` ${minutes % 60} мин` : ''}`;
+  const dayBlock = dd => `<div class="eyebrow" id="d-${dd}">${fdate(dd)}</div>${list(byDay[dd].map(l => cell({
+    lead: l.type === 'group' ? '👥' : '👤', plain: true,
+    t: esc(l.group || l.teacher),
+    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
+  })))}`;
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
     ${monthChips('p.lessons', period, {})}
-    ${typeChips}
+    ${chips}
     ${shown.length ? `<div class="card pad" style="margin-bottom:10px">
         <div style="font-weight:700">${day ? `${fdate(day)} · ` : ''}${plural(inView.length, ['занятие', 'занятия', 'занятий'])} · ${hours}</div>
-        <div class="hint">${day ? 'показан один день — нажмите ещё раз, чтобы вернуть месяц'
-          : `${n('group')} в группах, ${n('individual')} индивидуальных${byTeacher(shown)}`}</div>
+        ${day ? '<div class="hint">показан один день — нажмите ещё раз, чтобы вернуть месяц</div>' : ''}
         <div style="margin-top:10px">${calendar(period, byDay, day)}</div>
         <div class="hint" style="margin-top:6px"><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle"></i> группа · <i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);vertical-align:middle"></i> индивидуальное</div>
         ${day ? `<div style="margin-top:10px">${btn('✕ Весь месяц', 'pDayReset', {}, 'ghost')}</div>` : ''}
       </div>${(day ? [day] : days).map(dayBlock).join('')}`
-      : empty(type ? 'Таких занятий в этом месяце нет' : 'В этом месяце занятий не было')}
-    ${d.directTotal ? `<div class="card pad" style="margin-top:14px">
-        <div style="font-weight:700">Педагогу напрямую · ${fmt(d.directTotal)}</div>
-        ${d.direct.map(x => `<div class="hint" style="display:flex;justify-content:space-between"><span>${esc(x.teacher)}</span><span class="money">${fmt(x.amount)}</span></div>`).join('')}
-        <p class="hint" style="margin:8px 0 0">Эти занятия вы оплачиваете педагогу лично — в счёт школы они не входят. Школа такие оплаты не отслеживает, статус уточняйте у педагога.</p>
-      </div>` : ''}
-    ${d.rest ? `<div style="margin-top:14px">${goBtn(`🧾 Счёт школы за ${MON_NOM[+period.slice(5) - 1].toLowerCase()} — к оплате ${fmt(d.rest)}`, 'p.bill', { ym: period }, 'sec')}</div>` : ''}
-    <p class="hint" style="margin-top:8px">Это история посещений. Суммы и оплата — во вкладке «Счета».</p>` };
+      : empty(cur ? 'У этого педагога занятий в месяце нет' : 'В этом месяце занятий не было')}
+    <p class="hint" style="margin-top:8px">Это расписание занятий. Суммы и оплата — во вкладке «Счета».</p>` };
 };
-
-ACT.pLesType = ({ v }) => { state.ui.pLesType = v; state.ui.pDay = ''; render(); };
+ACT.pTeacher = ({ v }) => { state.ui.pTeacher = v; state.ui.pDay = ''; render(); };
 
 /* ── Дневник ─────────────────────────────────────────────────────────── */
 SCREENS['p.diary'] = async ({ ym }) => {
