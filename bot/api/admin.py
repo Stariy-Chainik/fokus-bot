@@ -121,9 +121,19 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         debtors = sum(1 for m in debt_map.values() if any(ym < period and amt > 0 for ym, amt in m.items()))
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
+        # Кто сколько отметил сегодня — чипы фильтра на сводке администратора.
+        by_teacher: dict[str, int] = {}
+        for ls in lessons_today:
+            by_teacher[ls.teacher_id] = by_teacher.get(ls.teacher_id, 0) + 1
+        names = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
+        today_teachers = sorted(
+            ({"id": tid, "name": names.get(tid, tid), "lessons": n} for tid, n in by_teacher.items()),
+            key=lambda x: (-x["lessons"], x["name"]),
+        )
         return _json({
             "today": today, "period": period, "prevPeriod": prev,
             "pendingTotal": pending, "debtorsCount": debtors, "lessonsToday": len(lessons_today),
+            "todayTeachers": today_teachers,
             "studentsCount": len(await student_repo.get_all()),
         })
 

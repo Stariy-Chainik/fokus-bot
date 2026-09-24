@@ -257,3 +257,31 @@ def await_teacher(dp):
 def test_bill_send_requires_bot(api):
     app, _ = api
     assert _call(app, "POST", f"/api/admin/bill/STU-0001/send?ym={YM}")[0] == 503
+
+
+def test_home_lists_who_marked_lessons_today(api):
+    """Сводка отдаёт разбивку «отмечено сегодня» по педагогам — чипы фильтра на главной."""
+    from datetime import date as _date
+    app, dp = api
+    today = _date.today().isoformat()
+    second = mk_teacher("TCH-0002", "Никишин Влад", rate_group=1000, rate_for_teacher=1500, rate_for_student=2000)
+    dp["teacher_repo"].items.append(second)
+    first = dp["teacher_repo"].items[0]
+    dp["lesson_repo"].items += [
+        mk_lesson("LES-T1", first, today, students=[("STU-0001", "Иванов Иван")]),
+        mk_lesson("LES-T2", second, today, students=[("STU-0002", "Петрова Анна")]),
+        mk_lesson("LES-T3", second, today, students=[("STU-0001", "Иванов Иван")]),
+    ]
+    status, h = _call(app, "GET", "/api/admin/home")
+    assert status == 200 and h["lessonsToday"] == 3
+    assert h["todayTeachers"] == [                       # сначала тот, кто отметил больше
+        {"id": "TCH-0002", "name": "Никишин Влад", "lessons": 2},
+        {"id": "TCH-0001", "name": "Река Станислав", "lessons": 1},
+    ]
+    assert sum(t["lessons"] for t in h["todayTeachers"]) == h["lessonsToday"]
+
+
+def test_home_without_lessons_today_has_no_teacher_chips(api):
+    app, _dp = api
+    h = _call(app, "GET", "/api/admin/home")[1]
+    assert h["lessonsToday"] == 0 and h["todayTeachers"] == []

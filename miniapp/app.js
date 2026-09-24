@@ -60,6 +60,7 @@ const hero = sub => `<div class="hero"><img class="logo" src="logo.jpg" alt="Ф�
 
 /* Имя группы без эмодзи — для чипов и других узких мест (в карточках эмодзи остаются). */
 const plainName = n => String(n || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B00}-\u{2BFF}]/gu, '').replace(/\s+/g, ' ').trim();
+const surname = n => plainName(n).split(' ')[0] || plainName(n);   // «Река Станислав» → «Река» для чипов
 /* Группы ученика в одну строку: первая + «ещё N». */
 const groupsShort = (groups, limit = 1) => {
   const list_ = groups || [];
@@ -115,6 +116,9 @@ SCREENS['a.home'] = async () => {
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${inbox.total ? `<div style="margin-bottom:12px">${goBtn(`📥 Ждут решения · ${inbox.total}`, 'a.inbox', {}, '')}</div>` : ''}
     <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
+    ${h.todayTeachers && h.todayTeachers.length > 1 ? `<div class="eyebrow">Отмечено сегодня</div>
+      <div class="chips">${[['', `Все · ${h.lessonsToday}`], ...h.todayTeachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.lessons}`])]
+        .map(([tid, label]) => `<button class="chip" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: h.today, tid }))}'>${label}</button>`).join('')}</div>` : ''}
     <div class="eyebrow">Быстрые действия</div>
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
@@ -436,11 +440,24 @@ Object.assign(ACT, {
 
 /* ── занятия за день ─────────────────────────────────────────────────── */
 const lessonCell = ls => cell({ lead: ls.type === 'group' ? '👥' : ls.students.length > 1 ? '👫' : '👤', plain: true, t: esc(ls.type === 'group' ? ls.groupName || 'группа' : ls.students.join(' + ')), s: `${esc(ls.teacherName)} · ${ls.durationMin} мин${ls.type === 'group' && ls.students.length ? ` · ${plural(ls.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${ls.locked ? ' · 🔒' : ''}`, r: ls.earned ? `<b>${fmt(ls.earned)}</b>` : '', go: 'a.lesson', p: { id: ls.id } });
-SCREENS['a.lessons.day'] = async ({ date }) => {
+SCREENS['a.lessons.day'] = async ({ date, tid }) => {
   const days = []; for (let i = 0; i < 7; i++) { const x = new Date(); x.setDate(x.getDate() - i); days.push(x.toISOString().slice(0, 10)); }
   const d = date || days[0];
   const r = await api(`/lessons?date=${d}`);
-  return { title: 'Занятия за день', html: `<div class="chips">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: x }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div><div class="h2">${fdate(d)}</div>${r.lessons.length ? list(r.lessons.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(r.earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}` };
+  // Педагоги этого дня: чип выбирается с главного экрана или здесь; если у выбранного
+  // в этот день занятий нет (переключили день) — показываем всех.
+  const teachers = [];
+  r.lessons.forEach(ls => { const t = teachers.find(x => x.id === ls.teacherId); t ? t.n++ : teachers.push({ id: ls.teacherId, name: ls.teacherName, n: 1 }); });
+  teachers.sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+  const cur = teachers.some(t => t.id === tid) ? tid : '';
+  const shown = cur ? r.lessons.filter(ls => ls.teacherId === cur) : r.lessons;
+  const earned = shown.reduce((a, ls) => a + ls.earned, 0);
+  const dayChips = `<div class="chips">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: x, tid: cur }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div>`;
+  const teacherChips = teachers.length > 1
+    ? `<div class="chips">${[['', `Все · ${r.lessons.length}`], ...teachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.n}`])]
+        .map(([id, label]) => `<button class="chip" aria-pressed="${cur === id}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: d, tid: id }))}' data-replace="1">${label}</button>`).join('')}</div>`
+    : '';
+  return { title: 'Занятия за день', html: `${stickyFilters(dayChips + teacherChips)}<div class="h2">${fdate(d)}</div>${shown.length ? list(shown.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}` };
 };
 SCREENS['a.lesson'] = async ({ id }) => {
   const l = await api(`/lessons/${id}`);
