@@ -191,3 +191,16 @@ def test_cash_can_be_switched_off_for_a_group(api, monkeypatch):
                  json={"studentId": "STU-0001", "ym": YM, "method": "cash"})[0] == 200  # API не запрещаем
     monkeypatch.setattr(settings, "cash_disabled_group_ids", "")
     assert _call(app, "GET", "/api/parent/me")[1]["children"][0]["cashAllowed"] is True
+
+
+def test_direct_payment_lessons_are_marked_and_not_billed(api, monkeypatch):
+    """Занятия с прямой оплатой педагогу помечены и в счёт школы не попадают."""
+    app, dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]
+    direct = [x for x in les["lessons"] if x["direct"]]
+    assert direct and all(x["type"] == "individual" for x in direct)
+    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
+    billed = [x for r in bill["rows"] for x in r["lessons"]]
+    assert not [x for x in billed if x["id"] in {d["id"] for d in direct}]   # их нет в счёте
+    assert [x for x in billed if x["type"] == "group"]                        # группы педагога — как обычно

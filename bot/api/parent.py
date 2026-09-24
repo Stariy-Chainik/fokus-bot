@@ -19,6 +19,7 @@ from base64 import b64encode
 from aiohttp import web
 
 from bot.api.admin import auth_tg_id
+from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
@@ -179,6 +180,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
                 "type": ls.type.value, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
                 "group": groups.get(ls.group_id, ""), "amount": mark.amount, "paid": mark.paid,
+                # оплата мимо школы: в счёт не попадает, родитель платит педагогу сам
+                "direct": ls.type == LessonType.INDIVIDUAL
+                and ls.teacher_id in settings.direct_pay_teacher_id_set,
             })
         # «к оплате» берём из того же леджера, что и счёт: иначе абонемент и доплаты
         # не попадали бы в сумму и цифры на двух вкладках расходились

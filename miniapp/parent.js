@@ -249,9 +249,9 @@ SCREENS['p.lessons'] = async ({ ym }) => {
   shown.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
   const days = Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1));     // свежие сверху
   const dayBlock = day => `<div class="eyebrow" id="d-${day}">${fdate(day)}</div>${list(byDay[day].map(l => cell({
-    lead: l.type === 'group' ? '👥' : '👤', plain: true,
+    lead: l.type === 'group' ? '👥' : '👤', plain: true, cls: l.direct ? 'wrap' : '',
     t: esc(l.group || l.teacher),
-    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}`,
+    s: `${l.durationMin} мин${l.group ? ` · ${esc(l.teacher)}` : ''}${l.direct ? '<br>оплата педагогу напрямую — в счёт школы не входит' : ''}`,
     r: l.paid ? pill('оплачено', 'ok') : '',
   })))}`;
   const day = byDay[state.ui.pDay] ? state.ui.pDay : '';      // день из календаря (если он есть в месяце)
