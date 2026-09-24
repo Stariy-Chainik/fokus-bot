@@ -16,8 +16,11 @@ from typing import Any, cast
 from aiohttp import web
 
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
+from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.payment_methods import ADMIN_MANUAL
+from bot.services.profit_service import calculate_profit_lesson
+from bot.utils.attendees import parse_attendees
 from bot.services.rosters import group_members
 from bot.utils.dates import current_period, last_periods
 from bot.utils.locks import InProgressGuard
@@ -80,6 +83,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     student_service = dp["student_service"]
     salary_service = dp["salary_service"]
     client_repo = dp["client_repo"]
+    profit_service = dp["profit_service"]
 
     def admin_only(handler):
         async def wrapped(request: web.Request) -> web.Response:
@@ -121,21 +125,56 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         debtors = sum(1 for m in debt_map.values() if any(ym < period and amt > 0 for ym, amt in m.items()))
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
-        # Кто сколько отметил сегодня — чипы фильтра на сводке администратора.
-        by_teacher: dict[str, int] = {}
-        for ls in lessons_today:
-            by_teacher[ls.teacher_id] = by_teacher.get(ls.teacher_id, 0) + 1
-        names = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
-        today_teachers = sorted(
-            ({"id": tid, "name": names.get(tid, tid), "lessons": n} for tid, n in by_teacher.items()),
-            key=lambda x: (-x["lessons"], x["name"]),
-        )
         return _json({
             "today": today, "period": period, "prevPeriod": prev,
             "pendingTotal": pending, "debtorsCount": debtors, "lessonsToday": len(lessons_today),
-            "todayTeachers": today_teachers,
+            "todayTeachers": await _today_by_teacher(lessons_today),
+            # плитка «Прибыль»: сегодня — только занятия, месяц — как экран «Прибыль»
+            "profitToday": (await profit_service.get_lesson_summary(today)).profit,
+            "profitMonth": (await profit_service.get_month_summary(period)).profit,
             "studentsCount": len(await student_repo.get_all()),
         })
+
+    async def _today_by_teacher(lessons_today: list) -> list[dict]:
+        """Раскрывающийся список на сводке: педагог → его занятия за сегодня и прибыль школы.
+
+        Деньги считаются как на экране «Прибыль» (`calculate_profit_lesson`): абонементные
+        занятия без выручки в суммы не входят, но в списке видны — они тоже «отмечены сегодня».
+        """
+        teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
+        groups = await _groups_by_id()
+        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        blocks: dict[str, dict] = {}
+        for ls in sorted(lessons_today, key=lambda x: x.recorded_at or ""):
+            t = teachers.get(ls.teacher_id)
+            prow = calculate_profit_lesson(ls, t) if t else None
+            if ls.type == LessonType.GROUP:
+                who = [students.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
+                title = groups[ls.group_id].name if ls.group_id in groups else "Группа"
+            else:
+                who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
+                title = " + ".join(who) or "Занятие"
+            block = blocks.setdefault(ls.teacher_id, {
+                "id": ls.teacher_id, "name": t.name if t else ls.teacher_name, "lessons": 0,
+                "income": 0, "salary": 0, "profit": 0, "owner": bool(prow and prow.owner_income) or False,
+                "ownerIncome": 0, "items": [],
+            })
+            block["lessons"] += 1
+            if prow is not None:
+                block["income"] += prow.income
+                block["salary"] += prow.salary
+                block["ownerIncome"] += prow.owner_income
+                block["owner"] = block["owner"] or prow.owner_income > 0
+            block["items"].append({
+                "id": ls.lesson_id, "type": ls.type.value, "title": title, "durationMin": ls.duration_min,
+                "attendees": len(who) if ls.type == LessonType.GROUP else 0,
+                "billable": prow is not None,
+                "income": prow.income if prow else 0,
+                "salary": (prow.salary or prow.owner_income) if prow else 0,
+            })
+        for block in blocks.values():
+            block["profit"] = block["income"] - block["salary"]
+        return sorted(blocks.values(), key=lambda x: (-x["lessons"], x["name"]))
 
     # ── ученики ──────────────────────────────────────────────────────────
     async def students(request: web.Request, user) -> web.Response:

@@ -117,6 +117,16 @@
   /* Прямая оплата педагогу: деньги не школы — приглушаем, чтобы не путать с начислением */
   .r b.direct, .amt.direct, .total .big.direct { color: var(--muted); font-weight: 700; }
   .content.stale { opacity: .5; transition: opacity .12s ease-out; pointer-events: none; }
+  /* Раскрывающийся блок (сводка админа: педагог → занятия дня) */
+  .acc { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 8px; overflow: hidden; }
+  .acc > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; font-weight: 700; }
+  .acc > summary::-webkit-details-marker { display: none; }
+  .acc > summary .chev { color: var(--muted); display: inline-block; transition: transform .15s ease-out; margin-right: 8px; }
+  .acc[open] > summary .chev { transform: rotate(90deg); }
+  .acc > summary .r { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .acc .accbody { border-top: 1px solid var(--line); }
+  .acc .accsum { padding: 8px 14px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  @media (prefers-reduced-motion: reduce) { .acc > summary .chev { transition: none; } }
   .total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); font-weight: 700; }
   .total .big { font-size: 20px; font-weight: 800; }
   .total .big.bad { color: var(--bad); } .total .big.ok { color: var(--ok); }

@@ -274,14 +274,21 @@ def test_home_lists_who_marked_lessons_today(api):
     ]
     status, h = _call(app, "GET", "/api/admin/home")
     assert status == 200 and h["lessonsToday"] == 3
-    assert h["todayTeachers"] == [                       # сначала тот, кто отметил больше
-        {"id": "TCH-0002", "name": "Никишин Влад", "lessons": 2},
-        {"id": "TCH-0001", "name": "Река Станислав", "lessons": 1},
-    ]
+    nik, reka = h["todayTeachers"]                       # сначала тот, кто отметил больше
+    assert (nik["id"], nik["name"], nik["lessons"]) == ("TCH-0002", "Никишин Влад", 2)
+    assert (reka["id"], reka["lessons"]) == ("TCH-0001", 1)
     assert sum(t["lessons"] for t in h["todayTeachers"]) == h["lessonsToday"]
+    # раскрытый блок: занятия педагога и деньги школы как на экране «Прибыль»
+    assert [i["title"] for i in nik["items"]] == ["Петрова Анна", "Иванов Иван"]
+    assert (nik["income"], nik["salary"], nik["profit"]) == (4000, 3000, 1000)
+    assert nik["items"][0] == {"id": "LES-T2", "type": "individual", "title": "Петрова Анна", "durationMin": 45,
+                               "attendees": 0, "billable": True, "income": 2000, "salary": 1500}
+    # плитка «Прибыль»: сегодня — занятия дня, месяц — как экран «Прибыль»
+    assert h["profitToday"] == 1000 + 500
+    assert h["profitMonth"] >= h["profitToday"]
 
 
 def test_home_without_lessons_today_has_no_teacher_chips(api):
     app, _dp = api
     h = _call(app, "GET", "/api/admin/home")[1]
-    assert h["lessonsToday"] == 0 and h["todayTeachers"] == []
+    assert h["lessonsToday"] == 0 and h["todayTeachers"] == [] and h["profitToday"] == 0

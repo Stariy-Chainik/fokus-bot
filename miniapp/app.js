@@ -110,15 +110,26 @@ const val = id => { const el = document.getElementById(id); return el ? el.value
 /* ── экраны ──────────────────────────────────────────────────────────── */
 const SCREENS = {};
 
+/* Сводка: педагог → его занятия за сегодня и прибыль школы по ним (как на экране «Прибыль»). */
+const todayLessonLine = i => `<button class="lesson-line pick" data-go="a.lesson" data-p='${esc(JSON.stringify({ id: i.id }))}'>
+  <span>${i.type === 'group' ? '👥' : '👤'}</span>
+  <span><div>${esc(i.title)}${i.attendees ? ` · ${plural(i.attendees, ['ученик', 'ученика', 'учеников'])}` : ''}</div>
+    <div class="d">${i.durationMin} мин${i.billable ? ` · зарплата ${fmt(i.salary)}` : ' · абонемент'}</div></span>
+  <span class="amt ${i.billable ? '' : 'direct'}">${i.billable ? fmt(i.income) : '—'}</span></button>`;
+const todayTeacherBlock = t => `<details class="acc">
+  <summary><span><span class="chev">›</span>${esc(t.name)} <span class="hint">· ${plural(t.lessons, ['занятие', 'занятия', 'занятий'])}</span></span>
+    <span class="r ${!t.income && !t.salary ? 'hint' : t.owner ? '' : t.profit < 0 ? 'money bad' : 'money ok'}">${!t.income && !t.salary ? 'абонемент' : t.owner ? `👑 ${fmt(t.income)}` : fmt(t.profit)}</span></summary>
+  <div class="accbody">
+    <div class="accsum">${!t.income && !t.salary ? 'только абонементные занятия — деньги считаются по месяцу' : t.owner ? `выручка ${fmt(t.income)} — руководитель, зарплата в прибыли` : `выручка ${fmt(t.income)} − зарплата ${fmt(t.salary)} = прибыль ${fmt(t.profit)}`}</div>
+    ${t.items.map(todayLessonLine).join('')}
+  </div></details>`;
 SCREENS['a.home'] = async () => {
   const [h, inbox] = await Promise.all([api('/home'), api('/inbox').catch(() => ({ total: 0 }))]);
   return { title: 'Школа сегодня', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${inbox.total ? `<div style="margin-bottom:12px">${goBtn(`📥 Ждут решения · ${inbox.total}`, 'a.inbox', {}, '')}</div>` : ''}
-    <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(h.studentsCount, 'учеников', '', 'a.students')}</div>
-    ${h.todayTeachers && h.todayTeachers.length > 1 ? `<div class="eyebrow">Отмечено сегодня</div>
-      <div class="chips">${[['', `Все · ${h.lessonsToday}`], ...h.todayTeachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.lessons}`])]
-        .map(([tid, label]) => `<button class="chip" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: h.today, tid }))}'>${label}</button>`).join('')}</div>` : ''}
+    <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(fmt(h.profitToday), `прибыль сегодня · за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()} ${fmt(h.profitMonth)}`, h.profitToday < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}</div>
+    ${h.todayTeachers && h.todayTeachers.length ? `<div class="eyebrow">Отмечено сегодня</div>${h.todayTeachers.map(todayTeacherBlock).join('')}` : ''}
     <div class="eyebrow">Быстрые действия</div>
     ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };

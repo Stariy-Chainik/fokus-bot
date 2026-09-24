@@ -59,10 +59,13 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
 
 ### Telegram Mini App (кабинеты администратора и педагога)
 
-На сводке администратора («Школа сегодня») под плиткой «отмечено сегодня» — чипы педагогов с числом
-занятий (`home.todayTeachers`); тап открывает «Занятия за день», отфильтрованные по этому педагогу
-(`a.lessons.day` c `tid`, там же чипы для переключения; при смене дня фильтр слетает, если у педагога
-в этот день занятий нет).
+На сводке администратора («Школа сегодня») плитки: ожидает оплаты · должники · отмечено сегодня ·
+**прибыль** (сегодня — только занятия дня, в подписи месяц; тап → экран «Прибыль»; плитки «учеников»
+нет — ученики есть в нижнем меню). Ниже — **раскрывающийся список педагогов** (`<details class="acc">`,
+`home.todayTeachers`): в заголовке педагог, число занятий и прибыль школы по ним (у руководителя 👑 — выручка),
+внутри «выручка − зарплата = прибыль» и занятия дня с суммой ученика и зарплатой (абонементные — без денег,
+как на экране «Прибыль»: `calculate_profit_lesson`). На экране «Занятия за день» (`a.lessons.day`)
+чипы педагогов остались: `tid` фильтрует список и итог.
 Фронт `miniapp/` (`index.html` + `app.js`, без сборки) раздаётся aiohttp-сервером бота по `/app/`
 ([bot/api/static.py](bot/api/static.py)); API `/api/admin/*` — [bot/api/admin.py](bot/api/admin.py), тонкий слой над
 `PaymentService`/`SalaryService`/`StudentService` (суммы считает сервер, один запрос = один экран).
@@ -214,7 +217,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `TeacherRateHistoryRepository` | `teacher_rate_history` | История ставок: `until_period` — «ставки действуют по этот месяц включительно»; для периода берётся ближайшая граница ≥ period, иначе карточка педагога. Кэш в памяти (`bot/services/rate_history.py`), обновляется фоном раз в 5 мин |
 | `TrainingEntryRepository` | `training_entries` | Дневник спортсмена: `(entry_id TE-, student_id, date, minutes, topics\|, task_ids\|, comment, grade 1–5, grade_comment, graded_by)`; оценку ставит педагог |
 | `AthleteTaskRepository` | `athlete_tasks` | Задания педагога спортсмену: `(task_id TK-, student_id, teacher_id, exercise, minutes, comment, source teacher\|lecture, status open\|closed)`; открыто до закрытия педагогом |
-| `PendingActionRepository` | `pending_actions` | Очередь решений администратора: `(action_id ACT-, kind cash\|receipt\|child, student_id, period_month, amount, method, parent_addr, file_id, status open\|done\|rejected)`. Пишется, когда родитель сообщает об оплате или присылает чек (бот, кабинет, MAX); закрывается любым решением — кнопкой в чате или в кабинете ([bot/services/pending_queue.py](bot/services/pending_queue.py)). **Идемпотентность:** кнопка уведомления несёт `action_id` (`pact:{id}:{сумма}:{код}` / `pnay:{id}`), перед зачислением `claim()` атомарно переводит строку `open → done` под замком листа с перечиткой статуса — сколько бы копий уведомления ни висело в чатах, зачтётся один раз. **Переплата:** если заявленная сумма больше остатка, подтверждение не проходит молча — бот показывает выбор «зачесть остаток / зачесть всё», кабинет отвечает 409 `needsConfirm` и спрашивает тем же вопросом |
+| `PendingActionRepository` | `pending_actions` | Очередь решений администратора: `(action_id ACT-, kind cash\|receipt\|child, student_id, period_month, amount, method, parent_addr, file_id, status open\|done\|rejected)`. Пишется, когда родитель сообщает об оплате или присылает чек (бот, кабинет, MAX); закрывается любым решением — кнопкой в чате или в кабинете ([bot/services/pending_queue.py](bot/services/pending_queue.py)). **Номер выдаётся под замком листа** (`add()` в `_sheet_lock()`), иначе два тапа родителя в одну секунду получали один `ACT-` на двоих (случай Чербы 21.09.2026: три строки ACT-000002, кнопка «Отклонить» закрывала первую, а открытые копии висели в кабинете). `claim()`/`close()` закрывают **все** открытые строки с этим id, `get_by_id` предпочитает открытую копию. **Идемпотентность:** кнопка уведомления несёт `action_id` (`pact:{id}:{сумма}:{код}` / `pnay:{id}`), перед зачислением `claim()` атомарно переводит строку `open → done` под замком листа с перечиткой статуса — сколько бы копий уведомления ни висело в чатах, зачтётся один раз. **Переплата:** если заявленная сумма больше остатка, подтверждение не проходит молча — бот показывает выбор «зачесть остаток / зачесть всё», кабинет отвечает 409 `needsConfirm` и спрашивает тем же вопросом |
 | `SubscriptionOverrideRepository` | `subscription_overrides` | Переопределение цены абонемента на месяц: `(group_id, period, student_id?)` → amount; пустой student_id = вся группа |
 
 **Google Sheets locale gotcha**: Russian-locale spreadsheets interpret `,` as a decimal separator. Any multi-value field written as comma-separated integers will be silently corrupted (`"123,456"` → `123.456` → `123`). Use `|` as separator. See `student.parent_tg_ids` (parser still accepts `,` for backwards compatibility).
