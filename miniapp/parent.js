@@ -88,6 +88,8 @@ SCREENS['p.bill'] = async ({ ym }) => {
   const line = (r, l) => {
     const pick = sel[r.key];
     const what = `${l.type === 'group' ? '👥' : '👤'} ${fdate(l.date)} · ${l.durationMin} мин`;
+    // прямая оплата педагогу: выбирать нечего — школе за них не платят
+    if (r.direct) return `<div class="lesson-line"><span></span><span>${what}</span><span class="amt">${fmt(l.amount)}</span></div>`;
     if (l.paid) return `<div class="lesson-line"><span class="mark paid">✓</span><span>${what}<div class="d">оплачено</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
     const on = !!pick && (pick.all || pick.lessons.has(l.id));
     return `<button class="lesson-line pick" data-act="bPickLesson" data-p='${esc(JSON.stringify({ key: r.key, id: l.id }))}'>${mark(on)}<span>${what}</span><span class="amt">${fmt(l.amount)}</span></button>`;
@@ -108,7 +110,7 @@ SCREENS['p.bill'] = async ({ ym }) => {
     return `${head(r)}
       ${r.subscription ? `<div class="lesson-line"><span></span><span class="hint">абонемент за месяц, целиком</span><span></span></div>`
         : open ? r.lessons.map(l => line(r, l)).join('')
-        : `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])}${unpaid ? `, ${unpaid} не оплачено` : ''} — показать</span><span class="hint">▾</span></button>`}
+        : `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">${plural(r.lessons.length, ['занятие', 'занятия', 'занятий'])}${!r.direct && unpaid ? `, ${unpaid} не оплачено` : ''} — показать</span><span class="hint">▾</span></button>`}
       ${open && !r.subscription ? `<button class="lesson-line pick" data-act="bToggleRow" data-p='${esc(JSON.stringify({ key: r.key }))}'><span></span><span class="hint">свернуть</span><span class="hint">▴</span></button>` : ''}
       ${r.overpaid ? `<div class="lesson-line"><span></span><span class="hint">переплата ${fmt(r.overpaid)} — учтём в следующем месяце</span><span></span></div>` : ''}`;
   };
