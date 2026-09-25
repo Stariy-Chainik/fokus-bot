@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # (teacher_id через запятую или |, например: TCH-0009). Пусто — счета только у админов.
     billing_teacher_ids: str = Field(default="", alias="BILLING_TEACHER_IDS")
 
+    # Сдача периода педагогом («📤 Сдать период», замок на месяц). Отключена по решению
+    # владельца 25.09.2026: кнопки и API нет, уже сданные месяцы остаются закрытыми,
+    # открыть их может администратор.
+    teacher_period_submit_enabled: bool = Field(default=False, alias="TEACHER_PERIOD_SUBMIT_ENABLED")
+
     @property
     def billing_teacher_id_set(self) -> set:
         return {t.strip() for t in self.billing_teacher_ids.replace("|", ",").split(",") if t.strip()}

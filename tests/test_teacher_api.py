@@ -281,3 +281,21 @@ def test_no_direct_block_for_ordinary_teacher(api):
     assert st["direct"] is None and not any(ln["direct"] for ln in st["lines"])
     assert all(x["direct"] is False and x["directAmount"] == 0
                for x in _call(app, "GET", f"/api/teacher/lessons?ym={YM}")[1]["lessons"])
+
+
+def test_period_submission_can_be_switched_off(api, monkeypatch):
+    """TEACHER_PERIOD_SUBMIT_ENABLED=false: кнопки нет, API отказывает, сводка без замка и напоминаний."""
+    from bot.keyboards.teacher import kb_teacher_menu
+    app, dp = api
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", False)
+    assert _call(app, "GET", "/api/teacher/me")[1]["periodSubmit"] is False
+    home = _call(app, "GET", "/api/teacher/home")[1]
+    assert home["periodSubmit"] is False and home["canSubmit"] is False
+    status, err = _call(app, "POST", "/api/teacher/submit", json={"ym": YM})
+    assert status == 403 and err["error"] == "disabled"
+    assert not any(x.period_month == YM for x in dp["submission_repo"].items)   # текущий месяц не сдан
+    labels = [b.text for row in kb_teacher_menu(teacher_id="TCH-0001").inline_keyboard for b in row]
+    assert "📤 Сдать период" not in labels
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
+    labels = [b.text for row in kb_teacher_menu(teacher_id="TCH-0001").inline_keyboard for b in row]
+    assert "📤 Сдать период" in labels

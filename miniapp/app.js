@@ -271,7 +271,7 @@ SCREENS['a.student'] = async ({ id }) => {
 
 SCREENS['a.teachers'] = async () => {
   const d = await api('/teachers');
-  return { title: 'Педагоги', html: `${list(d.teachers.map(t => cell({ lead: t.submittedPrev || t.isOwner ? '🟢' : '🔴', plain: true, t: esc(t.name), s: esc(t.groups.join(', ')) || 'групп нет', r: t.isOwner ? pill('👑 руководитель', 'warn') : t.directPay ? pill('прямая оплата', 'acc') : '', go: 'a.teacher', p: { id: t.id } })))}<p class="hint" style="margin-top:8px">🟢/🔴 — сдан ли ${MON_NOM[+d.prevPeriod.slice(5) - 1].toLowerCase()}</p><div style="margin-top:8px">${goBtn('➕ Добавить педагога', 'a.teacher.add', {}, 'sec')}</div>` };
+  return { title: 'Педагоги', html: `${list(d.teachers.map(t => cell({ ...(d.periodSubmit ? { lead: t.submittedPrev || t.isOwner ? '🟢' : '🔴', plain: true } : { lead: initials(t.name) }), t: esc(t.name), s: esc(t.groups.join(', ')) || 'групп нет', r: t.isOwner ? pill('👑 руководитель', 'warn') : t.directPay ? pill('прямая оплата', 'acc') : '', go: 'a.teacher', p: { id: t.id } })))}${d.periodSubmit ? `<p class="hint" style="margin-top:8px">🟢/🔴 — сдан ли ${MON_NOM[+d.prevPeriod.slice(5) - 1].toLowerCase()}</p>` : ''}<div style="margin-top:8px">${goBtn('➕ Добавить педагога', 'a.teacher.add', {}, 'sec')}</div>` };
 };
 
 SCREENS['a.teacher'] = async ({ id }) => {
@@ -280,7 +280,7 @@ SCREENS['a.teacher'] = async ({ id }) => {
     <div class="kpis">${kpi(fmt(t.rates.group), 'ставка — группа / 45 мин')}${kpi(fmt(t.rates.teacher), 'ставка — инд. / 45 мин')}${kpi(fmt(t.rates.student), 'цена для ученика / 45 мин')}${kpi(fmt(t.salary), `начислено за ${MON_NOM[+t.period.slice(5) - 1].toLowerCase()}`)}</div>
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
-    <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Ещё ничего не сдано', '<p class="hint" style="margin:0">Педагог сдаёт период с 25-го числа</p>')}
+    <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Сданных периодов нет', '<p class="hint" style="margin:0">Сданный месяц закрыт для правок педагога; открыть его можно здесь</p>')}
     <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
 };
 

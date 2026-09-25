@@ -248,7 +248,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                 "isOwner": t.teacher_id in settings.owner_teacher_id_set,
                 "directPay": t.teacher_id in settings.direct_pay_teacher_id_set,
             })
-        return _json({"teachers": out, "prevPeriod": prev})
+        return _json({"teachers": out, "prevPeriod": prev,
+                      "periodSubmit": settings.teacher_period_submit_enabled})   # 🟢/🔴 только при включённой сдаче
 
     async def teacher_card(request: web.Request, user) -> web.Response:
         tid = request.match_info["tid"]

@@ -166,6 +166,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return _json({
             "tgId": user.tg_id, "isAdmin": user.is_admin, "teacherId": teacher.teacher_id,
             "name": teacher.name, "canBill": teacher.teacher_id in settings.billing_teacher_id_set,
+            "periodSubmit": settings.teacher_period_submit_enabled,   # кнопка «Сдать период» и замок месяца
         })
 
     async def home(request: web.Request, user, teacher) -> web.Response:
@@ -183,8 +184,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             # прямая оплата: школа не начисляет, но на сводке это не должно выглядеть нулём
             "directMonth": sum(direct_amount(ls, teacher) for ls in month),
             "directToday": sum(direct_amount(ls, teacher) for ls in today_lessons),
+            "periodSubmit": settings.teacher_period_submit_enabled,
             "periodSubmitted": period in submitted, "prevSubmitted": prev in submitted,
-            "canSubmit": LessonService.can_submit_period(date.today(), period),
+            "canSubmit": settings.teacher_period_submit_enabled and LessonService.can_submit_period(date.today(), period),
             "groups": len(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))),
         })
 
@@ -387,6 +389,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ym = (body or {}).get("ym") or current_period()
         if not isinstance(ym, str) or len(ym) != 7:
             return _json({"error": "bad_request"}, status=400)
+        if not settings.teacher_period_submit_enabled:
+            return _json({"error": "disabled", "message": "Сдача периода отключена"}, status=403)
         if not LessonService.can_submit_period(date.today(), ym):
             return _json({"error": "too_early", "message": "Сдать период можно с 25-го числа"}, status=409)
         if await submission_repo.get_by_teacher_and_period(teacher.teacher_id, ym):

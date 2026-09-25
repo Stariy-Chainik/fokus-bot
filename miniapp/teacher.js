@@ -7,7 +7,8 @@
 /* ── Сводка ──────────────────────────────────────────────────────────── */
 SCREENS['t.home'] = async () => {
   const h = await api('/home');
-  const lock = h.periodSubmitted
+  // Сдача периода отключена (periodSubmit=false): ни замка, ни напоминаний «не сдан».
+  const lock = !h.periodSubmit ? '' : h.periodSubmitted
     ? pill('период сдан', 'ok')
     : h.canSubmit ? pill('можно сдавать', 'warn') : pill(`сдать с 25 ${MON_SHORT[+h.period.slice(5) - 1]}`, 'mute');
   return { title: 'Мой день', html: `
@@ -25,9 +26,9 @@ SCREENS['t.home'] = async () => {
     ${list([
       cell({ lead: '📋', plain: true, t: 'Мои занятия', s: 'сегодня, вчера, месяц', go: 't.lessons', p: {} }),
       cell({ lead: '👥', plain: true, t: 'Мои группы', s: `${plural(h.groups, ['группа', 'группы', 'групп'])}: состав, пары${state.me.canBill ? ', оплата' : ', солисты'}`, go: 't.groups', p: {} }),
-      cell({ lead: '💰', plain: true, t: 'Зарплата и период', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
+      cell({ lead: '💰', plain: true, t: h.periodSubmit ? 'Зарплата и период' : 'Зарплата', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
     ])}
-    ${!h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
+    ${h.periodSubmit && !h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
     ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'группа → вкладка «Оплата» → ученик', go: 't.groups', p: {} })])}` : ''}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
@@ -173,19 +174,20 @@ SCREENS['t.student'] = async ({ id, ym }) => {
 const T_LINE_ICON = { shift: '🕒', override: '✍️', in_shift: '↳', lesson: '📘' };
 SCREENS['t.money'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
-  const [st, sub] = [await api(`/stats?ym=${period}`), await api(`/submit?ym=${period}`)];
-  const state_ = sub.submitted ? pill('период сдан', 'ok') : sub.canSubmit ? pill('можно сдать', 'warn') : pill('сдаётся с 25-го', 'mute');
+  const canSubmitPeriod = !!(state.me && state.me.periodSubmit);
+  const [st, sub] = [await api(`/stats?ym=${period}`), canSubmitPeriod ? await api(`/submit?ym=${period}`) : { submitted: st => false }];
+  const state_ = !canSubmitPeriod ? '' : sub.submitted ? pill('период сдан', 'ok') : sub.canSubmit ? pill('можно сдать', 'warn') : pill('сдаётся с 25-го', 'mute');
   const d = st.direct && st.direct.lessons ? st.direct : null;   // блок прямой оплаты
   const paid = st.lines.filter(x => !x.direct);                  // строки, которые платит школа
   return { title: 'Зарплата', html: `
     ${monthChips('t.money', period, {})}
     <div class="card pad"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em">${fmt(st.total)}</div>
       <div class="hint">${MON_NOM[+period.slice(5) - 1]} · ${plural(st.groupLessons + st.individualLessons, ['занятие', 'занятия', 'занятий'])}${st.groupLessons ? ` · 👥 ${st.groupLessons}` : ''}${st.individualLessons ? ` · 👤 ${st.individualLessons}` : ''}</div>
-      <div style="margin-top:8px">${state_}</div></div>
-    <div style="margin-top:12px">${sub.submitted
+      ${state_ ? `<div style="margin-top:8px">${state_}</div>` : ''}</div>
+    ${!canSubmitPeriod ? '' : `<div style="margin-top:12px">${sub.submitted
       ? '<div class="card pad hint">Период сдан: занятия этого месяца больше не редактируются. Открыть его может администратор.</div>'
       : btn(sub.canSubmit ? `📤 Сдать ${MON_NOM[+period.slice(5) - 1].toLowerCase()} (${plural(sub.lessons, ['занятие', 'занятия', 'занятий'])}, ${fmt(sub.total)})` : `Сдать период можно с 25 ${MON_SHORT[+period.slice(5) - 1]}`,
-        'tSubmitAsk', { ym: period, lessons: sub.lessons, total: sub.total }, sub.canSubmit ? '' : 'ghost')}</div>
+        'tSubmitAsk', { ym: period, lessons: sub.lessons, total: sub.total }, sub.canSubmit ? '' : 'ghost')}</div>`}
     <div class="eyebrow">Начисления</div>
     ${paid.length || d ? list([
       ...paid.map(x => cell({

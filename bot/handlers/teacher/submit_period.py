@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.models import TeacherPeriodSubmission
+from config.settings import settings
 from bot.repositories import LessonRepository, TeacherPeriodSubmissionRepository
 from bot.services import LessonService
 from bot.repositories import TeacherRepository  # noqa: F401  (DI hint)
@@ -98,12 +99,18 @@ async def _show_confirm(
     )
 
 
+SUBMIT_DISABLED = "Сдача периода отключена — месяцы закрывает администратор"
+
+
 @router.callback_query(F.data == "teacher:submit_period", TeacherOnly())
 async def cb_submit_period_start(
     callback: CallbackQuery, user: TeacherUser, state: FSMContext,
     lesson_repo: LessonRepository,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> None:
+    if not settings.teacher_period_submit_enabled:      # старые кнопки в чатах
+        await callback.answer(SUBMIT_DISABLED, show_alert=True)
+        return
     await state.clear()
 
     open_periods, _counts = await _open_periods(user.teacher_id, lesson_repo, submission_repo)

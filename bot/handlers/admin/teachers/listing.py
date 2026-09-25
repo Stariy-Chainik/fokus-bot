@@ -36,9 +36,10 @@ def _kb_teachers_list_with_status(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for t in teachers:
-        mark = "🟢" if t.teacher_id in submitted_ids else "🔴"
+        # статус сдачи показываем, только пока сдача периода включена
+        mark = ("🟢 " if t.teacher_id in submitted_ids else "🔴 ") if settings.teacher_period_submit_enabled else ""
         rows.append([InlineKeyboardButton(
-            text=f"{mark} {t.name}", callback_data=f"teacher_card:{t.teacher_id}",
+            text=f"{mark}{t.name}", callback_data=f"teacher_card:{t.teacher_id}",
         )])
     rows.append([InlineKeyboardButton(text="➕ Добавить педагога", callback_data="teachers:add")])
     rows.append([InlineKeyboardButton(text="« Назад", callback_data="admin:menu")])
@@ -68,10 +69,10 @@ async def cb_teachers_list(
         s.teacher_id for s in await submission_repo.get_all()
         if s.period_month == prev
     }
+    header = (f"<b>Педагоги</b>\nСтатус сдачи периода: {display_period(prev)}\n🟢 — сдан, 🔴 — открыт"
+              if settings.teacher_period_submit_enabled else "<b>Педагоги</b>")
     await callback.message.edit_text(
-        f"<b>Педагоги</b>\nСтатус сдачи периода: {display_period(prev)}\n"
-        "🟢 — сдан, 🔴 — открыт",
-        reply_markup=_kb_teachers_list_with_status(teachers, submitted_ids),
+        header, reply_markup=_kb_teachers_list_with_status(teachers, submitted_ids),
     )
     await callback.answer()
 
