@@ -12,6 +12,7 @@ _RESET = {
     "shift_groups": "",
     "hall_rent_per_lesson": "",
     "student_lesson_rates": "",
+    "parent_bills_since_period": "",     # границу истории родителя тесты включают явно
     "hall_rent_since_period": "",
     "parent_receipt_email": True,
     "athlete_group_ids": "GRP-0001",

@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from bot.repositories import StudentRepository, TeacherRepository
 from bot.services import DiaryService
 from bot.keyboards.athlete import kb_period_toggle
+from bot.services.parent_views import history_hidden
 from bot.utils.dates import last_periods, format_date_display
 from bot.utils.diary_format import stats_text, tasks_text, stars, leaderboard_text
 
@@ -14,7 +15,7 @@ router = Router(name="client_diary")
 
 
 def _kb(student_id: str, period: str, this: str, prev: str, many: bool) -> InlineKeyboardMarkup:
-    rows = [kb_period_toggle(f"cldiary:m:{student_id}", period, this, prev)]
+    rows = [kb_period_toggle(f"cldiary:m:{student_id}", period, this, prev, show_prev=not history_hidden(prev))]
     rows.append([InlineKeyboardButton(text="🏆 Рейтинг группы", callback_data=f"cldiary:rating:{student_id}:{period}")])
     if many:
         rows.append([InlineKeyboardButton(text="« К детям", callback_data="client:diary")])
@@ -90,6 +91,9 @@ async def cb_client_diary_student(
     parts = callback.data.split(":")
     student_id = parts[2]
     period = parts[3] if len(parts) > 3 else last_periods(1)[0]
+    if history_hidden(period):
+        await callback.answer("Дневник показывается с сентября 2026", show_alert=True)
+        return
     students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     student = next((s for s in students if s.student_id == student_id), None)
     if student is None:
@@ -111,10 +115,13 @@ async def cb_client_diary_rating(
     if not any(s.student_id == student_id for s in students):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    if history_hidden(period):
+        await callback.answer("Рейтинг показывается с сентября 2026", show_alert=True)
+        return
     this, prev = last_periods(2)
     rows = await diary_service.leaderboard(period)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        kb_period_toggle(f"cldiary:rating:{student_id}", period, this, prev),
+        kb_period_toggle(f"cldiary:rating:{student_id}", period, this, prev, show_prev=not history_hidden(prev)),
         [InlineKeyboardButton(text="« К дневнику", callback_data=f"cldiary:m:{student_id}:{period}")],
         [InlineKeyboardButton(text="« Меню", callback_data="go:home")],
     ])

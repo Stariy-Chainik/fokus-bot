@@ -117,13 +117,16 @@ def kb_log_done() -> InlineKeyboardMarkup:
 
 # ─── Мои тренировки ──────────────────────────────────────────────────────────
 
-def kb_period_toggle(cb_prefix: str, period: str, this: str, prev: str) -> list[InlineKeyboardButton]:
-    """Ряд «Этот месяц / Прошлый месяц»; активный помечен ●."""
+def kb_period_toggle(
+    cb_prefix: str, period: str, this: str, prev: str, show_prev: bool = True,
+) -> list[InlineKeyboardButton]:
+    """Ряд «Этот месяц / Прошлый месяц»; активный помечен ●.
+    show_prev=False — прошлый месяц не показываем (родителю история с сентября 2026)."""
     def _btn(label: str, p: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(
             text=f"● {label}" if p == period else label, callback_data=f"{cb_prefix}:{p}",
         )
-    return [_btn("Этот месяц", this), _btn("Прошлый месяц", prev)]
+    return [_btn("Этот месяц", this)] + ([_btn("Прошлый месяц", prev)] if show_prev else [])
 
 
 def kb_entries(entries: list, period: str, this: str, prev: str) -> InlineKeyboardMarkup:

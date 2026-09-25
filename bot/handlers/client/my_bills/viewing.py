@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 
 from bot.repositories import StudentRepository
 from bot.services import PaymentService
-from bot.services.parent_views import bills_periods, bill_detail
+from bot.services.parent_views import bills_periods, bill_detail, history_hidden, visible_periods
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import student_select_screen, bills_list_screen, bill_detail_screen
 from ._base import router
@@ -41,6 +41,7 @@ async def _show_bills(
     await _edit(callback, bills_list_screen(
         period_rows, student_id, who, show_older,
         show_back=len(students_all) > 1,
+        has_older=len(visible_periods(6)) > 2,      # история с сентября — раньше показывать нечего
     ))
 
 
@@ -87,6 +88,9 @@ async def cb_bill_detail(
     callback: CallbackQuery, student_repo: StudentRepository, payment_service: PaymentService,
 ) -> None:
     _, student_id, period_month = callback.data.split(":", 2)
+    if history_hidden(period_month):
+        await callback.answer("Счета показываются с сентября 2026", show_alert=True)
+        return
     all_students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not all_students:
         await callback.answer("Нет доступа", show_alert=True)

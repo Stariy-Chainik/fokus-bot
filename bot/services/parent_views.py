@@ -14,8 +14,25 @@ from bot.services.parent_notifier import fmt_addr
 from bot.screens.parent_bills import BillDetail, render_bill_detail  # noqa: F401 — BillDetail реэкспорт
 from bot.services.payment_ledger import ledger_totals
 from bot.services.payment_methods import callback_code
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def history_hidden(period: str) -> bool:
+    """Месяц раньше PARENT_BILLS_SINCE_PERIOD родителю не показывается нигде.
+
+    Кабинет для родителей заработал с сентября 2026; всё, что раньше, — архив
+    школы (апрель–август закрыты оптом 09.09.2026). Одна граница на кабинет,
+    Telegram-бот и MAX: счета, занятия, дневник.
+    """
+    since = settings.parent_bills_since_period
+    return bool(since and period[:7] < since)
+
+
+def visible_periods(count: int) -> list:
+    """Последние `count` месяцев, которые родителю можно показывать."""
+    return [ym for ym in last_periods(count) if not history_hidden(ym)]
 
 
 METHOD_LABELS = {
@@ -37,7 +54,7 @@ class PeriodRow:
 async def bills_periods(students: list, payment_service, show_older: bool = False) -> list[PeriodRow]:
     """show_older=False — текущий и прошлый месяц; True — остальные из последних 6.
     Иконка: ✅ всё оплачено, ⏳ есть остаток к оплате, 📅 текущий месяц."""
-    all_periods = last_periods(6)
+    all_periods = visible_periods(6)
     periods = all_periods[2:] if show_older else all_periods[:2]
     rows: list[PeriodRow] = []
     for period_month in periods:

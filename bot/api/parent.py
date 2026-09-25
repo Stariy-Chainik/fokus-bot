@@ -23,11 +23,11 @@ from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.parent_views import (
-    admin_confirm_rows, cash_notice, cash_options, client_contact, qr_png,
+    admin_confirm_rows, cash_notice, cash_options, client_contact, history_hidden, qr_png, visible_periods,
 )
 from bot.services.payment_methods import CASH
 from bot.services.pending_queue import KIND_CASH, queue_action
-from bot.utils.dates import current_period, last_periods
+from bot.utils.dates import current_period
 from bot.utils.notify import notify
 from config.settings import settings
 
@@ -40,17 +40,13 @@ def _json(data, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
-def _hidden(period: str) -> bool:
-    """Месяц до PARENT_BILLS_SINCE_PERIOD: кабинет родителя работает с сентября 2026,
-    более ранняя история (закрытая оптом 09.09.2026) родителю не показывается нигде."""
-    since = settings.parent_bills_since_period
-    return bool(since and period < since)
-
-
 def _visible_periods(count: int) -> list:
     """Месяцы для родителя: не раньше PARENT_BILLS_SINCE_PERIOD (до него — архив школы)."""
-    since = settings.parent_bills_since_period
-    return [ym for ym in last_periods(count) if not since or ym >= since]
+    return visible_periods(count)
+
+
+def _hidden(period: str) -> bool:
+    return history_hidden(period)
 
 
 def _dp_get(dp, key: str):

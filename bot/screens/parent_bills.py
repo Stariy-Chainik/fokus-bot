@@ -129,8 +129,10 @@ def student_select_screen(students: list, section: str) -> tuple:
 
 def bills_list_screen(
     period_rows: list, student_id: str, who: str, show_older: bool, show_back: bool,
+    has_older: bool = True,
 ) -> tuple:
-    """period_rows: [PeriodRow]. Пустой список — сообщение «не найдено»."""
+    """period_rows: [PeriodRow]. Пустой список — сообщение «не найдено».
+    has_older=False — раньше показывать нечего (история с сентября), кнопки «Другие месяцы» нет."""
     if not period_rows:
         text = ("📋 За более ранние месяцы занятий не найдено." if show_older
                 else "📋 Занятий за текущий и прошлый месяц не найдено.")
@@ -140,7 +142,8 @@ def bills_list_screen(
     if show_older:
         rows.append([cb("« К текущим месяцам", f"cl_bills_stu:{student_id}")])
     else:
-        rows.append([cb("📆 Другие месяцы", f"cl_bills_more:{student_id}")])
+        if has_older:
+            rows.append([cb("📆 Другие месяцы", f"cl_bills_more:{student_id}")])
         if student_id != "all" and show_back:
             rows.append([cb("« Назад", "client:my_bills")])
     rows.append([cb("« Меню", HOME)])

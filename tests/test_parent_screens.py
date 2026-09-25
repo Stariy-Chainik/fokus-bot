@@ -248,3 +248,38 @@ def test_bill_detail_with_only_direct_lessons_is_not_empty():
     text = "\n".join(detail.lines)
     assert "Занятий не найдено" not in text and "Клецова Ангелина" in text
     assert detail.can_pay is False
+
+
+def test_parent_history_starts_in_september(monkeypatch):
+    """Бот и MAX: месяцы раньше PARENT_BILLS_SINCE_PERIOD не предлагаются и не открываются."""
+    from bot.services.parent_views import history_hidden, visible_periods
+    from bot.utils.dates import last_periods
+    from config.settings import settings
+    this = last_periods(1)[0]
+    monkeypatch.setattr(settings, "parent_bills_since_period", this)
+    assert visible_periods(6) == [this]
+    assert history_hidden(last_periods(2)[1]) and not history_hidden(this)
+    assert history_hidden(f"{last_periods(2)[1]}-15")          # день тоже сравнивается по месяцу
+    _, kb = bills_list_screen([PeriodRow(this, "Сентябрь", "📅")], "STU-1", "Алиса", False, False,
+                              has_older=len(visible_periods(6)) > 2)
+    assert not any("Другие месяцы" in b.label for row in kb for b in row)
+    monkeypatch.setattr(settings, "parent_bills_since_period", "")
+    assert len(visible_periods(6)) == 6
+    _, kb = bills_list_screen([PeriodRow(this, "Сентябрь", "📅")], "STU-1", "Алиса", False, False)
+    assert any("Другие месяцы" in b.label for row in kb for b in row)
+
+
+def test_bills_periods_skip_hidden_months(monkeypatch):
+    from bot.services.parent_views import bills_periods
+    from bot.utils.dates import last_periods
+    from config.settings import settings
+    this = last_periods(1)[0]
+    ledger = TeacherLedger("T1", "Педагог", accrued=1000, paid=1000)
+
+    class _Service:
+        async def ledger_for(self, student, period_month):
+            return {"T1": ledger}
+    monkeypatch.setattr(settings, "parent_bills_since_period", this)
+    recent = asyncio.run(bills_periods([_student()], _Service(), show_older=False))
+    older = asyncio.run(bills_periods([_student()], _Service(), show_older=True))
+    assert [r.period for r in recent] == [this] and older == []

@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.utils.dates import display_period, last_periods
+from bot.utils.dates import display_period
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_menu import menu_rows, welcome_text
 from bot.screens.parent_bills import bill_back_rows
@@ -60,8 +60,9 @@ def kb_lessons_period_select(student_id: str = "all") -> InlineKeyboardMarkup:
 
 
 def kb_lessons_month_list(student_id: str = "all") -> InlineKeyboardMarkup:
+    from bot.services.parent_views import visible_periods   # история родителя — с сентября 2026
     buttons = []
-    for period in last_periods(6):
+    for period in visible_periods(6):
         buttons.append([InlineKeyboardButton(
             text=display_period(period), callback_data=f"cl_month:{student_id}:{period}",
         )])

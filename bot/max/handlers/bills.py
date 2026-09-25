@@ -4,7 +4,7 @@ from __future__ import annotations
 from maxapi import F
 from maxapi.types import MessageCallback
 
-from bot.services.parent_views import bills_periods, bill_detail
+from bot.services.parent_views import bills_periods, bill_detail, history_hidden, visible_periods
 from bot.screens.parent_bills import student_select_screen, bills_list_screen, bill_detail_screen
 from ..render import edit_screen, alert
 from . import router
@@ -18,7 +18,8 @@ async def _show_bills(event, students_all: list, student_id: str, payment_servic
         return
     period_rows = await bills_periods(students, payment_service, show_older)
     who = students[0].name if student_id != "all" and len(students) == 1 else "все дети"
-    await edit_screen(event, *bills_list_screen(period_rows, student_id, who, show_older, show_back=len(students_all) > 1))
+    await edit_screen(event, *bills_list_screen(period_rows, student_id, who, show_older, show_back=len(students_all) > 1,
+                                                has_older=len(visible_periods(6)) > 2))
 
 
 @router.message_callback(F.callback.payload == "client:my_bills")
@@ -49,6 +50,9 @@ async def on_bills_more(event: MessageCallback, max_uid, student_repo, payment_s
 @router.message_callback(F.callback.payload.startswith("client_bill:"))
 async def on_bill_detail(event: MessageCallback, max_uid, student_repo, payment_service):
     _, student_id, period_month = event.callback.payload.split(":", 2)
+    if history_hidden(period_month):
+        await alert(event, "Счета показываются с сентября 2026")
+        return
     all_students = await require_parent(event, student_repo, max_uid)
     if not all_students:
         return

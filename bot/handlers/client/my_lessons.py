@@ -15,6 +15,7 @@ from bot.keyboards.client import (
 )
 from bot.keyboards.calendar import kb_calendar
 from bot.services import PaymentService
+from bot.services.parent_views import history_hidden
 from bot.utils.dates import format_date_short_with_wd, display_period
 
 from bot.utils.callbacks import (
@@ -46,6 +47,9 @@ async def _show_lessons(
     student_id: str = "all",
     teacher_filter: str = "all",
 ) -> None:
+    if history_hidden(period_str):                 # история родителя — с сентября 2026
+        await callback.answer("Занятия показываются с сентября 2026", show_alert=True)
+        return
     all_students = await student_repo.get_by_parent_tg_id(callback.from_user.id)
     if not all_students:
         await callback.answer("Нет доступа", show_alert=True)
@@ -245,6 +249,9 @@ async def cb_cl_nav(
         await callback.answer("Нет доступа", show_alert=True)
         return
     ym = ClientCalNavCb.unpack(callback.data).ym
+    if history_hidden(ym):
+        await callback.answer("Раньше сентября 2026 занятий в кабинете нет")
+        return
     year, month = (int(x) for x in ym.split("-"))
     data = await state.get_data()
     student_id = data.get("cl_student_id", "all")
