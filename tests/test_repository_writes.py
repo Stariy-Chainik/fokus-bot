@@ -169,3 +169,16 @@ def test_cache_patch_falls_back_to_invalidate_without_headers():
 def test_retry_wait_is_longer_for_quota_errors():
     assert [_retry_wait(429, a) for a in range(3)] == [10, 20, 40]
     assert [_retry_wait(503, a) for a in range(3)] == [5, 10, 20]
+
+
+def test_refresh_rereads_even_when_cache_is_fresh():
+    """Прогрев должен обновлять лист, а не возвращать живой кеш (иначе он бесполезен)."""
+    repo, ws = _groups_repo(2)
+    run(repo.get_all())
+    reads_before = sum(1 for c in ws.calls if c[0] == "get_all_records")
+    run(repo.get_all())                                            # кеш живой — чтения нет
+    assert sum(1 for c in ws.calls if c[0] == "get_all_records") == reads_before
+    ws.rows.append(_group_row("GRP-0003", "Новая"))                 # лист изменился снаружи
+    run(repo.refresh())
+    assert sum(1 for c in ws.calls if c[0] == "get_all_records") == reads_before + 1
+    assert [g.group_id for g in run(repo.get_all())] == ["GRP-0001", "GRP-0002", "GRP-0003"]

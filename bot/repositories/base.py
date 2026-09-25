@@ -262,6 +262,16 @@ class BaseRepository:
 
     # ── Async public helpers (вызываются из async-методов репозиториев) ───────
 
+    async def refresh(self) -> None:
+        """Перечитать лист в кеш независимо от возраста — для фонового прогрева.
+
+        Обычный get_all() при живом кеше в таблицу не ходит, поэтому прогрев раз в
+        240 с при TTL 300 с ничего не обновлял: лист протухал на 300-й секунде и до
+        480-й каждый запрос кабинета читал Google сам (по 0,3–0,7 с на лист).
+        """
+        records: list[dict[str, Any]] = await asyncio.to_thread(self._sync_all_records)
+        BaseRepository._cache[self._sheet_name] = (records, time.monotonic())
+
     async def _all_records(self) -> list[dict[str, Any]]:
         """Читает все записи листа с TTL-кешированием."""
         now = time.monotonic()

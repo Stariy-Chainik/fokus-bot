@@ -10,6 +10,7 @@ FSM storage:
   - Memory: иначе → состояния сбрасываются при перезапуске (только для dev)
 """
 import asyncio
+import time
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -195,23 +196,36 @@ def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
     register_miniapp_static(app)
 
 
+# Все листы, которые читают экраны бота и кабинета. Не здесь только teacher_rate_history —
+# у него свой _rate_history_refresher.
+_WARM_REPOS = (
+    "lesson_repo", "payment_repo", "student_repo", "teacher_repo", "group_repo",
+    "student_group_repo", "teacher_group_repo", "branch_repo", "user_repo",
+    "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
+    "finance_entry_repo", "payout_repo", "salary_override_repo", "pending_repo",
+    "training_entry_repo", "athlete_task_repo",
+)
+
+
 async def _cache_warmer(dp: Dispatcher, interval_sec: int = 240) -> None:
-    """Держит горячим кеш основных листов (TTL 300 с).
+    """Держит горячим кеш всех листов (TTL 300 с): каждый цикл перечитывает их принудительно.
 
     Без прогрева первый запрос после простоя читает Google Sheets по-настоящему —
     это 8–10 секунд, и Mini App успевает отвалиться по таймауту, а родитель жмёт
-    «оплатить» второй раз. Фоновое чтение делает такие запросы мгновенными.
+    «оплатить» второй раз. Раньше грелись только 8 основных листов и через get_all(),
+    который при живом кеше ничего не перечитывает, — в итоге сводка админа всё равно
+    ходила в Google за очередью решений, заявками, расходами и users на каждом открытии.
     """
-    keys = ("lesson_repo", "payment_repo", "student_repo", "teacher_repo",
-            "group_repo", "student_group_repo", "teacher_group_repo", "branch_repo")
     while True:
-        for key in keys:
+        t0 = time.monotonic()
+        for key in _WARM_REPOS:
             repo = dp.workflow_data.get(key)
             try:
                 if repo is not None:
-                    await repo.get_all()
+                    await repo.refresh()
             except Exception as exc:                     # прогрев не критичен
                 logger.debug("Прогрев кеша %s: %s", key, exc)
+        logger.info("Прогрев кеша: %d листов за %.1f с", len(_WARM_REPOS), time.monotonic() - t0)
         await asyncio.sleep(interval_sec)
 
 
