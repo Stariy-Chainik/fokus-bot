@@ -20,6 +20,7 @@ from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.profit_service import calculate_profit_lesson
+from bot.services.student_service import has_short_tariff
 from bot.utils.attendees import parse_attendees
 from bot.services.rosters import group_members
 from bot.utils.dates import current_period, last_periods
@@ -226,7 +227,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "isAthlete": bool(s.athlete_tg_id),
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
-                        "branch": g.branch_name, "mode": _mode(g.group) if g.group else None} for g in card.groups],
+                        "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,
+                        "hasShort": has_short_tariff(g.group)} for g in card.groups],   # где тариф вообще есть
             "months": months, "debt": debt,
         })
 

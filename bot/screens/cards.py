@@ -60,8 +60,11 @@ def admin_student_card_view(card: StudentCard) -> AdminStudentCardView:
 
     tier_toggle = None
     tier_line = ""
-    # Показ тарифа имеет смысл только для групп с dual-pricing (PER_VISIT + duration_short != duration_full).
-    if primary_group is not None and primary_group.billing_mode == GroupBillingMode.PER_VISIT:
+    # Блок тарифа — только если есть группа с коротким тарифом (PER_VISIT и price_short > 0):
+    # у «ЮБ сад ХГ» его нет, и карточка ученика про короткий тариф молчит.
+    tariff_group = getattr(card, "tariff_group", None)
+    if tariff_group is not None:
+        primary_group = tariff_group
         if student.group_tier == StudentGroupTier.SHORT:
             tier_line = (
                 f"\n🕐 Тариф: <b>короткий</b> — "

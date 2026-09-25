@@ -289,6 +289,18 @@ def test_toggle_tier_no_per_visit_group():
     assert _run(svc.toggle_tier("STU-1")) is TierToggleError.NO_PER_VISIT_GROUP
 
 
+def test_toggle_tier_needs_a_group_with_short_tariff():
+    """«ЮБ сад ХГ»: по посещению, но короткого тарифа нет — переключать нечего, карточка молчит."""
+    svc = _service(groups=[
+        Group(group_id="GRP-0001", branch_id="BRN-001", name="ЮБ сад ХГ",
+              billing_mode=GroupBillingMode.PER_VISIT,
+              price_short=0, duration_short=0, price_full=850, duration_full=60),
+    ])
+    assert _run(svc.toggle_tier("STU-1")) is TierToggleError.NO_SHORT_TARIFF
+    card = _run(svc.get_student_card("STU-1"))
+    assert card.tariff_group is None and card.primary_group is not None
+
+
 def test_toggle_tier_flips_full_to_short_and_back():
     svc = _service()
     assert _run(svc.toggle_tier("STU-1")) is None

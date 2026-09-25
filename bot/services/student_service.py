@@ -17,11 +17,17 @@ from .rosters import group_members
 from .visibility import TeacherVisibilityService
 
 
+def has_short_tariff(group: Group | None) -> bool:
+    """Короткий тариф есть только у группы «по посещению» с ненулевой ценой короткого занятия."""
+    return bool(group and group.billing_mode == GroupBillingMode.PER_VISIT and group.price_short > 0)
+
+
 class TierToggleError(str, Enum):
     """Причина отказа переключения тарифа (тексты алертов — в хендлере)."""
     STUDENT_NOT_FOUND = "student_not_found"
     NO_GROUPS = "no_groups"
     NO_PER_VISIT_GROUP = "no_per_visit_group"
+    NO_SHORT_TARIFF = "no_short_tariff"      # группы «по посещению» есть, но короткого тарифа в них нет
 
 
 @dataclass
@@ -47,7 +53,8 @@ class StudentCard:
     teacher_names: list[str] = field(default_factory=list)  # пусто — «не привязан»
     partner: Student | None = None    # None — партнёра нет или битая ссылка
     groups: list[StudentCardGroup] = field(default_factory=list)
-    primary_group: Group | None = None  # первая найденная группа (для блока тарифа)
+    primary_group: Group | None = None  # первая найденная группа
+    tariff_group: Group | None = None   # первая группа с коротким тарифом (price_short > 0) — блок тарифа
     client: Client | None = None      # None — клиент не задан или битая ссылка
 
 
@@ -94,7 +101,9 @@ class StudentService:
     async def toggle_tier(self, student_id: str) -> TierToggleError | None:
         """Переключить тариф SHORT↔FULL; None — успех, иначе причина отказа.
 
-        Тариф переключается относительно первой PER_VISIT группы ученика.
+        Короткий тариф — свойство группы (PER_VISIT и price_short > 0). Если ни в одной
+        группе ученика его нет (например, только «ЮБ сад ХГ»), переключать нечего:
+        в занятии он всё равно не применился бы, а карточка вводила бы в заблуждение.
         """
         student = await self._student_repo.get_by_id(student_id)
         if not student:
@@ -103,14 +112,11 @@ class StudentService:
         if not gids:
             return TierToggleError.NO_GROUPS
         groups_by_id = {g.group_id: g for g in await self._group_repo.get_all(include_archived=True)}
-        per_visit_group = None
-        for gid in gids:
-            g = groups_by_id.get(gid)
-            if g and g.billing_mode == GroupBillingMode.PER_VISIT:
-                per_visit_group = g
-                break
-        if per_visit_group is None:
+        per_visit = [g for gid in gids if (g := groups_by_id.get(gid)) and g.billing_mode == GroupBillingMode.PER_VISIT]
+        if not per_visit:
             return TierToggleError.NO_PER_VISIT_GROUP
+        if not any(has_short_tariff(g) for g in per_visit):
+            return TierToggleError.NO_SHORT_TARIFF
         new_tier = (
             StudentGroupTier.FULL if student.group_tier == StudentGroupTier.SHORT
             else StudentGroupTier.SHORT
@@ -216,11 +222,14 @@ class StudentService:
         branches = {b.branch_id: b.name for b in await self._branch_repo.get_all()}
         groups: list[StudentCardGroup] = []
         primary_group: Group | None = None
+        tariff_group: Group | None = None
         for gid in student.group_ids:
             g = groups_by_id.get(gid)
             if g:
                 if primary_group is None:
                     primary_group = g
+                if tariff_group is None and has_short_tariff(g):
+                    tariff_group = g
                 groups.append(StudentCardGroup(
                     group_id=gid, group=g,
                     branch_name=branches.get(g.branch_id, g.branch_id),
@@ -237,6 +246,6 @@ class StudentService:
             teacher_names=teacher_names,
             partner=partner,
             groups=groups,
-            primary_group=primary_group,
+            primary_group=primary_group, tariff_group=tariff_group,
             client=client,
         )

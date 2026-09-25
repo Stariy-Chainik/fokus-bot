@@ -73,14 +73,21 @@ def _billing_text(group_name: str, mode: GroupBillingMode,
         f"Режим: {_MODE_TITLES.get(mode, mode.value)}",
     ]
     if mode == GroupBillingMode.PER_VISIT:
-        lines += [
-            "",
-            f"🕐 Короткий тариф: {duration_short} мин — {price_short}₽",
-            f"🕐 Полный тариф: {duration_full} мин — {price_full}₽",
-            "",
-            "Тариф ученика выбирается в его карточке.",
-            "На занятии у педагога появятся отметки длительности.",
-        ]
+        lines += [""]
+        if price_short > 0:
+            lines += [
+                f"🕐 Короткий тариф: {duration_short} мин — {price_short}₽",
+                f"🕐 Полный тариф: {duration_full} мин — {price_full}₽",
+                "",
+                "Тариф ученика выбирается в его карточке.",
+                "На занятии у педагога появятся отметки длительности.",
+            ]
+        else:
+            lines += [
+                f"🕐 Посещение: {duration_full} мин — {price_full}₽",
+                "",
+                "Короткого тарифа в группе нет — у всех одна цена.",
+            ]
     elif mode == GroupBillingMode.SUBSCRIPTION:
         lines += [
             "",

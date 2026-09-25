@@ -292,3 +292,15 @@ def test_home_without_lessons_today_has_no_teacher_chips(api):
     app, _dp = api
     h = _call(app, "GET", "/api/admin/home")[1]
     assert h["lessonsToday"] == 0 and h["todayTeachers"] == [] and h["profitToday"] == 0
+
+
+def test_student_card_says_where_the_short_tariff_applies(api):
+    """Переключатель тарифа в кабинете — только если у ученика есть группа с коротким тарифом."""
+    app, dp = api
+    card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
+    assert [g["hasShort"] for g in card["groups"]] == [False]          # БП Джаз: по посещению, но без короткого
+    assert _call(app, "POST", "/api/admin/students/STU-0001/tier")[0] == 409
+    dp["group_repo"].items[0].price_short = 500                         # появился короткий тариф
+    card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
+    assert [g["hasShort"] for g in card["groups"]] == [True]
+    assert _call(app, "POST", "/api/admin/students/STU-0001/tier")[1]["tier"] == "short"
