@@ -234,6 +234,12 @@ function calendar(period, byDay, picked = '') {
 ACT.pDayPick = ({ d }) => { state.ui.pDay = state.ui.pDay === d ? '' : d; render(); };
 ACT.pDayReset = () => { state.ui.pDay = ''; render(); };
 
+/* Месяцы родителя: кабинет работает с сентября 2026 — раньше historySince чипов нет. */
+const pMonthChips = (go, cur, p) => {
+  const since = (state.me && state.me.historySince) || '';
+  const months = lastPeriods(3).filter(m => !since || m >= since);
+  return months.length > 1 ? `<div class="chips">${months.map(m => `<button class="chip" aria-pressed="${m === cur}" data-go="${go}" data-p='${esc(JSON.stringify({ ...p, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>` : '';
+};
 SCREENS['p.lessons'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const d = await api(`/lessons/${kid()}?ym=${period}`);
@@ -260,7 +266,7 @@ SCREENS['p.lessons'] = async ({ ym }) => {
   })))}`;
   return { title: 'Занятия', html: `
     ${kidChips('p.lessons', { ym: period })}
-    ${monthChips('p.lessons', period, {})}
+    ${pMonthChips('p.lessons', period, {})}
     ${chips}
     ${shown.length ? `<div class="card pad" style="margin-bottom:10px">
         <div style="font-weight:700">${day ? `${fdate(day)} · ` : ''}${plural(inView.length, ['занятие', 'занятия', 'занятий'])} · ${hours}</div>
@@ -288,7 +294,7 @@ SCREENS['p.diary'] = async ({ ym }) => {
   const topics = Object.entries(st.byTopic || {}).sort((a, b) => b[1] - a[1]);
   return { title: 'Дневник', html: `
     ${kidChips('p.diary', { ym: period })}
-    ${monthChips('p.diary', period, {})}
+    ${pMonthChips('p.diary', period, {})}
     <div class="kpis">${kpi(st.sessions, 'тренировок')}${kpi(st.minutes + ' мин', 'всего')}</div>
     <div class="kpis" style="margin-top:10px">${kpi(st.avgGrade ? st.avgGrade.toFixed(1) : '—', 'средняя оценка', 'ok')}${kpi(st.points, `очки${d.place ? ` · ${d.place <= 3 ? `${d.placeIcon} ` : ''}${d.place} место` : ''}`)}</div>
     ${topics.length ? `<div class="eyebrow">По танцам</div>${list(topics.map(([t, m]) => cell({ t: esc(t), r: `${Math.round(m)} мин` })))}` : ''}

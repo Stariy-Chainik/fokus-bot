@@ -40,6 +40,13 @@ def _json(data, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
+def _hidden(period: str) -> bool:
+    """Месяц до PARENT_BILLS_SINCE_PERIOD: кабинет родителя работает с сентября 2026,
+    более ранняя история (закрытая оптом 09.09.2026) родителю не показывается нигде."""
+    since = settings.parent_bills_since_period
+    return bool(since and period < since)
+
+
 def _visible_periods(count: int) -> list:
     """Месяцы для родителя: не раньше PARENT_BILLS_SINCE_PERIOD (до него — архив школы)."""
     since = settings.parent_bills_since_period
@@ -99,6 +106,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     break
         return _json({
             "tgId": tg_id, "name": name, "period": current_period(),
+            "historySince": settings.parent_bills_since_period,   # раньше этого месяца экранов нет
             "children": [{
                 "id": s.student_id, "name": s.name,
                 # наличные: где-то приняты и предпочтительны, где-то не принимаются вовсе
@@ -145,6 +153,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if student is None:
             return _json({"error": "not_found"}, status=404)
         period = request.match_info["ym"]
+        if _hidden(period):
+            return _json({"error": "not_found"}, status=404)
         ledgers = await payment_service.ledger_for(student, period)
         rows = []
         for key, ledger in sorted(ledgers.items(), key=lambda kv: kv[1].name):
@@ -187,6 +197,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if student is None:
             return _json({"error": "not_found"}, status=404)
         period = request.query.get("ym") or current_period()
+        if _hidden(period):
+            return _json({"student": {"id": student.student_id, "name": student.name},
+                          "period": period, "lessons": []})
         month = await payment_service.student_lesson_marks(student.student_id, period)
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
@@ -210,6 +223,10 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if student is None:
             return _json({"error": "not_found"}, status=404)
         period = request.query.get("ym") or current_period()
+        if _hidden(period):
+            return _json({"student": {"id": student.student_id, "name": student.name}, "period": period,
+                          "athlete": bool(student.athlete_tg_id), "stats": {"sessions": 0, "minutes": 0, "points": 0,
+                          "avgGrade": None, "byTopic": {}}, "place": None, "placeIcon": "", "entries": [], "openTasks": []})
         entries = await diary_service.entries_for_student(student.student_id, period=period)
         tasks = await diary_service.tasks_map(student.student_id)
         st = await diary_service.stats(student.student_id, period)

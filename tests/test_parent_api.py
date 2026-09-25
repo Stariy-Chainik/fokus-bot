@@ -216,3 +216,19 @@ def test_bills_start_from_the_configured_month(api, monkeypatch):
     assert len(from_sep) <= len(all_months)
     monkeypatch.setattr(settings, "parent_bills_since_period", "2099-01")
     assert _call(app, "GET", "/api/parent/bills")[1]["months"] == []
+
+
+def test_nothing_before_the_start_month_anywhere_in_the_cabinet(api, monkeypatch):
+    """Кабинет родителя работает с сентября: занятия, дневник и счёт за ранние месяцы не отдаём."""
+    from bot.utils.dates import last_periods
+    app, _dp = api
+    prev = last_periods(2)[1]
+    monkeypatch.setattr(settings, "parent_bills_since_period", YM)
+    assert _call(app, "GET", "/api/parent/me")[1]["historySince"] == YM
+    assert _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={prev}")[1]["lessons"] == []
+    d = _call(app, "GET", f"/api/parent/diary/STU-0001?ym={prev}")[1]
+    assert d["entries"] == [] and d["stats"]["sessions"] == 0
+    assert _call(app, "GET", f"/api/parent/bill/STU-0001/{prev}")[0] == 404
+    assert _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]["lessons"]   # текущий месяц — как обычно
+    monkeypatch.setattr(settings, "parent_bills_since_period", "")
+    assert _call(app, "GET", f"/api/parent/bill/STU-0001/{prev}")[0] == 200         # без границы — всё видно
