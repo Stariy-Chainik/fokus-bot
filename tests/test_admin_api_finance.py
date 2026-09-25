@@ -49,6 +49,12 @@ def test_salaries_and_lines(api):
     assert status == 200 and s["teachers"][0]["accrued"] == 4333 and s["teachers"][0]["lessons"] == 3 and s["total"] == 4333
     status, t = _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")
     assert status == 200 and [ln["amount"] for ln in t["lines"]] == [1500, 1500, 1333] and t["total"] == 4333
+    # у каждой строки-занятия видно, с кем был урок / какая группа, и есть ссылка на занятие
+    assert [ln["label"] for ln in t["lines"]] == ["Иванов Иван", "Иванов Иван", "БП Джаз"]
+    assert [ln["type"] for ln in t["lines"]] == ["individual", "individual", "group"]
+    assert t["lines"][2]["students"] == ["Иванов Иван", "Петрова Анна"] and all(ln["lessonId"] for ln in t["lines"])
+    p = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]
+    assert [ln["label"] for ln in p["lines"]] == ["Иванов Иван", "Иванов Иван", "БП Джаз"] and p["accrued"] == 4333
 
 
 def test_payouts_overrides_flow(api):

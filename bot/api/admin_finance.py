@@ -219,15 +219,41 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
                         "directPay": t.teacher_id in settings.direct_pay_teacher_id_set})
         return _json({"period": period, "teachers": out, "total": sum(x["accrued"] for x in out)})
 
+    async def _described_lines(t, period: str) -> list[dict]:
+        """Строки зарплаты с подписью: у занятия — группа (и сколько пришло) или ученики.
+
+        SalaryService имён не знает и оставляет label пустым; без подписи админ видел
+        только «дата · минуты · сумма» и не мог понять, с кем был урок.
+        """
+        lines = await salary_service.lines_for(t, period)
+        by_id = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(t.teacher_id, period)}
+        groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        out = []
+        for ln in lines:
+            d = _salary_line(ln)
+            ls = by_id.get(ln.lesson_id or "")
+            if ls is not None and not ln.label:
+                if ls.type == LessonType.GROUP:
+                    who = [names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
+                    d["label"] = groups.get(ls.group_id, "Группа")
+                    d["type"], d["students"] = "group", who
+                else:
+                    who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
+                    d["label"] = " + ".join(who) or "Занятие"
+                    d["type"], d["students"] = "individual", who
+            out.append(d)
+        return out
+
     async def salary_teacher(request: web.Request, user) -> web.Response:
         tid = request.match_info["tid"]
         period = request.query.get("ym") or current_period()
         t = await teacher_repo.get_by_id(tid)
         if t is None:
             return _json({"error": "not_found"}, status=404)
-        lines = await salary_service.lines_for(t, period)
+        lines = await _described_lines(t, period)
         return _json({"teacherId": tid, "name": t.name, "period": period,
-                      "lines": [_salary_line(ln) for ln in lines], "total": sum(ln.amount for ln in lines)})
+                      "lines": lines, "total": sum(ln["amount"] for ln in lines)})
 
     async def payouts(request: web.Request, user) -> web.Response:
         period = request.query.get("ym") or current_period()
@@ -251,14 +277,14 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         t = await teacher_repo.get_by_id(tid)
         if t is None:
             return _json({"error": "not_found"}, status=404)
-        lines = await salary_service.lines_for(t, period)
+        lines = await _described_lines(t, period)          # те же подписи, что на экране «Зарплаты»
         rows = await payout_repo.get_by_teacher_period(tid, period)
         overrides = await override_repo.get_for_teacher_period(tid, period)
         return _json({
             "teacherId": tid, "name": t.name, "period": period,
-            "accrued": sum(ln.amount for ln in lines), "paid": sum(p.amount for p in rows),
+            "accrued": sum(ln["amount"] for ln in lines), "paid": sum(p.amount for p in rows),
             "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment} for p in rows],
-            "lines": [_salary_line(ln) for ln in lines],
+            "lines": lines,
             "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment} for o in overrides],
             "isOwner": tid in settings.owner_teacher_id_set,
         })

@@ -393,7 +393,14 @@ SCREENS['a.profit.teacher'] = async ({ period, tid }) => {
   const t = await api(`/profit/teacher/${tid}?period=${period}`);
   return { title: t.name, html: `${t.owner ? '<div class="card pad" style="background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата не вычитается, остаётся в прибыли</div><div style="height:10px"></div>' : ''}${t.lessons.length ? `<div class="list">${t.lessons.map(profitLessonLine).join('')}</div><div class="card" style="margin-top:10px"><div class="total"><span>Выручка ${fmt(t.income)} · зарплата ${fmt(t.salary)}</span><span class="big">${fmt(t.profit)}</span></div></div>` : '<div class="empty">Нет тарифицируемых занятий</div>'}` };
 };
-const salaryLineCell = x => cell({ lead: x.kind === 'shift' ? '🕒' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' ? '↳' : '📘', plain: true, t: `${fdate(x.date)} · ${esc(x.label)}`, s: x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.minutes ? `${x.minutes} мин` : '', r: `<b>${fmt(x.amount)}</b>` });
+/* Строка зарплаты: занятие — с кем / какая группа, тап открывает карточку занятия. */
+const salaryLineCell = x => cell({
+  lead: x.kind === 'shift' ? '🕒' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' ? '↳' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
+  t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
+  s: x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается'
+    : `${x.minutes ? `${x.minutes} мин` : ''}${x.type === 'group' && x.students && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}`,
+  r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 'a.lesson', p: { id: x.lessonId } } : {}),
+});
 SCREENS['a.salaries'] = async ({ ym }) => {
   ym = ym || lastPeriods(1)[0];
   const s = await api(`/salaries?ym=${ym}`);
