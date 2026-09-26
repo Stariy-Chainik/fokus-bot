@@ -665,14 +665,22 @@ async def _forward_receipt(
 async def _send_unbound_receipt(
     bot, user_repo: UserRepository, payment_service: PaymentService,
     student, period_month: str, total: int, kind: str, file_id: str, parent_tg_id: int,
+    pending_repo=None,
 ) -> None:
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
     caption = receipt_caption("bank", student.name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
+    # Та же очередь решений, что у чека через «Прикрепить»: иначе чек виден только в чате,
+    # а в кабинете «Ждут решения» его нет (случай Сталяровой 26.09.2026).
+    action = await queue_action(
+        pending_repo, KIND_RECEIPT, student, period_month, amount=total, method=RECEIPT_UNKNOWN,
+        parent_addr=str(parent_tg_id), file_id=file_id, file_type=kind,
+    )
     rows = admin_confirm_rows(
         student.student_id, period_month, "", False,
         tg_addr(parent_tg_id), total, RECEIPT_UNKNOWN,
+        action_id=action.action_id if action else "",
     )
     await _forward_receipt(bot, user_repo, kind, file_id, caption, rows)
     logger.info("Чек без шага «Прикрепить»: tg_id=%s → %s %s", parent_tg_id, student.student_id, period_month)
@@ -682,6 +690,7 @@ async def _send_unbound_receipt(
 async def on_unbound_receipt(
     message: Message, user: User | None, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     if user is not None and (user.is_admin or user.teacher_id):
         return
@@ -703,7 +712,8 @@ async def on_unbound_receipt(
     if len(bills) == 1:
         student, period_month, total = bills[0]
         await _send_unbound_receipt(message.bot, user_repo, payment_service,
-                                    student, period_month, total, kind, file_id, message.from_user.id)
+                                    student, period_month, total, kind, file_id, message.from_user.id,
+                                    pending_repo=pending_repo)
         text, rows = receipt_sent_screen(student.student_id, period_month)
         await message.answer(text, reply_markup=to_aiogram_markup(rows))
         return
@@ -719,6 +729,7 @@ async def on_unbound_receipt(
 async def cb_receipt_pick(
     callback: CallbackQuery, state: FSMContext,
     student_repo: StudentRepository, payment_service: PaymentService, user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     cb = ReceiptPickCb.unpack(callback.data)
     student_id, period_month = cb.student_id, cb.period_month
@@ -732,7 +743,8 @@ async def cb_receipt_pick(
         return
     total, _ = await unpaid_for(student, period_month, payment_service)
     await _send_unbound_receipt(callback.bot, user_repo, payment_service,
-                                student, period_month, total, cast(str, kind), file_id, callback.from_user.id)
+                                student, period_month, total, cast(str, kind), file_id, callback.from_user.id,
+                                pending_repo=pending_repo)
     await _edit(callback, receipt_sent_screen(student_id, period_month))
     await callback.answer()
 
