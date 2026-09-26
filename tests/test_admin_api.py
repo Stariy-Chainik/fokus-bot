@@ -294,6 +294,22 @@ def test_home_without_lessons_today_has_no_teacher_chips(api):
     assert h["lessonsToday"] == 0 and h["todayTeachers"] == [] and h["profitToday"] == 0
 
 
+def test_home_month_collection_and_debtors(api):
+    """Блок месяца: начислено / зачтено / остаток; блок «требует внимания»: должники за закрытые месяцы."""
+    app, dp = api
+    teacher = dp["teacher_repo"].items[0]
+    prev = "2026-08" if YM != "2026-08" else "2026-07"
+    dp["lesson_repo"].items.append(mk_lesson("LES-OLD", teacher, f"{prev}-20", students=[("STU-0002", "Петрова Анна")]))
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0001", YM, "TCH-0001", 2000, status=PaymentStatus.PAID))
+    dp["payment_repo"].rows.append(mk_payment("PAY-2", "STU-0002", YM, "TCH-0001", 5000, status=PaymentStatus.PAID))  # переплата
+    h = _call(app, "GET", "/api/admin/home")[1]
+    # начислено за месяц: Иванов 2000 + 2000 + 800, Петрова 800; переплата Петровой сверх 800 не «собрана»
+    assert h["collected"] == {"accrued": 5600, "paid": 2800, "rest": 2800, "percent": 50}
+    assert h["pendingTotal"] == h["collected"]["rest"]
+    assert (h["debtorsCount"], h["debtorsTotal"]) == (1, 2000)          # Петрова за прошлый месяц
+    assert h["incomeMonth"] >= h["profitMonth"] and h["salaryMonth"] > 0
+
+
 def test_student_card_says_where_the_short_tariff_applies(api):
     """Переключатель тарифа в кабинете — только если у ученика есть группа с коротким тарифом."""
     app, dp = api

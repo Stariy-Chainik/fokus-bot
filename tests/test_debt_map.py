@@ -7,7 +7,7 @@ import asyncio
 
 from bot.models import Teacher, Lesson, StudentPeriodPayment
 from bot.models.enums import LessonType, PaymentStatus
-from bot.services.payment_service import PaymentService
+from bot.services.payment_service import PaymentService, debtors_summary, period_collection
 
 
 def _run(coro):
@@ -195,3 +195,28 @@ def test_build_debtor_rows_sorts_and_skips_unknown_students(caplog):
     ]
     assert "STU-404" in caplog.text
     assert build_debtor_rows({}, students, "2026-09") == []
+
+
+def test_ledger_map_gives_accrued_and_paid_per_key():
+    """Сводка админа читает одну карту: из неё же считаются долги."""
+    svc = _service(
+        [_lesson("LES-1", "TCH-0001", "2026-05-10", s1="STU-A"), _lesson("LES-2", "TCH-0001", "2026-06-10", s1="STU-A")],
+        [_teacher()],
+        [_payment("STU-A", "TCH-0001", "2026-05", PaymentStatus.PAID, amount=400)],
+    )
+    ledger = _run(svc.compute_ledger_map())
+    assert ledger == {("STU-A", "TCH-0001", "2026-05"): (1000, 400), ("STU-A", "TCH-0001", "2026-06"): (1000, 0)}
+    assert _run(svc.compute_debt_map()) == {"STU-A": {"2026-05": 600, "2026-06": 1000}}
+
+
+def test_period_collection_caps_overpayment_and_counts_closed_debts():
+    ledger = {
+        ("STU-A", "TCH-0001", "2026-06"): (1000, 1500),   # переплата: зачтено только 1000
+        ("STU-B", "TCH-0001", "2026-06"): (1000, 0),
+        ("STU-B", "TCH-0002", "2026-05"): (700, 200),     # закрытый месяц — долг 500
+        ("STU-C", "TCH-0001", "2026-04"): (300, 300),     # оплачено — не должник
+    }
+    c = period_collection(ledger, "2026-06")
+    assert (c.accrued, c.paid, c.rest, c.percent) == (2000, 1000, 1000, 50)
+    assert period_collection(ledger, "2026-07").percent == 0
+    assert debtors_summary(ledger, "2026-06") == (1, 500)

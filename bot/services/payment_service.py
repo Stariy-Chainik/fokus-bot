@@ -89,6 +89,46 @@ def build_debtor_rows(
     return rows
 
 
+@dataclass(frozen=True)
+class PeriodCollection:
+    """Сбор оплат за месяц на сводке администратора.
+
+    `paid` — зачтено в счёт начислений: переплата по связке (ученик, педагог) сверх
+    начисленного не считается, поэтому `rest` = сумма долгов месяца, как в «Должниках».
+    """
+    accrued: int = 0
+    paid: int = 0
+
+    @property
+    def rest(self) -> int:
+        return self.accrued - self.paid
+
+    @property
+    def percent(self) -> int:
+        return round(self.paid * 100 / self.accrued) if self.accrued else 0
+
+
+def period_collection(ledger: dict[tuple[str, str, str], tuple[int, int]], period: str) -> PeriodCollection:
+    """Начислено / зачтено за месяц по карте `PaymentService.compute_ledger_map`."""
+    accrued = paid = 0
+    for (_sid, _tid, ym), (amount, paid_amount) in ledger.items():
+        if ym != period:
+            continue
+        accrued += amount
+        paid += min(paid_amount, amount)
+    return PeriodCollection(accrued, paid)
+
+
+def debtors_summary(ledger: dict[tuple[str, str, str], tuple[int, int]], current_period: str) -> tuple[int, int]:
+    """Должники за закрытые месяцы (< current_period): (сколько учеников, сумма долга)."""
+    per_student: dict[str, int] = {}
+    for (sid, _tid, ym), (amount, paid_amount) in ledger.items():
+        if ym >= current_period or amount <= paid_amount:
+            continue
+        per_student[sid] = per_student.get(sid, 0) + amount - paid_amount
+    return len(per_student), sum(per_student.values())
+
+
 class PaymentService:
     def __init__(
         self,
@@ -555,15 +595,14 @@ class PaymentService:
                 rows.append(ledger.pending)
         return rows
 
-    async def compute_debt_map(
+    async def compute_ledger_map(
         self, since_period: str | None = None, until_period: str | None = None,
-    ) -> dict[str, dict[str, int]]:
-        """Карта долгов по всем ученикам и периодам: student_id → {period_month → долг ₽}.
+    ) -> dict[tuple[str, str, str], tuple[int, int]]:
+        """Начислено и оплачено по всем ученикам: (student, teacher | SUB:gid, period) → (начислено, оплачено).
 
-        Долг считается on-demand так же, как «К оплате» у родителя: начисления
-        (build_billing_rows по всем занятиям) минус оплаченные (student, teacher,
-        period) со статусом PAID. Наличие/отсутствие выставленного счёта роли
-        не играет. amount=0 (абонемент) в долг не входит.
+        Начисления — build_billing_rows по всем занятиям плюс абонементы; оплачено — сумма
+        PAID-строк по той же связке. Одно чтение для сводки администратора: из карты
+        считаются и долги (`compute_debt_map`), и сбор оплат месяца (`period_collection`).
 
         since_period ("YYYY-MM") — учитывать только периоды >= since_period;
         None/"" — за всё время. Отсекает месяцы до внедрения учёта оплат.
@@ -575,7 +614,7 @@ class PaymentService:
         for ls in lessons:
             teacher = teachers.get(ls.teacher_id)
             if teacher is None:
-                logger.warning("compute_debt_map: педагог %s не найден (занятие %s)",
+                logger.warning("compute_ledger_map: педагог %s не найден (занятие %s)",
                                ls.teacher_id, ls.lesson_id)
                 continue
             for b in build_billing_rows(ls, teacher):
@@ -621,11 +660,30 @@ class PaymentService:
                 key = (p.student_id, p.teacher_id, p.period_month)
                 paid[key] = paid.get(key, 0) + p.total_amount
 
-        debts: dict[str, dict[str, int]] = {}
-        for (sid, tid, period), amount in accrued.items():
-            if since_period and period < since_period:
+        ledger: dict[tuple[str, str, str], tuple[int, int]] = {}
+        for key, amount in accrued.items():
+            if since_period and key[2] < since_period:
                 continue
-            debt = amount - paid.get((sid, tid, period), 0)  # накопительно: доплата после новых уроков
+            ledger[key] = (amount, paid.get(key, 0))
+        return ledger
+
+    async def compute_debt_map(
+        self, since_period: str | None = None, until_period: str | None = None,
+    ) -> dict[str, dict[str, int]]:
+        """Карта долгов по всем ученикам и периодам: student_id → {period_month → долг ₽}.
+
+        Долг считается on-demand так же, как «К оплате» у родителя: начисления
+        (build_billing_rows по всем занятиям) минус оплаченные (student, teacher,
+        period) со статусом PAID. Наличие/отсутствие выставленного счёта роли
+        не играет. amount=0 (абонемент) в долг не входит.
+
+        since_period ("YYYY-MM") — учитывать только периоды >= since_period;
+        None/"" — за всё время. Отсекает месяцы до внедрения учёта оплат.
+        """
+        ledger = await self.compute_ledger_map(since_period=since_period, until_period=until_period)
+        debts: dict[str, dict[str, int]] = {}
+        for (sid, _tid, period), (amount, paid_amount) in ledger.items():
+            debt = amount - paid_amount  # накопительно: доплата после новых уроков
             if debt <= 0:
                 continue
             per_student = debts.setdefault(sid, {})

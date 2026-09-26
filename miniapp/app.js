@@ -123,15 +123,35 @@ const todayTeacherBlock = t => `<details class="acc">
     <div class="accsum">${!t.income && !t.salary ? 'только абонементные занятия — деньги считаются по месяцу' : t.owner ? `выручка ${fmt(t.income)} — руководитель, зарплата в прибыли` : `выручка ${fmt(t.income)} − зарплата ${fmt(t.salary)} = прибыль ${fmt(t.profit)}`}</div>
     ${t.items.map(todayLessonLine).join('')}
   </div></details>`;
+/* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
+   Быстрых действий нет: всё это есть во вкладках, а дубли плиток и кнопок только путали. */
 SCREENS['a.home'] = async () => {
   const [h, inbox] = await Promise.all([api('/home'), api('/inbox').catch(() => ({ total: 0 }))]);
-  return { title: 'Школа сегодня', html: `
+  const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase();
+  const c = h.collected;
+  const attention = [
+    inbox.total ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки родителей', r: pill(inbox.total, 'warn'), go: 'a.inbox' }) : '',
+    h.debtorsCount ? cell({ lead: '⚠️', plain: true, t: 'Должники', s: `за ${prevMon} и раньше · ${fmt(h.debtorsTotal)}`, r: pill(h.debtorsCount, 'bad'), go: 'a.debtors' }) : '',
+  ].filter(Boolean);
+  const today = h.lessonsToday ? `
+    <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(fmt(h.profitToday), `прибыль · выручка ${fmt(h.incomeToday)}`, h.profitToday < 0 ? 'bad' : 'ok', 'a.profit.day', { date: h.today })}</div>
+    <div style="margin-top:10px">${h.todayTeachers.map(todayTeacherBlock).join('')}</div>` : '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
+  // строка «Оплаты»: главная цифра справа — остаток к оплате; под полосой — сколько уже собрано
+  const payRow = c.accrued
+    ? { t: c.rest ? 'К оплате' : 'Оплаты', r: c.rest ? `<b>${fmt(c.rest)}</b>` : pill('✓ всё оплачено', 'ok'), s: `собрано ${fmt(c.paid)} из ${fmt(c.accrued)} · ${c.percent}%` }
+    : { t: 'Оплаты', r: '', s: 'начислений пока нет' };
+  return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
-    ${inbox.total ? `<div style="margin-bottom:12px">${goBtn(`📥 Ждут решения · ${inbox.total}`, 'a.inbox', {}, '')}</div>` : ''}
-    <div class="kpis">${kpi(fmt(h.pendingTotal), `ожидает оплаты за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, 'warn', 'a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}${kpi(h.debtorsCount, `должников за ${MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase()} и раньше`, h.debtorsCount ? 'bad' : 'ok', 'a.debtors')}${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(fmt(h.profitToday), `прибыль сегодня · за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()} ${fmt(h.profitMonth)}`, h.profitToday < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}</div>
-    ${h.todayTeachers && h.todayTeachers.length ? `<div class="eyebrow">Отмечено сегодня</div>${h.todayTeachers.map(todayTeacherBlock).join('')}` : ''}
-    <div class="eyebrow">Быстрые действия</div>
-    ${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'закрытые месяцы', go: 'a.debtors' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'мастер как в боте', go: 'a.record' })])}
+    <div class="eyebrow">Требует внимания</div>
+    ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
+    <div class="eyebrow">Сегодня</div>
+    ${today}
+    <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
+    <div class="eyebrow">${mon}</div>
+    <div class="list">
+      <button class="cell nolead wrap" ${attr('a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}><span><div class="t">${payRow.t}</div><div class="bar"><i class="${c.accrued && !c.rest ? 'ok' : ''}" style="width:${c.percent}%"></i></div><div class="s">${payRow.s}</div></span><span class="r">${payRow.r}<span class="chev">›</span></span></button>
+      <button class="cell nolead wrap" ${attr('a.profit', { ym: h.period })}><span><div class="t">Прибыль</div><div class="s">выручка ${fmt(h.incomeMonth)} · зарплата ${fmt(h.salaryMonth)}</div></span><span class="r"><b class="${h.profitMonth < 0 ? 'bad' : 'ok'}">${fmt(h.profitMonth)}</b><span class="chev">›</span></span></button>
+    </div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
 

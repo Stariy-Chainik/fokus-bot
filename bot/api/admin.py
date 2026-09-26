@@ -19,6 +19,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.payment_methods import ADMIN_MANUAL
+from bot.services.payment_service import debtors_summary, period_collection
 from bot.services.profit_service import calculate_profit_lesson
 from bot.services.student_service import has_short_tariff
 from bot.utils.attendees import parse_attendees
@@ -119,20 +120,25 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                       "name": teacher.name if teacher else ""})
 
     async def home(request: web.Request, user) -> web.Response:
+        """Сводка: «требует внимания» (должники) → «сегодня» (занятия дня) → «месяц» (сбор оплат, прибыль)."""
         period = current_period()
         prev = _prev_period(period)
-        debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
-        pending = sum(m.get(period, 0) for m in debt_map.values())
-        debtors = sum(1 for m in debt_map.values() if any(ym < period and amt > 0 for ym, amt in m.items()))
+        ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
+        collected = period_collection(ledger, period)
+        debtors_count, debtors_total = debtors_summary(ledger, period)
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
+        day = await profit_service.get_lesson_summary(today)      # только занятия дня
+        month = await profit_service.get_month_summary(period)    # как экран «Прибыль»
         return _json({
             "today": today, "period": period, "prevPeriod": prev,
-            "pendingTotal": pending, "debtorsCount": debtors, "lessonsToday": len(lessons_today),
-            "todayTeachers": await _today_by_teacher(lessons_today),
-            # плитка «Прибыль»: сегодня — только занятия, месяц — как экран «Прибыль»
-            "profitToday": (await profit_service.get_lesson_summary(today)).profit,
-            "profitMonth": (await profit_service.get_month_summary(period)).profit,
+            "debtorsCount": debtors_count, "debtorsTotal": debtors_total,
+            "lessonsToday": len(lessons_today), "todayTeachers": await _today_by_teacher(lessons_today),
+            "incomeToday": day.total_income, "profitToday": day.profit,
+            "pendingTotal": collected.rest,
+            "collected": {"accrued": collected.accrued, "paid": collected.paid,
+                          "rest": collected.rest, "percent": collected.percent},
+            "incomeMonth": month.total_income, "salaryMonth": month.salary, "profitMonth": month.profit,
             "studentsCount": len(await student_repo.get_all()),
         })
 
