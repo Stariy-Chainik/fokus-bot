@@ -63,6 +63,29 @@ def test_home_and_bills_show_own_child_only(api):
     assert _call(app, "GET", f"/api/parent/bill/STU-0002/{YM}")[0] == 404    # чужой ребёнок
 
 
+def test_home_attention_lessons_and_month_blocks(api):
+    """Сводка «Мои дети»: что оплатить, что ждёт подтверждения, новые оценки; занятия месяца; месяц по ребёнку."""
+    from datetime import date as _date
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    today = _date.today().isoformat()
+    dp["student_repo"].items[0].athlete_tg_id = 777001                 # Иванов ведёт дневник
+    fresh = mk_entry("TE-NEW", "STU-0001", today, 45, topics=["Самба"], grade=5)
+    fresh.graded_by, fresh.grade_comment = "TCH-0001", "Молодец"
+    dp["entry_repo"].items.append(fresh)
+    dp["pending_repo"] = PendingRepoFake()
+    asyncio.run(dp["pending_repo"].add("cash", "STU-0001", "Иванов Иван", YM, amount=4800, method="cash"))
+
+    h = _call(app, "GET", "/api/parent/home")[1]
+    c = h["children"][0]
+    assert h["today"] == today and c["unpaid"] == [{"ym": YM, "accrued": 4800, "paid": 0, "rest": 4800}]
+    assert c["pending"] == [{"kind": "cash", "amount": 4800, "ym": YM, "method": "cash"}]
+    assert c["grades"][0] == {"date": today, "grade": 5, "topics": ["Самба"], "teacher": "Река Станислав", "comment": "Молодец"}
+    lessons = c["lessons"]
+    assert (lessons["month"], lessons["minutes"], lessons["last"]) == (3, 150, f"{YM}-12")
+    assert all(x["teacher"] == "Река Станислав" and x["durationMin"] in (45, 60) for x in lessons["today"])
+
+
 def test_paid_lessons_are_marked(api):
     app, dp = api
     dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0001", YM, "TCH-0001", 2000, status=PaymentStatus.PAID))

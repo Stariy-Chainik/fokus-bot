@@ -14,27 +14,61 @@ const kidChips = (screen, extra = {}) => {
 ACT.pKid = ({ v, screen, extra }) => { state.ui.kid = v; state.stack.pop(); go(screen, extra || {}); };
 
 /* ── Сводка ──────────────────────────────────────────────────────────── */
+/* «Мои дети» — как у администратора и педагога: что требует внимания (оплатить, ждёт
+   подтверждения, новые оценки) → занятия (месяц и сегодня) → месяц по ребёнку. */
+const firstName = n => plainName(n).split(' ')[1] || plainName(n);   // «Иванов Иван» → «Иван»
+const pHours = m => `${Math.floor(m / 60)} ч${m % 60 ? ` ${m % 60} мин` : ''}`;
 SCREENS['p.home'] = async () => {
   const h = await api('/home');
   const mon = ym => MON_NOM[+ym.slice(5) - 1];
+  const many = h.children.length > 1;
+  const who = c => many ? ` · ${esc(firstName(c.name))}` : '';   // имя ребёнка — только если детей несколько
+  const attention = [];
+  h.children.forEach(c => {
+    c.unpaid.forEach(m => attention.push(cell({
+      lead: m.ym < h.period ? '⚠️' : '💳', plain: true,
+      t: `${m.ym < h.period ? 'Долг за' : 'Оплатить за'} ${mon(m.ym).toLowerCase()}${who(c)}`,
+      s: m.paid ? `оплачено ${fmt(m.paid)}, к доплате ${fmt(m.rest)}` : `начислено ${fmt(m.accrued)}`,
+      r: `<b class="bad">${fmt(m.rest)}</b>`, act: 'pOpen', p: { id: c.id, screen: 'p.bill', p: { ym: m.ym } },
+    })));
+    c.pending.forEach(a => attention.push(cell({
+      lead: '⏳', plain: true, t: `Ждёт подтверждения школы${who(c)}`,
+      s: `${a.kind === 'cash' ? 'наличные' : 'чек'} · ${fmt(a.amount)}${a.ym ? ` за ${mon(a.ym).toLowerCase()}` : ''}`,
+      r: pill('на проверке', 'warn'),
+    })));
+    c.grades.forEach(g => attention.push(cell({
+      lead: '⭐', plain: true, cls: 'wrap', t: `Новая оценка${who(c)}`,
+      s: `${fdate(g.date)}${g.topics.length ? ` · ${esc(g.topics.join(', '))}` : ''}${g.teacher ? ` · ${esc(g.teacher)}` : ''}${g.comment ? `<br>📝 ${esc(g.comment)}` : ''}`,
+      r: `<b>${g.grade}/5</b>`, act: 'pOpen', p: { id: c.id, screen: 'p.diary' },
+    })));
+  });
+  const lessonRows = h.children.map(c => {
+    const l = c.lessons;
+    if (!l.month) return cell({ lead: '📋', plain: true, t: `Занятий за ${mon(h.period).toLowerCase()} пока нет${who(c)}`, act: 'pOpen', p: { id: c.id, screen: 'p.lessons' } });
+    return cell({
+      lead: '📋', plain: true, t: `${plural(l.month, ['занятие', 'занятия', 'занятий'])} за ${mon(h.period).toLowerCase()}${who(c)}`,
+      s: l.today.length ? `сегодня: ${l.today.map(x => `${esc(x.group || x.teacher)} · ${x.durationMin} мин`).join(', ')}` : `${pHours(l.minutes)}${l.last ? ` · последнее ${fdate(l.last)}` : ''}`,
+      act: 'pOpen', p: { id: c.id, screen: 'p.lessons' },
+    });
+  });
+  const monthRows = h.children.map(c => {
+    const m = c.thisMonth;
+    const pct = m && m.accrued ? Math.min(100, Math.round(m.paid * 100 / m.accrued)) : 0;
+    return `<button class="cell nolead wrap" data-act="pOpen" data-p='${esc(JSON.stringify({ id: c.id, screen: 'p.bills' }))}'><span><div class="t">${esc(c.name)}</div>${m
+      ? `<div class="bar"><i class="${m.rest ? '' : 'ok'}" style="width:${pct}%"></i></div><div class="s">${m.rest ? `оплачено ${fmt(m.paid)} из ${fmt(m.accrued)}` : `начислено ${fmt(m.accrued)} · всё оплачено`}</div>`
+      : '<div class="s">начислений пока нет</div>'}</span><span class="r">${m ? (m.rest ? `<b class="bad">${fmt(m.rest)}</b>` : pill('✓ оплачено', 'ok')) : ''}<span class="chev">›</span></span></button>`;
+  });
   return { title: 'Мои дети', html: `
-    ${hero(h.rest ? `К оплате ${fmt(h.rest)}` : 'Всё оплачено, спасибо')}
-    ${h.children.map(c => {
-      const m = c.thisMonth;
-      return `<div class="card pad" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
-        <div style="font-weight:800;font-size:16px">${esc(c.name)}</div>
-        <div class="money" style="font-weight:800;color:${c.rest ? 'var(--bad)' : 'var(--ok)'}">${c.rest ? fmt(c.rest) : '✓'}</div></div>
-      <div class="hint">${m ? `${mon(h.period)}: начислено ${fmt(m.accrued)}, оплачено ${fmt(m.paid)}` : `${mon(h.period)}: занятий пока нет`}</div>
-      <div class="chips" style="margin:10px 0 0">
-        <button class="chip" data-act="pOpen" data-p='${esc(JSON.stringify({ id: c.id, screen: 'p.bills' }))}'>🧾 Счета</button>
-        <button class="chip" data-act="pOpen" data-p='${esc(JSON.stringify({ id: c.id, screen: 'p.lessons' }))}'>📋 Занятия</button>
-        <button class="chip" data-act="pOpen" data-p='${esc(JSON.stringify({ id: c.id, screen: 'p.diary' }))}'>📓 Дневник</button>
-      </div>
-      ${c.rest ? `<div style="margin-top:10px">${btn(`💳 Оплатить ${fmt(c.rest)}`, 'pOpen', { id: c.id, screen: 'p.bills' })}</div>` : ''}</div>`;
-    }).join('')}
-    <p class="hint">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>` };
+    ${hero(`Кабинет родителя · ${fdate(h.today)}`)}
+    <div class="eyebrow">Требует внимания</div>
+    ${attention.length ? list(attention) : '<div class="calm">✓ Всё оплачено, школа ничего не ждёт</div>'}
+    <div class="eyebrow">Занятия</div>
+    ${list(lessonRows)}
+    <div class="eyebrow">${mon(h.period)}</div>
+    <div class="list">${monthRows.join('')}</div>
+    <p class="hint" style="margin-top:12px">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>` };
 };
-ACT.pOpen = ({ id, screen }) => { state.ui.kid = id; go(screen, {}); };
+ACT.pOpen = ({ id, screen, p }) => { state.ui.kid = id; go(screen, p || {}); };
 
 /* ── Счета ───────────────────────────────────────────────────────────── */
 SCREENS['p.bills'] = async () => {

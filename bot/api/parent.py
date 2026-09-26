@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from base64 import b64encode
+from datetime import date
 
 from aiohttp import web
 
@@ -26,6 +27,7 @@ from bot.services.parent_views import (
     admin_confirm_rows, cash_notice, cash_options, client_contact, history_hidden, qr_png, visible_periods,
 )
 from bot.services.payment_methods import CASH
+from bot.repositories.pending_action_repo import KIND_RECEIPT
 from bot.services.pending_queue import KIND_CASH, queue_action
 from bot.utils.dates import current_period
 from bot.utils.notify import notify
@@ -118,7 +120,20 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         })
 
     async def home(request: web.Request, tg_id, children) -> web.Response:
+        """Сводка «Мои дети»: требует внимания (оплатить, ждёт подтверждения, новые оценки) →
+        занятия (месяц и сегодня) → месяц по ребёнку (начислено / оплачено)."""
         period = current_period()
+        today = date.today().isoformat()
+        # заявленные наличные и присланные чеки, которые администратор ещё не подтвердил
+        pending_repo = _dp_get(dp, "pending_repo")
+        open_actions: list = []
+        if pending_repo is not None:
+            try:
+                open_actions = [a for a in await pending_repo.get_open() if a.kind in (KIND_CASH, KIND_RECEIPT)]
+            except Exception as exc:                       # сводка важнее очереди
+                logger.warning("Кабинет родителя: очередь решений недоступна: %s", exc)
+        teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
+        groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
         kids, rest_total = [], 0
         for s in children:
             months = []
@@ -128,10 +143,34 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     months.append({"ym": ym, **t})
             rest = sum(m["rest"] for m in months)
             rest_total += rest
-            kids.append({"id": s.student_id, "name": s.name, "rest": rest,
-                         "thisMonth": next((m for m in months if m["ym"] == period), None),
-                         "months": months})
-        return _json({"period": period, "rest": rest_total, "children": kids})
+            month_lessons = [] if _hidden(period) else (
+                await payment_service.student_lesson_marks(s.student_id, period)).lessons
+            grades = []
+            if diary_service is not None and s.athlete_tg_id:      # оценки педагога за последнюю неделю
+                for e in await diary_service.entries_for_student(s.student_id, days=7):
+                    if e.grade:
+                        grades.append({"date": e.date, "grade": e.grade, "topics": list(e.topics or []),
+                                       "teacher": teachers.get(e.graded_by, ""), "comment": e.grade_comment or ""})
+                grades.sort(key=lambda g: g["date"], reverse=True)
+            kids.append({
+                "id": s.student_id, "name": s.name, "rest": rest,
+                "thisMonth": next((m for m in months if m["ym"] == period), None),
+                "months": months,
+                "unpaid": [m for m in months if m["rest"]],              # закрытые месяцы первыми
+                "pending": [{"kind": a.kind, "amount": a.amount, "ym": a.period_month, "method": a.method}
+                            for a in open_actions if a.student_id == s.student_id],
+                "grades": grades,
+                "lessons": {
+                    "month": len(month_lessons),
+                    "minutes": sum(ls.duration_min for ls in month_lessons),
+                    "last": max((ls.date for ls in month_lessons), default=None),
+                    "today": [{"type": ls.type.value, "durationMin": ls.duration_min,
+                               "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
+                               "group": groups.get(ls.group_id, "")}
+                              for ls in month_lessons if ls.date == today],
+                },
+            })
+        return _json({"period": period, "today": today, "rest": rest_total, "children": kids})
 
     # ── счета ────────────────────────────────────────────────────────────
     async def bills(request: web.Request, tg_id, children) -> web.Response:
