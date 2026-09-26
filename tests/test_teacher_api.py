@@ -12,7 +12,7 @@ from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import (
     AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake,
-    mk_entry, mk_lesson, mk_submission, mk_user,
+    mk_entry, mk_lesson, mk_payment, mk_submission, mk_user,
 )
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, make_api
 from tests.test_telegram_auth import make_init_data
@@ -58,6 +58,25 @@ def test_only_linked_teacher_gets_in(api):
     assert _call(app, "GET", "/api/teacher/me", tg_id=PARENT_TG)[0] == 403        # родитель — не педагог
     assert _call(app, "GET", "/api/teacher/me", tg_id=ADMIN_TG)[0] == 403         # админ без teacher_id
     assert _call(app, "GET", "/api/teacher/me", headers={})[0] == 401
+
+
+def test_home_attention_today_and_month_blocks(api, monkeypatch):
+    """Сводка педагога: записи без оценки, занятия дня целиком, счётчики месяца; счета — только у BILLING_TEACHER_IDS."""
+    app, dp = api
+    teacher = dp["teacher_repo"].items[0]
+    today = date.today().isoformat()
+    dp["lesson_repo"].items.append(mk_lesson("LES-TODAY", teacher, today, students=[("STU-0002", "Петрова Анна")]))
+    h = _call(app, "GET", "/api/teacher/home")[1]
+    assert h["unrated"] == 1 and h["bills"] is None                    # TE-1 без оценки; счетов у обычного педагога нет
+    assert h["lessonsToday"] == 1 and [x["id"] for x in h["todayLessons"]] == ["LES-TODAY"]
+    assert h["todayLessons"][0]["students"] == ["Петрова Анна"] and h["todayLessons"][0]["earned"] == 1500
+    assert (h["lessonsMonth"], h["groupLessonsMonth"], h["individualLessonsMonth"]) == (4, 1, 3)
+
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0001", YM, "TCH-0001", 4800, status=PaymentStatus.PAID))
+    h = _call(app, "GET", "/api/teacher/home")[1]
+    # Иванов оплатил всё (2000 + 2000 + 800); Петрова должна 800 за группу и 2000 за сегодняшний урок
+    assert h["bills"] == {"students": 1, "rest": 2800}
 
 
 def test_home_and_lessons_are_own_only(api):

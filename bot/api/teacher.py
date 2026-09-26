@@ -170,17 +170,34 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         })
 
     async def home(request: web.Request, user, teacher) -> web.Response:
+        """Сводка: «требует внимания» (оценки, счета, период) → «сегодня» (занятия дня) → «месяц» (зарплата)."""
         today = date.today().isoformat()
         period = current_period()
         month = await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, period)
-        today_lessons = [ls for ls in month if ls.date == today]
+        today_lessons = sorted((ls for ls in month if ls.date == today), key=lambda x: x.recorded_at or "")
         submitted = await _submitted(teacher.teacher_id)
         prev = last_periods(2)[1]
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        groups = await _group_names()
+        unrated = 0
+        if diary_service is not None:
+            athletes = await _athletes(teacher)
+            unrated = sum((await diary_service.unrated_counts([a.student_id for a in athletes])).values())
+        can_bill = teacher.teacher_id in settings.billing_teacher_id_set
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
-            "lessonsToday": len(today_lessons), "lessonsMonth": len(month),
-            "earnedMonth": await salary_service.total_for(teacher, period),
+            # «требует внимания»: записи спортсменов без оценки; у педагога со счетами — остаток в своих группах
+            "unrated": unrated,
+            "bills": await _bills_summary(teacher, period) if can_bill else None,
+            # «сегодня»: занятия дня целиком, чтобы сводка не ходила за ними вторым запросом
+            "lessonsToday": len(today_lessons),
+            "todayLessons": [_lesson_brief(ls, teacher, groups, names) for ls in today_lessons],
             "earnedToday": await salary_service.total_for(teacher, today),
+            # «месяц»
+            "lessonsMonth": len(month),
+            "groupLessonsMonth": sum(1 for ls in month if ls.type == LessonType.GROUP),
+            "individualLessonsMonth": sum(1 for ls in month if ls.type != LessonType.GROUP),
+            "earnedMonth": await salary_service.total_for(teacher, period),
             # прямая оплата: школа не начисляет, но на сводке это не должно выглядеть нулём
             "directMonth": sum(direct_amount(ls, teacher) for ls in month),
             "directToday": sum(direct_amount(ls, teacher) for ls in today_lessons),
@@ -189,6 +206,22 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "canSubmit": settings.teacher_period_submit_enabled and LessonService.can_submit_period(date.today(), period),
             "groups": len(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))),
         })
+
+    async def _bills_summary(teacher, period: str) -> dict:
+        """Счета своих групп за месяц: сколько учеников с остатком и сумма — строка «требует внимания».
+
+        Счёт ученика полный (по всем педагогам), поэтому берём общую карту «начислено/оплачено»
+        и оставляем учеников из групп педагога.
+        """
+        members: set[str] = set()
+        for gid in await _own_group_ids(teacher):
+            members.update(await student_group_repo.get_students_for_group(gid))
+        ledger = await payment_service.compute_ledger_map(since_period=period)
+        rest_by_student: dict[str, int] = {}
+        for (sid, _tid, ym), (accrued, paid) in ledger.items():
+            if ym == period and sid in members and accrued > paid:
+                rest_by_student[sid] = rest_by_student.get(sid, 0) + accrued - paid
+        return {"students": len(rest_by_student), "rest": sum(rest_by_student.values())}
 
     # ── занятия ──────────────────────────────────────────────────────────
     async def lessons(request: web.Request, user, teacher) -> web.Response:

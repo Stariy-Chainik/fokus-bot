@@ -5,31 +5,34 @@
 'use strict';
 
 /* ── Сводка ──────────────────────────────────────────────────────────── */
+/* Сводка — как у администратора, три блока по приоритету: что ждёт педагога → что было сегодня →
+   как идёт месяц. «Разделов» нет: занятия, группы и зарплата — это вкладки внизу. */
 SCREENS['t.home'] = async () => {
   const h = await api('/home');
+  const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1];
+  const attention = [
+    h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
+    h.bills && h.bills.rest ? cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: `к оплате за ${mon.toLowerCase()} · ${fmt(h.bills.rest)}`, r: pill(h.bills.students, 'bad'), go: 't.groups' }) : '',
+    h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
+  ].filter(Boolean);
+  const today = h.lessonsToday ? `
+    <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 't.lessons', { key: h.today })}${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok', 't.lessons', { key: h.today })}</div>
+    <div style="margin-top:10px">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>` : '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
   // Сдача периода отключена (periodSubmit=false): ни замка, ни напоминаний «не сдан».
-  const lock = !h.periodSubmit ? '' : h.periodSubmitted
-    ? pill('период сдан', 'ok')
-    : h.canSubmit ? pill('можно сдавать', 'warn') : pill(`сдать с 25 ${MON_SHORT[+h.period.slice(5) - 1]}`, 'mute');
-  return { title: 'Мой день', html: `
+  const lockNote = !h.periodSubmit ? '' : h.periodSubmitted ? ' · период сдан' : h.canSubmit ? ' · можно сдать период' : '';
+  const monthLine = `${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}${h.groupLessonsMonth ? ` · 👥 ${h.groupLessonsMonth}` : ''}${h.individualLessonsMonth ? ` · 👤 ${h.individualLessonsMonth}` : ''}${lockNote}`;
+  return { title: 'Сводка', html: `
     ${hero(`${esc(h.name)} · ${fdate(h.today)}`)}
-    <div class="kpis">
-      ${kpi(h.lessonsToday, 'занятий сегодня', '', 't.lessons', { key: h.today })}
-      ${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok')}
-    </div>
-    <div class="kpis" style="margin-top:10px">
-      ${kpi(h.lessonsMonth, `занятий за ${MON_NOM[+h.period.slice(5) - 1].toLowerCase()}`, '', 't.lessons', { key: h.period })}
-      ${kpi(fmt(h.earnedMonth), h.directMonth ? `зарплата · ещё ${fmt(h.directMonth)} напрямую` : 'зарплата за месяц', '', 't.money', { ym: h.period })}
-    </div>
-    <div style="margin-top:14px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
-    <div class="eyebrow">Разделы</div>
+    <div class="eyebrow">Требует внимания</div>
+    ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
+    <div class="eyebrow">Сегодня</div>
+    ${today}
+    <div style="margin-top:10px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
+    <div class="eyebrow">${mon}</div>
     ${list([
-      cell({ lead: '📋', plain: true, t: 'Мои занятия', s: 'сегодня, вчера, месяц', go: 't.lessons', p: {} }),
-      cell({ lead: '👥', plain: true, t: 'Мои группы', s: `${plural(h.groups, ['группа', 'группы', 'групп'])}: состав, пары${state.me.canBill ? ', оплата' : ', солисты'}`, go: 't.groups', p: {} }),
-      cell({ lead: '💰', plain: true, t: h.periodSubmit ? 'Зарплата и период' : 'Зарплата', s: `${MON_NOM[+h.period.slice(5) - 1]}: ${fmt(h.earnedMonth)}`, r: lock, go: 't.money', p: { ym: h.period } }),
+      cell({ lead: '💰', plain: true, t: 'Зарплата', s: monthLine, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
+      ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
     ])}
-    ${h.periodSubmit && !h.prevSubmitted ? `<div class="card pad" style="margin-top:12px;background:var(--warn-soft);border-color:var(--warn-soft)"><b>${MON_NOM[+h.prevPeriod.slice(5) - 1]} не сдан.</b> <span class="hint">Сдайте период, чтобы счёт родителям стал окончательным.</span><div style="margin-top:10px">${goBtn('Сдать период', 't.money', { ym: h.prevPeriod }, 'sec')}</div></div>` : ''}
-    ${state.me.canBill ? `<div class="eyebrow">Счета</div>${list([cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: 'группа → вкладка «Оплата» → ученик', go: 't.groups', p: {} })])}` : ''}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
 

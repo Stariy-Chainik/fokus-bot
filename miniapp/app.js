@@ -515,7 +515,7 @@ const chipsAct = (act, cur, items, extra = {}) => `<div class="chips">${items.ma
 const nextPeriods = n => { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() + i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; };
 const monthLabel = ym => ym === '*' ? 'постоянно' : ym ? `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}` : '—';
 
-SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки, группы, сданные периоды', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' }), cell({ lead: '📝', plain: true, t: 'Отметить занятие за педагога', s: 'группа, пара, солисты', go: 'a.record' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
+SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки, группы, сданные периоды', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
 
 SCREENS['a.branches'] = async () => {
   const d = await api('/branches');
