@@ -250,6 +250,8 @@ def test_manual_confirm_refuses_overpay_and_settles_the_queue(api):
     status, r = _call(app, "POST", "/api/admin/pay/confirm", json=body)
     assert status == 200 and r["credited"] == 2000 and r["overpaid"] == 0
     assert dp["pending_repo"].items[0].status == DONE and cash.action_id == dp["pending_repo"].items[0].action_id
+    addrs, text = dp["notifier"].sent[-1]                             # родителю ушло подтверждение
+    assert addrs == [("tg", PARENT_TG)] and "2000 руб." in text and "подтверждена" in text
     assert other.status == OPEN                                       # чужая заявка не тронута
 
     status, r = _call(app, "POST", "/api/admin/pay/confirm", json={**body, "amount": 5000})

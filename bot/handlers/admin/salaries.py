@@ -27,6 +27,7 @@ from bot.utils.callbacks import (
     SalaryTeacherCb,
     TeacherCardSalaryCb,
 )
+from config.settings import settings
 logger = logging.getLogger(__name__)
 router = Router(name="admin_salaries")
 
@@ -129,9 +130,9 @@ async def cb_salary_show(
         f"👥 Групповые ({group}): {gline}",
         f"👤 Индивидуальные ({ind}): {iline}",
         f"Начислено: {total_earned} руб.",
-        "",
-        f"Период: {period_status}",
     ]
+    if settings.teacher_period_submit_enabled:          # сдача выключена — статуса периода нет
+        lines += ["", f"Период: {period_status}"]
     await callback.message.edit_text("\n".join(lines), reply_markup=kb_back(back_cb))
     await callback.answer()
 

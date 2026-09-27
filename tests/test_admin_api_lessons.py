@@ -29,8 +29,10 @@ def test_lessons_of_day_and_detail(api):
     assert _call(app, "GET", "/api/admin/lessons/LES-404")[0] == 404
 
 
-def test_delete_lesson_bypasses_period_lock(api):
+def test_delete_lesson_bypasses_period_lock(api, monkeypatch):
+    from config.settings import settings
     app, dp = api
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     teacher = dp["teacher_repo"].items[0]
     dp["lesson_repo"].items.append(mk_lesson("LES-OLD", teacher, "2026-08-20", students=[("STU-0002", "Петрова Анна")]))
     status, d = _call(app, "GET", "/api/admin/lessons?date=2026-08-20")

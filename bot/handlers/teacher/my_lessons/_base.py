@@ -13,6 +13,7 @@ from bot.handlers.access import (  # noqa: F401 — реэкспорт для п
 from bot.models import User
 from bot.repositories import TeacherPeriodSubmissionRepository
 from bot.utils.dates import period_label as _month_label  # noqa: F401 — реэкспорт для под-модулей пакета
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_lessons")
@@ -74,6 +75,8 @@ async def _submitted_periods(
     teacher_id: str,
     submission_repo: TeacherPeriodSubmissionRepository,
 ) -> set[str]:
+    if not settings.teacher_period_submit_enabled:      # сдача периода выключена — замков нет
+        return set()
     submissions = await submission_repo.get_by_teacher(teacher_id)
     return {submission.period_month for submission in submissions}
 

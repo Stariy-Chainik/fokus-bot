@@ -4,6 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.keyboards.common import nav_row
 from bot.utils.paging import Page
+from config.settings import settings
 
 
 def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
@@ -119,17 +120,21 @@ def kb_teacher_list(teachers: list, action_prefix: str, back_cb: str = "admin:me
 
 
 def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [InlineKeyboardButton(text="📋 Занятия педагога", callback_data=f"tc_lessons:{teacher_id}")],
         [InlineKeyboardButton(text="💰 Зарплата за период", callback_data=f"tc_salary:{teacher_id}")],
         [InlineKeyboardButton(text="💵 Выплата за день", callback_data=f"salary_day:{teacher_id}")],
         [InlineKeyboardButton(text="📊 Изменить ставки", callback_data=f"card_edit_rates:{teacher_id}")],
         [InlineKeyboardButton(text="🏢 Изменить группы", callback_data=f"t_edit_groups:{teacher_id}")],
-        [InlineKeyboardButton(text="🔓 Открыть период", callback_data=f"open_period_list:{teacher_id}")],
+    ]
+    if settings.teacher_period_submit_enabled:          # сдача периода выключена — открывать нечего
+        rows.append([InlineKeyboardButton(text="🔓 Открыть период", callback_data=f"open_period_list:{teacher_id}")])
+    rows += [
         [InlineKeyboardButton(text="🗑 Удалить педагога", callback_data=f"del_teacher:{teacher_id}")],
         [InlineKeyboardButton(text="« Назад", callback_data="teachers:list")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")],
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_student: int) -> InlineKeyboardMarkup:

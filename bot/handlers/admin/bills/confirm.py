@@ -36,6 +36,7 @@ from ._base import (
 from .helpers import (
     _periods_only_buttons,
 )
+from bot.services.parent_notifier import notify_payment_confirmed, resolve_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -293,8 +294,11 @@ async def cb_do_confirm_payment(
         )
         if ok:
             if payment is not None:            # заявка родителя на этот абонемент уходит из очереди
-                await settle_actions(pending_repo, payment_service, await student_repo.get_by_id(payment.student_id),
+                student = await student_repo.get_by_id(payment.student_id)
+                await settle_actions(pending_repo, payment_service, student,
                                      payment.period_month, payment.total_amount, callback.from_user.id)
+                await notify_payment_confirmed(resolve_notifier(callback.bot), student,
+                                               payment.period_month, payment.total_amount)
             await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back(back_cb))
         else:
             await callback.message.edit_text("Счёт уже оплачен или не найден.", reply_markup=kb_back(back_cb))
@@ -456,6 +460,7 @@ async def cb_pay_select_apply(
         )
         await state.update_data(psel_chosen=[])
         await settle_actions(pending_repo, payment_service, student, period, credited, callback.from_user.id)
+        await notify_payment_confirmed(resolve_notifier(callback.bot), student, period, credited)
         if credited > 0:
             logger.info("Админ %s отметил оплату %d руб.: %s %s %s",
                         callback.from_user.id, credited, student_id, period, teacher_id)

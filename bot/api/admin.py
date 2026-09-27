@@ -29,6 +29,7 @@ from bot.utils.dates import current_period, last_periods
 from bot.utils.locks import InProgressGuard
 from bot.utils.telegram_auth import verify_init_data
 from config.settings import settings
+from bot.services.parent_notifier import notify_payment_confirmed
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +272,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         period = current_period()
         groups = await _groups_by_id()
         gids = [r.group_id for r in await dp["teacher_group_repo"].get_all() if r.teacher_id == tid]
-        subs = sorted({s.period_month for s in await submission_repo.get_by_teacher(tid)}, reverse=True)
+        subs = (sorted({s.period_month for s in await submission_repo.get_by_teacher(tid)}, reverse=True)
+                if settings.teacher_period_submit_enabled else [])       # сдача выключена — блока нет
         return _json({
             "id": t.teacher_id, "name": t.name, "tgId": t.tg_id,
             "rates": {"group": t.rate_group, "teacher": t.rate_for_teacher, "student": t.rate_for_student},
@@ -280,6 +282,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "salary": await salary_service.total_for(t, period),
             "isOwner": tid in settings.owner_teacher_id_set,
             "directPay": tid in settings.direct_pay_teacher_id_set,
+            "periodSubmit": settings.teacher_period_submit_enabled,
         })
 
     # ── подтверждение оплаты ─────────────────────────────────────────────
@@ -306,10 +309,19 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             members = await group_members(student_repo, student_group_repo, group_id)
         else:
             members = sorted(await student_repo.get_all(), key=lambda s: s.name.lower())
-        out = []
-        for s in members:
-            _, summary = await _student_bill(s.student_id, period)
-            out.append({"id": s.student_id, "name": s.name, **summary})
+        # одна карта «начислено/оплачено» на всех: счёт по каждому ученику отдельно («Все ученики» —
+        # 150 расчётов по всем занятиям) открывал экран несколько секунд
+        ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
+        totals: dict[str, dict] = {}
+        for (sid, _tid, ym), (accrued, paid) in ledger.items():
+            if ym != period:
+                continue
+            t = totals.setdefault(sid, {"total": 0, "paid": 0, "rest": 0})
+            t["total"] += accrued
+            t["paid"] += min(paid, accrued)
+            t["rest"] += max(accrued - paid, 0)
+        out = [{"id": s.student_id, "name": s.name, **totals.get(s.student_id, {"total": 0, "paid": 0, "rest": 0})}
+               for s in members]
         return _json({"period": period, "students": out})
 
     async def pay_student(request: web.Request, user) -> web.Response:
@@ -381,6 +393,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         logger.info("Mini App: админ %s отметил оплату %d руб.: %s %s %s", user.tg_id, credited, sid, period, key)
         # заявка родителя (наличные/чек), которую покрыла эта отметка, уходит из «Ждут решения»
         await settle_actions(_dp_get(dp, "pending_repo"), payment_service, student, period, credited, user.tg_id)
+        await notify_payment_confirmed(_dp_get(dp, "notifier"), student, period, credited)
         return _json({"credited": credited, "rows": rows, "overpaid": max(0, credited - rest)})
 
     async def pay_confirm_invoice(request: web.Request, user) -> web.Response:
@@ -404,6 +417,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             student = await student_repo.get_by_id(payment.student_id)
             await settle_actions(_dp_get(dp, "pending_repo"), payment_service, student, payment.period_month,
                                  payment.total_amount, user.tg_id)
+            await notify_payment_confirmed(_dp_get(dp, "notifier"), student, payment.period_month, payment.total_amount)
         return _json({"ok": ok})
 
     # ── счёт ученика ─────────────────────────────────────────────────────

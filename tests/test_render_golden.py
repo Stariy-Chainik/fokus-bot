@@ -131,6 +131,7 @@ def test_lesson_detail_screens(monkeypatch):
     from bot.handlers.teacher.my_lessons.detail import cb_lesson_detail
     install_fake_show_card(monkeypatch, "bot.handlers.teacher.my_lessons.detail")
     monkeypatch.setattr(settings, "revenue_share_groups", "GRP-0020:50")
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)   # замки видны только при включённой сдаче
     w = _world()
     lesson_repo = LessonRepoFake(_lesson_world())
     subs = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])

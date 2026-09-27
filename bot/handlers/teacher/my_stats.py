@@ -9,6 +9,7 @@ from bot.utils.dates import display_period, last_periods
 from bot.utils.lesson_stats import format_lesson_breakdown
 from bot.handlers.filters import TeacherOnly
 from bot.handlers.access import TeacherUser
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_my_stats")
@@ -57,9 +58,9 @@ async def cb_stats_period(
         f"Всего занятий: {total}",
         f"👥 Групповые ({group_count}): {group_line}",
         f"👤 Индивидуальные ({ind_count}): {ind_line}",
-        "",
-        status_line,
     ]
+    if settings.teacher_period_submit_enabled:          # сдача выключена — статуса периода нет
+        lines += ["", status_line]
 
     await callback.message.edit_text(
         "\n".join(lines),

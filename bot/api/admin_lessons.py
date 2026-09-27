@@ -10,6 +10,7 @@ from bot.models.enums import LessonType
 from bot.services.billing_service import calc_earned
 from bot.api.record import RecordError, record_create, record_options
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
     lesson_service = dp["lesson_service"]
 
     async def _locked(lesson) -> bool:
+        if not settings.teacher_period_submit_enabled:      # сдача периода выключена — замков нет
+            return False
         return await submission_repo.get_by_teacher_and_period(lesson.teacher_id, lesson.date[:7]) is not None
 
     def _slot_names(lesson) -> list[str]:

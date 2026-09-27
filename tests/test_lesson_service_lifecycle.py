@@ -5,6 +5,7 @@ import pytest
 
 from bot.models.enums import GroupBillingMode, LessonType
 from bot.services import LessonService
+from config.settings import settings
 from tests.fakes import ByIdRepo, LessonRepoFake, SubmissionRepoFake, mk_group, mk_lesson, mk_submission, mk_teacher, run
 
 
@@ -20,7 +21,8 @@ def test_create_rejects_future_date():
         run(svc.create(t, LessonType.INDIVIDUAL, "2999-01-01", 45, student_1_id="STU-1", student_1_name="A"))
 
 
-def test_create_respects_period_lock_unless_bypassed():
+def test_create_respects_period_lock_unless_bypassed(monkeypatch):
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     svc, t = _svc(subs=[mk_submission("TCH-0001", "2026-08")])
     with pytest.raises(PermissionError, match="уже сдан"):
         run(svc.create(t, LessonType.INDIVIDUAL, "2026-08-10", 45, student_1_id="STU-1", student_1_name="A"))
@@ -37,7 +39,8 @@ def test_create_group_lesson_not_deduplicated_and_ids_sequential():
     assert (first.lesson_id, second.lesson_id) == ("LES-000001", "LES-000002")
 
 
-def test_delete_paths():
+def test_delete_paths(monkeypatch):
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     t = mk_teacher()
     lessons = [mk_lesson("LES-1", t, "2026-08-10", students=[("STU-1", "A")]),
                mk_lesson("LES-2", t, "2026-09-10", students=[("STU-1", "A")])]
@@ -95,3 +98,14 @@ def test_can_submit_period_from_25th():
     assert LessonService.can_submit_period(date(2026, 9, 25), "2026-09") is True
     assert LessonService.can_submit_period(date(2026, 9, 1), "2026-08") is True    # прошлый месяц — всегда
     assert LessonService.can_submit_period(date(2026, 9, 30), "2026-10") is False
+
+
+def test_locks_are_ignored_when_submission_is_switched_off(monkeypatch):
+    """Сдача периода выключена (прод с 25.09.2026): сданные раньше месяцы больше не замок."""
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", False)
+    t = mk_teacher()
+    svc, _ = _svc([mk_lesson("LES-1", t, "2026-08-10", students=[("STU-1", "A")])],
+                  subs=[mk_submission("TCH-0001", "2026-08")])
+    assert run(svc.delete("LES-1")) is True
+    lesson = run(svc.create(t, LessonType.INDIVIDUAL, "2026-08-11", 45, student_1_id="STU-1", student_1_name="A"))
+    assert lesson.date == "2026-08-11"

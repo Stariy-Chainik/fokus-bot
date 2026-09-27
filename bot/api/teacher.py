@@ -38,6 +38,7 @@ from bot.utils.groups import hide_service_groups
 from bot.utils.ids import generate_submission_id
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
+from bot.services.parent_notifier import notify_payment_confirmed
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
 
     async def _submitted(teacher_id: str) -> set[str]:
+        if not settings.teacher_period_submit_enabled:      # сдача выключена — замков нет
+            return set()
         return {s.period_month for s in await submission_repo.get_by_teacher(teacher_id)}
 
     # ── профиль и сводка ─────────────────────────────────────────────────
@@ -721,6 +724,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
                     teacher.teacher_id, credited, sid, period, key)
         await settle_actions(_dp_get(dp, "pending_repo"), payment_service, s, period, credited, user.tg_id)
+        await notify_payment_confirmed(notifier, s, period, credited)
         return _json({"credited": credited, "rows": rows, "overpaid": max(0, credited - rest)})
 
     @billing_only

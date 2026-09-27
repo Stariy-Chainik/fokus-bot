@@ -114,6 +114,21 @@ class ParentNotifier:
         return len(addrs), await self.send_many(addrs, text, rows)
 
 
+async def notify_payment_confirmed(notifier, student, period_month: str, credited: int) -> int:
+    """Родителям ученика: оплата зачтена — одинаково из очереди, кабинета и ручной отметки в боте."""
+    if notifier is None or student is None or credited <= 0:
+        return 0
+    from bot.screens.parent_bills import bill_back_rows      # локально: screens тянут notifier
+    from bot.utils.dates import period_label
+    text = f"✅ Оплата {credited} руб. за {period_label(period_month)} ({student.name}) подтверждена."
+    try:
+        return await notifier.send_many(student.parent_addrs, text,
+                                        rows=bill_back_rows(student.student_id, period_month))
+    except Exception as exc:
+        logger.warning("Родителям %s не ушло подтверждение оплаты: %s", student.student_id, exc)
+        return 0
+
+
 def resolve_notifier(tg_bot=None) -> ParentNotifier:
     """Общий notifier процесса; если не настроен (тесты, скрипты) — только Telegram-бот вызова."""
     if ParentNotifier.default is not None:

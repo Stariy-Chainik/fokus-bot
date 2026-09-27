@@ -13,6 +13,7 @@ from bot.handlers.filters import TeacherOnly
 from bot.handlers.access import TeacherUser
 
 from ._base import router
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ async def cb_t_stu_lessons_list(
         await callback.answer()
         return
 
-    locked_period = bool(
+    locked_period = settings.teacher_period_submit_enabled and bool(
         await submission_repo.get_by_teacher_and_period(user.teacher_id, ym)
     )
     total_min = sum(ls.duration_min for ls in stu_lessons)
@@ -204,7 +205,7 @@ async def cb_t_pair_lessons_list(
         await callback.answer()
         return
 
-    locked_period = bool(
+    locked_period = settings.teacher_period_submit_enabled and bool(
         await submission_repo.get_by_teacher_and_period(user.teacher_id, ym)
     )
     total_min = sum(ls.duration_min for ls in pair_lessons)

@@ -38,6 +38,8 @@ def _call(dp, method, path, tg_id=TEACHER_TG, json=None, headers=None, bot=None)
 @pytest.fixture()
 def api(monkeypatch):
     dp, _ = make_api(monkeypatch)
+    # замки и сдача проверяются при включённом флаге; отдельный тест выключает его
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     asyncio.run(dp["user_repo"].add(TEACHER_TG, teacher_id="TCH-0001"))   # педагог со своим кабинетом
     dp["student_repo"].items[0].athlete_tg_id = ATHLETE_TG                # Иванов — спортсмен с кабинетом
     dp["entry_repo"] = TrainingEntryRepoFake([

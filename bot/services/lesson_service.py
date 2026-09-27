@@ -8,6 +8,7 @@ from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.utils import AttendeeEntry, generate_lesson_id, now_str, parse_attendees, period_month_from_date, serialize_attendees
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ class LessonService:
         self._salary_service = salary_service
 
     async def _ensure_not_submitted(self, teacher_id: str, period_month: str) -> None:
+        if not settings.teacher_period_submit_enabled:      # сдача периода выключена — замков нет
+            return
         sub = await self._submission_repo.get_by_teacher_and_period(teacher_id, period_month)
         if sub is not None:
             raise PermissionError(f"Период {period_month} уже сдан на оплату")

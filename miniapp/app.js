@@ -180,7 +180,7 @@ SCREENS['a.inbox'] = async () => {
     })))}<p class="hint" style="margin-top:8px">Заявки педагогов на новых учеников принимаются в чате бота.</p>` : ''}` };
 };
 
-SCREENS['a.pay'] = async ({ bill }) => ({ title: bill ? 'Счёт ученика' : 'Подтвердить оплату', html: `<div class="h2">Выберите месяц</div>${list(lastPeriods(3).map((ym, i) => cell({ t: fmon(ym), s: i === 0 ? 'текущий месяц' : 'закрыт', go: 'a.pay.groups', p: { ym, bill } })))}` });
+SCREENS['a.pay'] = async ({ bill }) => ({ title: bill ? 'Счёт ученика' : 'Подтвердить оплату', html: `<div class="h2">Выберите месяц</div>${list(lastPeriods(3).map((ym, i) => cell({ t: fmon(ym), s: i === 0 ? 'текущий месяц' : i === 1 ? 'прошлый месяц' : '', go: 'a.pay.groups', p: { ym, bill } })))}` });
 
 SCREENS['a.pay.groups'] = async ({ ym, bill }) => {
   const d = await api('/pay/groups');
@@ -214,8 +214,8 @@ SCREENS['a.pay.select'] = async ({ ym, sid, key }) => {
   return { title: d.ledger.name, html: `
     <div class="hint" style="margin-bottom:10px">${esc(d.student.name)} · ${fmon(ym)} · начислено ${fmt(d.ledger.accrued)}, оплачено ${fmt(d.ledger.paid)}. Отметьте занятия, за которые приняли деньги.</div>
     <div class="list">${d.marks.map(m => m.paid ? `<div class="lesson-line"><span class="mark paid">✓</span><span>${fdate(m.date)} · ${m.lessonType === 'group' ? 'групп.' : 'инд.'} · ${m.durationMin} мин<div class="d">оплачено</div></span><span class="amt">${fmt(m.amount)}</span></div>` : `<button class="lesson-line pick" data-act="pick" data-p='${esc(JSON.stringify({ id: m.lessonId }))}'><span class="mark ${ui.picked.has(m.lessonId) ? 'on' : ''}">${ui.picked.has(m.lessonId) ? '✓' : ''}</span><span>${fdate(m.date)} · ${m.lessonType === 'group' ? 'групп.' : 'инд.'} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></button>`).join('')}</div>
-    <div style="margin-top:12px">${btn(total ? `✅ Подтвердить оплату ${fmt(total)}` : 'Выберите занятия', 'confirmSel', { ym, sid, key, total, name: d.ledger.name, student: d.student.name }, total ? '' : 'sec')}</div>
-    <p class="hint" style="margin-top:10px">Сумма зачитывается на самые ранние неоплаченные занятия этого педагога — как в боте.</p>` };
+    <div style="margin-top:12px">${btn(total ? `✅ Подтвердить оплату ${fmt(total)}` : `✅ Подтвердить остаток ${fmt(d.ledger.remainder)}`, 'confirmSel', { ym, sid, key, total: total || d.ledger.remainder, name: d.ledger.name, student: d.student.name }, total || d.ledger.remainder ? '' : 'sec')}</div>
+    <p class="hint" style="margin-top:10px">Отметьте занятия, за которые приняли деньги, или подтвердите остаток целиком. Сумму можно поправить на следующем шаге: отмеченные занятия закрываются первыми, остальное — с самых ранних.</p>` };
 };
 
 const METHOD_CHIPS = () => { state.ui.method = state.ui.method || 'cash'; return `<div class="chips">${[['cash', 'Наличные'], ['receipt_bank', 'По реквизитам'], ['receipt_sbp', 'СБП']].map(([k, n]) => `<button class="chip" aria-pressed="${state.ui.method === k}" data-act="method" data-p='{"k":"${k}"}'>${n}</button>`).join('')}</div>`; };
@@ -311,7 +311,7 @@ SCREENS['a.teacher'] = async ({ id }) => {
     <div class="kpis">${kpi(fmt(t.rates.group), 'ставка — группа / 45 мин')}${kpi(fmt(t.rates.teacher), 'ставка — инд. / 45 мин')}${kpi(fmt(t.rates.student), 'цена для ученика / 45 мин')}${kpi(fmt(t.salary), `начислено за ${MON_NOM[+t.period.slice(5) - 1].toLowerCase()}`)}</div>
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
-    <div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Сданных периодов нет', '<p class="hint" style="margin:0">Сданный месяц закрыт для правок педагога; открыть его можно здесь</p>')}
+    ${t.periodSubmit ? `<div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Сданных периодов нет', '<p class="hint" style="margin:0">Сданный месяц закрыт для правок педагога; открыть его можно здесь</p>')}` : ''}
     <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
 };
 
@@ -321,10 +321,12 @@ SCREENS['a.finance'] = async () => ({ title: 'Финансы', html: `<div class
 const ACT = {
   closeSheet: () => closeSheet(),
   pick: ({ id }) => { const s = state.ui.sel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); },
-  confirmSel: ({ ym, sid, key, total, name, student }) => { if (!total) return; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div>${METHOD_CHIPS()}${btn('✅ Подтвердить', 'doConfirm', { ym, sid, key, amount: total })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
+  confirmSel: ({ ym, sid, key, total, name, student }) => { if (!total) return; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}</div>${field('pay-a', 'Сумма, ₽', String(total), 'inputmode="numeric"')}<div class="hint" style="margin:10px 0 4px">Способ оплаты</div>${METHOD_CHIPS()}${btn('✅ Подтвердить', 'doConfirm', { ym, sid, key })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
   method: ({ k }) => { state.ui.method = k; document.querySelectorAll('[data-act="method"]').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).k === k))); },
   refreshPay: () => { closeSheet(); state.ui.sel = null; render(); },
-  doConfirm: async ({ ym, sid, key, amount, force }) => {
+  doConfirm: async ({ ym, sid, key, amount: forced, force }) => {
+    const amount = forced || +val('pay-a');           // сумму можно поправить руками — платят не всегда «по урокам»
+    if (!amount) { toast('Укажите сумму'); return; }
     try {
       const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, force: !!force, method: state.ui.method || 'cash', lessonIds: [...((state.ui.sel && state.ui.sel.picked) || [])] } });
       closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}`);
@@ -533,7 +535,7 @@ const chipsAct = (act, cur, items, extra = {}) => `<div class="chips">${items.ma
 const nextPeriods = n => { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() + i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; };
 const monthLabel = ym => ym === '*' ? 'постоянно' : ym ? `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}` : '—';
 
-SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки, группы, сданные периоды', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
+SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки и группы', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
 
 SCREENS['a.branches'] = async () => {
   const d = await api('/branches');

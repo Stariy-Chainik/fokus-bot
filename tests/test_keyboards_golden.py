@@ -77,8 +77,13 @@ def test_kb_lesson_detail_variants():
                   markup_dump(kb_lesson_detail(lesson, back_cb="lessons_page:0:m-2026-09", can_add_guest=True)))
 
 
-def test_kb_teacher_card_back_confirm():
+def test_kb_teacher_card_back_confirm(monkeypatch):
+    from config.settings import settings
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     assert_golden("kb_teacher_card", markup_dump(kb_teacher_card("TCH-0001")))
+    monkeypatch.setattr(settings, "teacher_period_submit_enabled", False)
+    labels = [b.text for row in kb_teacher_card("TCH-0001").inline_keyboard for b in row]
+    assert "🔓 Открыть период" not in labels          # сдача выключена — открывать нечего
     assert_golden("kb_back", markup_dump(kb_back("admin:menu")))
     assert_golden("kb_confirm", markup_dump(kb_confirm("del:ok", "del:no", "🗑 Удалить")))
 
