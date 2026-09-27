@@ -24,7 +24,9 @@ _RESET = {
 def _neutral_settings(monkeypatch):
     for name, value in _RESET.items():
         monkeypatch.setattr(settings, name, value)
-    from bot.services import rate_history
+    from bot.services import activity, rate_history
     rate_history.load([])
+    activity.setup(None)      # лента изменений: тест DI включает её на живой лист — сбрасываем до и после
     yield
     rate_history.load([])
+    activity.setup(None)
