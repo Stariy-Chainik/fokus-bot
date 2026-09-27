@@ -54,3 +54,19 @@ def test_lesson_card_says_why_a_visit_costs_nothing(api):
 
     dp["group_repo"].items[0].billing_mode = GroupBillingMode.SUBSCRIPTION
     assert _call(app, "GET", "/api/admin/lessons/LES-FREE")[1]["freeLabel"] == "абонемент"
+
+
+def test_lessons_by_month_and_teacher_with_rent(api, monkeypatch):
+    """Вкладка «Занятия» и карточка педагога: месяц (?ym) и фильтр педагога (?tid); у прямой оплаты — аренда зала."""
+    from config.settings import settings
+    app, dp = api
+    status, d = _call(app, "GET", f"/api/admin/lessons?ym={YM}")
+    assert status == 200 and not d["isDay"] and [x["id"] for x in d["lessons"]] == ["LES-1", "LES-2", "LES-3"]
+    assert d["earned"] == 4333 and d["rent"] == 0
+    assert _call(app, "GET", f"/api/admin/lessons?ym={YM}&tid=TCH-0099")[1]["lessons"] == []
+    assert _call(app, "GET", "/api/admin/lessons?ym=2026-1")[0] == 400
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    monkeypatch.setattr(settings, "hall_rent_since_period", "")
+    d = _call(app, "GET", f"/api/admin/lessons?ym={YM}&tid=TCH-0001")[1]
+    assert [x["rent"] for x in d["lessons"]] == [500, 500, 0] and d["rent"] == 1000   # групповое — без аренды

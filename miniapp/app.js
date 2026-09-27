@@ -315,11 +315,16 @@ SCREENS['a.teachers'] = async () => {
   return { title: 'Педагоги', html: `${list(d.teachers.map(t => cell({ ...(d.periodSubmit ? { lead: t.submittedPrev || t.isOwner ? '🟢' : '🔴', plain: true } : { lead: initials(t.name) }), t: esc(t.name), s: esc(t.groups.join(', ')) || 'групп нет', r: t.isOwner ? pill('👑 руководитель', 'warn') : t.directPay ? pill('прямая оплата', 'acc') : '', go: 'a.teacher', p: { id: t.id } })))}${d.periodSubmit ? `<p class="hint" style="margin-top:8px">🟢/🔴 — сдан ли ${MON_NOM[+d.prevPeriod.slice(5) - 1].toLowerCase()}</p>` : ''}<div style="margin-top:8px">${goBtn('➕ Добавить педагога', 'a.teacher.add', {}, 'sec')}</div>` };
 };
 
-SCREENS['a.teacher'] = async ({ id }) => {
-  const t = await api(`/teachers/${id}`);
+SCREENS['a.teacher'] = async ({ id, ym }) => {
+  const period = ym || lastPeriods(1)[0];
+  const [t, r] = await Promise.all([api(`/teachers/${id}`), api(`/lessons?ym=${period}&tid=${encodeURIComponent(id)}`)]);
+  const lessonsBlock = `<div class="eyebrow">Занятия</div>
+    <div class="chips scroll">${periodsSince(LESSONS_SINCE).map(m => `<button class="chip" aria-pressed="${m === period}" data-go="a.teacher" data-p='${esc(JSON.stringify({ id, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>
+    ${r.lessons.length ? lessonsTotal(r.lessons, t.directPay) + `<div style="margin-top:10px">${lessonsByDay(r.lessons, t.directPay)}</div>` : '<div class="empty">В этом месяце занятий не отмечено</div>'}`;
   return { title: t.name, html: `
     <div class="kpis">${kpi(fmt(t.rates.group), 'ставка — группа / 45 мин')}${kpi(fmt(t.rates.teacher), 'ставка — инд. / 45 мин')}${kpi(fmt(t.rates.student), 'цена для ученика / 45 мин')}${kpi(fmt(t.salary), `начислено за ${MON_NOM[+t.period.slice(5) - 1].toLowerCase()}`)}</div>
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
+    ${lessonsBlock}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
     ${t.periodSubmit ? `<div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Сданных периодов нет', '<p class="hint" style="margin:0">Сданный месяц закрыт для правок педагога; открыть его можно здесь</p>')}` : ''}
     <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
@@ -507,24 +512,44 @@ Object.assign(ACT, {
 
 /* ── занятия за день ─────────────────────────────────────────────────── */
 const lessonCell = ls => cell({ lead: ls.type === 'group' ? '👥' : ls.students.length > 1 ? '👫' : '👤', plain: true, t: esc(ls.type === 'group' ? ls.groupName || 'группа' : ls.students.join(' + ')), s: `${esc(ls.teacherName)} · ${ls.durationMin} мин${ls.type === 'group' && ls.students.length ? ` · ${plural(ls.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${ls.locked ? ' · 🔒' : ''}`, r: ls.earned ? `<b>${fmt(ls.earned)}</b>` : '', go: 'a.lesson', p: { id: ls.id } });
-SCREENS['a.lessons.day'] = async ({ date, tid }) => {
+/* Месяцы для фильтров: с августа 2026 (начало учёта в кабинете) по текущий. */
+const periodsSince = start => { const out = []; const d = new Date(); let y = +start.slice(0, 4), m = +start.slice(5, 7); while (y < d.getFullYear() || (y === d.getFullYear() && m <= d.getMonth() + 1)) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } } return out; };
+const LESSONS_SINCE = '2026-08';
+/* Список занятий по дням с итогом дня; для педагога с прямой оплатой — аренда зала вместо нуля. */
+const lessonsByDay = (items, directPay = false) => {
+  const byDay = {}; items.forEach(l => (byDay[l.date] = byDay[l.date] || []).push(l));
+  return Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1)).map(dd => {
+    const day = byDay[dd]; const earned = day.reduce((a, l) => a + l.earned, 0); const rent = day.reduce((a, l) => a + (l.rent || 0), 0);
+    return `<div class="eyebrow">${fdate(dd)}<span style="margin-left:auto;font-weight:600">${plural(day.length, ['занятие', 'занятия', 'занятий'])} · ${directPay && rent ? `аренда ${fmt(rent)}` : fmt(earned)}</span></div>${list(day.map(lessonCell))}`;
+  }).join('');
+};
+const lessonsTotal = (items, directPay = false) => {
+  const groups = items.filter(l => l.type === 'group').length, solo = items.length - groups;
+  const earned = items.reduce((a, l) => a + l.earned, 0), rent = items.reduce((a, l) => a + (l.rent || 0), 0);
+  return `<div class="card"><div class="total"><span>${plural(items.length, ['занятие', 'занятия', 'занятий'])}${groups ? ` · 👥 ${groups}` : ''}${solo ? ` · 👤 ${solo}` : ''}</span><span class="big">${fmt(earned)}</span></div>${directPay ? `<div class="total" style="border-top:0;padding-top:0"><span class="hint">Индивидуальные платят родители напрямую · аренда зала школе</span><span class="big direct">${fmt(rent)}</span></div>` : ''}</div>`;
+};
+/* Занятия школы: день (последние семь дней) или месяц с августа, чипы педагогов фильтруют список и итог. */
+SCREENS['a.lessons.day'] = async ({ date, ym, tid }) => {
   const days = []; for (let i = 0; i < 7; i++) { const x = new Date(); x.setDate(x.getDate() - i); days.push(x.toISOString().slice(0, 10)); }
-  const d = date || days[0];
-  const r = await api(`/lessons?date=${d}`);
-  // Педагоги этого дня: чип выбирается с главного экрана или здесь; если у выбранного
-  // в этот день занятий нет (переключили день) — показываем всех.
+  const d = ym ? '' : (date || days[0]);
+  const r = await api(ym ? `/lessons?ym=${ym}` : `/lessons?date=${d}`);
+  // Педагоги периода: чип выбирается со сводки или здесь; если у выбранного занятий нет — показываем всех.
   const teachers = [];
   r.lessons.forEach(ls => { const t = teachers.find(x => x.id === ls.teacherId); t ? t.n++ : teachers.push({ id: ls.teacherId, name: ls.teacherName, n: 1 }); });
   teachers.sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
   const cur = teachers.some(t => t.id === tid) ? tid : '';
   const shown = cur ? r.lessons.filter(ls => ls.teacherId === cur) : r.lessons;
-  const earned = shown.reduce((a, ls) => a + ls.earned, 0);
-  const dayChips = `<div class="chips">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: x, tid: cur }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div>`;
+  const monthChipsRow = `<div class="chips scroll">${periodsSince(LESSONS_SINCE).map(m => `<button class="chip" aria-pressed="${m === ym}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ ym: m, tid: cur }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>`;
+  const dayChips = `<div class="chips scroll">${days.map(x => `<button class="chip" aria-pressed="${x === d}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: x, tid: cur }))}' data-replace="1">${+x.slice(8)} ${MON_SHORT[+x.slice(5, 7) - 1]}</button>`).join('')}</div>`;
   const teacherChips = teachers.length > 1
-    ? `<div class="chips">${[['', `Все · ${r.lessons.length}`], ...teachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.n}`])]
-        .map(([id, label]) => `<button class="chip" aria-pressed="${cur === id}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: d, tid: id }))}' data-replace="1">${label}</button>`).join('')}</div>`
+    ? `<div class="chips scroll">${[['', `Все · ${r.lessons.length}`], ...teachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.n}`])]
+        .map(([id, label]) => `<button class="chip" aria-pressed="${cur === id}" data-go="a.lessons.day" data-p='${esc(JSON.stringify(ym ? { ym, tid: id } : { date: d, tid: id }))}' data-replace="1">${label}</button>`).join('')}</div>`
     : '';
-  return { title: 'Занятия', html: `${stickyFilters(dayChips + teacherChips)}<div class="h2">${fdate(d)}</div>${shown.length ? list(shown.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}<div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
+  const body = !shown.length
+    ? `<div class="empty">${ym ? 'В этом месяце занятий не отмечено' : 'В этот день занятий не отмечено'}</div>`
+    : ym ? lessonsByDay(shown) + `<div style="margin-top:10px">${lessonsTotal(shown)}</div>`
+      : list(shown.map(lessonCell)) + `<div style="margin-top:10px">${lessonsTotal(shown)}</div>`;
+  return { title: 'Занятия', html: `${stickyFilters(monthChipsRow + dayChips + teacherChips)}<div class="h2">${ym ? fmon(ym) : fdate(d)}</div>${body}<div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
 };
 SCREENS['a.lesson'] = async ({ id }) => {
   const l = await api(`/lessons/${id}`);

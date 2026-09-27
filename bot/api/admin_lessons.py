@@ -9,6 +9,7 @@ from aiohttp import web
 from bot.models.enums import LessonType
 from bot.services.billing_service import calc_earned
 from bot.api.record import RecordError, record_create, record_options
+from bot.services.profit_service import lesson_rent
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from config.settings import settings
 
@@ -37,14 +38,20 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
                             getattr(lesson, "student_3_name", None), getattr(lesson, "student_4_name", None)) if n]
 
     async def lessons(request: web.Request, user) -> web.Response:
-        day = request.query.get("date") or date.today().isoformat()
-        if len(day) != 10:
+        """?date=YYYY-MM-DD — день (по умолчанию сегодня), ?ym=YYYY-MM — месяц; ?tid= — только этот педагог."""
+        ym = request.query.get("ym") or ""
+        day = "" if ym else (request.query.get("date") or date.today().isoformat())
+        key = ym or day
+        if len(key) not in (7, 10):
             return _json({"error": "bad_request"}, status=400)
+        tid = request.query.get("tid") or ""
         teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
         groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         students = {s.student_id: s.name for s in await student_repo.get_all()}
+        rows = [x for x in await lesson_repo.get_all()
+                if (x.date[:7] == ym if ym else x.date == day) and (not tid or x.teacher_id == tid)]
         out = []
-        for ls in sorted((x for x in await lesson_repo.get_all() if x.date == day), key=lambda x: x.recorded_at or ""):
+        for ls in sorted(rows, key=lambda x: (x.date, x.recorded_at or "")):
             t = teachers.get(ls.teacher_id)
             names = (_slot_names(ls) if ls.type != LessonType.GROUP
                      else [students.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees)])
@@ -54,9 +61,11 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
                 "groupName": groups[ls.group_id].name if ls.group_id in groups else "",
                 "students": names, "durationMin": ls.duration_min,
                 "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
+                "rent": lesson_rent(ls),        # аренда зала у педагога с прямой оплатой (статистика, не оплата)
                 "recordedAt": ls.recorded_at, "locked": await _locked(ls),
             })
-        return _json({"date": day, "lessons": out, "earned": sum(x["earned"] for x in out)})
+        return _json({"date": day, "key": key, "isDay": bool(day), "lessons": out,
+                      "earned": sum(x["earned"] for x in out), "rent": sum(x["rent"] for x in out)})
 
     async def lesson(request: web.Request, user) -> web.Response:
         ls = await lesson_repo.get_by_id(request.match_info["lid"])
