@@ -83,17 +83,13 @@ const empty = (text, action = '') => `<div class="empty"><div>${text}</div>${act
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
 /* ── навигация ───────────────────────────────────────────────────────── */
+/* Нижнее меню — эмодзи вместо контурных иконок; у администратора шесть вкладок по сущностям
+   (как в референсе владельца 27.09.2026): деньги — одной вкладкой, «Школа» разошлась по «Группам» и «Педагогам». */
 const TABS = {
-  admin: [['a.home', 'Сводка', 'home'], ['a.payhub', 'Оплаты', 'card'], ['a.students', 'Ученики', 'users'], ['a.school', 'Школа', 'teacher'], ['a.finance', 'Финансы', 'chart']],
-  teacher: [['t.home', 'Сводка', 'home'], ['t.lessons', 'Занятия', 'card'], ['t.groups', 'Группы', 'users'], ['t.diary', 'Дневник', 'book'], ['t.money', 'Зарплата', 'chart']],
-  parent: [['p.home', 'Мои дети', 'home'], ['p.bills', 'Счета', 'card'], ['p.lessons', 'Занятия', 'users'], ['p.diary', 'Дневник', 'book']],
-  athlete: [['s.home', 'Дневник', 'home'], ['s.entries', 'Тренировки', 'book'], ['s.tasks', 'Задания', 'card'], ['s.rating', 'Рейтинг', 'chart']],
-};
-const ICON = {
-  home: '<path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/>',
-  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-5-6.3"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-  teacher: '<circle cx="12" cy="7" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0M3 3h4M17 3h4"/>',
-  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M8 7h7M8 11h7"/>',
+  admin: [['a.home', 'Сводка', '📊'], ['a.students', 'Ученики', '👥'], ['a.branches', 'Группы', '🏷️'], ['a.teachers', 'Педагоги', '👩‍🏫'], ['a.lessons.day', 'Занятия', '📅'], ['a.money', 'Деньги', '💰']],
+  teacher: [['t.home', 'Сводка', '📊'], ['t.lessons', 'Занятия', '📅'], ['t.groups', 'Группы', '👥'], ['t.diary', 'Дневник', '📓'], ['t.money', 'Зарплата', '💰']],
+  parent: [['p.home', 'Мои дети', '🏠'], ['p.bills', 'Счета', '🧾'], ['p.lessons', 'Занятия', '📅'], ['p.diary', 'Дневник', '📓']],
+  athlete: [['s.home', 'Дневник', '📓'], ['s.entries', 'Тренировки', '🏃'], ['s.tasks', 'Задания', '📋'], ['s.rating', 'Рейтинг', '🏆']],
 };
 const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];
@@ -155,9 +151,23 @@ SCREENS['a.home'] = async () => {
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
 
-SCREENS['a.payhub'] = async () => {
+/* «Деньги»: всё про оплаты и финансы одной вкладкой (раньше — «Оплаты» и «Финансы»). */
+SCREENS['a.money'] = async () => {
   const inbox = await api('/inbox').catch(() => ({ total: 0 }));
-  return { title: 'Оплаты', html: `${inbox.total ? `${list([cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })])}` : ''}<div class="eyebrow">Принять оплату</div>${list([cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }), cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } })])}<div class="eyebrow">Контроль</div>${list([cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }), cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' })])}` };
+  return { title: 'Деньги', html: `
+    ${inbox.total ? list([cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })]) : ''}
+    <div class="eyebrow">Оплаты</div>${list([
+      cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }),
+      cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }),
+      cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }),
+      cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' }),
+    ])}
+    <div class="eyebrow">Школа</div>${list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} })])}
+    <div class="eyebrow">Педагоги</div>${list([
+      cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }),
+      cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} }),
+    ])}
+    <p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` };
 };
 
 /* Очередь решений: чеки, наличные и заявки, которые ждут администратора. */
@@ -315,7 +325,6 @@ SCREENS['a.teacher'] = async ({ id }) => {
     <div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record.w', { tid: id, name: t.name })}${btn('✏️ Изменить ставки', 'ratesForm', { id, rates: t.rates }, 'sec')}${goBtn('💃 Группы педагога', 'a.teacher.groups', { id, name: t.name }, 'ghost')}${btn('🗑 Удалить педагога', 'teacherDelete', { id, name: t.name }, 'danger')}</div>` };
 };
 
-SCREENS['a.finance'] = async () => ({ title: 'Финансы', html: `<div class="eyebrow">Школа</div>${list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} })])}<div class="eyebrow">Педагоги</div>${list([cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }), cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} })])}<p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` });
 
 /* ── действия ────────────────────────────────────────────────────────── */
 const ACT = {
@@ -515,7 +524,7 @@ SCREENS['a.lessons.day'] = async ({ date, tid }) => {
     ? `<div class="chips">${[['', `Все · ${r.lessons.length}`], ...teachers.map(t => [t.id, `${esc(surname(t.name))} · ${t.n}`])]
         .map(([id, label]) => `<button class="chip" aria-pressed="${cur === id}" data-go="a.lessons.day" data-p='${esc(JSON.stringify({ date: d, tid: id }))}' data-replace="1">${label}</button>`).join('')}</div>`
     : '';
-  return { title: 'Занятия за день', html: `${stickyFilters(dayChips + teacherChips)}<div class="h2">${fdate(d)}</div>${shown.length ? list(shown.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}` };
+  return { title: 'Занятия', html: `${stickyFilters(dayChips + teacherChips)}<div class="h2">${fdate(d)}</div>${shown.length ? list(shown.map(lessonCell)) + `<div class="card" style="margin-top:10px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · зарплата педагогов</span><span class="big">${fmt(earned)}</span></div></div>` : '<div class="empty">В этот день занятий не отмечено</div>'}<div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
 };
 SCREENS['a.lesson'] = async ({ id }) => {
   const l = await api(`/lessons/${id}`);
@@ -535,7 +544,6 @@ const chipsAct = (act, cur, items, extra = {}) => `<div class="chips">${items.ma
 const nextPeriods = n => { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() + i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; };
 const monthLabel = ym => ym === '*' ? 'постоянно' : ym ? `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}` : '—';
 
-SCREENS['a.school'] = async () => ({ title: 'Школа', html: `${list([cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги', s: 'ставки и группы', go: 'a.teachers' }), cell({ lead: '🏢', plain: true, t: 'Филиалы и группы', s: 'биллинг, составы, архив', go: 'a.branches' })])}<div class="eyebrow">Добавить</div>${list([cell({ lead: '➕', plain: true, t: 'Педагога', go: 'a.teacher.add' }), cell({ lead: '➕', plain: true, t: 'Ученика', go: 'a.student.add' })])}` });
 
 SCREENS['a.branches'] = async () => {
   const d = await api('/branches');
@@ -635,7 +643,7 @@ Object.assign(ACT, {
   doGroupRename: async ({ id }) => { const name = val('gn').trim(); if (!name) return; try { await api(`/groups/${id}`, { method: 'PATCH', body: { name } }); closeSheet(); render(); toast('Переименовано'); } catch (e) { toast(errText(e)); } },
   groupArchive: async ({ id, archived }) => { try { await api(`/groups/${id}`, { method: 'PATCH', body: { archived } }); render(); toast(archived ? 'Группа в архиве' : 'Группа возвращена'); } catch (e) { toast(errText(e)); } },
   groupDelete: ({ id, name, students }) => sheet(`<h3>Удалить «${esc(name)}»?</h3><div class="hint">${students ? `${plural(students, ['ученик выйдет', 'ученика выйдут', 'учеников выйдут'])} из состава, ` : ''}педагоги отвяжутся; прошлые занятия и счета останутся. Если нужна история в списках — лучше архив.</div><div style="margin-top:12px">${btn('🗑 Удалить группу', 'doGroupDelete', { id }, 'danger')}${btn('📦 Лучше в архив', 'groupArchiveClose', { id }, 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
-  doGroupDelete: async ({ id }) => { try { await api(`/groups/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.school' }, { n: 'a.branches' }]; render(); toast('Группа удалена'); } catch (e) { toast(errText(e)); } },
+  doGroupDelete: async ({ id }) => { try { await api(`/groups/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.teachers' }, { n: 'a.branches' }]; render(); toast('Группа удалена'); } catch (e) { toast(errText(e)); } },
   groupArchiveClose: ({ id }) => { closeSheet(); ACT.groupArchive({ id, archived: true }); },
   groupTeacherToggle: async ({ gid, tid, assigned }) => { try { await api(`/groups/${gid}/teachers`, { method: 'PUT', body: { teacherId: tid, assigned } }); render(); } catch (e) { toast(errText(e)); } },
   teacherGroupToggle: async ({ tid, gid, assigned }) => { try { await api(`/teachers/${tid}/groups`, { method: 'PUT', body: { groupId: gid, assigned } }); render(); } catch (e) { toast(errText(e)); } },
@@ -673,7 +681,7 @@ Object.assign(ACT, {
   openPeriod: ({ id, ym }) => sheet(`<h3>Открыть ${monthLabel(ym).toLowerCase()}?</h3><div class="hint">Педагог снова сможет добавлять и удалять занятия месяца; счета родителям за него перестанут быть окончательными.</div><div style="margin-top:12px">${btn('🔓 Открыть период', 'doOpenPeriod', { id, ym }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   doOpenPeriod: async ({ id, ym }) => { try { await api(`/teachers/${id}/periods/${ym}/open`, { method: 'POST' }); closeSheet(); render(); toast('Период открыт'); } catch (e) { toast(errText(e)); } },
   teacherDelete: ({ id, name }) => sheet(`<h3>Удалить ${esc(name)}?</h3><div class="hint">Связи с группами и доступ к боту удалятся; занятия останутся в истории под его именем.</div><div style="margin-top:12px">${btn('🗑 Удалить', 'doTeacherDelete', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
-  doTeacherDelete: async ({ id }) => { try { await api(`/teachers/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.school' }, { n: 'a.teachers' }]; render(); toast('Педагог удалён'); } catch (e) { toast(errText(e)); } },
+  doTeacherDelete: async ({ id }) => { try { await api(`/teachers/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.teachers' }, { n: 'a.teachers' }]; render(); toast('Педагог удалён'); } catch (e) { toast(errText(e)); } },
 });
 
 /* ── запись занятия за педагога (мастер как в боте) ─────────────────────── */
@@ -762,7 +770,7 @@ async function render() {
   const seq = ++renderSeq; const s = cur();
   const content = document.getElementById('content');
   const rootN = state.stack[0].n;
-  document.getElementById('tabs').innerHTML = TABS[ROLE].map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><svg viewBox="0 0 24 24">${ICON[ic]}</svg>${label}</button>`).join('');
+  document.getElementById('tabs').innerHTML = TABS[ROLE].map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${ic}</span>${label}</button>`).join('');
   const deep = state.stack.length > 1;
   document.getElementById('back').classList.toggle('on', deep && !tg);
   if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
