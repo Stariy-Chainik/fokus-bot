@@ -22,12 +22,13 @@ from bot.api.admin import auth_tg_id
 from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
-from bot.models.enums import LessonType
+from bot.models.enums import GroupBillingMode, LessonType
 from bot.services import LessonService, payment_ledger
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.pending_queue import rest_for_keys, settle_actions
+from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
 from bot.utils.dates import format_date_display
@@ -165,6 +166,59 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return set()
         return {s.period_month for s in await submission_repo.get_by_teacher(teacher_id)}
 
+    # ── статус оплаты занятия (карточка, журнал, «сегодня» на сводке) ────
+    async def _lesson_student_ids(ls, g, cache: dict) -> tuple[list[str], bool]:
+        """Ученики занятия: посещаемость, слоты или — у абонемента без посещаемости — состав группы."""
+        if ls.type == LessonType.GROUP:
+            ids = [e.student_id for e in parse_attendees(ls.attendees or "")]
+            if not ids and g is not None and g.billing_mode == GroupBillingMode.SUBSCRIPTION:
+                key = ("roster", g.group_id)
+                if key not in cache:
+                    cache[key] = [m.student_id for m in await group_members(student_repo, student_group_repo, g.group_id)]
+                return list(cache[key]), True
+            return ids, False
+        return [i for i in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id) if i], False
+
+    async def _pay_statuses(ls, teacher, g, student_ids: list, students: dict, cache: dict) -> list:
+        """Статус по каждому ученику: занятие с суммой — по накопительным оплатам месяца (как ✅/⬜
+        у родителя), абонемент — по остатку начисления SUB:{gid}; прямую оплату школа не отслеживает."""
+        if is_direct(ls, teacher):
+            return [None] * len(student_ids)
+        period = ls.date[:7]
+        out: list[str | None] = []
+        for sid in student_ids:
+            if sid not in students:
+                out.append(None)
+                continue
+            mkey = ("marks", sid, period)
+            if mkey not in cache:
+                cache[mkey] = await payment_service.student_lesson_marks(sid, period)
+            mark = cache[mkey].mark(ls.lesson_id)
+            if mark.amount > 0:
+                out.append("paid" if mark.paid else "unpaid")
+            elif g is not None and g.billing_mode == GroupBillingMode.SUBSCRIPTION:
+                lkey = ("ledger", sid, period)
+                if lkey not in cache:
+                    cache[lkey] = await payment_service.ledger_for(students[sid], period)
+                sub = cache[lkey].get(f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}")
+                out.append(None if sub is None or sub.accrued <= 0
+                           else ("sub_paid" if sub.remainder <= 0 else "sub_unpaid"))
+            else:
+                out.append(None)
+        return out
+
+    async def _add_pay_counts(teacher, rows: list, items: list) -> None:
+        """В строки журнала — «оплатили N из M» (paidCount / payableCount), одним кешем на запрос."""
+        groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        students = {s.student_id: s for s in await student_repo.get_all()}
+        cache: dict = {}
+        for ls, item in zip(rows, items, strict=True):
+            g = groups_by_id.get(ls.group_id) if ls.group_id else None
+            ids, _ = await _lesson_student_ids(ls, g, cache)
+            statuses = [x for x in await _pay_statuses(ls, teacher, g, ids, students, cache) if x]
+            item["paidCount"] = sum(1 for x in statuses if x in ("paid", "sub_paid"))
+            item["payableCount"] = len(statuses)
+
     # ── профиль и сводка ─────────────────────────────────────────────────
     async def me(request: web.Request, user, teacher) -> web.Response:
         return _json({
@@ -183,6 +237,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         prev = last_periods(2)[1]
         names = {s.student_id: s.name for s in await student_repo.get_all()}
         groups = await _group_names()
+        today_items = [_lesson_brief(ls, teacher, groups, names) for ls in today_lessons]
+        await _add_pay_counts(teacher, today_lessons, today_items)
         unrated = 0
         if diary_service is not None:
             athletes = await _athletes(teacher)
@@ -195,7 +251,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "bills": await _bills_summary(teacher, period) if can_bill else None,
             # «сегодня»: занятия дня целиком, чтобы сводка не ходила за ними вторым запросом
             "lessonsToday": len(today_lessons),
-            "todayLessons": [_lesson_brief(ls, teacher, groups, names) for ls in today_lessons],
+            "todayLessons": today_items,
             "earnedToday": await salary_service.total_for(teacher, today),
             # «месяц»
             "lessonsMonth": len(month),
@@ -238,10 +294,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         names = {s.student_id: s.name for s in await student_repo.get_all()}
         groups = await _group_names()
         submitted = await _submitted(teacher.teacher_id)
-        out = [_lesson_brief(ls, teacher, groups, names)
-               for ls in sorted(rows, key=lambda x: (x.date, x.recorded_at or ""))]
+        ordered = sorted(rows, key=lambda x: (x.date, x.recorded_at or ""))
+        out = [_lesson_brief(ls, teacher, groups, names) for ls in ordered]
         for item in out:
             item["locked"] = item["date"][:7] in submitted
+        await _add_pay_counts(teacher, ordered, out)      # «оплатили N из M» в каждой строке
         return _json({
             "key": key, "isDay": len(key) == 10, "lessons": out,
             "earned": await salary_service.total_for(teacher, key),
@@ -252,7 +309,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if ls is None or ls.teacher_id != teacher.teacher_id:
             return _json({"error": "not_found"}, status=404)
         g = await group_repo.get_by_id(ls.group_id) if ls.group_id else None
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s for s in await student_repo.get_all()}
+        names = {sid: s.name for sid, s in students.items()}
         if ls.type == LessonType.GROUP:
             attendees = [{"studentId": e.student_id, "name": names.get(e.student_id, e.student_id),
                           "durationMin": e.duration_min, "amount": e.amount}
@@ -267,8 +325,21 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             attendees = [{"studentId": i, "name": names.get(i, n), "durationMin": ls.duration_min,
                           "amount": shares.get(i) if shares else None}
                          for i, n in zip(ids, slots, strict=False)]
+        # Абонементная группа пишется без посещаемости — вместо пустого списка показываем состав
+        # с оплатой абонемента за месяц занятия: педагог видит, кто из группы ещё не оплатил.
+        cache: dict = {}
+        ids, roster = await _lesson_student_ids(ls, g, cache)
+        if roster:
+            attendees = [{"studentId": sid, "name": names.get(sid, sid), "durationMin": ls.duration_min, "amount": None}
+                         for sid in ids]
+        statuses = await _pay_statuses(ls, teacher, g, [a["studentId"] for a in attendees], students, cache)
+        for a, status in zip(attendees, statuses, strict=True):
+            a["payStatus"] = status
+        payable = [a for a in attendees if a["payStatus"]]
         return _json({
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
+            "paidCount": sum(1 for a in payable if a["payStatus"] in ("paid", "sub_paid")),
+            "payableCount": len(payable), "roster": roster,
             "groupId": ls.group_id or "", "groupName": g.name if g else "",
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),

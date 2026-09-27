@@ -100,6 +100,44 @@ def test_home_and_lessons_are_own_only(api):
     assert _call(app, "DELETE", "/api/teacher/lessons/LES-OTHER")[0] == 404
 
 
+def test_lesson_card_shows_payment_status_per_student(api):
+    """Карточка занятия у педагога: у каждого ученика — оплачено / не оплачено по оплатам месяца."""
+    app, dp = api
+    one = _call(app, "GET", "/api/teacher/lessons/LES-3")[1]
+    assert [a["payStatus"] for a in one["attendees"]] == ["unpaid", "unpaid"]
+    assert (one["paidCount"], one["payableCount"]) == (0, 2)
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0002", YM, "TCH-0001", 800, status=PaymentStatus.PAID))
+    one = _call(app, "GET", "/api/teacher/lessons/LES-3")[1]
+    assert {a["studentId"]: a["payStatus"] for a in one["attendees"]} == {"STU-0001": "unpaid", "STU-0002": "paid"}
+    assert (one["paidCount"], one["payableCount"]) == (1, 2)
+    solo = _call(app, "GET", "/api/teacher/lessons/LES-1")[1]          # индивидуальное: один ученик
+    assert solo["attendees"][0]["payStatus"] == "unpaid" and solo["payableCount"] == 1
+    # журнал: та же отметка в каждой строке
+    rows = _call(app, "GET", f"/api/teacher/lessons?ym={YM}")[1]["lessons"]
+    assert {r["id"]: (r["paidCount"], r["payableCount"]) for r in rows} == {
+        "LES-1": (0, 1), "LES-2": (0, 1), "LES-3": (1, 2)}
+
+
+def test_lesson_card_status_for_subscription_and_direct_pay(api, monkeypatch):
+    from tests.test_parent_api import _sub_mode
+    app, dp = api
+    _sub_mode(dp, price=6000)                                            # БП Джаз — абонемент 6000/мес
+    teacher = dp["teacher_repo"].items[0]
+    # абонементное занятие пишется без посещаемости: в карточке — состав группы с оплатой абонемента
+    dp["lesson_repo"].items.append(mk_lesson("LES-SUB", teacher, f"{YM}-14", duration=60,
+                                             lesson_type=LessonType.GROUP, group_id="GRP-0001"))
+    one = _call(app, "GET", "/api/teacher/lessons/LES-SUB")[1]
+    assert one["roster"] and [a["payStatus"] for a in one["attendees"]] == ["sub_unpaid", "sub_unpaid"]
+    dp["payment_repo"].rows.append(mk_payment("PAY-S", "STU-0001", YM, "SUB:GRP-0001", 6000, status=PaymentStatus.PAID))
+    one = _call(app, "GET", "/api/teacher/lessons/LES-SUB")[1]
+    assert {a["studentId"]: a["payStatus"] for a in one["attendees"]} == {"STU-0001": "sub_paid", "STU-0002": "sub_unpaid"}
+    assert (one["paidCount"], one["payableCount"]) == (1, 2)
+    # прямая оплата: школа не отслеживает — статуса нет
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    solo = _call(app, "GET", "/api/teacher/lessons/LES-1")[1]
+    assert solo["attendees"][0]["payStatus"] is None and solo["payableCount"] == 0
+
+
 def test_period_lock_blocks_delete_and_record(api):
     app, dp = api
     teacher = dp["teacher_repo"].items[0]

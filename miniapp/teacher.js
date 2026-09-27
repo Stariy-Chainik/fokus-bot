@@ -38,11 +38,15 @@ SCREENS['t.home'] = async () => {
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */
 const tKey = () => state.ui.tKey || new Date().toISOString().slice(0, 10);
+/* Отметка оплаты в строке журнала: один ученик — оплачено / нет, несколько — «оплатили N из M». */
+const tPayNote = x => !x.payableCount ? '' : x.payableCount === 1
+  ? (x.paidCount ? ' · ✅ оплачено' : ' · ⏳ не оплачено')
+  : ` · ${x.paidCount === x.payableCount ? '✅' : '⏳'} оплатили ${x.paidCount} из ${x.payableCount}`;
 /* Занятие с прямой оплатой: школа не начисляет, поэтому показываем сумму родителя. */
 const tLessonCell = (x, withDate = false) => cell({
   lead: x.type === 'group' ? '👥' : '👤', plain: true,
   t: esc(x.type === 'group' ? (x.groupName || 'Группа') : x.students.join(' + ') || '—'),
-  s: `${withDate ? `${fdate(x.date)} · ` : ''}${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.direct ? ' · платит родитель' : ''}${x.locked ? ' · 🔒' : ''}`,
+  s: `${withDate ? `${fdate(x.date)} · ` : ''}${x.durationMin} мин${x.type === 'group' && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}${x.direct ? ' · платит родитель' : ''}${tPayNote(x)}${x.locked ? ' · 🔒' : ''}`,
   r: x.direct ? `<b class="direct">${fmt(x.directAmount)}</b>` : `<b>${fmt(x.earned)}</b>`,
   go: 't.lesson', p: { id: x.id },
 });
@@ -87,14 +91,19 @@ SCREENS['t.lessons'] = async ({ key }) => {
     <div style="margin-top:12px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>` };
 };
 
+/* Статус оплаты ученика в карточке занятия: по накопительным оплатам месяца (как ✅/⬜ у родителя). */
+const T_PAY = { paid: ['✅ оплачено', 'ok'], unpaid: ['⏳ не оплачено', 'warn'], sub_paid: ['✅ абонемент оплачен', 'ok'], sub_unpaid: ['⏳ абонемент не оплачен', 'warn'] };
 SCREENS['t.lesson'] = async ({ id }) => {
   const l = await api(`/lessons/${id}`);
+  const payPill = !l.payableCount ? '' : l.payableCount > 1
+    ? pill(`оплатили ${l.paidCount} из ${l.payableCount}`, l.paidCount === l.payableCount ? 'ok' : 'warn')
+    : pill(...T_PAY[l.attendees.find(a => a.payStatus).payStatus]);
   return { title: 'Занятие', html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(l.type === 'group' ? l.groupName || 'Группа' : l.attendees.map(a => a.name).join(' + '))}</div>
       <div class="hint">${fdate(l.date)} · ${l.durationMin} мин${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>
-      ${l.locked ? `<div style="margin-top:8px">${pill('🔒 период сдан', 'mute')}</div>` : ''}</div>
-    ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({
-      lead: initials(a.name), t: esc(a.name), s: l.direct ? 'платит напрямую' : '',
+      ${payPill || l.locked ? `<div style="margin-top:8px">${payPill}${l.locked ? ` ${pill('🔒 период сдан', 'mute')}` : ''}</div>` : ''}</div>
+    ${l.attendees.length ? `<div class="eyebrow">${l.roster ? `Абонемент за ${MON_NOM[+l.date.slice(5, 7) - 1].toLowerCase()}` : l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({
+      lead: initials(a.name), t: esc(a.name), s: l.direct ? 'платит напрямую' : (T_PAY[a.payStatus] ? T_PAY[a.payStatus][0] : ''),
       r: a.amount === null ? '' : a.amount ? `<b class="${l.direct ? 'direct' : ''}">${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'),
       go: 't.student', p: { id: a.studentId },
     })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
