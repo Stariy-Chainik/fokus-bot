@@ -350,14 +350,19 @@ ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
     <div style="margin-top:12px">${btn('💾 Зачесть оплату', 'tPayDo', { sid, ym, key })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
 ACT.tPayMethod = ({ v }) => { state.ui.tPayMethod = v; document.querySelectorAll('[id^="pm-"]').forEach(b => b.setAttribute('aria-pressed', b.id === `pm-${v}`)); };
-ACT.tPayDo = async ({ sid, ym, key }) => {
-  const amount = +val('pay-a');
+ACT.tPayDo = async ({ sid, ym, key, amount: forced, force }) => {
+  const amount = forced || +val('pay-a');
   if (!amount) { toast('Укажите сумму'); return; }
   try {
-    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, method: state.ui.tPayMethod || 'cash', lessonIds: [...((state.ui.tsel && state.ui.tsel.picked) || [])] } });
+    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, force: !!force, method: state.ui.tPayMethod || 'cash', lessonIds: [...((state.ui.tsel && state.ui.tsel.picked) || [])] } });
     if (state.ui.tsel) state.ui.tsel.key = '';
-    closeSheet(); render(); toast(r.credited ? `Зачтено ${fmt(r.credited)}` : 'Закрывать нечего — остатков нет');
-  } catch (e) { closeSheet(); toast(errText(e)); }
+    closeSheet(); render(); toast(r.credited ? `Зачтено ${fmt(r.credited)}${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : 'Закрывать нечего — остатков нет');
+  } catch (e) {
+    closeSheet();
+    // остаток меньше суммы (экран устарел или платят больше) — спрашиваем, что зачесть
+    if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'tPayDo', { sid, ym, key });
+    toast(errText(e));
+  }
 };
 ACT.tBillSend = ({ sid, ym, name }) => sheet(`<h3>Отправить счёт?</h3><div class="hint">${esc(name)} · ${fmon(ym)}. Родитель получит счёт в Telegram или MAX.</div>
   <div style="margin-top:12px">${btn('📨 Отправить', 'tBillSendDo', { sid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);

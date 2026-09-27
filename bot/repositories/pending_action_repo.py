@@ -51,6 +51,11 @@ class PendingAction:
     status: str = OPEN
     decided_at: str = ""
     decided_by_tg_id: int = 0
+    teacher_keys: str = ""    # за кого платили: ключи начислений через «|» (пусто — за всё по порядку имён)
+
+    @property
+    def keys(self) -> list[str]:
+        return [k for k in self.teacher_keys.split("|") if k]
 
 
 def _row_to_action(row: dict) -> PendingAction:
@@ -70,6 +75,7 @@ def _row_to_action(row: dict) -> PendingAction:
         status=str(row.get("status") or OPEN),
         decided_at=str(row.get("decided_at") or ""),
         decided_by_tg_id=int(row.get("decided_by_tg_id") or 0),
+        teacher_keys=str(row.get("teacher_keys") or ""),
     )
 
 
@@ -88,7 +94,7 @@ class PendingActionRepository(BaseRepository):
     async def add(
         self, kind: str, student_id: str, student_name: str, period_month: str = "",
         amount: int = 0, method: str = "", parent_addr: str = "",
-        file_id: str = "", file_type: str = "", comment: str = "",
+        file_id: str = "", file_type: str = "", comment: str = "", teacher_keys: str = "",
     ) -> PendingAction:
         # Номер выдаём под замком листа: два тапа родителя подряд (наличные «оплатить»
         # дважды в секунду) иначе читали один max и получали один ACT-номер на обоих.
@@ -98,10 +104,11 @@ class PendingActionRepository(BaseRepository):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             await self._append_row([
                 action_id, kind, student_id, student_name, period_month, amount, method,
-                parent_addr, file_id, file_type, comment, now, OPEN, "", "",
+                parent_addr, file_id, file_type, comment, now, OPEN, "", "", teacher_keys,
             ])
         return PendingAction(action_id, kind, student_id, student_name, period_month, amount,
-                             method, parent_addr, file_id, file_type, comment, now)
+                             method, parent_addr, file_id, file_type, comment, now,
+                             teacher_keys=teacher_keys)
 
     async def _close_open_rows(self, action_id: str, status: str, decided_by_tg_id: int) -> int:
         """Закрыть все ОТКРЫТЫЕ строки с этим id (задвоенные номера — тоже).

@@ -346,7 +346,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             partial = len(chosen) < len(open_keys) or amount < sum(v.remainder for v in chosen.values())
             pids = ".".join(str(v.pending_pid) for v in chosen.values() if v.pending_pid)
             action = await queue_action(pending_repo, KIND_CASH, student, period,
-                                        amount=amount, method=CASH, parent_addr=str(tg_id))
+                                        amount=amount, method=CASH, parent_addr=str(tg_id),
+                                        teacher_keys=list(chosen) if partial else None)
             rows = admin_confirm_rows(student.student_id, period, pids, partial,
                                       ("tg", tg_id), amount, CASH,
                                       action_id=action.action_id if action else "")

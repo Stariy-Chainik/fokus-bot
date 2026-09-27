@@ -218,7 +218,18 @@ SCREENS['a.pay.select'] = async ({ ym, sid, key }) => {
     <p class="hint" style="margin-top:10px">Сумма зачитывается на самые ранние неоплаченные занятия этого педагога — как в боте.</p>` };
 };
 
-SCREENS['a.pay.sub'] = async ({ ym, sid, key, name, pendingId, amount }) => ({ title: 'Абонемент', html: `<div class="card pad"><div style="font-weight:700">${esc(name)}</div><div class="hint">${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin-top:8px">${fmt(amount)}</div></div><div style="margin-top:12px">${btn('✅ Подтвердить оплату абонемента', 'confirmInvoice', { pendingId, amount }, pendingId ? '' : 'sec')}</div>` });
+const METHOD_CHIPS = () => { state.ui.method = state.ui.method || 'cash'; return `<div class="chips">${[['cash', 'Наличные'], ['receipt_bank', 'По реквизитам'], ['receipt_sbp', 'СБП']].map(([k, n]) => `<button class="chip" aria-pressed="${state.ui.method === k}" data-act="method" data-p='{"k":"${k}"}'>${n}</button>`).join('')}</div>`; };
+SCREENS['a.pay.sub'] = async ({ ym, sid, key, name, pendingId, amount }) => ({ title: 'Абонемент', html: `<div class="card pad"><div style="font-weight:700">${esc(name)}</div><div class="hint">${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin-top:8px">${fmt(amount)}</div></div><div class="hint" style="margin:12px 0 6px">Способ оплаты</div>${METHOD_CHIPS()}<div style="margin-top:12px">${btn('✅ Подтвердить оплату абонемента', 'confirmInvoice', { pendingId, amount }, pendingId ? '' : 'sec')}</div>` });
+/* Сумма больше остатка: экран устарел или родитель заявил больше, чем должен. Один диалог на все пути подтверждения. */
+function overpaySheet(d, act, base) {
+  const settled = !d.rest;
+  sheet(`<h3>Сумма больше остатка</h3><div class="hint">${settled ? `К оплате ничего не осталось — скорее всего, оплату уже отметили. Заявлено ${fmt(d.amount)}.` : `Заявлено ${fmt(d.amount)}, к оплате осталось ${fmt(d.rest)}. Переплата останется на счёте ученика.`}</div>
+    <div style="margin-top:12px">${settled
+      ? (act === 'inboxDecide' ? btn('✅ Закрыть заявку — оплата уже отмечена', act, { ...base, amount: 0, force: true }) : btn('🔄 Обновить экран', 'refreshPay', {}, 'sec'))
+      : btn(`✅ Зачесть остаток ${fmt(d.rest)}`, act, { ...base, amount: d.rest, force: true })}
+    ${btn(`💸 Зачесть ${fmt(d.amount)} с переплатой`, act, { ...base, amount: d.amount, force: true }, settled ? 'ghost' : 'sec')}
+    ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+}
 
 SCREENS['a.bill'] = async ({ ym, sid }) => {
   const d = await api(`/bill/${sid}?ym=${ym}`);
@@ -310,15 +321,22 @@ SCREENS['a.finance'] = async () => ({ title: 'Финансы', html: `<div class
 const ACT = {
   closeSheet: () => closeSheet(),
   pick: ({ id }) => { const s = state.ui.sel.picked; s.has(id) ? s.delete(id) : s.add(id); render(); },
-  confirmSel: ({ ym, sid, key, total, name, student }) => { if (!total) return; state.ui.method = state.ui.method || 'cash'; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div><div class="chips">${[['cash', 'Наличные'], ['receipt_bank', 'По реквизитам'], ['receipt_sbp', 'СБП']].map(([k, n]) => `<button class="chip" aria-pressed="${state.ui.method === k}" data-act="method" data-p='{"k":"${k}"}'>${n}</button>`).join('')}</div>${btn('✅ Подтвердить', 'doConfirm', { ym, sid, key, amount: total })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
-  method: ({ k }) => { state.ui.method = k; document.querySelectorAll('.sheet .chip').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).k === k))); },
-  doConfirm: async ({ ym, sid, key, amount }) => {
-    try { const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, method: state.ui.method || 'cash', lessonIds: [...((state.ui.sel && state.ui.sel.picked) || [])] } }); closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена`); }
-    catch (e) { toast(errText(e)); }
+  confirmSel: ({ ym, sid, key, total, name, student }) => { if (!total) return; sheet(`<h3>Подтвердить оплату?</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div>${METHOD_CHIPS()}${btn('✅ Подтвердить', 'doConfirm', { ym, sid, key, amount: total })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
+  method: ({ k }) => { state.ui.method = k; document.querySelectorAll('[data-act="method"]').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).k === k))); },
+  refreshPay: () => { closeSheet(); state.ui.sel = null; render(); },
+  doConfirm: async ({ ym, sid, key, amount, force }) => {
+    try {
+      const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, force: !!force, method: state.ui.method || 'cash', lessonIds: [...((state.ui.sel && state.ui.sel.picked) || [])] } });
+      closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}`);
+    } catch (e) {
+      // экран устарел: остаток меньше суммы — спрашиваем, что зачесть
+      if (e.status === 409 && e.data && e.data.needsConfirm) { closeSheet(); return overpaySheet(e.data, 'doConfirm', { ym, sid, key }); }
+      toast(errText(e));
+    }
   },
   confirmInvoice: async ({ pendingId, amount }) => {
     if (!pendingId) return;
-    try { const r = await api('/pay/confirm-invoice', { method: 'POST', body: { paymentId: pendingId, method: 'cash' } }); if (r.ok) { back(); toast(`Абонемент ${fmt(amount)} оплачен`); } else toast('Счёт уже оплачен или не найден'); }
+    try { const r = await api('/pay/confirm-invoice', { method: 'POST', body: { paymentId: pendingId, method: state.ui.method || 'cash' } }); if (r.ok) { back(); toast(`Абонемент ${fmt(amount)} оплачен`); } else toast('Счёт уже оплачен или не найден'); }
     catch (e) { toast(errText(e)); }
   },
   sendBill: async ({ ym, sid }) => {
@@ -784,20 +802,14 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   try {
     const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force } });
     closeSheet(); render();
-    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : 'Готово') : 'Отклонено');
+    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : (r.status === 'done' ? 'Заявка закрыта — оплата уже была отмечена' : 'Готово')) : 'Отклонено');
   } catch (e) {
     // сумма больше остатка — спрашиваем, что зачесть; повтор решения — сообщаем и обновляем
-    if (e.status === 409 && e.data && e.data.needsConfirm) return inboxOverpay(id, e.data);
+    if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'inboxDecide', { id, approve: true });
     if (e.status === 409) { render(); toast('Эта заявка уже обработана'); return; }
     toast(errText(e));
   }
 };
-function inboxOverpay(id, d) {
-  sheet(`<h3>Сумма больше остатка</h3><div class="hint">Заявлено ${fmt(d.amount)}, к оплате осталось ${fmt(d.rest)}. Переплата останется на счёте ученика.</div>
-    <div style="margin-top:12px">${btn(`✅ Зачесть остаток ${fmt(d.rest)}`, 'inboxDecide', { id, approve: true, amount: d.rest, force: true })}
-    ${btn(`💸 Зачесть ${fmt(d.amount)} с переплатой`, 'inboxDecide', { id, approve: true, amount: d.amount, force: true }, 'sec')}
-    ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
-}
 ACT.retry = () => render();
 ACT.payGroupPick = ({ v }) => {
   const { ym, bill } = state.ui.payPick || {};

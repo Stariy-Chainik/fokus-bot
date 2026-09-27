@@ -185,7 +185,8 @@ async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo,
     ledgers = await payment_service.ledger_for(student, period_month)
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     action = await queue_action(pending_repo, KIND_CASH, student, period_month,   # очередь решений
-                                amount=total, method=CASH, parent_addr=f"m{max_uid}")
+                                amount=total, method=CASH, parent_addr=f"m{max_uid}",
+                                teacher_keys=[u["tid"] for u in sel] if partial else None)
     await _notify_admins_tg(tg_bot, user_repo, cash_notice(student.name, period_month, total, breakdown),
                             admin_confirm_rows(
                                 student_id, period_month, sel_pids, partial,
@@ -246,7 +247,8 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     action = await queue_action(pending_repo, KIND_RECEIPT, student, period_month,   # очередь решений
                                 amount=total, method=method, parent_addr=f"m{max_uid}",
                                 student_id=student_id, student_name=student_name,
-                                comment="чек пришёл в MAX — смотрите в чате бота")
+                                comment="чек пришёл в MAX — смотрите в чате бота",
+                                teacher_keys=list(sel_tids) if sel_partial else None)
     rows = admin_confirm_rows(
         student_id, period_month, sel_pids, sel_partial,
         max_addr(max_uid), total, method,

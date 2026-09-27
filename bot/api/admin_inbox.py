@@ -18,6 +18,7 @@ from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
 from bot.services.parent_notifier import parse_addr
+from bot.services.pending_queue import rest_for_keys
 from bot.services.parent_views import METHOD_LABELS
 from bot.utils.dates import period_label
 
@@ -128,20 +129,27 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                         user.tg_id, action.parent_addr, action.student_id)
             return _json({"ok": True, "status": DONE})
 
-        # сумма больше остатка — переплату проводим только по явному подтверждению
+        # сумма больше остатка — переплату проводим только по явному подтверждению;
+        # остаток считаем по педагогам, за которых платил родитель (action.keys)
         ledgers = await payment_service.ledger_for(student, action.period_month)
-        rest = sum(v.remainder for v in ledgers.values())
-        amount = int(body.get("amount") or action.amount)
+        rest = rest_for_keys(ledgers, action.keys)
+        raw_amount = body.get("amount")
+        amount = action.amount if raw_amount is None else int(raw_amount)   # 0 — «закрыть без зачёта»
+        if amount < 0:
+            return _json({"error": "bad_request"}, status=400)
         if amount > rest and not force:
             return _json({"error": "overpay", "needsConfirm": True,
                           "amount": amount, "rest": rest}, status=409)
 
         if not await pending_repo.claim(action.action_id, DONE, user.tg_id):
             return _json({"error": "already_decided"}, status=409)
-        credited, rows = await payment_service.record_payment(
-            action.student_id, student.name, action.period_month, amount,
-            user.tg_id, None, "из очереди решений", action.method or "",
-        )
+        if amount > 0:
+            credited, rows = await payment_service.record_payment(
+                action.student_id, student.name, action.period_month, amount,
+                user.tg_id, action.keys or None, "из очереди решений", action.method or "",
+            )
+        else:                                   # оплату уже отметили вручную — заявку просто закрываем
+            credited, rows = 0, 0
         await pending_repo.close_for_period(action.student_id, action.period_month, DONE, user.tg_id)
         await _notify_parent(action, student, approved=True, credited=credited)
         logger.info("Очередь решений: админ %s зачёл %d руб. — %s %s",

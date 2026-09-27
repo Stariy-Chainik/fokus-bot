@@ -237,6 +237,27 @@ def test_pay_flow_marks_and_confirm(api):
     assert _call(app, "POST", "/api/admin/pay/confirm", json=bad)[0] == 400
 
 
+def test_manual_confirm_refuses_overpay_and_settles_the_queue(api):
+    """Ручная отметка: сумма больше остатка → 409 (экран устарел), с force — переплата;
+    заявка родителя на ту же сумму закрывается, чтобы не висеть в «Ждут решения»."""
+    from tests.test_admin_inbox_api import PendingRepoFake
+    from bot.repositories.pending_action_repo import DONE, KIND_CASH, OPEN
+    app, dp = api
+    dp["pending_repo"] = PendingRepoFake()
+    cash = asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-0001", "Иванов Иван", YM, 2000, "cash", str(PARENT_TG)))
+    other = asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-0002", "Петрова Анна", YM, 800, "cash"))
+    body = {"studentId": "STU-0001", "periodMonth": YM, "key": "TCH-0001", "amount": 2000, "method": "cash"}
+    status, r = _call(app, "POST", "/api/admin/pay/confirm", json=body)
+    assert status == 200 and r["credited"] == 2000 and r["overpaid"] == 0
+    assert dp["pending_repo"].items[0].status == DONE and cash.action_id == dp["pending_repo"].items[0].action_id
+    assert other.status == OPEN                                       # чужая заявка не тронута
+
+    status, r = _call(app, "POST", "/api/admin/pay/confirm", json={**body, "amount": 5000})
+    assert status == 409 and r["needsConfirm"] and r["rest"] == 2800
+    status, r = _call(app, "POST", "/api/admin/pay/confirm", json={**body, "amount": 5000, "force": True})
+    assert status == 200 and r["credited"] == 5000 and r["overpaid"] == 2200
+
+
 def test_bill_and_debtors(api):
     app, dp = api
     dp["payment_repo"].rows.append(mk_payment("PAY-9", "STU-0002", "2026-08", "TCH-0001", 1500))   # старый долг Петровой

@@ -255,6 +255,16 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
                  json={"ym": YM, "key": "TCH-0001", "amount": 100, "method": "yookassa"})[0] == 400
 
 
+def test_billing_teacher_cannot_overpay_silently(api, monkeypatch):
+    app, _dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "cash"}
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json=body)
+    assert status == 409 and r["needsConfirm"] and r["rest"] == 4800
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "force": True})
+    assert status == 200 and r["credited"] == 9000 and r["overpaid"] == 4200
+
+
 def test_direct_pay_lessons_show_parent_amount_not_zero(api, monkeypatch):
     """Занятия с прямой оплатой: школа начисляет 0, но педагог видит сумму родителя и аренду."""
     app, _dp = api

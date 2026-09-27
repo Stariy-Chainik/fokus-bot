@@ -23,9 +23,29 @@ HEADER = [
 ]
 
 
+EXTRA_COLUMNS = ["teacher_keys"]     # добавлены позже: за каких педагогов платил родитель
+
+
+def ensure_columns(sh) -> None:
+    ws = sh.worksheet(settings.sheet_pending_actions)
+    header = ws.row_values(1)
+    for name in EXTRA_COLUMNS:
+        if name in header:
+            print(f"{settings.sheet_pending_actions}.{name}: есть (колонка {header.index(name) + 1})")
+            continue
+        idx = len(header) + 1
+        if ws.col_count < idx:
+            ws.add_cols(idx - ws.col_count)
+        ws.update_cell(1, idx, name)
+        header.append(name)
+        print(f"{settings.sheet_pending_actions}.{name}: добавлена колонка {idx}")
+
+
 def main() -> None:
-    ensure_sheet(get_sheet(), settings.sheet_pending_actions, HEADER,
+    sh = get_sheet()
+    ensure_sheet(sh, settings.sheet_pending_actions, HEADER,
                  ["period_month", "created_at", "decided_at", "parent_addr", "file_id"])
+    ensure_columns(sh)
 
 
 if __name__ == "__main__":

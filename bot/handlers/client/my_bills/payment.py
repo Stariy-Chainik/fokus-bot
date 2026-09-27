@@ -24,7 +24,7 @@ from bot.services.payment_methods import (
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import resolve_notifier, parse_addr, tg_addr
 from bot.services.pending_queue import (
-    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, queue_action,
+    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, queue_action, rest_for_keys,
 )
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
@@ -352,7 +352,8 @@ async def cb_cash_notify(
     breakdown = "\n".join(breakdown_lines(bills_map, [u["tid"] for u in sel], ledgers=ledgers))
     msg = cash_notice(student.name, period_month, total, breakdown)
     action = await queue_action(pending_repo, KIND_CASH, student, period_month,   # очередь решений
-                                amount=total, method=CASH, parent_addr=str(callback.from_user.id))
+                                amount=total, method=CASH, parent_addr=str(callback.from_user.id),
+                                teacher_keys=[u["tid"] for u in sel] if partial else None)
     kb = to_aiogram_markup(admin_confirm_rows(
         student_id, period_month, sel_pids, partial,
         tg_addr(callback.from_user.id), total, CASH,
@@ -424,6 +425,7 @@ async def on_receipt_photo(
         parent_addr=str(message.from_user.id), student_id=student_id, student_name=student_name,
         file_id=(message.photo[-1].file_id if message.photo else message.document.file_id),
         file_type="photo" if message.photo else "document",
+        teacher_keys=list(sel_tids) if sel_partial else None,
     )
     confirm_kb = to_aiogram_markup(admin_confirm_rows(
         student_id, period_month, sel_pids, sel_partial,
@@ -751,15 +753,19 @@ async def cb_receipt_pick(
 
 # ─── Подтверждение по строке очереди: одно решение на одно уведомление ────────
 
-def _parse_pact(data: str) -> tuple[str, int, str, bool]:
-    """`pact:{action_id}[:{сумма}]:{код способа}[:f]` → (action_id, сумма, способ, force)."""
+def _parse_pact(data: str) -> tuple[str, int | None, str, bool]:
+    """`pact:{action_id}[:{сумма}]:{код способа}[:f]` → (action_id, сумма | None, способ, force).
+
+    Сумма None — в кнопке её нет, берём заявленную; 0 — «закрыть без зачёта» (оплату уже
+    отметили вручную, остатка нет).
+    """
     parts = data.split(":")
     force = parts[-1] == "f"
     if force:
         parts = parts[:-1]
     action_id = parts[1]
     method = from_callback_code(parts[-1]) if len(parts) > 2 else RECEIPT_UNKNOWN
-    amount = int(parts[2]) if len(parts) > 3 and parts[2].isdigit() else 0
+    amount = int(parts[2]) if len(parts) > 3 and parts[2].isdigit() else None
     return action_id, amount, method, force
 
 
@@ -796,22 +802,24 @@ async def cb_action_confirm(
     if student is None:
         await callback.answer("Ученик не найден", show_alert=True)
         return
-    claimed = amount or action.amount
+    claimed = action.amount if amount is None else amount
     ledgers = await payment_service.ledger_for(student, action.period_month)
-    rest = sum(ledger.remainder for ledger in ledgers.values())
+    rest = rest_for_keys(ledgers, action.keys)      # остаток по педагогам, за которых платили
 
     # Заявлено больше, чем осталось: переплата — только осознанно, отдельной кнопкой
     if claimed > rest and not force:
         code = callback_code(method)
         rows = [
-            [cb_btn(f"✅ Зачесть остаток {rest} руб.", f"pact:{action_id}:{rest}:{code}:f")],
+            [cb_btn(f"✅ Зачесть остаток {rest} руб.", f"pact:{action_id}:{rest}:{code}:f") if rest
+             else cb_btn("✅ Закрыть заявку — оплата уже отмечена", f"pact:{action_id}:0:{code}:f")],
             [cb_btn(f"💸 Всё равно зачесть {claimed} руб. (переплата)", f"pact:{action_id}:{claimed}:{code}:f")],
             [cb_btn("❌ Не подтверждать", f"pnay:{action_id}")],
         ]
         await _edit_admin_msg(
             callback,
             f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб."
-            f"\nВыберите, что зачесть — переплата останется на счёте ученика.",
+            + ("\nСкорее всего, оплату уже отметили вручную." if not rest else "")
+            + "\nВыберите, что зачесть — переплата останется на счёте ученика.",
             keep_rows=rows,
         )
         await callback.answer("Сумма больше остатка", show_alert=True)
@@ -822,14 +830,18 @@ async def cb_action_confirm(
         await callback.answer("Эта оплата уже обработана", show_alert=True)
         return
 
-    credited, count = await payment_service.record_payment(
-        action.student_id, student.name, action.period_month, claimed,
-        callback.from_user.id, None, "из уведомления", action.method or method,
-    )
+    if claimed > 0:
+        credited, count = await payment_service.record_payment(
+            action.student_id, student.name, action.period_month, claimed,
+            callback.from_user.id, action.keys or None, "из уведомления", action.method or method,
+        )
+    else:                                       # остатка нет — заявку закрываем без зачёта
+        credited, count = 0, 0
     over = max(0, claimed - rest)
     await _edit_admin_msg(
         callback,
-        f"\n\n✅ Оплата подтверждена: {credited} руб." + (f" (в т.ч. переплата {over})" if over else ""),
+        f"\n\n✅ Оплата подтверждена: {credited} руб." + (f" (в т.ч. переплата {over})" if over else "")
+        if credited else "\n\n✅ Заявка закрыта: оплата уже была отмечена вручную",
     )
     addr = parse_addr(action.parent_addr) if action.parent_addr else None
     if addr is not None:

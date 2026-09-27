@@ -27,6 +27,7 @@ from bot.services import LessonService, payment_ledger
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
+from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
 from bot.utils.dates import format_date_display
@@ -703,6 +704,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
+        rest = rest_for_keys(await payment_service.ledger_for(s, period), [key])
+        if amount > rest and not bool((body or {}).get("force")):
+            return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
         guard = f"{sid}:{period}:{key}"
         if guard in _paying:
             return _json({"error": "in_progress"}, status=409)
@@ -716,7 +720,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             _paying.discard(guard)
         logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
                     teacher.teacher_id, credited, sid, period, key)
-        return _json({"credited": credited, "rows": rows})
+        await settle_actions(_dp_get(dp, "pending_repo"), payment_service, s, period, credited, user.tg_id)
+        return _json({"credited": credited, "rows": rows, "overpaid": max(0, credited - rest)})
 
     @billing_only
     async def bills_student_send(request: web.Request, user, teacher) -> web.Response:

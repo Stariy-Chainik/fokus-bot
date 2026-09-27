@@ -10,6 +10,7 @@ from bot.repositories import (
     StudentRepository, PaymentRepository,
     BranchRepository, GroupRepository, StudentGroupRepository,
 )
+from bot.services.pending_queue import settle_actions
 from bot.services import PaymentService
 from bot.keyboards.admin import kb_back, kb_confirm
 from bot.utils.dates import display_period, format_date_short_with_wd
@@ -267,7 +268,7 @@ async def cb_pay_confirm(
 @router.callback_query(F.data.startswith("do_confirm_payment:"), AdminOnly())
 async def cb_do_confirm_payment(
     callback: CallbackQuery, user: User, payment_service: PaymentService,
-    payment_repo: PaymentRepository,
+    payment_repo: PaymentRepository, student_repo: StudentRepository, pending_repo=None,
 ) -> None:
 
     cb = DoConfirmPaymentCb.unpack(callback.data)
@@ -291,6 +292,9 @@ async def cb_do_confirm_payment(
             payment_id, callback.from_user.id, ADMIN_MANUAL,
         )
         if ok:
+            if payment is not None:            # заявка родителя на этот абонемент уходит из очереди
+                await settle_actions(pending_repo, payment_service, await student_repo.get_by_id(payment.student_id),
+                                     payment.period_month, payment.total_amount, callback.from_user.id)
             await callback.message.edit_text(f"Оплата {payment_id} подтверждена.", reply_markup=kb_back(back_cb))
         else:
             await callback.message.edit_text("Счёт уже оплачен или не найден.", reply_markup=kb_back(back_cb))
@@ -428,7 +432,7 @@ async def cb_pay_select_confirm(
 @router.callback_query(F.data.startswith("pslok:"), AdminOnly())
 async def cb_pay_select_apply(
     callback: CallbackQuery, user: User, state: FSMContext,
-    student_repo: StudentRepository, payment_service: PaymentService,
+    student_repo: StudentRepository, payment_service: PaymentService, pending_repo=None,
 ) -> None:
     data = await state.get_data()
     if not data.get("psel_student"):
@@ -451,6 +455,7 @@ async def cb_pay_select_apply(
             lesson_ids=list(data.get("psel_chosen") or []),
         )
         await state.update_data(psel_chosen=[])
+        await settle_actions(pending_repo, payment_service, student, period, credited, callback.from_user.id)
         if credited > 0:
             logger.info("Админ %s отметил оплату %d руб.: %s %s %s",
                         callback.from_user.id, credited, student_id, period, teacher_id)
