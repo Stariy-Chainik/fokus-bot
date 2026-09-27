@@ -1,6 +1,7 @@
 from typing import Optional
 from bot.models import StudentPeriodPayment
 from bot.models.enums import PaymentStatus
+from bot.utils.ids import generate_payment_id
 from bot.utils import now_str
 from .base import BaseRepository
 
@@ -69,6 +70,15 @@ class PaymentRepository(BaseRepository):
     async def get_existing_ids(self) -> list[str]:
         return [p.payment_id for p in await self.get_all()]
 
+    async def add_new(self, payment: StudentPeriodPayment) -> StudentPeriodPayment:
+        """Добавить строку со свежим номером. Номер выдаётся под замком листа: два параллельных
+        `ledger_for` (два экрана, два ученика) иначе читали один max и получали один PAY-номер
+        на двоих — подтверждение по номеру попадало в чужую строку (Архипова/Великая, 27.09.2026)."""
+        async with self._sheet_lock():
+            payment.payment_id = generate_payment_id(await self.get_existing_ids())
+            await self.add(payment)
+        return payment
+
     async def add(self, payment: StudentPeriodPayment) -> StudentPeriodPayment:
         await self._append_row([
             payment.payment_id,
@@ -89,18 +99,23 @@ class PaymentRepository(BaseRepository):
         ])
         return payment
 
-    async def set_lesson_ids(self, payment_id: str, lesson_ids: str) -> bool:
+    @staticmethod
+    def _key(payment_id: str, student_id: str) -> dict:
+        """Ключ строки: номер и, если известен, ученик — чтобы задвоенный номер не увёл запись к чужой строке."""
+        return {"payment_id": payment_id, **({"student_id": student_id} if student_id else {})}
+
+    async def set_lesson_ids(self, payment_id: str, lesson_ids: str, student_id: str = "") -> bool:
         """Записать занятия оплаты (или намерение плательщика у строки-остатка)."""
-        async with self._locked_row(payment_id=payment_id) as row_idx:
+        async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, 15, lesson_ids)
             await self._update_cell(row_idx, 11, now_str())
         return True
 
-    async def update_amount(self, payment_id: str, new_amount: int) -> bool:
+    async def update_amount(self, payment_id: str, new_amount: int, student_id: str = "") -> bool:
         ts_now = now_str()
-        async with self._locked_row(payment_id=payment_id) as row_idx:
+        async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, 5, new_amount)   # total_amount
@@ -139,11 +154,11 @@ class PaymentRepository(BaseRepository):
 
     async def confirm(
         self, payment_id: str, confirmed_by_tg_id: int,
-        payment_method: str = "admin_manual",
+        payment_method: str = "admin_manual", student_id: str = "",
     ) -> bool:
         """Подтверждает оплату и фиксирует её точный способ."""
         ts_now = now_str()
-        async with self._locked_row(payment_id=payment_id) as row_idx:
+        async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)  # status

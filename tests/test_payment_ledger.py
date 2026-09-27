@@ -63,7 +63,18 @@ class _PayRepo:
         self.added.append(p)
         return p
 
-    async def update_amount(self, pid, amount):
+    async def add_new(self, p):
+        from bot.utils.ids import generate_payment_id
+        p.payment_id = generate_payment_id([r.payment_id for r in self.rows])
+        return await self.add(p)
+
+    async def set_lesson_ids(self, pid, lesson_ids, student_id=""):
+        for r in self.rows:
+            if r.payment_id == pid:
+                r.lesson_ids = lesson_ids
+        return True
+
+    async def update_amount(self, pid, amount, student_id=""):
         self.updated.append((pid, amount))
         for r in self.rows:
             if r.payment_id == pid:
@@ -133,7 +144,7 @@ class _PayRepo2(_PayRepo):
         super().__init__(rows)
         self.confirmed = []
 
-    async def confirm(self, pid, by, payment_method="admin_manual"):
+    async def confirm(self, pid, by, payment_method="admin_manual", student_id=""):
         self.confirmed.append((pid, payment_method))
         for r in self.rows:
             if r.payment_id == pid:

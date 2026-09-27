@@ -285,26 +285,32 @@ class PaymentRepoFake:
     async def get_existing_ids(self):
         return [r.payment_id for r in self.rows]
 
+    async def add_new(self, payment):
+        from bot.utils.ids import generate_payment_id
+        payment.payment_id = generate_payment_id([r.payment_id for r in self.rows])
+        self.rows.append(payment)
+        return payment
+
     async def add(self, payment):
         self.rows.append(payment)
         self.added.append(payment)
         return payment
 
-    async def set_lesson_ids(self, payment_id, lesson_ids):
+    async def set_lesson_ids(self, payment_id, lesson_ids, student_id=""):
         for r in self.rows:
             if r.payment_id == payment_id:
                 r.lesson_ids = lesson_ids
                 return True
         return False
 
-    async def update_amount(self, payment_id, amount):
+    async def update_amount(self, payment_id, amount, student_id=""):
         self.updated.append((payment_id, amount))
         for r in self.rows:
             if r.payment_id == payment_id:
                 r.total_amount = amount
         return True
 
-    async def confirm(self, payment_id, confirmed_by_tg_id, payment_method="admin_manual"):
+    async def confirm(self, payment_id, confirmed_by_tg_id, payment_method="admin_manual", student_id=""):
         for r in self.rows:
             if r.payment_id == payment_id:
                 r.status = PaymentStatus.PAID

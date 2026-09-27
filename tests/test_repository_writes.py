@@ -182,3 +182,42 @@ def test_refresh_rereads_even_when_cache_is_fresh():
     run(repo.refresh())
     assert sum(1 for c in ws.calls if c[0] == "get_all_records") == reads_before + 1
     assert [g.group_id for g in run(repo.get_all())] == ["GRP-0001", "GRP-0002", "GRP-0003"]
+
+
+def test_payment_ids_are_unique_under_concurrency():
+    """Номер счёта выдаётся под замком листа: два параллельных add_new не получают один PAY-номер
+    (дубли PAY-000863/864 у Архиповой и Великой 27.09.2026 — подтверждение уходило в чужую строку)."""
+    from bot.models import StudentPeriodPayment
+    from bot.models.enums import PaymentStatus
+    headers = ["payment_id", "student_id", "student_name", "period_month", "total_amount", "status", "paid_at",
+               "confirmed_by_tg_id", "comment", "created_at", "updated_at", "teacher_id", "teacher_name",
+               "payment_method", "lesson_ids"]
+    ws = FakeWorksheet(headers, [["PAY-000010", "STU-1", "A", "2026-09", 1000, "pending", "", "", "", "", "", "T1", "", "", ""]])
+    repo = PaymentRepository(FakeSheetsClient(ws), "student_payments")
+
+    def mk(sid):
+        return StudentPeriodPayment(payment_id="", student_id=sid, student_name=sid, period_month="2026-09",
+                                    total_amount=500, status=PaymentStatus.PENDING, paid_at=None,
+                                    confirmed_by_tg_id=None, comment=None, created_at="", updated_at="",
+                                    teacher_id="T1", teacher_name="")
+
+    async def both():
+        return await asyncio.gather(repo.add_new(mk("STU-2")), repo.add_new(mk("STU-3")))
+
+    a, b = run(both())
+    assert {a.payment_id, b.payment_id} == {"PAY-000011", "PAY-000012"}
+    assert [r[0] for r in ws.rows] == ["PAY-000010", "PAY-000011", "PAY-000012"]
+
+
+def test_payment_writes_verify_the_student_when_ids_are_duplicated():
+    """Задвоенный номер: запись по (номер, ученик) попадает в свою строку, а не в первую попавшуюся."""
+    headers = ["payment_id", "student_id", "student_name", "period_month", "total_amount", "status", "paid_at",
+               "confirmed_by_tg_id", "comment", "created_at", "updated_at", "teacher_id", "teacher_name",
+               "payment_method", "lesson_ids"]
+    ws = FakeWorksheet(headers, [
+        ["PAY-000863", "STU-0127", "Архипова", "2026-09", 4000, "pending", "", "", "", "", "", "TCH-0006", "", "", ""],
+        ["PAY-000863", "STU-0142", "Великая", "2026-09", 2000, "pending", "", "", "", "", "", "TCH-0006", "", "", ""],
+    ])
+    repo = PaymentRepository(FakeSheetsClient(ws), "student_payments")
+    assert run(repo.confirm("PAY-000863", 664410718, "receipt_bank", student_id="STU-0142")) is True
+    assert ws.rows[0][5] == "pending" and ws.rows[1][5] == "paid"

@@ -6,7 +6,7 @@ from typing import Any
 
 from bot.models import StudentPeriodPayment, Student, Teacher
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
-from bot.utils import generate_payment_id, now_str
+from bot.utils import now_str
 from bot.utils.dates import last_periods
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
@@ -434,7 +434,7 @@ class PaymentService:
                     pending = await self._create_invoice(student, period_month, teacher_id, agg.name, remainder)
             elif pending.total_amount != remainder:
                 logger.info("Остаток по %s изменился: %d → %d", pending.payment_id, pending.total_amount, remainder)
-                await self._payment_repo.update_amount(pending.payment_id, remainder)
+                await self._payment_repo.update_amount(pending.payment_id, remainder, student_id=student.student_id)
                 pending.total_amount = remainder
             ledgers[teacher_id] = TeacherLedger(
                 teacher_id=teacher_id, name=agg.name, accrued=agg.total, paid=paid,
@@ -448,13 +448,13 @@ class PaymentService:
     ) -> StudentPeriodPayment:
         now = now_str()
         payment = StudentPeriodPayment(
-            payment_id=generate_payment_id(await self._payment_repo.get_existing_ids()),
+            payment_id="",                       # номер выдаст репозиторий под замком листа
             student_id=student.student_id, student_name=student.name, period_month=period_month,
             total_amount=amount, status=PaymentStatus.PENDING, paid_at=None,
             confirmed_by_tg_id=None, comment=None, created_at=now, updated_at=now,
             teacher_id=teacher_id, teacher_name=teacher_name,
         )
-        await self._payment_repo.add(payment)
+        await self._payment_repo.add_new(payment)
         logger.info("Создан счёт %s student=%s teacher=%s период=%s сумма=%d",
                     payment.payment_id, student.student_id, teacher_id, period_month, amount)
         return payment
@@ -538,18 +538,19 @@ class PaymentService:
             row_ids = linked or (getattr(pending, "lesson_ids", "") or "")
             if pay == pending.total_amount:
                 await self._payment_repo.confirm(
-                    pending.payment_id, confirmed_by_tg_id, payment_method,
+                    pending.payment_id, confirmed_by_tg_id, payment_method, student_id=student_id,
                 )
                 if row_ids:
-                    await self._payment_repo.set_lesson_ids(pending.payment_id, row_ids)
+                    await self._payment_repo.set_lesson_ids(pending.payment_id, row_ids, student_id=student_id)
             else:
                 await self._add_paid_row(
                     student, period_month, tid, ledgers[tid].name, pay,
                     confirmed_by_tg_id, comment, payment_method, row_ids,
                 )
-                await self._payment_repo.update_amount(pending.payment_id, pending.total_amount - pay)
+                await self._payment_repo.update_amount(pending.payment_id, pending.total_amount - pay,
+                                                       student_id=student_id)
                 if not linked and row_ids:  # намерение израсходовано
-                    await self._payment_repo.set_lesson_ids(pending.payment_id, "")
+                    await self._payment_repo.set_lesson_ids(pending.payment_id, "", student_id=student_id)
             left -= pay
             credited += pay
             rows += 1
@@ -571,14 +572,14 @@ class PaymentService:
     ) -> StudentPeriodPayment:
         now = now_str()
         payment = StudentPeriodPayment(
-            payment_id=generate_payment_id(await self._payment_repo.get_existing_ids()),
+            payment_id="",                       # номер выдаст репозиторий под замком листа
             student_id=student.student_id, student_name=student.name, period_month=period_month,
             total_amount=amount, status=PaymentStatus.PAID, paid_at=now,
             confirmed_by_tg_id=confirmed_by_tg_id, comment=comment, created_at=now, updated_at=now,
             teacher_id=teacher_id, teacher_name=teacher_name, payment_method=payment_method,
             lesson_ids=lesson_ids,
         )
-        await self._payment_repo.add(payment)
+        await self._payment_repo.add_new(payment)
         return payment
 
     async def get_or_create_invoices_for_student_period(
