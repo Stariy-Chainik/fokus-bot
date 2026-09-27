@@ -220,6 +220,21 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
     <div style="margin-top:12px">${rows.join('') || '<div class="hint">Способы оплаты не настроены — напишите администратору.</div>'}
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
+/* Чек из кабинета: файл уходит администраторам в Telegram и в очередь решений — как чек из бота. */
+ACT.pReceipt = async ({ ym, method, amount }) => {
+  const input = document.getElementById('rc-file');
+  const file = input && input.files && input.files[0];
+  if (!file) { toast('Выберите фото чека или PDF'); return; }
+  if (state.ui.paying) return;
+  state.ui.paying = true;
+  const b = document.querySelector('.sheet [data-act="pReceipt"]'); if (b) { b.disabled = true; b.textContent = 'Отправляем…'; }
+  const form = new FormData();
+  form.append('studentId', kid()); form.append('ym', ym); form.append('method', method); form.append('amount', String(amount || 0));
+  form.append('file', file, file.name);
+  try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.notified ? 'Чек отправлен — администратор подтвердит оплату' : 'Чек принят, администраторы пока не получили уведомление'); }
+  catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Отправить чек'; } toast(errText(e)); }
+  finally { state.ui.paying = false; }
+};
 ACT.pPayDo = async ({ ym, method, sel }) => {
   if (state.ui.paying) { toast('Отправляем, подождите…'); return; }
   state.ui.paying = true;
@@ -238,7 +253,10 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
     if (r.url) { try { tg ? tg.openLink(r.url) : window.open(r.url, '_blank'); } catch (_) { window.open(r.url, '_blank'); } toast('Открываю оплату…'); return; }
     if (r.details) { sheet(`<h3>Реквизиты · ${fmt(r.amount)}</h3>
     ${r.qr ? `<img src="${r.qr}" alt="QR для оплаты" style="display:block;width:180px;max-width:60%;margin:12px auto;border-radius:10px;background:#fff;padding:8px">` : ''}
-    <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div><div style="margin-top:12px">${btn('Понятно', 'closeSheet', {}, 'sec')}</div>`); return; }
+    <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div>
+    <label class="hint" for="rc-file" style="display:block;margin:12px 0 4px">Чек об оплате (фото или PDF)</label>
+    <input class="search" id="rc-file" type="file" accept="image/*,application/pdf" style="margin:0">
+    <div style="margin-top:12px">${btn('📎 Отправить чек', 'pReceipt', { ym, method, amount: r.amount })}${btn('Позже, пришлю в бот', 'closeSheet', {}, 'ghost')}</div>`); return; }
     if (r.ok) { render(); toast(r.duplicate ? 'Уведомление уже отправлено' : 'Администратор получил уведомление'); return; }
   } catch (e) { closeSheet(); toast(errText(e)); }
   finally { state.ui.paying = false; }

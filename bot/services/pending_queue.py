@@ -11,6 +11,7 @@ import logging
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
+from bot.services import activity
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,13 @@ async def queue_action(
     sid = student.student_id if student is not None else student_id
     name = student.name if student is not None else student_name
     try:
-        return await pending_repo.add(
+        action = await pending_repo.add(
             kind, sid, name, period_month, amount, method, parent_addr,
             file_id, file_type, comment, "|".join(teacher_keys or []),
         )
+        await activity.record(activity.QUEUE, f"Заявка от родителя ({kind}): {sid} · {period_month}"
+                              + (f" · {amount} ₽ · {method}" if amount else ""), ref=action.action_id)
+        return action
     except Exception as exc:                      # очередь — вспомогательная, платёж важнее
         logger.error("Очередь решений: не записали %s для %s: %s", kind, sid, exc)
         return None
@@ -63,7 +67,10 @@ async def claim_action(pending_repo, action_id: str, status: str = DONE, decided
     if pending_repo is None or not action_id:
         return True                               # очередь недоступна — работаем по-старому
     try:
-        return await pending_repo.claim(action_id, status, decided_by_tg_id)
+        claimed = await pending_repo.claim(action_id, status, decided_by_tg_id)
+        if claimed and status == REJECTED:
+            await activity.record(activity.QUEUE, f"Заявка {action_id} отклонена", actor=decided_by_tg_id, ref=action_id)
+        return claimed
     except Exception as exc:
         logger.error("Очередь решений: не заняли %s: %s", action_id, exc)
         return True                               # лист недоступен — не блокируем оплату
@@ -100,6 +107,8 @@ async def settle_actions(
                     closed += 1
                     logger.info("Очередь решений: %s закрыта ручной отметкой %d руб. (%s %s)",
                                 a.action_id, credited, student.student_id, period_month)
+                    await activity.record(activity.QUEUE, f"Заявка {a.action_id} закрыта ручной отметкой:"
+                                          f" {student.student_id} · {period_month}", actor=decided_by_tg_id, ref=a.action_id)
         return closed
     except Exception as exc:
         logger.error("Очередь решений: не закрыли заявки %s %s: %s", student.student_id, period_month, exc)

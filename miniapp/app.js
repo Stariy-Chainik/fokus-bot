@@ -27,7 +27,17 @@ async function api(path, { method = 'GET', body } = {}) {
   if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);   // тело нужно, напр. при переплате
   return data;
 }
-const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.' };
+/* multipart-запрос (чек об оплате): те же заголовки авторизации, тело — FormData. */
+async function apiForm(path, form) {
+  const headers = { 'Accept': 'application/json' };
+  if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
+  else if (DEV) headers.Authorization = 'dev';
+  const resp = await fetch(API_BASE[ROLE] + path, { method: 'POST', headers, body: form });
+  let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
+  if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);
+  return data;
+}
+const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.' };
 const errText = e => e instanceof ApiError ? (ERR_TEXT[e.code] || `Ошибка сервера (${e.status})`) : 'Нет связи с сервером';
 
 /* ── форматирование ──────────────────────────────────────────────────── */
@@ -142,6 +152,7 @@ SCREENS['a.home'] = async () => {
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
+    <div style="margin-top:10px">${list([cell({ lead: '🕒', plain: true, t: 'Изменения за сегодня', s: 'оплаты, занятия, заявки, ученики, группы', r: h.activityToday ? pill(h.activityToday, 'acc') : '', go: 'a.activity' })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     <div class="eyebrow">${mon}</div>
     <div class="list">
@@ -168,6 +179,20 @@ SCREENS['a.money'] = async () => {
       cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} }),
     ])}
     <p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` };
+};
+
+/* Лента изменений: всё, что поменялось в школе, — из листа activity_log (пишут сервисы и репозитории). */
+const ACT_KIND = { payment: ['💳', 'Оплаты'], lesson: ['📝', 'Занятия'], queue: ['📥', 'Заявки'], payout: ['💸', 'Выплаты'], finance: ['📊', 'Доходы и расходы'], student: ['👥', 'Ученики'], group: ['🏷️', 'Группы'], teacher: ['👩‍🏫', 'Педагоги'] };
+SCREENS['a.activity'] = async ({ days, kind }) => {
+  const n = days || 1, k = kind || '';
+  const d = await api(`/activity?days=${n}${k ? `&kind=${k}` : ''}`);
+  const byDay = {}; d.events.forEach(e => (byDay[e.ts.slice(0, 10)] = byDay[e.ts.slice(0, 10)] || []).push(e));
+  const chips = `<div class="chips">${[[1, 'Сегодня'], [7, '7 дней'], [30, '30 дней']].map(([v, l]) => `<button class="chip" aria-pressed="${v === n}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: v, kind: k }))}' data-replace="1">${l}</button>`).join('')}</div>
+    <div class="chips scroll">${[['', 'Все'], ...Object.entries(ACT_KIND).map(([v, [ic, l]]) => [v, `${ic} ${l}`])].map(([v, l]) => `<button class="chip" aria-pressed="${v === k}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: n, kind: v }))}' data-replace="1">${l}</button>`).join('')}</div>`;
+  const row = e => cell({ lead: (ACT_KIND[e.kind] || ['•'])[0], plain: true, cls: 'wrap', t: esc(e.text), s: `${e.ts.slice(11, 16)}${e.who ? ` · ${esc(e.who)}` : ''}` });
+  return { title: 'Изменения', html: `${stickyFilters(chips)}${d.events.length
+    ? Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1)).map(dd => `<div class="eyebrow">${fdate(dd)}<span style="margin-left:auto;font-weight:600">${plural(byDay[dd].length, ['событие', 'события', 'событий'])}</span></div>${list(byDay[dd].map(row))}`).join('')
+    : empty('Изменений нет', '<p class="hint" style="margin:0">Сюда попадает всё: оплаты, занятия, заявки, выплаты, ученики, группы, педагоги</p>')}` };
 };
 
 /* Очередь решений: чеки, наличные и заявки, которые ждут администратора. */

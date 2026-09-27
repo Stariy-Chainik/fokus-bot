@@ -49,6 +49,9 @@ class TeacherRepository(BaseRepository):
             rate_for_teacher,
             rate_for_student,
         ])
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.TEACHER, f"Новый педагог: {teacher_id} {name} · ставки {rate_group}/"
+                              f"{rate_for_teacher}/{rate_for_student}", ref=teacher_id)
         return Teacher(
             teacher_id=teacher_id,
             tg_id=tg_id,
@@ -63,7 +66,9 @@ class TeacherRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
-            return True
+        from bot.services import activity
+        await activity.record(activity.TEACHER, f"Удалён педагог {teacher_id}", ref=teacher_id)
+        return True
 
     async def update_rates(
         self,
@@ -78,4 +83,7 @@ class TeacherRepository(BaseRepository):
             await self._update_cell(row_idx, 4, rate_group)
             await self._update_cell(row_idx, 5, rate_for_teacher)
             await self._update_cell(row_idx, 6, rate_for_student)
-            return True
+        from bot.services import activity
+        await activity.record(activity.TEACHER, f"Ставки {teacher_id}: группа {rate_group} · инд. {rate_for_teacher}"
+                              f" · ученику {rate_for_student}", ref=teacher_id)
+        return True

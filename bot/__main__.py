@@ -19,6 +19,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
+from bot.services import activity
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
@@ -93,6 +94,9 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     training_entry_repo = TrainingEntryRepository(sheets_client, settings.sheet_training_entries)
     athlete_task_repo = AthleteTaskRepository(sheets_client, settings.sheet_athlete_tasks)
     pending_repo = PendingActionRepository(sheets_client, settings.sheet_pending_actions)
+    from bot.repositories.activity_log_repo import ActivityLogRepository
+    activity_repo = ActivityLogRepository(sheets_client, settings.sheet_activity_log)
+    activity.setup(activity_repo)          # лента изменений: пишут сервисы и репозитории
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
@@ -158,6 +162,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["training_entry_repo"] = training_entry_repo
     dp["athlete_task_repo"] = athlete_task_repo
     dp["pending_repo"] = pending_repo
+    dp["activity_repo"] = activity_repo
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
@@ -203,7 +208,7 @@ _WARM_REPOS = (
     "student_group_repo", "teacher_group_repo", "branch_repo", "user_repo",
     "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
     "finance_entry_repo", "payout_repo", "salary_override_repo", "pending_repo",
-    "training_entry_repo", "athlete_task_repo",
+    "training_entry_repo", "athlete_task_repo", "activity_repo",
 )
 
 
@@ -258,7 +263,7 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     )
     logger.info("Webhook зарегистрирован: %s", webhook_url)
 
-    app = web.Application()
+    app = web.Application(client_max_size=20 * 1024 ** 2)
 
     async def health(_request: web.Request) -> web.Response:
         return web.Response(text="ok")
@@ -289,7 +294,7 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
     await bot.delete_webhook(drop_pending_updates=True)
 
     # Отдельный aiohttp-сервер: webhook ЮКассы + API Mini App
-    app = web.Application()
+    app = web.Application(client_max_size=20 * 1024 ** 2)
     _register_payment_webhook(app, dp, bot)
     _register_miniapp_api(app, dp, bot)
     runner = web.AppRunner(app)

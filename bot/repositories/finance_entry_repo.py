@@ -35,6 +35,9 @@ class FinanceEntryRepository(BaseRepository):
             entry.entry_id, entry.period_month, entry.kind,
             entry.title, entry.amount, entry.created_at,
         ])
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.FINANCE, f"{'Доход' if kind == 'income' else 'Расход'} {amount} ₽: {title}"
+                              f" · {period_month}", ref=entry_id)
         return entry
 
     async def delete(self, entry_id: str) -> bool:
@@ -42,4 +45,6 @@ class FinanceEntryRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
-            return True
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.FINANCE, f"Удалена запись доходов/расходов {entry_id}", ref=entry_id)
+        return True

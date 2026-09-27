@@ -79,6 +79,8 @@ class StudentRepository(BaseRepository):
         student_id = generate_student_id(existing_ids)
         # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
         await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.STUDENT, f"Новый ученик: {student_id} {name}", ref=student_id)
         return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])
 
     async def update_name(self, student_id: str, name: str) -> bool:
@@ -86,7 +88,9 @@ class StudentRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, 2, name)
-            return True
+        from bot.services import activity
+        await activity.record(activity.STUDENT, f"Переименован ученик {student_id}: {name}", ref=student_id)
+        return True
 
     async def update_tier(self, student_id: str, tier: StudentGroupTier) -> bool:
         async with self._locked_row(student_id=student_id) as row_idx:
@@ -103,7 +107,9 @@ class StudentRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
-            return True
+        from bot.services import activity
+        await activity.record(activity.STUDENT, f"Удалён ученик {student_id}", ref=student_id)
+        return True
 
     # ─── Управление партнёрами ────────────────────────────────────────────────
 
@@ -190,15 +196,23 @@ class StudentRepository(BaseRepository):
             return False
         if max_id in student.parent_max_ids:
             return True
-        return await self._write_parent_max_ids(student_id, student.parent_max_ids + [max_id])
+        ok = await self._write_parent_max_ids(student_id, student.parent_max_ids + [max_id])
+        if ok:
+            from bot.services import activity
+            await activity.record(activity.STUDENT, f"Родитель привязан: {student_id} · MAX {max_id}", ref=student_id)
+        return ok
 
     async def remove_parent_max_id(self, student_id: str, max_id: int) -> bool:
         student = await self.get_by_id(student_id)
         if student is None or max_id not in student.parent_max_ids:
             return False
-        return await self._write_parent_max_ids(
+        ok = await self._write_parent_max_ids(
             student_id, [i for i in student.parent_max_ids if i != max_id],
         )
+        if ok:
+            from bot.services import activity
+            await activity.record(activity.STUDENT, f"Родитель отвязан: {student_id} · MAX {max_id}", ref=student_id)
+        return ok
 
     async def get_by_parent(self, addr) -> list[Student]:
         """addr = ("tg", id) | ("max", id)."""
@@ -244,7 +258,9 @@ class StudentRepository(BaseRepository):
                 return False
             new_ids = student.parent_tg_ids + [tg_id]
             await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
-            return True
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.STUDENT, f"Родитель привязан: {student_id} · Telegram {tg_id}", ref=student_id)
+        return True
 
     async def remove_parent_tg_id(self, student_id: str, tg_id: int) -> bool:
         """Отвязывает родителя от ученика (отмена ошибочной привязки)."""
@@ -256,7 +272,9 @@ class StudentRepository(BaseRepository):
                 return False
             new_ids = [i for i in student.parent_tg_ids if i != tg_id]
             await self._update_cell(row_idx, _PARENT_TG_IDS_COL, "|".join(str(i) for i in new_ids))
-            return True
+        from bot.services import activity
+        await activity.record(activity.STUDENT, f"Родитель отвязан: {student_id} · Telegram {tg_id}", ref=student_id)
+        return True
 
     async def clear_partner(self, student_id: str) -> None:
         """Разрывает связь с обеих сторон. Безопасно вызывать для солиста."""

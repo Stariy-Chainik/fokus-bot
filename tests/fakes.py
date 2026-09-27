@@ -926,3 +926,23 @@ def mk_entry(entry_id: str, student_id: str, date: str, minutes: int = 60,
     return TrainingEntry(entry_id=entry_id, student_id=student_id, date=date, minutes=minutes,
                          topics=list(topics), task_ids=list(task_ids), comment=comment,
                          created_at=f"{date} 12:00:00", grade=grade)
+
+
+class ActivityRepoFake:
+    """Лист activity_log в памяти (bot/repositories/activity_log_repo.py)."""
+
+    def __init__(self) -> None:
+        self.items: list = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def since(self, ts_from):
+        return sorted((e for e in self.items if e.ts >= ts_from), key=lambda e: e.ts, reverse=True)
+
+    async def add(self, kind, text, actor=0, ref=""):
+        from datetime import datetime
+        from bot.repositories.activity_log_repo import ActivityEvent
+        e = ActivityEvent(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), kind, int(actor or 0), text, ref)
+        self.items.append(e)
+        return e

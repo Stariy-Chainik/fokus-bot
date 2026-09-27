@@ -18,12 +18,14 @@ from base64 import b64encode
 from datetime import date
 
 from aiohttp import web
+from aiogram.types import BufferedInputFile
 
 from bot.api.admin import auth_tg_id
 from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.parent_views import (
+    breakdown_lines, receipt_caption, unpaid_for,
     admin_confirm_rows, cash_notice, cash_options, client_contact, history_hidden, qr_png, visible_periods,
 )
 from bot.services.payment_methods import CASH
@@ -36,6 +38,7 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 PREFIX = "/api/parent"
+_RECEIPT_MAX_BYTES = 15 * 1024 * 1024     # чек с телефона — до 15 МБ
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -385,14 +388,88 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             qr = qr_png(student.name, period, amount) if method == "bank" else None
             return _json({"amount": amount, "details": details.replace("\\n", "\n"),
                           "qr": ("data:image/png;base64," + b64encode(qr).decode()) if qr else "",
-                          "hint": "После перевода пришлите чек в бот — администратор подтвердит оплату."})
+                          "hint": "После перевода прикрепите чек здесь или пришлите его в бот — администратор подтвердит оплату."})
         return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
+
+    async def receipt(request: web.Request, tg_id, children) -> web.Response:
+        """Чек об оплате по реквизитам/СБП из кабинета: multipart (studentId, ym, method, amount, file).
+
+        Файл уходит администраторам в Telegram с теми же кнопками, что чек из бота, и ставится
+        в очередь решений с file_id — в кабинете администратора чек виден картинкой.
+        """
+        if bot is None:
+            return _json({"error": "bot_unavailable"}, status=503)
+        try:
+            form = await request.post()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        student = _child(children, str(form.get("studentId") or ""))
+        period = str(form.get("ym") or current_period())
+        method = str(form.get("method") or "bank")
+        upload = form.get("file")
+        if student is None or method not in ("bank", "sbp") or not hasattr(upload, "file"):
+            return _json({"error": "bad_request"}, status=400)
+        data = upload.file.read()
+        if not data or len(data) > _RECEIPT_MAX_BYTES:
+            return _json({"error": "file_too_big" if data else "bad_request"}, status=400)
+        ctype = (upload.content_type or "").lower()
+        is_image = ctype.startswith("image/")
+        if not is_image and ctype != "application/pdf":
+            return _json({"error": "bad_file_type"}, status=400)
+        try:
+            amount = int(str(form.get("amount") or 0))
+        except ValueError:
+            amount = 0
+        if amount <= 0:
+            amount, _ = await unpaid_for(student, period, payment_service)
+        bills = await payment_service.compute_bills_for_student_period(student.student_id, period)
+        ledgers = await payment_service.ledger_for(student, period)
+        caption = receipt_caption(method, student.name, period, amount,
+                                  "\n".join(breakdown_lines(bills, list(bills), ledgers=ledgers)))
+        filename = upload.filename or ("receipt.jpg" if is_image else "receipt.pdf")
+        admins = [u.tg_id for u in await user_repo.get_admins()]
+        if not admins:
+            return _json({"error": "bot_unavailable"}, status=503)
+
+        async def send(admin_id: int, markup):
+            payload = BufferedInputFile(data, filename=filename)
+            if is_image:
+                return await bot.send_photo(admin_id, payload, caption=caption, reply_markup=markup)
+            return await bot.send_document(admin_id, payload, caption=caption, reply_markup=markup)
+
+        # первому админу — без кнопок, чтобы получить file_id для очереди; затем кнопки по номеру решения
+        first, file_id, file_type = None, "", "photo" if is_image else "document"
+        try:
+            first = await send(admins[0], None)
+            file_id = (first.photo[-1].file_id if is_image else first.document.file_id) if first else ""
+        except Exception as exc:
+            logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admins[0], exc)
+        action = await queue_action(_dp_get(dp, "pending_repo"), KIND_RECEIPT, student, period, amount=amount,
+                                    method=method, parent_addr=str(tg_id), file_id=file_id, file_type=file_type)
+        rows = admin_confirm_rows(student.student_id, period, "", False, ("tg", tg_id), amount, method,
+                                  action_id=action.action_id if action else "")
+        markup = to_aiogram_markup(rows)
+        sent = 0
+        if first is not None:
+            try:
+                await bot.edit_message_reply_markup(admins[0], first.message_id, reply_markup=markup)
+                sent += 1
+            except Exception as exc:
+                logger.warning("Кабинет родителя: кнопки к чеку не добавились: %s", exc)
+        for admin_id in admins[1:]:
+            try:
+                await send(admin_id, markup)
+                sent += 1
+            except Exception as exc:
+                logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admin_id, exc)
+        logger.info("Кабинет родителя: чек %s ₽ — %s %s (%s), админов: %d", amount, student.student_id, period, method, sent)
+        return _json({"ok": True, "amount": amount, "notified": sent})
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/bills", bills), ("GET", "/bill/{sid}/{ym}", bill),
         ("GET", "/lessons/{sid}", lessons), ("GET", "/diary/{sid}", diary),
-        ("POST", "/pay", pay),
+        ("POST", "/pay", pay), ("POST", "/receipt", receipt),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, parent_only(handler))

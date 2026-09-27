@@ -9,7 +9,8 @@ Telegram — `MINIAPP_DEV_TG_ID` + заголовок `Authorization: dev` (на
 from __future__ import annotations
 
 import logging
-from datetime import date
+import re
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -147,7 +148,64 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                           "rest": collected.rest, "percent": collected.percent},
             "incomeMonth": month.total_income, "salaryMonth": month.salary, "profitMonth": month.profit,
             "studentsCount": len(await student_repo.get_all()),
+            "activityToday": await _activity_count(today),
         })
+
+    async def _activity_count(day: str) -> int:
+        repo = _dp_get(dp, "activity_repo")
+        if repo is None:
+            return 0
+        try:
+            return len(await repo.since(day))
+        except Exception as exc:                  # лента вспомогательная — сводка важнее
+            logger.warning("Лента изменений недоступна: %s", exc)
+            return 0
+
+    # ── лента изменений ──────────────────────────────────────────────────
+    _ID_RE = re.compile(r"\b(STU|GRP|TCH)-\d{4}\b")
+
+    async def _activity_names() -> dict:
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names.update({g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
+        names.update({t.teacher_id: t.name for t in await teacher_repo.get_all()})
+        return names
+
+    async def _actor_labels(actors: set) -> dict:
+        """tg_id → кто это: педагог по имени, администратор, родитель; 0 — система/ЮКасса."""
+        users = {u.tg_id: u for u in await user_repo.get_all()}
+        teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
+        out = {}
+        for tg in actors:
+            u = users.get(tg)
+            if not tg:
+                out[tg] = ""
+            elif u is not None and u.teacher_id and not u.is_admin:
+                out[tg] = teachers.get(u.teacher_id, "педагог")
+            elif u is not None and u.is_admin:
+                out[tg] = "админ" + (f" ({teachers[u.teacher_id]})" if u.teacher_id in teachers else "")
+            else:
+                out[tg] = "родитель"
+        return out
+
+    async def activity(request: web.Request, user) -> web.Response:
+        """Все изменения за N дней: оплаты, занятия, заявки, выплаты, ученики, группы, педагоги."""
+        repo = _dp_get(dp, "activity_repo")
+        if repo is None:
+            return _json({"error": "unavailable"}, status=503)
+        try:
+            days = max(1, min(int(request.query.get("days") or 1), 90))
+        except ValueError:
+            return _json({"error": "bad_request"}, status=400)
+        kind = request.query.get("kind") or ""
+        since = (date.today() - timedelta(days=days - 1)).isoformat()
+        events = [e for e in await repo.since(since) if not kind or e.kind == kind]
+        names = await _activity_names()
+        labels = await _actor_labels({e.actor for e in events})
+        pretty = lambda text: _ID_RE.sub(lambda m: names.get(m.group(0), m.group(0)), text)  # noqa: E731
+        out = [{"ts": e.ts, "kind": e.kind, "text": pretty(e.text),
+                "who": labels.get(e.actor, "") or ("ЮКасса" if e.kind == "payment" and not e.actor else ""),
+                "ref": e.ref} for e in events]
+        return _json({"days": days, "since": since, "events": out})
 
     async def _today_by_teacher(lessons_today: list) -> list[dict]:
         """Раскрывающийся список на сводке: педагог → его занятия за сегодня и прибыль школы.
@@ -478,7 +536,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         return _json({"period": period, "debtors": out})
 
     routes = [
-        ("GET", "/me", me), ("GET", "/home", home),
+        ("GET", "/me", me), ("GET", "/home", home), ("GET", "/activity", activity),
         ("GET", "/students", students), ("GET", "/students/{sid}", student_card),
         ("GET", "/teachers", teachers), ("GET", "/teachers/{tid}", teacher_card),
         ("GET", "/pay/groups", pay_groups), ("GET", "/pay/students", pay_students),

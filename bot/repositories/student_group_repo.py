@@ -60,6 +60,8 @@ class StudentGroupRepository(BaseRepository):
             return existing
         joined = joined_period or current_period()
         await self._append_row([student_id, group_id, joined, ""])
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.STUDENT, f"Ученик {student_id} добавлен в группу {group_id} с {joined}", ref=student_id)
         return StudentGroup(student_id=student_id, group_id=group_id, joined_period=joined)
 
     async def set_joined_period(self, student_id: str, group_id: str, joined_period: str) -> bool:
@@ -68,7 +70,13 @@ class StudentGroupRepository(BaseRepository):
 
     async def set_left_period(self, student_id: str, group_id: str, left_period: str) -> bool:
         """Пометить уход: с этого месяца абонемент не начисляется. Пусто — вернуть в группу."""
-        return await self._set_cell(student_id, group_id, _LEFT_COL, left_period)
+        ok = await self._set_cell(student_id, group_id, _LEFT_COL, left_period)
+        if ok:
+            from bot.services import activity
+            await activity.record(activity.STUDENT, (f"Ученик {student_id} уходит из группы {group_id} с {left_period}"
+                                                     if left_period else f"Ученик {student_id} вернулся в группу {group_id}"),
+                                  ref=student_id)
+        return ok
 
     async def _set_cell(self, student_id: str, group_id: str, col: int, value: str) -> bool:
         async with self._locked_row(student_id=student_id, group_id=group_id) as row_idx:
@@ -82,7 +90,9 @@ class StudentGroupRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
-            return True
+        from bot.services import activity
+        await activity.record(activity.STUDENT, f"Ученик {student_id} убран из группы {group_id}", ref=student_id)
+        return True
 
     async def remove_all_for_student(self, student_id: str) -> int:
         return await self._delete_all_where(student_id=student_id)

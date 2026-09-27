@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     sheet_lessons: str = Field(default="lessons", alias="SHEET_LESSONS")
     sheet_billing: str = Field(default="billing", alias="SHEET_BILLING")
     sheet_payments: str = Field(default="student_period_payments", alias="SHEET_PAYMENTS")
+    sheet_activity_log: str = Field(default="activity_log", alias="SHEET_ACTIVITY_LOG")
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )

@@ -255,3 +255,54 @@ def test_nothing_before_the_start_month_anywhere_in_the_cabinet(api, monkeypatch
     assert _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]["lessons"]   # текущий месяц — как обычно
     monkeypatch.setattr(settings, "parent_bills_since_period", "")
     assert _call(app, "GET", f"/api/parent/bill/STU-0001/{prev}")[0] == 200         # без границы — всё видно
+
+
+def test_receipt_upload_from_the_cabinet(api, monkeypatch):
+    """Чек по реквизитам из кабинета: файл уходит админам с кнопками очереди, заявка хранит file_id."""
+    from types import SimpleNamespace
+    from tests.test_admin_inbox_api import PendingRepoFake
+    import aiohttp
+    app, dp = api
+    dp["pending_repo"] = PendingRepoFake()
+    monkeypatch.setattr(settings, "payment_bank_details", "Банк")
+
+    class Bot:
+        def __init__(self):
+            self.photos, self.markups = [], []
+
+        async def send_photo(self, chat_id, photo, caption=None, reply_markup=None, **_):
+            self.photos.append((chat_id, caption, reply_markup))
+            return SimpleNamespace(message_id=len(self.photos), photo=[SimpleNamespace(file_id="FILE-CAB")])
+
+        async def edit_message_reply_markup(self, chat_id, message_id, reply_markup=None, **_):
+            self.markups.append((chat_id, message_id, reply_markup))
+
+    bot = Bot()
+
+    async def run():
+        app_ = web.Application(client_max_size=20 * 1024 ** 2)
+        register_parent_api(app_, dp, bot)
+        client = TestClient(TestServer(app_))
+        await client.start_server()
+        try:
+            form = aiohttp.FormData()
+            for name, value in (("studentId", "STU-0001"), ("ym", YM), ("method", "bank")):
+                form.add_field(name, value)
+            form.add_field("amount", "4800")
+            form.add_field("file", b"\x89PNG fake", filename="receipt.png", content_type="image/png")
+            resp = await client.post("/api/parent/receipt", data=form,
+                                     headers={"Authorization": f"tma {make_init_data(user_id=PARENT_TG)}"})
+            return resp.status, await resp.json()
+        finally:
+            await client.close()
+
+    status, r = asyncio.run(run())
+    assert status == 200 and r["ok"] and r["amount"] == 4800 and r["notified"] == 1
+    a = dp["pending_repo"].items[0]
+    assert (a.kind, a.student_id, a.period_month, a.amount, a.method, a.file_id, a.file_type) == (
+        "receipt", "STU-0001", YM, 4800, "bank", "FILE-CAB", "photo")
+    assert a.parent_addr == str(PARENT_TG)
+    chat, caption, first_markup = bot.photos[0]
+    assert chat == ADMIN_TG and "Чек об оплате" in caption and "Иванов Иван" in caption and first_markup is None
+    callbacks = [b.callback_data for row in bot.markups[0][2].inline_keyboard for b in row]
+    assert any(c.startswith(f"pact:{a.action_id}:4800:") for c in callbacks)   # кнопки — по номеру решения

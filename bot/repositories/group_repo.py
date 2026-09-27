@@ -81,6 +81,8 @@ class GroupRepository(BaseRepository):
             group_id, branch_id, name, now, now, 0,
             GroupBillingMode.NONE.value, 0, 35, 0, 60, "",
         ])
+        from bot.services import activity          # локально: репозитории грузятся раньше сервисов
+        await activity.record(activity.GROUP, f"Новая группа: {group_id} {name}", ref=group_id)
         return Group(
             group_id=group_id, branch_id=branch_id, name=name,
             created_at=now, updated_at=now,
@@ -92,7 +94,9 @@ class GroupRepository(BaseRepository):
                 return False
             await self._update_cell(row_idx, 3, name)
             await self._update_cell(row_idx, 5, now_str())
-            return True
+        from bot.services import activity
+        await activity.record(activity.GROUP, f"Переименована группа {group_id}: {name}", ref=group_id)
+        return True
 
     async def update_billing(
         self, group_id: str,
@@ -109,7 +113,10 @@ class GroupRepository(BaseRepository):
             await self._update_cell(row_idx, _PRICE_FULL_COL, price_full)
             await self._update_cell(row_idx, _DUR_FULL_COL, duration_full)
             await self._update_cell(row_idx, 5, now_str())
-            return True
+        from bot.services import activity
+        await activity.record(activity.GROUP, f"Биллинг группы {group_id}: {billing_mode.value} · {price_full} ₽"
+                              + (f" · короткий {price_short} ₽" if price_short else ""), ref=group_id)
+        return True
 
     async def set_archived(self, group_id: str, archived: bool) -> bool:
         """В архив / из архива. Строку не удаляет — история занятий и оплат цела."""
@@ -118,11 +125,15 @@ class GroupRepository(BaseRepository):
                 return False
             await self._update_cell(row_idx, _ARCHIVED_COL, "1" if archived else "")
             await self._update_cell(row_idx, 5, now_str())
-            return True
+        from bot.services import activity
+        await activity.record(activity.GROUP, f"Группа {group_id} {'в архиве' if archived else 'возвращена из архива'}", ref=group_id)
+        return True
 
     async def delete(self, group_id: str) -> bool:
         async with self._locked_row(group_id=group_id) as row_idx:
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
-            return True
+        from bot.services import activity
+        await activity.record(activity.GROUP, f"Удалена группа {group_id}", ref=group_id)
+        return True

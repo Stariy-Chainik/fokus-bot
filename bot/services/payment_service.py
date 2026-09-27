@@ -18,6 +18,7 @@ from .payment_ledger import (
 )
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
+from . import activity
 logger = logging.getLogger(__name__)
 
 # Ключ «педагога» для абонементного начисления в счетах/долгах: SUB:{group_id}.
@@ -563,6 +564,9 @@ class PaymentService:
             credited += left
             rows += 1
         logger.info("Оплата зачтена: student=%s period=%s сумма=%d строк=%d", student_id, period_month, credited, rows)
+        if credited > 0:
+            await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
+                                  + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id, ref=student_id)
         return credited, rows
 
     async def _add_paid_row(
@@ -708,9 +712,13 @@ class PaymentService:
         if payment.total_amount <= 0:
             logger.warning("Счёт %s с нулевым остатком — подтверждать нечего", payment_id)
             return False
-        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id, payment_method)
+        ok = await self._payment_repo.confirm(payment_id, confirmed_by_tg_id, payment_method,
+                                              student_id=payment.student_id)
         if ok:
             logger.info("Счёт %s подтверждён", payment_id)
+            await activity.record(activity.PAYMENT, f"Оплата {payment.total_amount} ₽: {payment.student_id}"
+                                  f" · {payment.period_month} · {payment_method} · {payment.teacher_id}",
+                                  actor=confirmed_by_tg_id, ref=payment.student_id)
         return ok
 
     async def create_yookassa_payment(
@@ -812,4 +820,7 @@ class PaymentService:
             student_id, period_month, confirmed_by_tg_id, payment_method,
         )
         logger.info("Период %s ученика %s оплачен (%d счётов)", period_month, student_id, count)
+        if count:
+            await activity.record(activity.PAYMENT, f"Подтверждён период: {student_id} · {period_month}"
+                                  f" · счетов {count} · {payment_method}", actor=confirmed_by_tg_id, ref=student_id)
         return count

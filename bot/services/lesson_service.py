@@ -10,6 +10,7 @@ from bot.repositories import (
 from bot.utils import AttendeeEntry, generate_lesson_id, now_str, parse_attendees, period_month_from_date, serialize_attendees
 from config.settings import settings
 
+from . import activity
 logger = logging.getLogger(__name__)
 
 
@@ -95,6 +96,9 @@ class LessonService:
         await self._lesson_repo.add(lesson)
         logger.info("Создано занятие %s teacher=%s date=%s",
                     lesson_id, teacher.teacher_id, lesson_date)
+        await activity.record(activity.LESSON, (
+            f"Отмечено занятие: {teacher.teacher_id} · {lesson_date} · {group_id or ' + '.join(participants)}"
+            f" · {duration_min} мин" + (" · за педагога" if bypass_period_lock else "")), ref=lesson_id)
         return lesson
 
     async def create_pair_batch(
@@ -191,6 +195,8 @@ class LessonService:
         existing.append(AttendeeEntry(student_id=student_id, duration_min=lesson.duration_min, amount=amount))
         new_attendees = serialize_attendees(existing)
         await self._lesson_repo.update_attendees(lesson.lesson_id, new_attendees)
+        await activity.record(activity.LESSON, f"Гость в занятии: {student_id} · {lesson.teacher_id} · {lesson.date}"
+                              f" · {lesson.group_id}{' · пробное' if trial else ''}", ref=lesson.lesson_id)
         return new_attendees
 
     # ─── Удаление ─────────────────────────────────────────────────────────
@@ -206,6 +212,11 @@ class LessonService:
         deleted = await self._lesson_repo.delete(lesson_id)
         if deleted:
             logger.info("Удалено занятие %s", lesson_id)
+            who = lesson.group_id or " + ".join(
+                i for i in (lesson.student_1_id, lesson.student_2_id, lesson.student_3_id, lesson.student_4_id) if i)
+            await activity.record(activity.LESSON, (
+                f"Удалено занятие: {lesson.teacher_id} · {lesson.date} · {who} · {lesson.duration_min} мин"
+                + (" · администратором" if bypass_period_lock else "")), ref=lesson_id)
         return deleted
 
     # ─── Сдача периода ───────────────────────────────────────────────────

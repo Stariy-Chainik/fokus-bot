@@ -39,7 +39,7 @@ async def main(port: int) -> None:
         sys.exit(2)
     dp = _build_dispatcher(MemoryStorage())
     rate_history.load(await dp["rate_history_repo"].get_all())
-    app = web.Application()
+    app = web.Application(client_max_size=20 * 1024 ** 2)
     register_miniapp_api(app, dp)
     register_admin_api(app, dp)
     register_teacher_api(app, dp)
