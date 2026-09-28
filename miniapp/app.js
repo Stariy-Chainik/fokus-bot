@@ -854,7 +854,13 @@ async function loadAuthImage(img) {
   try {
     const resp = await fetch(API_BASE[ROLE] + img.dataset.file, { headers });
     if (!resp.ok) throw new Error(resp.status);
-    img.src = URL.createObjectURL(await resp.blob());
+    const blob = await resp.blob(); const url = URL.createObjectURL(blob);
+    if (blob.type.startsWith('image/')) { img.src = url; return; }
+    // чек прислан документом (обычно PDF из банка): встраиваем и даём открыть отдельно
+    const box = document.createElement('div');
+    box.innerHTML = `<object data="${url}" type="${esc(blob.type || 'application/pdf')}" style="display:block;width:100%;height:360px;border-radius:10px;margin-top:10px;background:var(--bg)"></object>
+      <a class="btn ghost" style="margin-top:8px;text-decoration:none" href="${url}" target="_blank" rel="noopener">📄 Открыть чек отдельно</a>`;
+    img.replaceWith(box);
   } catch (_) { img.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Чек не загрузился — посмотрите его в чате бота' })); }
 }
 /* Решение из очереди: подтвердить оплату / привязать ребёнка или отклонить. */

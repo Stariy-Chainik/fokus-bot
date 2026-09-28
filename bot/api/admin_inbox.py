@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 
 from aiohttp import web
 
@@ -48,7 +49,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             "period": a.period_month, "periodLabel": period_label(a.period_month) if a.period_month else "",
             "amount": a.amount, "method": METHOD_LABELS.get(a.method, a.method),
             "comment": a.comment, "createdAt": a.created_at,
-            "hasFile": bool(a.file_id), "rest": rest,
+            "hasFile": bool(a.file_id), "fileType": a.file_type, "rest": rest,
         }
 
     async def inbox(request: web.Request, user) -> web.Response:
@@ -88,7 +89,9 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             logger.warning("Очередь решений: не скачали чек %s: %s", action.action_id, exc)
             return _json({"error": "download_failed"}, status=502)
         data = buf.read() if hasattr(buf, "read") else bytes(buf)
-        ctype = "image/jpeg" if action.file_type == "photo" else "application/octet-stream"
+        # тип файла — по расширению пути в Telegram: чек присылают и фото, и PDF-документом
+        ctype = "image/jpeg" if action.file_type == "photo" else (
+            mimetypes.guess_type(file.file_path or "")[0] or "application/octet-stream")
         return web.Response(body=data, content_type=ctype,
                             headers={"Cache-Control": "no-store"})
 
