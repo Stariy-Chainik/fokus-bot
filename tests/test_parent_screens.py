@@ -293,6 +293,7 @@ def test_receipt_goes_through_the_miniapp_when_configured():
     assert "в приложении" in text and rows[0][0].kind == "webapp"
     assert rows[0][0].value == "https://fokus.example/app/?open=bill&sid=STU-0001&ym=2026-09"
     kb = to_aiogram_markup(rows)
-    assert kb.inline_keyboard[0][0].web_app.url.endswith("ym=2026-09") and kb.inline_keyboard[1][0].callback_data == "client_pay:STU-0001:2026-09"
+    assert kb.inline_keyboard[0][0].web_app.url.endswith("ym=2026-09")
+    assert kb.inline_keyboard[1][0].callback_data == "client_pay:STU-0001:2026-09"
     legacy = receipt_rows("bank", "STU-0001", "2026-09")
     assert legacy[0][0].kind == "cb" and legacy[0][0].value == "receipt_upload:bank:STU-0001:2026-09"
