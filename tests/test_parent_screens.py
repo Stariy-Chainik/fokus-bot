@@ -283,3 +283,16 @@ def test_bills_periods_skip_hidden_months(monkeypatch):
     recent = asyncio.run(bills_periods([_student()], _Service(), show_older=False))
     older = asyncio.run(bills_periods([_student()], _Service(), show_older=True))
     assert [r.period for r in recent] == [this] and older == []
+
+
+def test_receipt_goes_through_the_miniapp_when_configured():
+    """Чек по реквизитам — через приложение: кнопка Mini App на счёт; без адреса и в MAX — загрузка в чат."""
+    from bot.screens.adapters import to_aiogram_markup
+    from bot.screens.parent_bills import bank_screen, receipt_rows
+    text, rows = bank_screen(4800, "STU-0001", "2026-09", "Банк", webapp_url="https://fokus.example/app/")
+    assert "в приложении" in text and rows[0][0].kind == "webapp"
+    assert rows[0][0].value == "https://fokus.example/app/?open=bill&sid=STU-0001&ym=2026-09"
+    kb = to_aiogram_markup(rows)
+    assert kb.inline_keyboard[0][0].web_app.url.endswith("ym=2026-09") and kb.inline_keyboard[1][0].callback_data == "client_pay:STU-0001:2026-09"
+    legacy = receipt_rows("bank", "STU-0001", "2026-09")
+    assert legacy[0][0].kind == "cb" and legacy[0][0].value == "receipt_upload:bank:STU-0001:2026-09"

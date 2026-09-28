@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from bot.services.payment_ledger import lesson_paid_marks
 from bot.utils.dates import format_date_display, period_label
-from .types import cb, url
+from .types import cb, url, webapp
 
 HOME = "go:home"
 
@@ -236,27 +236,39 @@ def cash_screen(total: int, student_id: str, period_month: str) -> tuple:
     return text, rows
 
 
-def receipt_rows(method: str, student_id: str, period_month: str) -> list:
-    return [
-        [cb("📎 Прикрепить чек", f"receipt_upload:{method}:{student_id}:{period_month}")],
-        [cb("« Назад", f"client_pay:{student_id}:{period_month}")],
-    ]
+def receipt_link(webapp_url: str, student_id: str, period_month: str) -> str:
+    """Ссылка кабинета сразу на счёт: там «Оплатить → По реквизитам → Прикрепить чек»."""
+    return f"{webapp_url}?open=bill&sid={student_id}&ym={period_month}"
 
 
-def bank_screen(total: int, student_id: str, period_month: str, bank_details: str) -> tuple:
+def receipt_rows(method: str, student_id: str, period_month: str, webapp_url: str = "") -> list:
+    """Чек по реквизитам — через приложение (решение владельца 28.09.2026); без MINIAPP_URL и в MAX —
+    прежняя загрузка в чат."""
+    attach = (webapp("📎 Прикрепить чек в приложении", receipt_link(webapp_url, student_id, period_month))
+              if webapp_url else cb("📎 Прикрепить чек", f"receipt_upload:{method}:{student_id}:{period_month}"))
+    return [[attach], [cb("« Назад", f"client_pay:{student_id}:{period_month}")]]
+
+
+def _receipt_hint(webapp_url: str) -> str:
+    return ("После оплаты прикрепите чек в приложении: кнопка ниже откроет счёт, дальше "
+            "«Оплатить» → «По реквизитам» → «Прикрепить чек»." if webapp_url
+            else "После оплаты прикрепите фото чека.")
+
+
+def bank_screen(total: int, student_id: str, period_month: str, bank_details: str, webapp_url: str = "") -> tuple:
     lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b>", ""]
     if bank_details:
         lines += [bank_details.replace("\\n", "\n"), ""]
-    lines.append("После оплаты прикрепите фото чека.")
-    return "\n".join(lines), receipt_rows("bank", student_id, period_month)
+    lines.append(_receipt_hint(webapp_url))
+    return "\n".join(lines), receipt_rows("bank", student_id, period_month, webapp_url)
 
 
-def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str) -> tuple:
+def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str, webapp_url: str = "") -> tuple:
     lines = ["<b>📱 Оплата через СБП</b>", f"Сумма: <b>{total} руб.</b>", ""]
     if sbp_details:
         lines += [sbp_details, ""]
-    lines.append("После оплаты прикрепите фото чека.")
-    return "\n".join(lines), receipt_rows("sbp", student_id, period_month)
+    lines.append(_receipt_hint(webapp_url))
+    return "\n".join(lines), receipt_rows("sbp", student_id, period_month, webapp_url)
 
 
 def online_pay_screen(kind: str, total: int, pay_url: str, student_id: str, period_month: str) -> tuple:

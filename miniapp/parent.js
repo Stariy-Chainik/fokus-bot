@@ -232,7 +232,7 @@ ACT.pReceipt = async ({ ym, method, amount }) => {
   form.append('studentId', kid()); form.append('ym', ym); form.append('method', method); form.append('amount', String(amount || 0));
   form.append('file', file, file.name);
   try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.notified ? 'Чек отправлен — администратор подтвердит оплату' : 'Чек принят, администраторы пока не получили уведомление'); }
-  catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Отправить чек'; } toast(errText(e)); }
+  catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; } toast(errText(e)); }
   finally { state.ui.paying = false; }
 };
 ACT.pPayDo = async ({ ym, method, sel }) => {
@@ -256,7 +256,7 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
     <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div>
     <label class="hint" for="rc-file" style="display:block;margin:12px 0 4px">Чек об оплате (фото или PDF)</label>
     <input class="search" id="rc-file" type="file" accept="image/*,application/pdf" style="margin:0">
-    <div style="margin-top:12px">${btn('📎 Отправить чек', 'pReceipt', { ym, method, amount: r.amount })}${btn('Позже, пришлю в бот', 'closeSheet', {}, 'ghost')}</div>`); return; }
+    <div style="margin-top:12px">${btn('📎 Прикрепить чек', 'pReceipt', { ym, method, amount: r.amount })}${btn('Прикреплю позже', 'closeSheet', {}, 'ghost')}</div>`); return; }
     if (r.ok) { render(); toast(r.duplicate ? 'Уведомление уже отправлено' : 'Администратор получил уведомление'); return; }
   } catch (e) { closeSheet(); toast(errText(e)); }
   finally { state.ui.paying = false; }

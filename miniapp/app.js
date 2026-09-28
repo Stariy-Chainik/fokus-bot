@@ -916,6 +916,13 @@ ACT.switchRole = async ({ to }) => {
   }
   if (last) return fail(last);
   state.stack = [{ n: ROLE_HOME[ROLE] }];
+  // кнопка «Прикрепить чек в приложении» из бота ведёт сразу на счёт: ?open=bill&sid=STU-…&ym=YYYY-MM
+  const q = new URLSearchParams(location.search);
+  if (ROLE === 'parent' && q.get('open') === 'bill' && q.get('sid') && q.get('ym')
+      && (state.me.children || []).some(c => c.id === q.get('sid'))) {
+    state.ui.kid = q.get('sid');
+    state.stack.push({ n: 'p.bill', p: { ym: q.get('ym') } });
+  }
   render();
   function fail(e) {
     document.getElementById('tabs').innerHTML = '';

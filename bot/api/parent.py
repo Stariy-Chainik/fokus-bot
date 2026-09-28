@@ -388,7 +388,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             qr = qr_png(student.name, period, amount) if method == "bank" else None
             return _json({"amount": amount, "details": details.replace("\\n", "\n"),
                           "qr": ("data:image/png;base64," + b64encode(qr).decode()) if qr else "",
-                          "hint": "После перевода прикрепите чек здесь или пришлите его в бот — администратор подтвердит оплату."})
+                          "hint": "После перевода прикрепите чек кнопкой ниже — администратор подтвердит оплату."})
         return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
 
     async def receipt(request: web.Request, tg_id, children) -> web.Response:

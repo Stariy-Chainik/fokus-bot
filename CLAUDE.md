@@ -379,7 +379,7 @@ earned (REVENUE_SHARE_GROUPS, напр. GRP-0020 «Индивидуальные 
 (решение владельца 21.09.2026; один и тот же `methods_screen` в боте, MAX и кабинете).
 Каждый способ настраивается через ENV — без настройки способа не видно:
 1. 💵 Наличные — родитель жмёт «📨 Уведомить об оплате», админ подтверждает кнопкой (`PAYMENT_CASH_ENABLED`, по умолчанию включено; флаг передаётся в `methods_screen(cash=…)` из Telegram- и MAX-хендлеров).
-2. 🏦 По реквизитам — shows QR + bank details; client uploads receipt (`PAYMENT_BANK_DETAILS`).
+2. 🏦 По реквизитам — shows QR + bank details; чек **через приложение** (решение владельца 28.09.2026): в боте кнопка Mini App «📎 Прикрепить чек в приложении» (`Btn` kind `webapp` → `WebAppInfo`, ссылка `MINIAPP_URL?open=bill&sid=&ym=` открывает счёт ребёнка), без `MINIAPP_URL` и в MAX — прежняя загрузка в чат (`receipt_upload:`) (`PAYMENT_BANK_DETAILS`).
 3. 📱 СБП — shows SBP details; client uploads receipt (`PAYMENT_SBP_DETAILS`).
 4. 💳 Картой онлайн — YooKassa link (`YOOKASSA_SHOP_ID` + `YOOKASSA_SECRET_KEY`).
 

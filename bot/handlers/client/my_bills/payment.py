@@ -292,7 +292,7 @@ async def cb_pay_method(
         await _edit(callback, cash_screen(total, student_id, period_month))
 
     elif method == "bank":
-        await _edit(callback, bank_screen(total, student_id, period_month, settings.payment_bank_details))
+        await _edit(callback, bank_screen(total, student_id, period_month, settings.payment_bank_details, webapp_url=settings.miniapp_url))
         png = qr_png(student.name, period_month, total)
         try:
             if png:
@@ -306,7 +306,7 @@ async def cb_pay_method(
             logger.warning("Не удалось отправить QR-код: %s", exc)
 
     elif method == "sbp":
-        await _edit(callback, sbp_screen(total, student_id, period_month, settings.payment_sbp_details))
+        await _edit(callback, sbp_screen(total, student_id, period_month, settings.payment_sbp_details, webapp_url=settings.miniapp_url))
 
     elif method in ("ysbp", "yookassa"):
         try:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Btn:
     label: str
-    kind: str      # "cb" | "url"
+    kind: str      # "cb" | "url" | "webapp"
     value: str     # callback payload или URL
 
 
@@ -19,4 +19,9 @@ def cb(label: str, data: str) -> Btn:
 
 def url(label: str, link: str) -> Btn:
     return Btn(label, "url", link)
+
+
+def webapp(label: str, link: str) -> Btn:
+    """Кнопка Mini App (Telegram открывает кабинет с initData); в MAX — обычная ссылка."""
+    return Btn(label, "webapp", link)
 
