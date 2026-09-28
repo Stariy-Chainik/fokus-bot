@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     sheet_billing: str = Field(default="billing", alias="SHEET_BILLING")
     sheet_payments: str = Field(default="student_period_payments", alias="SHEET_PAYMENTS")
     sheet_activity_log: str = Field(default="activity_log", alias="SHEET_ACTIVITY_LOG")
+    sheet_group_schedule: str = Field(default="group_schedule", alias="SHEET_GROUP_SCHEDULE")
+    lesson_reminders_enabled: bool = Field(default=True, alias="LESSON_REMINDERS_ENABLED")
+    teacher_reminder_time: str = Field(default="21:00", alias="TEACHER_REMINDER_TIME")
+    admin_digest_time: str = Field(default="10:00", alias="ADMIN_DIGEST_TIME")
+    reminder_tz: str = Field(default="Europe/Moscow", alias="REMINDER_TZ")
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )

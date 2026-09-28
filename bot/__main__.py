@@ -97,6 +97,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     from bot.repositories.activity_log_repo import ActivityLogRepository
     activity_repo = ActivityLogRepository(sheets_client, settings.sheet_activity_log)
     activity.setup(activity_repo)          # лента изменений: пишут сервисы и репозитории
+    from bot.repositories.group_schedule_repo import GroupScheduleRepository
+    group_schedule_repo = GroupScheduleRepository(sheets_client, settings.sheet_group_schedule)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
@@ -163,6 +165,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["athlete_task_repo"] = athlete_task_repo
     dp["pending_repo"] = pending_repo
     dp["activity_repo"] = activity_repo
+    dp["group_schedule_repo"] = group_schedule_repo
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
@@ -208,7 +211,7 @@ _WARM_REPOS = (
     "student_group_repo", "teacher_group_repo", "branch_repo", "user_repo",
     "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
     "finance_entry_repo", "payout_repo", "salary_override_repo", "pending_repo",
-    "training_entry_repo", "athlete_task_repo", "activity_repo",
+    "training_entry_repo", "athlete_task_repo", "activity_repo", "group_schedule_repo",
 )
 
 
@@ -324,6 +327,8 @@ async def main() -> None:
     # История ставок педагогов: первая загрузка до старта, дальше — фоновое обновление
     refresher = asyncio.create_task(_rate_history_refresher(dp))
     warmer = asyncio.create_task(_cache_warmer(dp))      # кеш листов держим горячим
+    from bot.services import lesson_reminders
+    reminders = asyncio.create_task(lesson_reminders.run(dp, bot))   # напоминания педагогам по расписанию
     await asyncio.sleep(0)  # дать задаче выполнить первую загрузку
 
     # Бот в MAX (кабинет родителя) — в том же процессе, на тех же репозиториях
@@ -348,6 +353,7 @@ async def main() -> None:
     finally:
         refresher.cancel()
         warmer.cancel()
+        reminders.cancel()
         if max_task is not None:
             max_task.cancel()
 

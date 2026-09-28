@@ -149,14 +149,17 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "incomeMonth": month.total_income, "salaryMonth": month.salary, "profitMonth": month.profit,
             "studentsCount": len(await student_repo.get_all()),
             "activityToday": await _activity_count(today),
+            # колокольчик «События»: новые с последнего просмотра (?seen= — ts последнего просмотренного события)
+            "activityNew": await _activity_count(request.query.get("seen") or today, strict=bool(request.query.get("seen"))),
         })
 
-    async def _activity_count(day: str) -> int:
+    async def _activity_count(since: str, strict: bool = False) -> int:
         repo = _dp_get(dp, "activity_repo")
         if repo is None:
             return 0
         try:
-            return len(await repo.since(day))
+            events = await repo.since(since)
+            return sum(1 for e in events if e.ts > since) if strict else len(events)
         except Exception as exc:                  # лента вспомогательная — сводка важнее
             logger.warning("Лента изменений недоступна: %s", exc)
             return 0
@@ -205,7 +208,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         out = [{"ts": e.ts, "kind": e.kind, "text": pretty(e.text),
                 "who": labels.get(e.actor, "") or ("ЮКасса" if e.kind == "payment" and not e.actor else ""),
                 "ref": e.ref} for e in events]
-        return _json({"days": days, "since": since, "events": out})
+        return _json({"days": days, "since": since, "events": out, "latest": events[0].ts if events else ""})
 
     async def _today_by_teacher(lessons_today: list) -> list[dict]:
         """Раскрывающийся список на сводке: педагог → его занятия за сегодня и прибыль школы.
@@ -524,6 +527,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         period = current_period()
         debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
         students_by_id = {s.student_id: s for s in await student_repo.get_all()}
+        groups_of = await student_group_repo.get_map_by_student()          # для фильтра по филиалу/группе
         out = []
         for sid, months in debt_map.items():
             s = students_by_id.get(sid)
@@ -531,7 +535,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                 continue
             closed = sum(a for ym, a in months.items() if ym < period)
             out.append({"id": sid, "name": s.name, "months": dict(sorted(months.items())),
-                        "closedTotal": closed, "currentTotal": months.get(period, 0), "hasParent": bool(s.parent_addrs)})
+                        "closedTotal": closed, "currentTotal": months.get(period, 0), "hasParent": bool(s.parent_addrs),
+                        "groups": list(groups_of.get(sid, []))})
         out.sort(key=lambda r: (-r["closedTotal"], -r["currentTotal"], r["name"]))
         return _json({"period": period, "debtors": out})
 

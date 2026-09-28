@@ -132,7 +132,7 @@ const todayTeacherBlock = t => `<details class="acc">
 /* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
    Быстрых действий нет: всё это есть во вкладках, а дубли плиток и кнопок только путали. */
 SCREENS['a.home'] = async () => {
-  const [h, inbox] = await Promise.all([api('/home'), api('/inbox').catch(() => ({ total: 0 }))]);
+  const [h, inbox] = await Promise.all([api(`/home${actSeen() ? `?seen=${encodeURIComponent(actSeen())}` : ''}`), api('/inbox').catch(() => ({ total: 0 }))]);
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase();
   const c = h.collected;
   const attention = [
@@ -152,7 +152,7 @@ SCREENS['a.home'] = async () => {
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
-    <div style="margin-top:10px">${list([cell({ lead: '🕒', plain: true, t: 'Изменения за сегодня', s: 'оплаты, занятия, заявки, ученики, группы', r: h.activityToday ? pill(h.activityToday, 'acc') : '', go: 'a.activity' })])}</div>
+    <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     <div class="eyebrow">${mon}</div>
     <div class="list">
@@ -183,6 +183,8 @@ SCREENS['a.money'] = async () => {
 
 /* Лента изменений: всё, что поменялось в школе, — из листа activity_log (пишут сервисы и репозитории). */
 const ACT_KIND = { payment: ['💳', 'Оплаты'], lesson: ['📝', 'Занятия'], queue: ['📥', 'Заявки'], payout: ['💸', 'Выплаты'], finance: ['📊', 'Доходы и расходы'], student: ['👥', 'Ученики'], group: ['🏷️', 'Группы'], teacher: ['👩‍🏫', 'Педагоги'] };
+/* Колокольчик: ts последнего просмотренного события — у каждого админа в своём браузере. */
+const actSeen = () => { try { return localStorage.getItem('actSeen') || ''; } catch (_) { return ''; } };
 SCREENS['a.activity'] = async ({ days, kind }) => {
   const n = days || 1, k = kind || '';
   const d = await api(`/activity?days=${n}${k ? `&kind=${k}` : ''}`);
@@ -190,9 +192,10 @@ SCREENS['a.activity'] = async ({ days, kind }) => {
   const chips = `<div class="chips">${[[1, 'Сегодня'], [7, '7 дней'], [30, '30 дней']].map(([v, l]) => `<button class="chip" aria-pressed="${v === n}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: v, kind: k }))}' data-replace="1">${l}</button>`).join('')}</div>
     <div class="chips scroll">${[['', 'Все'], ...Object.entries(ACT_KIND).map(([v, [ic, l]]) => [v, `${ic} ${l}`])].map(([v, l]) => `<button class="chip" aria-pressed="${v === k}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: n, kind: v }))}' data-replace="1">${l}</button>`).join('')}</div>`;
   const row = e => cell({ lead: (ACT_KIND[e.kind] || ['•'])[0], plain: true, cls: 'wrap', t: esc(e.text), s: `${e.ts.slice(11, 16)}${e.who ? ` · ${esc(e.who)}` : ''}` });
-  return { title: 'Изменения', html: `${stickyFilters(chips)}${d.events.length
+  if (d.latest && d.latest > actSeen()) try { localStorage.setItem('actSeen', d.latest); } catch (_) { /* приватный режим */ }
+  return { title: 'События', html: `${stickyFilters(chips)}${d.events.length
     ? Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1)).map(dd => `<div class="eyebrow">${fdate(dd)}<span style="margin-left:auto;font-weight:600">${plural(byDay[dd].length, ['событие', 'события', 'событий'])}</span></div>${list(byDay[dd].map(row))}`).join('')
-    : empty('Изменений нет', '<p class="hint" style="margin:0">Сюда попадает всё: оплаты, занятия, заявки, выплаты, ученики, группы, педагоги</p>')}` };
+    : empty('Событий нет', '<p class="hint" style="margin:0">Сюда попадает всё: оплаты, занятия, заявки, выплаты, ученики, группы, педагоги</p>')}` };
 };
 
 /* Очередь решений: чеки, наличные и заявки, которые ждут администратора. */
@@ -275,10 +278,30 @@ SCREENS['a.bill'] = async ({ ym, sid }) => {
     <div style="margin-top:12px">${btn('📨 Отправить родителям', 'sendBill', { ym, sid }, d.rows.length ? '' : 'sec')}${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym, sid }, 'ghost')}</div>` };
 };
 
+/* Должники с фильтрами: поиск, филиал → группа, «с текущим месяцем», «без родителя», сортировка. */
 SCREENS['a.debtors'] = async () => {
+  const f = state.ui.df || (state.ui.df = { group: '', current: false, noparent: false, sort: 'sum' });
+  if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
   const d = await api('/debtors');
-  const rows = d.debtors.filter(r => r.closedTotal || r.currentTotal); const targets = rows.filter(r => r.closedTotal && r.hasParent);
-  return { title: 'Должники', html: `<div class="hint" style="margin-bottom:10px">Долг = начислено − оплачено. Текущий месяц помечен * и в напоминание не входит.</div>${rows.length ? list(rows.map(r => cell({ lead: initials(r.name), t: esc(r.name), s: Object.entries(r.months).map(([ym, a]) => `${MON_NOM[+ym.slice(5) - 1]}${ym === d.period ? '*' : ''}: ${fmt(a)}`).join(' · ') + (r.hasParent ? '' : ' · родитель не привязан'), r: r.closedTotal ? pill(fmt(r.closedTotal), 'bad') : pill(fmt(r.currentTotal), 'warn'), go: 'a.student', p: { id: r.id } }))) : empty('Должников нет', '<p class="hint" style="margin:0">Все закрытые месяцы оплачены</p>')}<div style="margin-top:12px">${btn(`📤 Напомнить всем (${targets.length})`, 'remind', { n: targets.length, total: targets.reduce((a, r) => a + r.closedTotal, 0) }, targets.length ? '' : 'sec')}</div>` };
+  const q = (state.ui.q5 || '').trim().toLowerCase();
+  const branch = state.ui.gfBranchDebt || '';
+  const branchGroups = new Set(branch ? (state.ui.groupsCache.find(b => b.id === branch) || { groups: [] }).groups.map(g => g.id) : []);
+  const amount = r => f.current ? r.closedTotal + r.currentTotal : r.closedTotal;
+  let rows = d.debtors.filter(r => amount(r) > 0)
+    .filter(r => !q || r.name.toLowerCase().includes(q))
+    .filter(r => !f.noparent || !r.hasParent)
+    .filter(r => f.group ? r.groups.includes(f.group) : !branch || r.groups.some(g => branchGroups.has(g)));
+  rows = rows.sort((a, b) => f.sort === 'name' ? a.name.localeCompare(b.name) : amount(b) - amount(a));
+  const total = rows.reduce((a, r) => a + amount(r), 0);
+  const targets = rows.filter(r => r.closedTotal && r.hasParent);
+  const chip = (label, on, act, p = {}) => `<button class="chip" aria-pressed="${on}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${label}</button>`;
+  const filters = `<input class="search" id="q5" placeholder="🔍 Фамилия ученика" value="${esc(state.ui.q5 || '')}">
+    ${groupFilter(state.ui.groupsCache, f.group, 'debtGroup', 'gfBranchDebt')}
+    <div class="chips scroll">${chip('Прошлые месяцы', !f.current, 'debtOpt', { k: 'current', v: false })}${chip('+ текущий*', f.current, 'debtOpt', { k: 'current', v: true })}${chip('Без родителя', f.noparent, 'debtOpt', { k: 'noparent', v: !f.noparent })}${chip('По сумме', f.sort === 'sum', 'debtOpt', { k: 'sort', v: 'sum' })}${chip('По фамилии', f.sort === 'name', 'debtOpt', { k: 'sort', v: 'name' })}</div>`;
+  return { title: 'Должники', html: `${stickyFilters(filters)}
+    <div class="hint" style="margin:6px 0 10px">${plural(rows.length, ['должник', 'должника', 'должников'])} · ${fmt(total)}. Долг = начислено − оплачено${f.current ? '; текущий месяц помечен * и в напоминание не входит' : ''}.</div>
+    ${rows.length ? list(rows.map(r => cell({ lead: initials(r.name), t: esc(r.name), s: Object.entries(r.months).filter(([ym]) => f.current || ym < d.period).map(([ym, a]) => `${MON_NOM[+ym.slice(5) - 1]}${ym === d.period ? '*' : ''}: ${fmt(a)}`).join(' · ') + (r.hasParent ? '' : ' · родитель не привязан'), r: pill(fmt(amount(r)), r.closedTotal ? 'bad' : 'warn'), go: 'a.student', p: { id: r.id } }))) : empty('Должников нет', '<p class="hint" style="margin:0">По выбранным фильтрам всё оплачено</p>')}
+    <div style="margin-top:12px">${btn(`📤 Напомнить всем (${targets.length})`, 'remind', { n: targets.length, total: targets.reduce((a, r) => a + r.closedTotal, 0) }, targets.length ? '' : 'sec')}</div>` };
 };
 
 /* Ученики: сначала филиал → группы → состав группы. Поиск и быстрые фильтры
@@ -614,6 +637,9 @@ SCREENS['a.group'] = async ({ id }) => {
     ${left.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Ушли <span class="hint">· ${left.length}</span></span><span class="r hint">не в составе</span></summary>
       <div class="accbody"><div class="accsum">Уже убраны из группы: с месяца ухода абонемент не начисляется. Строка хранится ради прошлых месяцев — за них уже выставлены и оплачены счета.</div>${left.map(m => memberRow(m, true)).join('')}</div></details>` : ''}
     <div style="margin-top:10px">${goBtn('➕ Добавить ученика', 'a.group.addst', { id, name: g.name }, 'sec')}</div>
+    <div class="eyebrow">Расписание</div>
+    ${g.schedule.length ? list(g.schedule.map(x => `<div class="cell static"><span class="lead plain">🕒</span><span><div class="t">${WD_FULL[x.weekday - 1]} · ${x.start}–${x.end}</div>${x.teacherId ? `<div class="s">${esc((g.teachers.find(t => t.id === x.teacherId) || { name: x.teacherId }).name)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="schedDel" data-p='${esc(JSON.stringify({ gid: id, slot: x.id }))}' aria-label="Удалить">✖</button></span></div>`)) : '<div class="card pad hint">Расписания нет — напоминания педагогу не приходят. В 21:00 бот напомнит отметить занятие, если по расписанию оно было, а в боте его нет.</div>'}
+    <div style="margin-top:10px">${btn('➕ Время занятия', 'schedForm', { gid: id, teachers: g.teachers.filter(t => t.assigned).map(t => [t.id, t.name]) }, 'sec')}</div>
     <div class="eyebrow">Настройки</div>${list([cell({ lead: '💳', plain: true, t: 'Биллинг ученикам', s: `${modeLabel(g.mode)}${g.priceFull ? ' · ' + fmt(g.priceFull) : ''}${g.overrides.length ? ` · переопределений: ${g.overrides.length}` : ''}`, go: 'a.billing', p: { id } }), cell({ lead: '👩‍🏫', plain: true, t: 'Педагоги группы', s: g.teachers.filter(t => t.assigned).map(t => esc(t.name)).join(', ') || 'не назначены', go: 'a.group.teachers', p: { id } }), cell({ lead: '🧾', plain: true, t: 'Счета всей группе', s: 'за текущий месяц', go: 'a.pay.students', p: { ym: lastPeriods(1)[0], g: id, gname: g.name, bill: true } })])}
     <div style="margin-top:12px">${btn('✏️ Переименовать', 'groupRename', { id, name: g.name }, 'ghost')}${btn(g.archived ? '📤 Вернуть из архива' : '📦 В архив', 'groupArchive', { id, archived: !g.archived }, 'ghost')}${btn('🗑 Удалить группу', 'groupDelete', { id, name: g.name, students: active.length }, 'danger')}</div>
     <p class="hint" style="margin-top:8px">Архивная группа пропадает из выбора при записи и счетах, но история занятий, счетов и зарплат не меняется.</p>` };
@@ -843,7 +869,7 @@ async function render() {
     if (on && on !== strip.firstElementChild) strip.scrollLeft = Math.max(0, on.offsetLeft - 12);
   });
   content.querySelectorAll('img[data-file]').forEach(loadAuthImage);   // чеки — только с авторизацией
-  const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4'); const qid = q ? q.id : null; const qkey = qid || 'q';
+  const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4') || document.getElementById('q5'); const qid = q ? q.id : null; const qkey = qid || 'q';
   if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
 }
 /* <img> не умеет слать Authorization, поэтому тянем файл fetch'ем и подставляем blob. */
@@ -877,6 +903,26 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   }
 };
 ACT.retry = () => render();
+const WD_FULL = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+ACT.schedForm = ({ gid, teachers }) => {
+  state.ui.sched = { gid, days: new Set(), tid: '' };
+  sheet(`<h3>Время занятия</h3><div class="hint">Дни недели</div>
+    <div class="chips" id="sched-days">${['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map((d, i) => `<button class="chip" aria-pressed="false" data-act="schedDay" data-p='{"d":${i + 1}}'>${d}</button>`).join('')}</div>
+    ${field('sc-start', 'С', '17:00', 'type="time"')}${field('sc-end', 'До', '18:00', 'type="time"')}
+    ${teachers.length > 1 ? `<div class="hint" style="margin:10px 0 4px">Кому напоминать</div><div class="chips" id="sched-t">${[['', 'Кто вёл недавно'], ...teachers].map(([tid, n]) => `<button class="chip" aria-pressed="${!tid}" data-act="schedTeacher" data-p='${esc(JSON.stringify({ tid }))}'>${esc(tid ? n.split(' ')[0] : n)}</button>`).join('')}</div>` : ''}
+    <div style="margin-top:12px">${btn('💾 Сохранить', 'schedSave', {})}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.schedDay = ({ d }) => { const s = state.ui.sched.days; s.has(d) ? s.delete(d) : s.add(d); document.querySelectorAll('#sched-days .chip').forEach((c, i) => c.setAttribute('aria-pressed', String(s.has(i + 1)))); };
+ACT.schedTeacher = ({ tid }) => { state.ui.sched.tid = tid; document.querySelectorAll('#sched-t .chip').forEach(c => c.setAttribute('aria-pressed', String(JSON.parse(c.dataset.p).tid === tid))); };
+ACT.schedSave = async () => {
+  const { gid, days, tid } = state.ui.sched;
+  if (!days.size) { toast('Выберите дни недели'); return; }
+  try { await api(`/groups/${gid}/schedule`, { method: 'POST', body: { weekdays: [...days], start: val('sc-start'), end: val('sc-end'), teacherId: tid } }); closeSheet(); render(); toast('Расписание сохранено'); }
+  catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
+ACT.schedDel = async ({ gid, slot }) => { try { await api(`/groups/${gid}/schedule/${slot}`, { method: 'DELETE' }); render(); toast('Время удалено'); } catch (e) { toast(errText(e)); } };
+ACT.debtGroup = ({ v }) => { state.ui.df.group = v; render(); };
+ACT.debtOpt = ({ k, v }) => { state.ui.df[k] = v; render(); };
 ACT.payGroupPick = ({ v }) => {
   const { ym, bill } = state.ui.payPick || {};
   const g = (state.ui.groupsCache || []).flatMap(b => b.groups).find(x => x.id === v);

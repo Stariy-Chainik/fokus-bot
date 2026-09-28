@@ -63,6 +63,8 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
     student_group_repo = dp["student_group_repo"]
     teacher_group_repo = dp["teacher_group_repo"]
     override_repo = dp["subscription_override_repo"]
+    _wf = getattr(dp, "workflow_data", dp)
+    schedule_repo = _wf.get("group_schedule_repo") if hasattr(_wf, "get") else None
     teacher_repo = dp["teacher_repo"]
     student_repo = dp["student_repo"]
     client_repo = dp["client_repo"]
@@ -137,7 +139,40 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
             "teachers": [{"id": t.teacher_id, "name": t.name, "assigned": t.teacher_id in assigned}
                          for t in sorted(await teacher_repo.get_all(), key=lambda t: t.name)],
             "members": members, "overrides": overrides,
+            "schedule": [{"id": x.slot_id, "weekday": x.weekday, "start": x.start, "end": x.end, "teacherId": x.teacher_id}
+                         for x in (await schedule_repo.get_for_group(gid) if schedule_repo is not None else [])],
         })
+
+    async def schedule_add(request: web.Request, user) -> web.Response:
+        """Время занятия группы: по нему бот в 21:00 напоминает педагогу отметить занятие."""
+        import re as _re
+        if schedule_repo is None:
+            return _json({"error": "unavailable"}, status=503)
+        gid = request.match_info["gid"]
+        body = await _body(request) or {}
+        days = [int(d) for d in (body.get("weekdays") or []) if str(d).isdigit() and 1 <= int(d) <= 7]
+        start, end, tid = str(body.get("start") or ""), str(body.get("end") or ""), str(body.get("teacherId") or "")
+        hhmm = _re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+        if await group_repo.get_by_id(gid) is None:
+            return _json({"error": "not_found"}, status=404)
+        if not days or not hhmm.match(start) or not hhmm.match(end) or end <= start:
+            return _json({"error": "bad_request", "message": "Дни недели и время «с — до»"}, status=400)
+        for d in days:
+            await schedule_repo.add(gid, d, start, end, tid)
+        from bot.services import activity
+        wd = ", ".join(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d - 1] for d in days)
+        await activity.record(activity.GROUP, f"Расписание {gid}: {wd} {start}–{end}", actor=user.tg_id, ref=gid)
+        return _json({"ok": True})
+
+    async def schedule_delete(request: web.Request, user) -> web.Response:
+        if schedule_repo is None:
+            return _json({"error": "unavailable"}, status=503)
+        ok = await schedule_repo.delete(request.match_info["slot"])
+        if ok:
+            from bot.services import activity
+            await activity.record(activity.GROUP, f"Из расписания {request.match_info['gid']} удалено время {request.match_info['slot']}",
+                                  actor=user.tg_id, ref=request.match_info["gid"])
+        return _json({"ok": ok}, status=200 if ok else 404)
 
     async def group_add(request: web.Request, user) -> web.Response:
         body = await _body(request) or {}
@@ -459,6 +494,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         ("PUT", "/groups/{gid}/billing", group_billing),
         ("PUT", "/groups/{gid}/overrides", override_put), ("DELETE", "/groups/{gid}/overrides", override_delete),
         ("PUT", "/groups/{gid}/teachers", group_teachers),
+        ("POST", "/groups/{gid}/schedule", schedule_add), ("DELETE", "/groups/{gid}/schedule/{slot}", schedule_delete),
         ("POST", "/groups/{gid}/members", member_add), ("DELETE", "/groups/{gid}/members/{sid}", member_remove),
         ("PUT", "/groups/{gid}/members/{sid}", member_periods),
         ("POST", "/students", student_add), ("PATCH", "/students/{sid}", student_patch), ("DELETE", "/students/{sid}", student_delete),
