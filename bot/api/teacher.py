@@ -271,16 +271,17 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _bills_summary(teacher, period: str) -> dict:
         """Счета своих групп за месяц: сколько учеников с остатком и сумма — строка «требует внимания».
 
-        Счёт ученика полный (по всем педагогам), поэтому берём общую карту «начислено/оплачено»
-        и оставляем учеников из групп педагога.
+        Только свои направления: абонементы своих групп и собственные начисления педагога.
         """
         members: set[str] = set()
-        for gid in await _own_group_ids(teacher):
+        own = await _own_group_ids(teacher)
+        for gid in own:
             members.update(await student_group_repo.get_students_for_group(gid))
+        keys = {teacher.teacher_id} | {f"SUB:{g}" for g in own}
         ledger = await payment_service.compute_ledger_map(since_period=period)
         rest_by_student: dict[str, int] = {}
-        for (sid, _tid, ym), (accrued, paid) in ledger.items():
-            if ym == period and sid in members and accrued > paid:
+        for (sid, tid, ym), (accrued, paid) in ledger.items():
+            if ym == period and sid in members and tid in keys and accrued > paid:
                 rest_by_student[sid] = rest_by_student.get(sid, 0) + accrued - paid
         return {"students": len(rest_by_student), "rest": sum(rest_by_student.values())}
 
@@ -709,20 +710,49 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _own_group_ids(teacher) -> set:
         return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
 
-    async def _bill_rows(sid: str, period: str) -> tuple[dict, dict, list]:
+    async def _visible_marks(teacher, sid: str, period: str) -> dict:
+        """Счёт ученика глазами педагога — только его направления (решение владельца 29.09.2026).
+
+        key → (agg, marks): абонемент — только своих групп; занятия — те, что прошли в его группах,
+        или его индивидуальные. Бальные танцы той же девочки у другого педагога не видны.
+        """
+        own = await _own_group_ids(teacher)
         bills = await payment_service.compute_bills_for_student_period(sid, period)
+        pay_rows = await payment_repo.get_by_student_and_period(sid, period)
+        paid_map, linked = payment_ledger.paid_sums(pay_rows), payment_ledger.paid_lesson_ids(pay_rows)
+        group_of = {ls.lesson_id: ls.group_id or "" for ls in await lesson_repo.get_by_student_and_period(sid, period)}
+        out: dict[str, tuple] = {}
+        for key, agg in bills.items():
+            if agg.subscription:
+                if key.split(":", 1)[-1] in own:
+                    out[key] = (agg, None)
+                continue
+            marks = [m for m in payment_ledger.lesson_marks(agg.items, paid_map.get(key, 0), linked.get(key, set()))
+                     if group_of.get(m["lesson_id"], "") in own
+                     or (not group_of.get(m["lesson_id"]) and key == teacher.teacher_id)]
+            if marks:
+                out[key] = (agg, marks)
+        return out
+
+    async def _bill_rows(sid: str, period: str, teacher=None) -> tuple[dict, dict, list]:
+        visible = await _visible_marks(teacher, sid, period)
         paid_map = payment_ledger.paid_sums(await payment_repo.get_by_student_and_period(sid, period))
         rows = []
-        for key, agg in bills.items():
-            paid = paid_map.get(key, 0)
-            rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": agg.total,
-                         "paid": min(paid, agg.total), "rest": max(agg.total - paid, 0),
-                         "items": [{"date": m["date"], "durationMin": m["duration_min"],
-                                    "amount": m["amount"], "paid": m["paid"]}
-                                   for m in payment_ledger.lesson_marks(agg.items, paid)]})
+        for key, (agg, marks) in visible.items():
+            if marks is None:                             # абонемент своей группы — целиком
+                paid = min(paid_map.get(key, 0), agg.total)
+                total, items = agg.total, [{"date": m["date"], "durationMin": m["duration_min"], "amount": m["amount"],
+                                            "paid": m["paid"]} for m in payment_ledger.lesson_marks(agg.items, paid)]
+            else:
+                total = sum(m["amount"] for m in marks)
+                paid = sum(m["amount"] for m in marks if m["paid"])
+                items = [{"date": m["date"], "durationMin": m["duration_min"], "amount": m["amount"], "paid": m["paid"]}
+                         for m in marks]
+            rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": total,
+                         "paid": paid, "rest": max(total - paid, 0), "items": items})
         summary = {"total": sum(r["total"] for r in rows), "paid": sum(r["paid"] for r in rows),
                    "rest": sum(r["rest"] for r in rows)}
-        return bills, summary, rows
+        return visible, summary, rows
 
     @billing_only
     async def bills_groups(request: web.Request, user, teacher) -> web.Response:
@@ -743,7 +773,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         g = await group_repo.get_by_id(gid)
         rows = []
         for s in await group_members(student_repo, student_group_repo, gid):
-            _b, summary, _r = await _bill_rows(s.student_id, period)
+            _b, summary, _r = await _bill_rows(s.student_id, period, teacher)
             rows.append({"id": s.student_id, "name": s.name, "hasParent": bool(s.parent_addrs), **summary})
         return _json({"group": {"id": gid, "name": g.name if g else gid}, "period": period, "students": rows})
 
@@ -756,7 +786,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
-        _bills, summary, rows = await _bill_rows(sid, period)
+        _bills, summary, rows = await _bill_rows(sid, period, teacher)
         return _json({"student": {"id": sid, "name": s.name, "hasParent": bool(s.parent_addrs)},
                       "period": period, "rows": rows, **summary,
                       "groups": await _student_group_names(sid, student_group_repo, group_repo)})
@@ -773,12 +803,18 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if s is None:
             return _json({"error": "not_found"}, status=404)
         marks, ledger = await payment_service.teacher_lesson_marks(s, period, key)
-        if ledger is None:
+        visible = (await _visible_marks(teacher, sid, period)).get(key)
+        if ledger is None or visible is None:
             return _json({"error": "not_found"}, status=404)
+        if visible[1] is not None:                         # только занятия своих направлений
+            ids = {m["lesson_id"] for m in visible[1]}
+            marks = [m for m in marks if m["lesson_id"] in ids]
+        accrued = sum(m["amount"] for m in marks)
+        paid_v = sum(m["amount"] for m in marks if m["paid"])
         return _json({
             "student": {"id": sid, "name": s.name}, "period": period,
-            "ledger": {"key": key, "name": ledger.name, "group": ledger.group, "accrued": ledger.accrued,
-                       "paid": ledger.paid, "remainder": ledger.remainder},
+            "ledger": {"key": key, "name": ledger.name, "group": ledger.group, "accrued": accrued,
+                       "paid": paid_v, "remainder": accrued - paid_v},
             "marks": [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
                        "amount": m["amount"], "paid": m["paid"]} for m in marks],
         })
@@ -804,7 +840,17 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
+        visible = (await _visible_marks(teacher, sid, period)).get(key)
+        if visible is None:
+            return _json({"error": "not_found"}, status=404)
+        if visible[1] is not None and key != teacher.teacher_id:
+            # чужое начисление (занятие другого педагога в своей группе): только выбранные видимые занятия
+            ids = {m["lesson_id"] for m in visible[1] if not m["paid"]}
+            if not lessons or not set(lessons) <= ids:
+                return _json({"error": "bad_request", "message": "Отметьте занятия своего направления"}, status=400)
         rest = rest_for_keys(await payment_service.ledger_for(s, period), [key])
+        if visible[1] is not None and key != teacher.teacher_id:
+            rest = min(rest, sum(m["amount"] for m in visible[1] if not m["paid"]))
         if amount > rest and not bool((body or {}).get("force")):
             return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
         guard = f"{sid}:{period}:{key}"

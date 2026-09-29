@@ -385,3 +385,21 @@ def test_senior_teacher_switches_twice_a_week(api, monkeypatch):
     assert _call(app, "PUT", "/api/teacher/students/STU-0001/frequency", json=body)[0] == 200
     assert _call(app, "GET", "/api/teacher/students/STU-0001")[1]["tariffs"][0]["freq"]["times"] == 2
     assert _call(app, "PUT", "/api/teacher/students/STU-0001/frequency", json={**body, "groupId": "GRP-0099"})[0] == 404
+
+
+def test_teacher_bill_shows_only_own_directions(api, monkeypatch):
+    """Педагог в счёте ученика видит только свои направления: занятия своих групп и свои индивидуальные.
+    Индивидуальное у другого педагога (другое направление) не видно и в «к оплате» не входит."""
+    from tests.fakes import mk_teacher
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    other = mk_teacher("TCH-0002", "Контарева Елизавета", rate_group=1000, rate_for_teacher=1500, rate_for_student=3000)
+    dp["teacher_repo"].items.append(other)
+    dp["lesson_repo"].items.append(mk_lesson("LES-BT", other, f"{YM}-20", students=[("STU-0001", "Иванов Иван")]))
+    b = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    assert [r["key"] for r in b["rows"]] == ["TCH-0001"] and b["total"] == 4800     # 2000 + 2000 + 800, без 3000
+    g = _call(app, "GET", f"/api/teacher/bills/group/GRP-0001?ym={YM}")[1]
+    assert next(x for x in g["students"] if x["id"] == "STU-0001")["rest"] == 4800
+    assert _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0002")[0] == 404
+    assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 404
