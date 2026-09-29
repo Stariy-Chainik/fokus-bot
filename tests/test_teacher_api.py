@@ -420,3 +420,33 @@ def test_revenue_share_individuals_stay_visible_to_their_teacher(api, monkeypatc
     assert b["total"] == 4800 + 1800
     card = _call(app, "GET", "/api/teacher/students/STU-0001")[1]
     assert "ХГ Индивидуальные" not in card["groups"]               # служебная группа в карточке не светится
+
+
+def test_admin_and_teacher_marking_same_lesson_at_once_credit_once(api, monkeypatch):
+    """Админ и педагог одновременно отмечают оплату одного урока: зачтётся один раз, второй получит 409."""
+    from bot.api import register_admin_api
+    app_dp, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    lesson = next(x for x in dp["lesson_repo"].items if x.lesson_id == "LES-1")
+
+    async def run():
+        app = web.Application()
+        register_admin_api(app, dp)
+        register_teacher_api(app, dp)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            admin_h = {"Authorization": f"tma {make_init_data(user_id=ADMIN_TG)}"}
+            teacher_h = {"Authorization": f"tma {make_init_data(user_id=TEACHER_TG)}"}
+            a = client.post("/api/admin/pay/confirm", headers=admin_h, json={
+                "studentId": "STU-0001", "periodMonth": YM, "key": "TCH-0001", "amount": 2000,
+                "method": "cash", "lessonIds": [lesson.lesson_id]})
+            t = client.post("/api/teacher/bills/student/STU-0001/pay", headers=teacher_h, json={
+                "ym": YM, "key": "TCH-0001", "amount": 4800, "method": "cash"})
+            ra, rt = await asyncio.gather(a, t)
+            return ra.status, rt.status
+        finally:
+            await client.close()
+    statuses = asyncio.run(run())
+    paid = sum(p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID)
+    assert sorted(statuses) == [200, 409] and paid in (2000, 4800)       # кто первый — тот и зачёл, без двойного

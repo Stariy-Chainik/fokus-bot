@@ -28,7 +28,7 @@ from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.pending_queue import rest_for_keys, settle_actions
-from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
+from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
 from bot.services.subscription_frequency import frequency_info, set_frequency
@@ -46,7 +46,6 @@ logger = logging.getLogger(__name__)
 
 PREFIX = "/api/teacher"
 _submitting = InProgressGuard()
-_paying = InProgressGuard()
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -749,8 +748,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             else:
                 total = sum(m["amount"] for m in marks)
                 paid = sum(m["amount"] for m in marks if m["paid"])
-                items = [{"date": m["date"], "durationMin": m["duration_min"], "amount": m["amount"], "paid": m["paid"]}
-                         for m in marks]
+                items = [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
+                          "amount": m["amount"], "paid": m["paid"]} for m in marks]
             rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": total,
                          "paid": paid, "rest": max(total - paid, 0), "items": items})
         summary = {"total": sum(r["total"] for r in rows), "paid": sum(r["paid"] for r in rows),
@@ -851,22 +850,16 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             ids = {m["lesson_id"] for m in visible[1] if not m["paid"]}
             if not lessons or not set(lessons) <= ids:
                 return _json({"error": "bad_request", "message": "Отметьте занятия своего направления"}, status=400)
-        rest = rest_for_keys(await payment_service.ledger_for(s, period), [key])
-        if visible[1] is not None and key != teacher.teacher_id:
-            rest = min(rest, sum(m["amount"] for m in visible[1] if not m["paid"]))
-        if amount > rest and not bool((body or {}).get("force")):
-            return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
-        guard = f"{sid}:{period}:{key}"
-        if guard in _paying:
-            return _json({"error": "in_progress"}, status=409)
-        _paying.add(guard)
-        try:
+        async with payment_lock(sid, period):             # общий замок с администратором и очередью решений
+            rest = rest_for_keys(await payment_service.ledger_for(s, period), [key])
+            if visible[1] is not None and key != teacher.teacher_id:
+                rest = min(rest, sum(m["amount"] for m in visible[1] if not m["paid"]))
+            if amount > rest and not bool((body or {}).get("force")):
+                return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
             credited, rows = await payment_service.record_payment(
                 sid, s.name, period, amount, user.tg_id, [key],
                 f"отметил педагог {teacher.name}", method, lesson_ids=lessons,
             )
-        finally:
-            _paying.discard(guard)
         logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
                     teacher.teacher_id, credited, sid, period, key)
         await settle_actions(_dp_get(dp, "pending_repo"), payment_service, s, period, credited, user.tg_id)

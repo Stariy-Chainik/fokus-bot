@@ -20,6 +20,7 @@ from bot.repositories.pending_action_repo import (
 )
 from bot.services.parent_notifier import parse_addr
 from bot.services.pending_queue import rest_for_keys
+from bot.services.payment_service import payment_lock
 from bot.services.parent_views import METHOD_LABELS
 from bot.utils.dates import period_label
 
@@ -147,10 +148,11 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         if not await pending_repo.claim(action.action_id, DONE, user.tg_id):
             return _json({"error": "already_decided"}, status=409)
         if amount > 0:
-            credited, rows = await payment_service.record_payment(
-                action.student_id, student.name, action.period_month, amount,
-                user.tg_id, action.keys or None, "из очереди решений", action.method or "",
-            )
+            async with payment_lock(action.student_id, action.period_month):    # общий замок с ручной отметкой
+                credited, rows = await payment_service.record_payment(
+                    action.student_id, student.name, action.period_month, amount,
+                    user.tg_id, action.keys or None, "из очереди решений", action.method or "",
+                )
         else:                                   # оплату уже отметили вручную — заявку просто закрываем
             credited, rows = 0, 0
         await pending_repo.close_for_period(action.student_id, action.period_month, DONE, user.tg_id)

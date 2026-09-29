@@ -956,7 +956,10 @@ ACT.abillDo = async ({ sid, ym }) => {
       credited += res.credited;
     }
     closeSheet(); state.ui.abill = null; render(); toast(`Оплата ${fmt(credited)} отмечена`);
-  } catch (e) { closeSheet(); render(); toast(errText(e)); }
+  } catch (e) {
+    closeSheet(); render();
+    // оплату этих уроков уже отметил кто-то другой (админ или педагог) — второй раз не зачитываем
+    toast(e.status === 409 ? (credited ? `Отмечено ${fmt(credited)}; остальное уже оплачено` : 'Эти уроки уже оплачены — экран обновлён') : (e.data && e.data.message ? e.data.message : errText(e))); render(); toast(errText(e)); }
   finally { state.ui.paySubmitting = false; }
 };
 ACT.aGroupTab = ({ v }) => { state.ui.aGroupTab = v; render(); };

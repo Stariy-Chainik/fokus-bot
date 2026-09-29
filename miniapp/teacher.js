@@ -290,24 +290,73 @@ SCREENS['t.rating'] = async ({ ym }) => {
 };
 
 /* ── Счета своих групп (BILLING_TEACHER_IDS) ─────────────────────────── */
+/* Счёт ученика у педагога (только свои направления): неоплаченные уроки и абонемент — галочками,
+   «Отметить оплату N ₽» → способ → зачёт по каждому начислению за выбранные уроки. */
 SCREENS['t.bill'] = async ({ sid, ym }) => {
   const b = await api(`/bills/student/${sid}?ym=${ym}`);
+  const sel = state.ui.tbill && state.ui.tbill.k === sid + ym ? state.ui.tbill : (state.ui.tbill = { k: sid + ym, rows: {}, sub: {} });
+  sel.data = b.rows;
+  const picked = tbillTotal();
+  const mark = (on, paid) => `<span class="mark ${paid ? 'paid' : on ? 'on' : ''}">${paid || on ? '✓' : ''}</span>`;
+  const rowsHtml = b.rows.map(r => {
+    const head = `<div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>`;
+    if (r.subscription) {
+      return head + (r.rest
+        ? `<button class="lesson-line pick" data-act="tbillSub" data-p='${esc(JSON.stringify({ key: r.key }))}'>${mark(!!sel.sub[r.key], false)}<span>абонемент за месяц · к оплате</span><span class="amt">${fmt(r.rest)}</span></button>`
+        : `<div class="lesson-line">${mark(false, true)}<span class="hint">абонемент оплачен</span><span class="amt">${fmt(r.total)}</span></div>`);
+    }
+    return head + r.items.map(i => i.paid
+      ? `<div class="lesson-line">${mark(false, true)}<span>${fdate(i.date)} · ${i.durationMin} мин</span><span class="amt">${fmt(i.amount)}</span></div>`
+      : `<button class="lesson-line pick" data-act="tbillPick" data-p='${esc(JSON.stringify({ key: r.key, id: i.lessonId }))}'>${mark((sel.rows[r.key] || []).includes(i.lessonId), false)}<span>${fdate(i.date)} · ${i.durationMin} мин</span><span class="amt">${fmt(i.amount)}</span></button>`).join('');
+  }).join('');
   return { title: b.student.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
-      <div class="hint">${fmon(b.period)}${b.groups.length ? ` · ${esc(b.groups.join(', '))}` : ''}</div></div>
-    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${b.rows.map(r => `
-      <div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>
-      ${r.items.map(i => `<div class="lesson-line"><span>${i.paid ? '✅' : '⬜'}</span><span>${fdate(i.date)} · ${i.durationMin} мин</span><span class="amt">${fmt(i.amount)}</span></div>`).join('')}`).join('')}
+      <div class="hint">${fmon(b.period)}${b.groups.length ? ` · ${esc(b.groups.join(', '))}` : ''}${b.rest ? ' · отметьте галочками, что оплачено' : ''}</div></div>
+    ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${rowsHtml}
       <div class="total"><span>К оплате</span><span class="big ${b.rest ? 'bad' : 'ok'}">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
-    ${b.rows.some(r => r.rest > 0) ? `<div class="eyebrow">Отметить оплату</div>${list(b.rows.filter(r => r.rest > 0).map(r => cell({
-      lead: '💾', plain: true, t: esc(r.name), s: `остаток ${fmt(r.rest)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}`,
-      ...(r.subscription
-        ? { r: pill('отметить', 'acc'), act: 'tPayAsk', p: { sid, ym, key: r.key, name: r.name, rest: r.rest, student: b.student.name } }
-        : { r: pill('занятия', 'acc'), go: 't.pay.select', p: { sid, ym, key: r.key } }),
-    })))}` : ''}
+    ${b.rest ? `<div style="margin-top:12px">${btn(picked ? `✅ Отметить оплату ${fmt(picked)}` : 'Отметьте галочками оплаченные уроки', 'tbillAsk', { sid, ym, name: b.student.name }, picked ? '' : 'sec')}</div>` : ''}
     <div style="margin-top:12px">${b.student.hasParent
-      ? btn('📨 Отправить родителю', 'tBillSend', { sid, ym, name: b.student.name }, b.total ? '' : 'ghost')
+      ? btn('📨 Отправить родителю', 'tBillSend', { sid, ym, name: b.student.name }, 'ghost')
       : '<div class="card pad hint">Родитель не привязан к ученику — отправлять некому.</div>'}</div>` };
+};
+function tbillTotal() {
+  const a = state.ui.tbill; if (!a || !a.data) return 0;
+  let t = 0;
+  a.data.forEach(r => {
+    if (r.subscription) { if (a.sub[r.key]) t += r.rest; return; }
+    const ids = a.rows[r.key] || []; r.items.forEach(i => { if (ids.includes(i.lessonId)) t += i.amount; });
+  });
+  return t;
+}
+ACT.tbillPick = ({ key, id }) => { const a = state.ui.tbill; const cur = a.rows[key] || []; a.rows[key] = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; render(); };
+ACT.tbillSub = ({ key }) => { const a = state.ui.tbill; a.sub[key] = !a.sub[key]; render(); };
+ACT.tbillAsk = ({ sid, ym, name }) => {
+  const total = tbillTotal(); if (!total) { toast('Отметьте галочками оплаченные уроки'); return; }
+  state.ui.tPayMethod = 'cash';
+  sheet(`<h3>Отметить оплату?</h3><div class="hint">${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div>
+    <div class="hint" style="margin:10px 0 4px">Способ оплаты</div>
+    <div class="chips">${[['cash', '💵 Наличные'], ['receipt_bank', '🏦 Перевод'], ['admin_manual', '👤 Вручную']].map(([v, n]) => `<button class="chip" id="pm-${v}" aria-pressed="${v === 'cash'}" data-act="tPayMethod" data-p='${esc(JSON.stringify({ v }))}'>${n}</button>`).join('')}</div>
+    <div style="margin-top:12px">${btn('✅ Подтвердить', 'tbillDo', { sid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.tbillDo = async ({ sid, ym }) => {
+  if (state.ui.tPaying) return;
+  state.ui.tPaying = true;
+  document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
+  const a = state.ui.tbill; let credited = 0;
+  try {
+    for (const r of a.data) {
+      const ids = r.subscription ? [] : (a.rows[r.key] || []);
+      const amount = r.subscription ? (a.sub[r.key] ? r.rest : 0) : r.items.filter(i => ids.includes(i.lessonId)).reduce((x, i) => x + i.amount, 0);
+      if (!amount) continue;
+      const res = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key: r.key, amount, method: state.ui.tPayMethod || 'cash', lessonIds: ids } });
+      credited += res.credited;
+    }
+    closeSheet(); state.ui.tbill = null; render(); toast(`Оплата ${fmt(credited)} отмечена`);
+  } catch (e) {
+    closeSheet(); render();
+    // оплату этих уроков уже отметил кто-то другой (админ или педагог) — второй раз не зачитываем
+    toast(e.status === 409 ? (credited ? `Отмечено ${fmt(credited)}; остальное уже оплачено` : 'Эти уроки уже оплачены — экран обновлён') : (e.data && e.data.message ? e.data.message : errText(e))); render(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  finally { state.ui.tPaying = false; }
 };
 
 SCREENS['t.pay.select'] = async ({ sid, ym, key }) => {

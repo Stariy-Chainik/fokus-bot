@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -128,6 +129,16 @@ def debtors_summary(ledger: dict[tuple[str, str, str], tuple[int, int]], current
             continue
         per_student[sid] = per_student.get(sid, 0) + amount - paid_amount
     return len(per_student), sum(per_student.values())
+
+
+_PAY_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def payment_lock(student_id: str, period_month: str) -> asyncio.Lock:
+    """Один замок на ученика и месяц для всех, кто отмечает оплату (админ, педагог, очередь, бот):
+    проверка остатка и зачёт идут под ним, поэтому одновременная отметка админом и педагогом
+    не зачтёт деньги дважды — второй увидит уже уменьшенный остаток."""
+    return _PAY_LOCKS.setdefault((student_id, period_month), asyncio.Lock())
 
 
 class PaymentService:

@@ -20,7 +20,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.payment_methods import ADMIN_MANUAL
-from bot.services.payment_service import debtors_summary, period_collection
+from bot.services.payment_service import debtors_summary, payment_lock, period_collection
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.profit_service import calculate_profit_lesson
 from bot.services.student_service import has_short_tariff
@@ -454,21 +454,15 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         student = await student_repo.get_by_id(sid)
         if student is None:
             return _json({"error": "not_found"}, status=404)
-        # экран мог устареть (оплату уже отметил другой админ): лишнее не проводим молча
-        rest = rest_for_keys(await payment_service.ledger_for(student, period), [key])
-        if amount > rest and not bool(body.get("force")):
-            return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
-        guard_key = f"{sid}:{period}:{key}"
-        if guard_key in _confirming:
-            return _json({"error": "in_progress"}, status=409)
-        _confirming.add(guard_key)
-        try:
+        async with payment_lock(sid, period):             # общий замок с педагогом и очередью решений
+            # экран мог устареть (оплату уже отметил другой админ или педагог): лишнее не проводим молча
+            rest = rest_for_keys(await payment_service.ledger_for(student, period), [key])
+            if amount > rest and not bool(body.get("force")):
+                return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
             credited, rows = await payment_service.record_payment(
                 sid, student.name, period, amount, user.tg_id, [key], "отмечено вручную", method,
                 lesson_ids=lessons,
             )
-        finally:
-            _confirming.discard(guard_key)
         logger.info("Mini App: админ %s отметил оплату %d руб.: %s %s %s", user.tg_id, credited, sid, period, key)
         # заявка родителя (наличные/чек), которую покрыла эта отметка, уходит из «Ждут решения»
         await settle_actions(_dp_get(dp, "pending_repo"), payment_service, student, period, credited, user.tg_id)
