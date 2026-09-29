@@ -327,7 +327,7 @@ def test_home_month_collection_and_debtors(api):
     dp["payment_repo"].rows.append(mk_payment("PAY-2", "STU-0002", YM, "TCH-0001", 5000, status=PaymentStatus.PAID))  # переплата
     h = _call(app, "GET", "/api/admin/home")[1]
     # начислено за месяц: Иванов 2000 + 2000 + 800, Петрова 800; переплата Петровой сверх 800 не «собрана»
-    assert h["collected"] == {"accrued": 5600, "paid": 2800, "rest": 2800, "percent": 50}
+    assert h["collected"] == {"accrued": 5600, "paid": 2800, "rest": 2800, "percent": 50, "unpaidStudents": 1}
     assert h["pendingTotal"] == h["collected"]["rest"]
     assert (h["debtorsCount"], h["debtorsTotal"]) == (1, 2000)          # Петрова за прошлый месяц
     assert h["incomeMonth"] >= h["profitMonth"] and h["salaryMonth"] > 0

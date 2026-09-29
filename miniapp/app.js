@@ -142,23 +142,20 @@ SCREENS['a.home'] = async () => {
   const today = h.lessonsToday ? `
     <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(fmt(h.profitToday), `прибыль · выручка ${fmt(h.incomeToday)}`, h.profitToday < 0 ? 'bad' : 'ok', 'a.profit.day', { date: h.today })}</div>
     <div style="margin-top:10px">${h.todayTeachers.map(todayTeacherBlock).join('')}</div>` : '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
-  // строка «Оплаты»: главная цифра справа — остаток к оплате; под полосой — сколько уже собрано
-  const payRow = c.accrued
-    ? { t: c.rest ? 'К оплате' : 'Оплаты', r: c.rest ? `<b>${fmt(c.rest)}</b>` : pill('✓ всё оплачено', 'ok'), s: `собрано ${fmt(c.paid)} из ${fmt(c.accrued)} · ${c.percent}%` }
-    : { t: 'Оплаты', r: '', s: 'начислений пока нет' };
+  // плитки месяца наверху: кто ещё должен за месяц и ожидаемая прибыль (если все оплатят)
+  const tiles = `<div class="kpis" style="margin-bottom:6px">
+      ${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, c.rest ? 'bad' : 'ok', 'a.pay.students', { ym: h.period, g: '', gname: `Не оплатили · ${mon}`, unpaid: true })}
+      ${kpi(fmt(h.profitMonth), `ожидаемая прибыль за ${mon.toLowerCase()} · собрано ${c.percent}%`, h.profitMonth < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}
+    </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
+    ${tiles}
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
     <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
-    <div class="eyebrow">${mon}</div>
-    <div class="list">
-      <button class="cell nolead wrap" ${attr('a.pay.students', { ym: h.period, g: '', gname: 'Все ученики' })}><span><div class="t">${payRow.t}</div><div class="bar"><i class="${c.accrued && !c.rest ? 'ok' : ''}" style="width:${c.percent}%"></i></div><div class="s">${payRow.s}</div></span><span class="r">${payRow.r}<span class="chev">›</span></span></button>
-      <button class="cell nolead wrap" ${attr('a.profit', { ym: h.period })}><span><div class="t">Прибыль</div><div class="s">выручка ${fmt(h.incomeMonth)} · зарплата ${fmt(h.salaryMonth)}</div></span><span class="r"><b class="${h.profitMonth < 0 ? 'bad' : 'ok'}">${fmt(h.profitMonth)}</b><span class="chev">›</span></span></button>
-    </div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
 
@@ -225,11 +222,12 @@ SCREENS['a.pay.groups'] = async ({ ym, bill }) => {
   return { title: fmon(ym), html: d.branches.map(b => `<div class="eyebrow">${esc(b.name)}</div>${list(b.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name), s: MODE[g.mode] + (g.price ? ` · ${fmt(g.price)}` : ''), go: 'a.pay.students', p: { ym, g: g.id, gname: g.name, bill } })))}`).join('') + `<div class="eyebrow">Без группы</div>${list([cell({ t: '📋 Все ученики', go: 'a.pay.students', p: { ym, g: '', gname: 'Все ученики', bill } })])}` };
 };
 
-SCREENS['a.pay.students'] = async ({ ym, g, gname, bill }) => {
+SCREENS['a.pay.students'] = async ({ ym, g, gname, bill, unpaid }) => {
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
-  state.ui.payPick = { ym, bill };
+  state.ui.payPick = { ym, bill, unpaid };
   const d = await api(`/pay/students?ym=${ym}&group=${encodeURIComponent(g || '')}`);
-  return { title: gname || 'Ученики', html: `${stickyFilters(groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay') + `<p class="hint" style="margin:-2px 0 8px">${fmon(ym)} — выберите ученика</p>`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'bad') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}` };
+  if (unpaid) d.students = d.students.filter(x => x.rest > 0).sort((a, b) => b.rest - a.rest);   // «кто ещё не оплатил» с плитки сводки
+  return { title: gname || 'Ученики', html: `${stickyFilters(groupFilter(state.ui.groupsCache, g || '', 'payGroupPick', 'gfBranchPay') + `<p class="hint" style="margin:-2px 0 8px">${fmon(ym)} — выберите ученика</p>`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений', r: s.rest ? pill(fmt(s.rest), 'bad') : s.total ? pill('✓', 'ok') : '', go: bill ? 'a.bill' : 'a.pay.student', p: { ym, sid: s.id } }))) : `<div class="empty">${unpaid ? 'Все оплатили ✓' : 'В группе нет учеников'}</div>`}` };
 };
 
 SCREENS['a.pay.student'] = async ({ ym, sid }) => {
@@ -938,10 +936,10 @@ ACT.schedDel = async ({ gid, slot }) => { try { await api(`/groups/${gid}/schedu
 ACT.debtGroup = ({ v }) => { state.ui.df.group = v; render(); };
 ACT.debtOpt = ({ k, v }) => { state.ui.df[k] = v; render(); };
 ACT.payGroupPick = ({ v }) => {
-  const { ym, bill } = state.ui.payPick || {};
+  const { ym, bill, unpaid } = state.ui.payPick || {};
   const g = (state.ui.groupsCache || []).flatMap(b => b.groups).find(x => x.id === v);
   state.stack.pop();
-  go('a.pay.students', { ym, g: v, gname: g ? g.name : 'Все ученики', bill });
+  go('a.pay.students', { ym, g: v, gname: (g ? g.name : 'Все ученики') + (unpaid ? ' · не оплатили' : ''), bill, unpaid });
 };
 /* Быстрые фильтры на экране «Ученики»: показывают плоский список по всей школе. */
 ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };

@@ -147,7 +147,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "incomeToday": day.total_income, "profitToday": day.profit,
             "pendingTotal": collected.rest,
             "collected": {"accrued": collected.accrued, "paid": collected.paid,
-                          "rest": collected.rest, "percent": collected.percent},
+                          "rest": collected.rest, "percent": collected.percent,
+                          # сколько учеников ещё не оплатили текущий месяц (плитка «К оплате»)
+                          "unpaidStudents": len({k[0] for k, (a, pd) in ledger.items() if k[2] == period and a > pd})},
             "incomeMonth": month.total_income, "salaryMonth": month.salary, "profitMonth": month.profit,
             "studentsCount": len(await student_repo.get_all()),
             "activityToday": await _activity_count(today),
