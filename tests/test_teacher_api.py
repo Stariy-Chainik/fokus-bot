@@ -7,7 +7,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot.api import register_teacher_api
-from bot.models.enums import LessonType, PaymentStatus
+from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
 from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import (
@@ -403,3 +403,20 @@ def test_teacher_bill_shows_only_own_directions(api, monkeypatch):
     assert _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0002")[0] == 404
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
                  json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 404
+
+
+def test_revenue_share_individuals_stay_visible_to_their_teacher(api, monkeypatch):
+    """Индивидуальные Яковлевой пишутся в служебную группу revenue-share: в её счёте они видны (регрессия 29.09)."""
+    from tests.fakes import mk_group
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "revenue_share_groups", "GRP-0020:50")
+    dp["group_repo"].items.append(mk_group("GRP-0020", "ХГ Индивидуальные", billing_mode=GroupBillingMode.PER_VISIT, price_full=1800))
+    asyncio.run(dp["teacher_group_repo"].add("TCH-0001", "GRP-0020"))
+    teacher = dp["teacher_repo"].items[0]
+    dp["lesson_repo"].items.append(mk_lesson("LES-RS", teacher, f"{YM}-21", duration=60, lesson_type=LessonType.GROUP,
+                                             attendees="STU-0001:60:1800", group_id="GRP-0020"))
+    b = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    assert b["total"] == 4800 + 1800
+    card = _call(app, "GET", "/api/teacher/students/STU-0001")[1]
+    assert "ХГ Индивидуальные" not in card["groups"]               # служебная группа в карточке не светится

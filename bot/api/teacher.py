@@ -453,6 +453,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 or sid in [e.student_id for e in parse_attendees(ls.attendees or "")]]
         names = {x.student_id: x.name for x in await student_repo.get_all()}
         gids = await student_group_repo.get_groups_for_student(sid)
+        own_visible = await _own_group_ids(teacher)
         tariffs = []
         if teacher.teacher_id in settings.senior_teacher_id_set:      # старший тренер меняет «2 / 3 раза» в своих группах
             own = await _own_group_ids(teacher)
@@ -464,7 +465,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value,
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
-            "groups": [groups_map.get(g, g) for g in gids], "tariffs": tariffs,
+            # в карточке — только свои группы: чужие направления педагогу не показываем
+            "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
             "period": ym,
             "lessons": [_lesson_brief(ls, teacher, groups_map, names)
                         for ls in sorted(mine, key=lambda x: x.date)],
@@ -716,7 +718,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         key → (agg, marks): абонемент — только своих групп; занятия — те, что прошли в его группах,
         или его индивидуальные. Бальные танцы той же девочки у другого педагога не видны.
         """
-        own = await _own_group_ids(teacher)
+        # свои направления — все группы педагога, включая служебные (индивидуальные revenue-share Яковлевой)
+        own = set(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))
         bills = await payment_service.compute_bills_for_student_period(sid, period)
         pay_rows = await payment_repo.get_by_student_and_period(sid, period)
         paid_map, linked = payment_ledger.paid_sums(pay_rows), payment_ledger.paid_lesson_ids(pay_rows)
