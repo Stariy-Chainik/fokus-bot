@@ -31,6 +31,7 @@ from bot.utils.locks import InProgressGuard
 from bot.utils.telegram_auth import verify_init_data
 from config.settings import settings
 from bot.services.parent_notifier import notify_payment_confirmed
+from bot.services.subscription_frequency import frequency_info, set_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     branch_repo = dp["branch_repo"]
     student_group_repo = dp["student_group_repo"]
     lesson_repo = dp["lesson_repo"]
+    override_repo = dp["subscription_override_repo"]
     payment_repo = dp["payment_repo"]
     submission_repo = dp["submission_repo"]
     payment_service = dp["payment_service"]
@@ -302,9 +304,23 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
                         "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,
-                        "hasShort": has_short_tariff(g.group)} for g in card.groups],   # где тариф вообще есть
+                        "hasShort": has_short_tariff(g.group),                            # где тариф вообще есть
+                        **(await _frequency(sid, g.group))} for g in card.groups],
             "months": months, "debt": debt,
         })
+
+    async def _frequency(sid: str, group) -> dict:
+        return await frequency_info(override_repo, sid, group)
+
+    async def student_frequency(request: web.Request, user) -> web.Response:
+        """PUT {groupId, times: 2|3, since: YYYY-MM} — см. bot/services/subscription_frequency.py."""
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        ok = await set_frequency(override_repo, request.match_info["sid"], body.get("groupId"), body.get("times"),
+                                 str(body.get("since") or ""), user.tg_id)
+        return _json({"ok": True} if ok else {"error": "bad_request"}, status=200 if ok else 400)
 
     # ── педагоги ─────────────────────────────────────────────────────────
     async def teachers(request: web.Request, user) -> web.Response:
@@ -542,7 +558,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home), ("GET", "/activity", activity),
-        ("GET", "/students", students), ("GET", "/students/{sid}", student_card),
+        ("GET", "/students", students), ("GET", "/students/{sid}", student_card), ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/teachers", teachers), ("GET", "/teachers/{tid}", teacher_card),
         ("GET", "/pay/groups", pay_groups), ("GET", "/pay/students", pay_students),
         ("GET", "/pay/student/{sid}", pay_student), ("GET", "/pay/marks/{sid}", pay_marks),

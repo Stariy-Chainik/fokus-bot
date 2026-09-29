@@ -216,6 +216,26 @@ class Settings(BaseSettings):
                     out[gid.strip()] = int(rate.strip())
         return out
 
+    # Абонемент «2 раза в неделю» (цена ниже, чем за 3): GRP-XXXX:цена,... На проде — ХГ Боброво по сайту:
+    # Начальная 5000, Средняя и Спортивная 6000 (цена группы = 3 раза). Переключатель — в карточке ученика.
+    subscription_twice_prices: str = Field(default="", alias="SUBSCRIPTION_TWICE_PRICES")
+    # Старшие тренеры (TCH-XXXX через запятую): в своём кабинете меняют ученикам своих групп «2 / 3 раза в неделю».
+    senior_teacher_ids: str = Field(default="", alias="SENIOR_TEACHER_IDS")
+
+    @property
+    def senior_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.senior_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
+    @property
+    def subscription_twice_map(self) -> dict:
+        out = {}
+        for chunk in self.subscription_twice_prices.replace("|", ",").split(","):
+            if ":" in chunk:
+                gid, price = chunk.split(":", 1)
+                if gid.strip() and price.strip().isdigit():
+                    out[gid.strip()] = int(price.strip())
+        return out
+
     @property
     def revenue_share_group_map(self) -> dict:
         out = {}

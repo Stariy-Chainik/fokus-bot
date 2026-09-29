@@ -368,3 +368,20 @@ def test_period_submission_can_be_switched_off(api, monkeypatch):
     monkeypatch.setattr(settings, "teacher_period_submit_enabled", True)
     labels = [b.text for row in kb_teacher_menu(teacher_id="TCH-0001").inline_keyboard for b in row]
     assert "📤 Сдать период" in labels
+
+
+def test_senior_teacher_switches_twice_a_week(api, monkeypatch):
+    """Старший тренер (SENIOR_TEACHER_IDS) меняет «2 / 3 раза в неделю» ученику своей группы; обычный — нет."""
+    from tests.test_parent_api import _sub_mode
+    app, dp = api
+    _sub_mode(dp, price=7000)
+    monkeypatch.setattr(settings, "subscription_twice_prices", "GRP-0001:6000")
+    body = {"groupId": "GRP-0001", "times": 2, "since": YM}
+    assert _call(app, "GET", "/api/teacher/students/STU-0001")[1]["tariffs"] == []
+    assert _call(app, "PUT", "/api/teacher/students/STU-0001/frequency", json=body)[0] == 403
+    monkeypatch.setattr(settings, "senior_teacher_ids", "TCH-0001")
+    card = _call(app, "GET", "/api/teacher/students/STU-0001")[1]
+    assert card["tariffs"][0]["freq"]["times"] == 3
+    assert _call(app, "PUT", "/api/teacher/students/STU-0001/frequency", json=body)[0] == 200
+    assert _call(app, "GET", "/api/teacher/students/STU-0001")[1]["tariffs"][0]["freq"]["times"] == 2
+    assert _call(app, "PUT", "/api/teacher/students/STU-0001/frequency", json={**body, "groupId": "GRP-0099"})[0] == 404

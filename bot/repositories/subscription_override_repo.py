@@ -29,9 +29,10 @@ class SubscriptionOverrideRepository(BaseRepository):
         return [o for o in await self.get_all() if o.group_id == group_id]
 
     async def upsert(
-        self, group_id: str, period_month: str, student_id: str | None, amount: int,
+        self, group_id: str, period_month: str, student_id: str | None, amount: int, since: str = "",
     ) -> SubscriptionOverride:
-        values = [group_id, period_month, student_id or "", amount, now_str()]
+        """since (YYYY-MM) — для постоянного правила ('*'): с какого месяца действует (пишется в created_at)."""
+        values = [group_id, period_month, student_id or "", amount, f"{since}-01 00:00:00" if since else now_str()]
         async with self._locked_row(group_id=group_id, period_month=period_month, student_id=student_id or "") as row_idx:
             if row_idx is not None:
                 await self._update_row(row_idx, values)

@@ -176,6 +176,8 @@ SCREENS['t.student'] = async ({ id, ym }) => {
   return { title: s.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(s.name)}</div>
       <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div></div>
+    ${(s.tariffs || []).length ? `<div class="eyebrow">Абонемент</div>${list(s.tariffs.map(g => `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)} в месяц${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
+      <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>`))}` : ''}
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
     ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}

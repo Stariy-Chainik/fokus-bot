@@ -350,7 +350,8 @@ SCREENS['a.student'] = async ({ id }) => {
   const cur = s.months.find(m => m.period === lastPeriods(1)[0]) || { total: 0, paid: 0, rest: 0 };
   return { title: s.name, html: `
     <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-weight:800;font-size:17px">${esc(s.name)}</div><div class="hint">${s.client ? 'Родитель: ' + esc(s.client.name) : s.parents.length ? 'Родитель в ' + s.parents.map(p => p.platform === 'tg' ? 'Telegram' : 'MAX').join(', ') : 'Родитель не привязан'}${s.isAthlete ? ' · 🏃 спортсмен' : ''}${s.partner ? ' · пара с ' + esc(s.partner.name) : ''}</div></div>${s.debt ? pill(`долг ${fmt(s.debt)}`, 'bad') : cur.rest ? pill(`к оплате ${fmt(cur.rest)}`, 'warn') : cur.total ? pill('оплачено', 'ok') : ''}</div></div>
-    <div class="eyebrow">Группы</div>${s.groups.length ? list(s.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : '<div class="empty">Не состоит в группах</div>'}
+    <div class="eyebrow">Группы</div>${s.groups.length ? list(s.groups.map(g => g.freq ? `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${esc(g.branch)} · абонемент ${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)}${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
+      <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>` : cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : '<div class="empty">Не состоит в группах</div>'}
     ${s.teachers.length ? `<div class="eyebrow">Педагоги</div><div class="card pad">${esc(s.teachers.join(', '))}</div>` : ''}
     <div class="eyebrow">Счета</div>${list(s.months.map(m => cell({ lead: m.total ? (m.rest ? '⏳' : '✅') : '—', plain: true, t: fmon(m.period), s: m.total ? `начислено ${fmt(m.total)} · оплачено ${fmt(m.paid)}` : 'начислений нет', r: m.rest ? pill(fmt(m.rest), m.period < lastPeriods(1)[0] ? 'bad' : 'warn') : '', go: 'a.bill', p: { ym: m.period, sid: id } })))}
     <div style="margin-top:12px">${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym: lastPeriods(1)[0], sid: id }, 'sec')}</div>
@@ -906,6 +907,16 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   }
 };
 ACT.retry = () => render();
+ACT.freqAsk = ({ sid, gid, times, name, price, cur }) => {
+  if (times === cur) return;
+  const [m0, m1] = [lastPeriods(1)[0], nextPeriods(2)[1]];
+  sheet(`<h3>${times} раза в неделю</h3><div class="hint">${esc(name)} · абонемент ${fmt(price)} в месяц. С какого месяца?</div>
+    <div style="margin-top:12px">${btn(`С ${monthLabel(m0).toLowerCase()}`, 'freqSet', { sid, gid, times, since: m0 })}${btn(`Со следующего — ${monthLabel(m1).toLowerCase()}`, 'freqSet', { sid, gid, times, since: m1 }, 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.freqSet = async ({ sid, gid, times, since }) => {
+  try { await api(`/students/${sid}/frequency`, { method: 'PUT', body: { groupId: gid, times, since } }); closeSheet(); render(); toast('Сохранено — счёт пересчитан'); }
+  catch (e) { toast(errText(e)); }
+};
 const WD_FULL = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 ACT.schedForm = ({ gid, teachers }) => {
   state.ui.sched = { gid, days: new Set(), tid: '' };

@@ -31,6 +31,7 @@ from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
+from bot.services.subscription_frequency import frequency_info, set_frequency
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
@@ -420,6 +421,22 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "pairs": pairs, "soloists": [{"id": s.student_id, "name": s.name} for s in solo],
         })
 
+    async def student_frequency(request: web.Request, user, teacher) -> web.Response:
+        """Старший тренер: «2 / 3 раза в неделю» ученику своей группы (SENIOR_TEACHER_IDS)."""
+        sid = request.match_info["sid"]
+        if teacher.teacher_id not in settings.senior_teacher_id_set:
+            return _json({"error": "forbidden"}, status=403)
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        gid = body.get("groupId")
+        if gid not in await _own_group_ids(teacher) or gid not in await student_group_repo.get_groups_for_student(sid):
+            return _json({"error": "not_found"}, status=404)
+        ok = await set_frequency(dp["subscription_override_repo"], sid, gid, body.get("times"),
+                                 str(body.get("since") or ""), user.tg_id)
+        return _json({"ok": True} if ok else {"error": "bad_request"}, status=200 if ok else 400)
+
     async def student(request: web.Request, user, teacher) -> web.Response:
         sid = request.match_info["sid"]
         if not await visibility.is_visible(teacher.teacher_id, sid):
@@ -434,10 +451,19 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 if sid in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id)
                 or sid in [e.student_id for e in parse_attendees(ls.attendees or "")]]
         names = {x.student_id: x.name for x in await student_repo.get_all()}
+        gids = await student_group_repo.get_groups_for_student(sid)
+        tariffs = []
+        if teacher.teacher_id in settings.senior_teacher_id_set:      # старший тренер меняет «2 / 3 раза» в своих группах
+            own = await _own_group_ids(teacher)
+            for gid in gids:
+                g = await group_repo.get_by_id(gid) if gid in own else None
+                info = await frequency_info(dp["subscription_override_repo"], sid, g) if g else {}
+                if info:
+                    tariffs.append({"id": gid, "name": g.name, **info})
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value,
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
-            "groups": [groups_map.get(g, g) for g in await student_group_repo.get_groups_for_student(sid)],
+            "groups": [groups_map.get(g, g) for g in gids], "tariffs": tariffs,
             "period": ym,
             "lessons": [_lesson_brief(ls, teacher, groups_map, names)
                         for ls in sorted(mine, key=lambda x: x.date)],
@@ -852,6 +878,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group), ("GET", "/students/{sid}", student),
+        ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),
         ("POST", "/diary/entries/{eid}/grade", diary_grade),

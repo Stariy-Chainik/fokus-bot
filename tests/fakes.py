@@ -844,10 +844,11 @@ class SubOverrideRepoFake:
     async def get_for_group(self, group_id):
         return [o for o in self.items if o.group_id == group_id]
 
-    async def upsert(self, group_id, period_month, student_id, amount):
+    async def upsert(self, group_id, period_month, student_id, amount, since=""):
         sid = student_id or None
         self.items = [o for o in self.items if (o.group_id, o.period_month, o.student_id) != (group_id, period_month, sid)]
-        o = self._cls(group_id=group_id, period_month=period_month, student_id=sid, amount=amount)
+        o = self._cls(group_id=group_id, period_month=period_month, student_id=sid, amount=amount,
+                      created_at=f"{since}-01 00:00:00" if since else "")
         self.items.append(o)
         return o
 

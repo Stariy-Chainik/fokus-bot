@@ -343,3 +343,27 @@ def test_student_card_says_where_the_short_tariff_applies(api):
     card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
     assert [g["hasShort"] for g in card["groups"]] == [True]
     assert _call(app, "POST", "/api/admin/students/STU-0001/tier")[1]["tier"] == "short"
+
+
+def test_twice_a_week_price_from_a_month_and_back(api, monkeypatch):
+    """«2 раза в неделю» — постоянная цена ученика с выбранного месяца; возврат к 3 закрепляет прошлые месяцы."""
+    from bot.services.payment_service import PaymentService  # noqa: F401
+    from tests.test_parent_api import _sub_mode
+    app, dp = api
+    _sub_mode(dp, price=7000)
+    monkeypatch.setattr(settings, "subscription_twice_prices", "GRP-0001:6000")
+    card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
+    assert card["groups"][0]["freq"] == {"times": 3, "since": "", "priceTwice": 6000, "priceThrice": 7000}
+    assert _call(app, "PUT", "/api/admin/students/STU-0001/frequency",
+                 json={"groupId": "GRP-0001", "times": 2, "since": YM})[0] == 200
+    card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
+    assert card["groups"][0]["freq"]["times"] == 2 and card["groups"][0]["freq"]["since"] == YM
+    bill = _call(app, "GET", f"/api/admin/bill/STU-0001?ym={YM}")[1]
+    assert any(r["subscription"] and r["total"] == 6000 for r in bill["rows"])
+    nxt = f"{int(YM[:4]) + (YM[5:] == '12')}-{(int(YM[5:]) % 12) + 1:02d}"
+    assert _call(app, "PUT", "/api/admin/students/STU-0001/frequency",
+                 json={"groupId": "GRP-0001", "times": 3, "since": nxt})[0] == 200
+    rows = dp["subscription_override_repo"].items
+    assert (("GRP-0001", YM, "STU-0001", 6000) in [(o.group_id, o.period_month, o.student_id, o.amount) for o in rows])
+    assert not any(o.period_month == "*" for o in rows)
+    assert _call(app, "PUT", "/api/admin/students/STU-0001/frequency", json={"groupId": "GRP-0099", "times": 2, "since": YM})[0] == 400
