@@ -625,9 +625,12 @@ SCREENS['a.branches'] = async () => {
   return { title: 'Филиалы и группы', html: `${d.branches.map(b => `<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center"><span>${esc(b.name)}</span><span><button class="chip" style="padding:1px 8px;text-transform:none;letter-spacing:0" data-act="branchRename" data-p='${esc(JSON.stringify({ id: b.id, name: b.name }))}'>✏️</button> <button class="chip" style="padding:1px 8px" data-act="branchDelete" data-p='${esc(JSON.stringify({ id: b.id, name: b.name, groups: b.groups.length }))}'>🗑</button></span></div>${b.groups.length ? list(b.groups.map(g => cell({ lead: g.archived ? '📦' : '💃', plain: true, t: esc(g.name), s: `${modeLabel(g.mode)}${g.priceFull ? ' · ' + fmt(g.priceFull) : ''} · ${plural(g.students, ['ученик', 'ученика', 'учеников'])}${g.teachers.length ? ' · ' + esc(g.teachers.map(n => n.split(' ')[0]).join(', ')) : ''}`, go: 'a.group', p: { id: g.id } }))) : '<div class="empty">Групп нет</div>'}`).join('')}<div style="margin-top:12px">${btn('➕ Группа', 'groupAddForm', { branches: d.branches.map(b => [b.id, b.name]) }, 'sec')}${btn('➕ Филиал', 'branchAddForm', {}, 'ghost')}</div>` };
 };
 
-SCREENS['a.group'] = async ({ id }) => {
+SCREENS['a.group'] = async ({ id, ym }) => {
   const g = await api(`/groups/${id}`);
   const active = g.members.filter(m => !m.left), left = g.members.filter(m => m.left);
+  const tab = state.ui.aGroupTab || 'members';
+  const tabs = chipsAct('aGroupTab', tab, [['members', `Состав · ${active.length}`], ['pay', '💳 Оплата']]);
+  if (tab === 'pay') return aGroupPay(g, id, ym || lastPeriods(1)[0], tabs);
   // Ушедший из абонементной группы остаётся строкой с месяцем ухода — на ней держится история
   // начислений за прошлые месяцы. Поэтому у него не ✖ (он уже убран), а «↩ Вернуть» и 📅.
   const memberRow = (m, gone = false) => `<div class="cell static"><span class="lead">${initials(m.name)}</span><button class="cell nolead" style="padding:0;border:0;display:block;text-align:left" data-go="a.student" data-p='${esc(JSON.stringify({ id: m.id }))}'><div class="t">${esc(m.name)}</div><div class="s">${g.mode === 'subscription' ? `с ${m.joined ? monthLabel(m.joined).toLowerCase() : 'начала'}${m.left ? ` · ушёл с ${monthLabel(m.left).toLowerCase()}` : ''}` : (m.hasParent ? '' : 'без родителя')}</div></button><span class="r">${g.mode === 'subscription' ? `<button class="chip" style="padding:2px 8px" data-go="a.member" data-p='${esc(JSON.stringify({ gid: id, sid: m.id, name: m.name, joined: m.joined, left: m.left }))}'>📅</button> ` : ''}${gone
@@ -635,6 +638,7 @@ SCREENS['a.group'] = async ({ id }) => {
     : `<button class="chip" style="padding:2px 8px" data-act="memberRemove" data-p='${esc(JSON.stringify({ gid: id, sid: m.id, name: m.name, sub: g.mode === 'subscription' }))}' aria-label="Убрать">✖</button>`}</span></div>`;
   return { title: g.name, html: `
     <div class="card pad"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><div style="font-weight:800;font-size:16px">${esc(g.name)}${g.archived ? ' 📦' : ''}</div><div class="hint">${esc(g.branchName)} · ${g.teachers.filter(t => t.assigned).map(t => esc(t.name.split(' ')[0])).join(', ') || 'педагог не назначен'}</div></div>${pill(modeLabel(g.mode), 'acc')}</div>${g.priceFull ? `<div class="money" style="margin-top:8px;font-size:20px;font-weight:800">${fmt(g.priceFull)} <span class="hint" style="font-size:13px;font-weight:500">${g.mode === 'subscription' ? 'в месяц с ученика' : `за посещение${g.priceShort ? ` · ${fmt(g.priceShort)} за ${g.durationShort} мин` : ''}`}</span></div>` : ''}</div>
+    <div style="margin-top:12px">${tabs}</div>
     <div class="eyebrow">Состав · ${active.length}</div>${active.length ? `<div class="list">${active.map(m => memberRow(m)).join('')}</div>` : '<div class="empty">Состав пуст</div>'}
     ${left.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Ушли <span class="hint">· ${left.length}</span></span><span class="r hint">не в составе</span></summary>
       <div class="accbody"><div class="accsum">Уже убраны из группы: с месяца ухода абонемент не начисляется. Строка хранится ради прошлых месяцев — за них уже выставлены и оплачены счета.</div>${left.map(m => memberRow(m, true)).join('')}</div></details>` : ''}
@@ -905,6 +909,31 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   }
 };
 ACT.retry = () => render();
+ACT.aGroupTab = ({ v }) => { state.ui.aGroupTab = v; render(); };
+/* Вкладка «Оплата» карточки группы у администратора — как у педагога со счетами: ученики месяца
+   с начислено / оплачено / остатком, тап → отметка оплаты; рассылка счетов всей группе. */
+async function aGroupPay(g, id, period, tabs) {
+  const d = await api(`/pay/students?ym=${period}&group=${encodeURIComponent(id)}`);
+  const total = d.students.reduce((a, s) => a + s.total, 0), paid = d.students.reduce((a, s) => a + s.paid, 0), rest = d.students.reduce((a, s) => a + s.rest, 0);
+  const unpaid = d.students.filter(s => s.rest > 0).length, toSend = d.students.filter(s => s.total > 0);
+  const sorted = [...d.students].sort((a, b) => b.rest - a.rest || a.name.localeCompare(b.name));
+  return { title: g.name, html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${esc(g.branchName)} · ${fmon(period)}</div></div>
+    <div style="margin-top:12px">${tabs}</div>
+    <div class="chips scroll">${periodsSince(LESSONS_SINCE).map(m => `<button class="chip" aria-pressed="${m === period}" data-go="a.group" data-p='${esc(JSON.stringify({ id, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>
+    <div class="kpis">${kpi(rest ? fmt(rest) : '✓', rest ? `к оплате · не оплатили ${unpaid}` : 'всё оплачено', rest ? 'bad' : 'ok')}${kpi(fmt(paid), `оплачено из ${fmt(total)}`, 'ok')}</div>
+    <div style="margin-top:10px">${sorted.length ? list(sorted.map(s => cell({ lead: initials(s.name), t: esc(s.name),
+      s: s.total ? `начислено ${fmt(s.total)} · оплачено ${fmt(s.paid)}` : 'нет начислений',
+      r: s.rest ? pill(fmt(s.rest), 'bad') : s.total ? pill('✓', 'ok') : '', go: 'a.pay.student', p: { ym: period, sid: s.id } }))) : '<div class="empty">В группе нет учеников</div>'}</div>
+    <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend.length})`, 'aGroupBills', { ids: toSend.map(s => s.id), ym: period, name: g.name }, toSend.length ? '' : 'ghost')}</div>` };
+}
+ACT.aGroupBills = ({ ids, ym, name }) => { if (!ids.length) return; sheet(`<h3>Отправить счета?</h3><div class="hint">${esc(name)} · ${fmon(ym)}: ${plural(ids.length, ['счёт', 'счёта', 'счетов'])} родителям в Telegram или MAX.</div><div style="margin-top:12px">${btn('📨 Отправить', 'aGroupBillsDo', { ids, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`); };
+ACT.aGroupBillsDo = async ({ ids, ym }) => {
+  closeSheet(); toast('Отправляем…');
+  let sent = 0, noParent = 0;
+  for (const sid of ids) { try { const r = await api(`/bill/${sid}/send?ym=${ym}`, { method: 'POST' }); r.sentTo ? sent++ : noParent++; } catch (_) { noParent++; } }
+  toast(`Счета отправлены: ${sent}${noParent ? ` · без родителя: ${noParent}` : ''}`);
+};
 ACT.freqAsk = ({ sid, gid, times, name, price, cur }) => {
   if (times === cur) return;
   const [m0, m1] = [lastPeriods(1)[0], nextPeriods(2)[1]];
