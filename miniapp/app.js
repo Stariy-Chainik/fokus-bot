@@ -389,6 +389,9 @@ const ACT = {
   doConfirm: async ({ ym, sid, key, amount: forced, force }) => {
     const amount = forced || +val('pay-a');           // сумму можно поправить руками — платят не всегда «по урокам»
     if (!amount) { toast('Укажите сумму'); return; }
+    if (state.ui.paySubmitting) return;               // защита от двойного нажатия
+    state.ui.paySubmitting = true;
+    document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
     try {
       const r = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key, amount, force: !!force, method: state.ui.method || 'cash', lessonIds: [...((state.ui.sel && state.ui.sel.picked) || [])] } });
       closeSheet(); state.ui.sel = null; back(); toast(`Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}`);
@@ -396,7 +399,7 @@ const ACT = {
       // экран устарел: остаток меньше суммы — спрашиваем, что зачесть
       if (e.status === 409 && e.data && e.data.needsConfirm) { closeSheet(); return overpaySheet(e.data, 'doConfirm', { ym, sid, key }); }
       toast(errText(e));
-    }
+    } finally { state.ui.paySubmitting = false; }
   },
   confirmInvoice: async ({ pendingId, amount }) => {
     if (!pendingId) return;

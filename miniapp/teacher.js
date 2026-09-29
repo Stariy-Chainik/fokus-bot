@@ -362,6 +362,9 @@ ACT.tPayMethod = ({ v }) => { state.ui.tPayMethod = v; document.querySelectorAll
 ACT.tPayDo = async ({ sid, ym, key, amount: forced, force }) => {
   const amount = forced || +val('pay-a');
   if (!amount) { toast('Укажите сумму'); return; }
+  if (state.ui.tPaying) return;                     // двойное нажатие зачитывало оплату дважды (Андреянова 28.09)
+  state.ui.tPaying = true;
+  document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
   try {
     const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, force: !!force, method: state.ui.tPayMethod || 'cash', lessonIds: [...((state.ui.tsel && state.ui.tsel.picked) || [])] } });
     if (state.ui.tsel) state.ui.tsel.key = '';
@@ -371,7 +374,7 @@ ACT.tPayDo = async ({ sid, ym, key, amount: forced, force }) => {
     // остаток меньше суммы (экран устарел или платят больше) — спрашиваем, что зачесть
     if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'tPayDo', { sid, ym, key });
     toast(errText(e));
-  }
+  } finally { state.ui.tPaying = false; }
 };
 ACT.tBillSend = ({ sid, ym, name }) => sheet(`<h3>Отправить счёт?</h3><div class="hint">${esc(name)} · ${fmon(ym)}. Родитель получит счёт в Telegram или MAX.</div>
   <div style="margin-top:12px">${btn('📨 Отправить', 'tBillSendDo', { sid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
