@@ -414,6 +414,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 - **Client vs Student**: a student attends lessons; the client (parent) pays. Separate entities: `student.client_id → Client`; `student.parent_tg_ids → list[int]` of Telegram IDs with bot access.
 - **parent_tg_ids separator**: uses `|` (pipe), **not** `,` (comma). Russian-locale Google Sheets corrupts comma-joined integers (see Repositories section). Parser accepts both for backwards compatibility (`student_repo.py`).
 - **Client registration**: first-time registration is direct (no approval). Adding a second student requires admin approval via `client:add_child` FSM → `admin_child_ok` / `admin_child_no` callbacks ([admin/client_requests.py](bot/handlers/admin/client_requests.py)).
+- **Второй родитель к ребёнку — только с одобрения администратора** (решение владельца 29.09.2026): если у ученика уже есть привязанный родитель, ссылка группы и регистрация по фамилии (Telegram и MAX) не привязывают, а шлют заявку админам с `admin_child_ok/no` и строку KIND_CHILD в «Ждут решения» (`bot/services/parent_linking.py`: `needs_approval`, `request_approval`). Первый родитель привязывается сам, как раньше.
 
 ---
 

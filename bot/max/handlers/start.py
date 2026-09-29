@@ -18,6 +18,7 @@ from ..render import send_screen, edit_screen, alert
 from ..states import MaxParentStates
 from . import router
 from ._common import parent_students, show_menu
+from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ async def on_start_cmd(event: MessageCreated, context, max_uid, student_repo, st
 # ─── Ссылка группы ───────────────────────────────────────────────────────────
 
 @router.message_callback(F.callback.payload.startswith("glink:"))
-async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_repo, user_repo, tg_bot):
+async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_repo, user_repo, tg_bot, pending_repo=None):
     _, group_id, student_id = event.callback.payload.split(":", 2)
     student = await student_repo.get_by_id(student_id)
     if student is None:
@@ -86,6 +87,13 @@ async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_rep
         return
     if max_uid in student.parent_max_ids:
         await show_menu(event, await parent_students(student_repo, max_uid), max_uid)
+        return
+    if needs_approval(student, max_addr(max_uid)):        # второй родитель — только через администратора
+        group = await group_repo.get_by_id(group_id)
+        who = f"{event.callback.user.first_name} {event.callback.user.last_name or ''}".strip()
+        await request_approval(tg_bot, user_repo, pending_repo, student, max_addr(max_uid), who,
+                               f"ссылка группы {group.name if group else group_id} (MAX)")
+        await edit_screen(event, WAIT_TEXT.format(name=student.name), [])
         return
     prev_addrs = list(student.parent_addrs)
     await student_repo.add_parent_max_id(student_id, max_uid)
@@ -149,11 +157,16 @@ async def on_text_no_state(event: MessageCreated, max_uid, student_repo):
 
 
 @router.message_callback(F.callback.payload.startswith("client_reg:"))
-async def on_reg_confirm(event: MessageCallback, max_uid, student_repo):
+async def on_reg_confirm(event: MessageCallback, max_uid, student_repo, user_repo=None, tg_bot=None, pending_repo=None):
     student_id = event.callback.payload.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     if student is None:
         await alert(event, "Ученик не найден")
+        return
+    if needs_approval(student, max_addr(max_uid)) and user_repo is not None:   # второй родитель — через администратора
+        who = f"{event.callback.user.first_name} {event.callback.user.last_name or ''}".strip()
+        await request_approval(tg_bot, user_repo, pending_repo, student, max_addr(max_uid), who, "регистрация по фамилии (MAX)")
+        await edit_screen(event, WAIT_TEXT.format(name=student.name), [])
         return
     if max_uid not in student.parent_max_ids:
         await student_repo.add_parent_max_id(student_id, max_uid)

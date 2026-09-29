@@ -12,6 +12,8 @@ from bot.repositories import StudentRepository, UserRepository
 from bot.keyboards.client import kb_client_menu, kb_admin_approve_child
 from bot.services.pending_queue import KIND_CHILD, queue_action
 from bot.states import ClientRegStates
+from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
+from bot.services.parent_notifier import tg_addr
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_start")
@@ -76,6 +78,8 @@ async def handle_surname_input(
 async def cb_client_reg_confirm(
     callback: CallbackQuery,
     student_repo: StudentRepository,
+    user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     student_id = callback.data.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
@@ -93,6 +97,12 @@ async def cb_client_reg_confirm(
         await callback.answer()
         return
 
+    if needs_approval(student, tg_addr(tg_id)):          # второй родитель — только через администратора
+        await request_approval(callback.bot, user_repo, pending_repo, student, tg_addr(tg_id),
+                               callback.from_user.full_name or str(tg_id), "регистрация по фамилии")
+        await callback.message.edit_text(WAIT_TEXT.format(name=student.name))
+        await callback.answer()
+        return
     await student_repo.add_parent_tg_id(student_id, tg_id)
     logger.info("Родитель tg_id=%s привязан к student_id=%s", tg_id, student_id)
     await callback.message.edit_text(

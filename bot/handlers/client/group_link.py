@@ -35,6 +35,8 @@ from bot.keyboards.client import kb_client_menu
 from bot.states.client_states import GroupLinkStates
 from bot.utils.group_links import parse_start_payload
 from bot.services.parent_notifier import resolve_notifier, parse_addr
+from bot.services.parent_notifier import tg_addr
+from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_group_link")
@@ -134,6 +136,7 @@ async def cb_group_link_pick(
     student_repo: StudentRepository,
     group_repo: GroupRepository,
     user_repo: UserRepository,
+    pending_repo=None,
 ) -> None:
     _, group_id, student_id = callback.data.split(":", 2)
     student = await student_repo.get_by_id(student_id)
@@ -147,6 +150,14 @@ async def cb_group_link_pick(
             f"Вы уже привязаны к ученику <b>{student.name}</b>.\n\nВыберите раздел:",
             reply_markup=kb_client_menu(),
         )
+        await callback.answer()
+        return
+
+    if needs_approval(student, tg_addr(tg_id)):          # второй родитель — только через администратора
+        group = await group_repo.get_by_id(group_id)
+        await request_approval(callback.bot, user_repo, pending_repo, student, tg_addr(tg_id),
+                               callback.from_user.full_name or str(tg_id), f"ссылка группы {group.name if group else group_id}")
+        await callback.message.edit_text(WAIT_TEXT.format(name=student.name))
         await callback.answer()
         return
 
