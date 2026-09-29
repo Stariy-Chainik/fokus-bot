@@ -65,7 +65,7 @@ const myName = () => {
   return (u && u.first_name) || '';
 };
 /* Шапка кабинета: логотип школы, приветствие и строка роли. */
-const hero = sub => `<div class="hero"><img class="logo" src="logo.jpg" alt="Фокус" width="52" height="52">
+const hero = sub => `<div class="hero"><picture class="logo"><source srcset="logo-anim.webp" media="(prefers-reduced-motion: no-preference)" type="image/webp"><img src="logo.png" alt="Фокус" width="52" height="52"></picture>
   <div><div class="hi">${hello()}${myName() ? `, ${esc(myName())}` : ''}</div><div class="hint">${sub}</div></div></div>`;
 
 /* Имя группы без эмодзи — для чипов и других узких мест (в карточках эмодзи остаются). */
