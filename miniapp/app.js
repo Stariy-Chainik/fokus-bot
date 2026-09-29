@@ -267,13 +267,31 @@ function overpaySheet(d, act, base) {
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 }
 
+/* Счёт ученика: неоплаченные занятия и абонемент отмечаются галочками прямо здесь → «Отметить оплату». */
 SCREENS['a.bill'] = async ({ ym, sid }) => {
   const d = await api(`/bill/${sid}?ym=${ym}`);
+  const sel = state.ui.abill && state.ui.abill.k === sid + ym ? state.ui.abill : (state.ui.abill = { k: sid + ym, rows: {}, sub: {} });
+  sel.data = d.rows;
+  const picked = abillTotal();
+  const mark = (on, paid) => `<span class="mark ${paid ? 'paid' : on ? 'on' : ''}">${paid || on ? '✓' : ''}</span>`;
+  const rowsHtml = d.rows.map(r => {
+    const head = `<div class="grp"><span>${r.subscription ? '💳' : r.group ? '👥' : '👨‍🏫'} ${esc(r.name)}</span><span class="money">${fmt(r.total)}</span></div>`;
+    if (r.subscription) {
+      const on = !!sel.sub[r.key];
+      return head + (r.rest
+        ? `<button class="lesson-line pick" data-act="abillSub" data-p='${esc(JSON.stringify({ key: r.key }))}'>${mark(on, false)}<span>абонемент за месяц · к оплате</span><span class="amt">${fmt(r.rest)}</span></button>`
+        : `<div class="lesson-line">${mark(false, true)}<span class="hint">абонемент оплачен</span><span class="amt">${fmt(r.total)}</span></div>`);
+    }
+    return head + r.items.map(m => m.paid
+      ? `<div class="lesson-line">${mark(false, true)}<span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></div>`
+      : `<button class="lesson-line pick" data-act="abillPick" data-p='${esc(JSON.stringify({ key: r.key, id: m.lessonId }))}'>${mark((sel.rows[r.key] || []).includes(m.lessonId), false)}<span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></button>`).join('');
+  }).join('');
   return { title: 'Счёт ученика', html: `
-    <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}</div></div>
-    ${d.rows.length ? d.rows.map(r => `<div class="grp"><span>${r.subscription ? '💳' : r.group ? '👥' : '👨‍🏫'} ${esc(r.name)}</span><span class="money">${fmt(r.total)}</span></div>${r.subscription ? '<div class="lesson-line"><span></span><span class="hint">фиксированная сумма за месяц</span><span></span></div>' : r.items.map(m => `<div class="lesson-line"><span class="mark ${m.paid ? 'paid' : ''}">${m.paid ? '✓' : ''}</span><span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></div>`).join('')}`).join('') : '<div class="empty">Начислений за месяц нет</div>'}
+    <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}${d.rest ? ' · отметьте галочками, что оплачено' : ''}</div></div>
+    ${d.rows.length ? rowsHtml : '<div class="empty">Начислений за месяц нет</div>'}
     <div class="total"><span>Начислено ${fmt(d.total)}<br><span class="hint">оплачено ${fmt(d.paid)}</span></span><span class="big ${d.rest ? 'bad' : 'ok'}">${d.rest ? fmt(d.rest) : '✓ оплачено'}</span></div></div>
-    <div style="margin-top:12px">${btn('📨 Отправить родителям', 'sendBill', { ym, sid }, d.rows.length ? '' : 'sec')}${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym, sid }, 'ghost')}</div>` };
+    ${d.rest ? `<div style="margin-top:12px">${btn(picked ? `✅ Отметить оплату ${fmt(picked)}` : 'Отметьте занятия галочками', 'abillAsk', { sid, ym, name: d.student.name }, picked ? '' : 'sec')}</div>` : ''}
+    <div style="margin-top:12px">${btn('📨 Отправить родителям', 'sendBill', { ym, sid }, d.rows.length ? 'ghost' : 'sec')}</div>` };
 };
 
 /* Должники с фильтрами: поиск, филиал → группа, «с текущим месяцем», «без родителя», сортировка. */
@@ -909,6 +927,38 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   }
 };
 ACT.retry = () => render();
+function abillTotal() {
+  const a = state.ui.abill; if (!a || !a.data) return 0;
+  let t = 0;
+  a.data.forEach(r => {
+    if (r.subscription) { if (a.sub[r.key]) t += r.rest; return; }
+    const ids = a.rows[r.key] || []; r.items.forEach(m => { if (ids.includes(m.lessonId)) t += m.amount; });
+  });
+  return t;
+}
+ACT.abillPick = ({ key, id }) => { const a = state.ui.abill; const cur = a.rows[key] || []; a.rows[key] = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; render(); };
+ACT.abillSub = ({ key }) => { const a = state.ui.abill; a.sub[key] = !a.sub[key]; render(); };
+ACT.abillAsk = ({ sid, ym, name }) => {
+  const total = abillTotal(); if (!total) { toast('Отметьте галочками оплаченные занятия'); return; }
+  sheet(`<h3>Отметить оплату?</h3><div class="hint">${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div><div class="hint" style="margin:10px 0 4px">Способ оплаты</div>${METHOD_CHIPS()}${btn('✅ Подтвердить', 'abillDo', { sid, ym })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`);
+};
+ACT.abillDo = async ({ sid, ym }) => {
+  if (state.ui.paySubmitting) return;
+  state.ui.paySubmitting = true;
+  document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
+  const a = state.ui.abill; let credited = 0;
+  try {
+    for (const r of a.data) {                       // по каждому начислению — отдельный зачёт с его занятиями
+      const ids = r.subscription ? [] : (a.rows[r.key] || []);
+      const amount = r.subscription ? (a.sub[r.key] ? r.rest : 0) : r.items.filter(m => ids.includes(m.lessonId)).reduce((x, m) => x + m.amount, 0);
+      if (!amount) continue;
+      const res = await api('/pay/confirm', { method: 'POST', body: { studentId: sid, periodMonth: ym, key: r.key, amount, method: state.ui.method || 'cash', lessonIds: ids } });
+      credited += res.credited;
+    }
+    closeSheet(); state.ui.abill = null; render(); toast(`Оплата ${fmt(credited)} отмечена`);
+  } catch (e) { closeSheet(); render(); toast(errText(e)); }
+  finally { state.ui.paySubmitting = false; }
+};
 ACT.aGroupTab = ({ v }) => { state.ui.aGroupTab = v; render(); };
 /* Вкладка «Оплата» карточки группы у администратора — как у педагога со счетами: ученики месяца
    с начислено / оплачено / остатком, тап → отметка оплаты; рассылка счетов всей группе. */

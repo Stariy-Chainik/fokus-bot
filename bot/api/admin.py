@@ -507,15 +507,18 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         if student is None:
             return _json({"error": "not_found"}, status=404)
         bills, summary = await _student_bill(sid, period)
-        paid_map = payment_ledger.paid_sums(await payment_repo.get_by_student_and_period(sid, period))
+        pay_rows = await payment_repo.get_by_student_and_period(sid, period)
+        paid_map, linked = payment_ledger.paid_sums(pay_rows), payment_ledger.paid_lesson_ids(pay_rows)
         rows = []
         for key, agg in bills.items():
             paid = paid_map.get(key, 0)
             rows.append({
                 "key": key, "name": agg.name, "group": getattr(agg, "group", False), "subscription": agg.subscription,
                 "total": agg.total, "paid": min(paid, agg.total), "rest": max(agg.total - paid, 0),
-                "items": [{"date": m["date"], "durationMin": m["duration_min"], "amount": m["amount"], "paid": m["paid"]}
-                          for m in payment_ledger.lesson_marks(agg.items, paid)],
+                # галочки в счёте нажимаются: lessonId — чтобы отметить оплату именно за эти занятия
+                "items": [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
+                           "amount": m["amount"], "paid": m["paid"]}
+                          for m in payment_ledger.lesson_marks(agg.items, paid, linked.get(key, set()))],
             })
         return _json({
             "student": {"id": sid, "name": student.name}, "period": period,
