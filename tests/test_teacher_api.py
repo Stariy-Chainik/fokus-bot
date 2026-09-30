@@ -641,3 +641,24 @@ def test_cash_scenarios_debt_until_admin_gets_money(api, monkeypatch):
     assert status == 200 and r["credited"] == 1000
     assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before - 1000
     assert _call(app, "GET", "/api/teacher/home")[1]["heldCash"] == 0
+
+
+def test_teacher_sees_student_lessons_in_own_directions(api, monkeypatch):
+    """Карточка ученика у педагога → «Все занятия ученика»: свои направления (индивидуальное у другого
+    педагога скрыто), с FULL_BILL — все; суммы и ✓ оплаты — только у педагога со счетами."""
+    from tests.fakes import mk_teacher
+    app, dp = api
+    other = mk_teacher("TCH-0002", "Контарева Елизавета", rate_for_student=3000)
+    dp["teacher_repo"].items.append(other)
+    dp["lesson_repo"].items.append(mk_lesson("LES-BT", other, f"{YM}-20", students=[("STU-0001", "Иванов Иван")]))
+    url = f"/api/teacher/students/STU-0001/lessons?ym={YM}"
+    d = _call(app, "GET", url)[1]
+    ids = [x["id"] for x in d["lessons"]]
+    assert "LES-BT" not in ids and ids and d["money"] is False and all(x["amount"] == 0 for x in d["lessons"])
+    assert all(x["mine"] for x in d["lessons"])
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "TCH-0001")
+    d = _call(app, "GET", url)[1]
+    bt = next(x for x in d["lessons"] if x["id"] == "LES-BT")
+    assert d["all"] and d["money"] and bt["amount"] == 3000 and not bt["mine"]
+    assert _call(app, "GET", f"/api/teacher/students/STU-9999/lessons?ym={YM}")[0] == 404

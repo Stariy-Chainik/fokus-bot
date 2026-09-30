@@ -441,6 +441,28 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                                  str(body.get("since") or ""), user.tg_id)
         return _json({"ok": True} if ok else {"error": "bad_request"}, status=200 if ok else 400)
 
+    async def student_lessons(request: web.Request, user, teacher) -> web.Response:
+        """Все занятия ученика за месяц — как у администратора, но в видимости педагога: с полным счётом
+        (FULL_BILL_*) — все, иначе свои направления (занятия в своих группах и свои индивидуальные).
+        Суммы и ✓ оплаты — только педагогам со счетами."""
+        sid = request.match_info["sid"]
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        own = set(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))
+        full = await _full_bill(teacher, sid)
+
+        def keep(ls) -> bool:
+            return full or (ls.group_id in own if ls.group_id else ls.teacher_id == teacher.teacher_id)
+        from bot.api.student_lessons import month_lessons
+        d = await month_lessons(dp, sid, request.query.get("ym") or current_period(), keep,
+                                money=teacher.teacher_id in settings.billing_teacher_id_set)
+        for x in d["lessons"]:
+            x["mine"] = x["teacherId"] == teacher.teacher_id           # своё занятие открывается карточкой
+        return _json({"student": {"id": sid, "name": s.name}, "all": full, **d})
+
     async def student(request: web.Request, user, teacher) -> web.Response:
         sid = request.match_info["sid"]
         if not await visibility.is_visible(teacher.teacher_id, sid):
@@ -1016,6 +1038,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group), ("GET", "/students/{sid}", student),
+        ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),

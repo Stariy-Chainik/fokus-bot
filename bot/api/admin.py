@@ -286,43 +286,14 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         return _json({"students": out, "total": len(await student_repo.get_all())})
 
     async def student_lessons(request: web.Request, user) -> web.Response:
-        """Занятия ученика за месяц (?ym=): педагог, группа, длительность, доля ученика и ✅/⬜ оплаты.
-
-        Отметка оплаты — та же, что в счёте (`student_lesson_marks`). Групповые занятия без отметки
-        посещения (абонемент/бесплатные группы пишутся без состава) показываются по членству в группе.
-        """
+        """Занятия ученика за месяц (?ym=) — `student_lessons.month_lessons`."""
         sid = request.match_info["sid"]
         student = await student_repo.get_by_id(sid)
         if student is None:
             return _json({"error": "not_found"}, status=404)
-        period = request.query.get("ym") or current_period()
-        month = await payment_service.student_lesson_marks(sid, period)
-        teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
-        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        seen = {ls.lesson_id for ls in month.lessons}
-        rows = [(ls, month.mark(ls.lesson_id), True) for ls in month.lessons]
-        membership = await student_group_repo.get_membership_map()
-        my_groups = {gid for (s_id, gid), m in membership.items() if s_id == sid and m.covers(period)}
-        for ls in await lesson_repo.get_all():
-            if (ls.date[:7] == period and ls.lesson_id not in seen and ls.type == LessonType.GROUP
-                    and not ls.attendees and ls.group_id in my_groups):
-                rows.append((ls, None, False))
-        direct = {x.lesson_id: x.amount for row in await payment_service.direct_pay_rows(sid, period) for x in row.lessons}
-        out = []
-        for ls, mark, attended in sorted(rows, key=lambda r: (r[0].date, r[0].recorded_at or "")):
-            g = groups.get(ls.group_id)
-            out.append({
-                "direct": direct.get(ls.lesson_id),     # прямая оплата педагогу: сумма родителя, школа не начисляет
-                "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min, "type": ls.type.value,
-                "teacher": teachers.get(ls.teacher_id, ls.teacher_name), "group": g.name if g else "",
-                "mode": g.billing_mode.value if g else "",
-                "amount": mark.amount if mark else 0, "paid": bool(mark and mark.paid),
-                "attended": attended,           # False — занятие группы без отметки посещения
-            })
-        billed = [x for x in out if x["amount"]]
-        return _json({"student": {"id": sid, "name": student.name}, "period": period, "lessons": out,
-                      "total": sum(x["amount"] for x in billed),
-                      "paid": sum(x["amount"] for x in billed if x["paid"])})
+        from bot.api.student_lessons import month_lessons
+        d = await month_lessons(dp, sid, request.query.get("ym") or current_period())
+        return _json({"student": {"id": sid, "name": student.name}, **d})
 
     async def student_card(request: web.Request, user) -> web.Response:
         sid = request.match_info["sid"]
