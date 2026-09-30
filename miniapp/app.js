@@ -943,7 +943,15 @@ async function render() {
   document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">${ROLE_TITLE[ROLE]}</span>`;
   const keepScroll = sameScreen ? content.scrollTop : 0;
   content.classList.remove('stale');
-  content.innerHTML = `<div class="${sameScreen ? '' : 'fade'}">${scr.html}</div>`;
+  // Поиск «на лету»: поле ввода, в котором человек печатает, не пересоздаём — меняем всё вокруг него.
+  // Раньше экран перерисовывался целиком: буквы, набранные за время запроса, пропадали, курсор прыгал,
+  // на телефоне закрывалась клавиатура (жалоба владельца 01.10.2026).
+  const live = sameScreen ? content.querySelector('input.search[id^="q"]') : null;
+  const html = `<div class="${sameScreen ? '' : 'fade'}">${scr.html}</div>`;
+  if (live && document.activeElement === live) {
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    if (tmp.querySelector('#' + live.id)) keepInputPatch(content, tmp, live.id); else content.innerHTML = html;
+  } else content.innerHTML = html;
   content.scrollTop = keepScroll;
   // выбранный чип в прокручиваемой строке — в зону видимости
   content.querySelectorAll('.chips.scroll').forEach(strip => {
@@ -952,7 +960,33 @@ async function render() {
   });
   content.querySelectorAll('img[data-file]').forEach(loadAuthImage);   // чеки — только с авторизацией
   const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4') || document.getElementById('q5'); const qid = q ? q.id : null; const qkey = qid || 'q';
-  if (q) { let t; q.addEventListener('input', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => { const pos = e.target.selectionStart; render().then(() => { const nq = document.getElementById(qid); if (nq) { nq.focus(); nq.setSelectionRange(pos, pos); } }); }, 250); }); }
+  if (q && !q.dataset.bound) {
+    q.dataset.bound = '1';                               // поле живёт между перерисовками — слушатель один
+    let t;
+    q.addEventListener('input', e => {
+      state.ui[qkey] = e.target.value;
+      clearTimeout(t);
+      if (e.isComposing) return;                         // ввод через подсказки клавиатуры ещё не закончен
+      t = setTimeout(() => render(), 300);
+    });
+    q.addEventListener('compositionend', e => { state.ui[qkey] = e.target.value; clearTimeout(t); t = setTimeout(() => render(), 300); });
+  }
+}
+/* Заменить содержимое root на newRoot, не трогая элемент #id (и его предков): фокус, курсор и
+   набранный текст в поле поиска сохраняются, пока приходят новые результаты. */
+function keepInputPatch(root, newRoot, id) {
+  const holds = el => el.id === id || !!(el.querySelector && el.querySelector('#' + id));
+  const oldKids = [...root.childNodes], newKids = [...newRoot.childNodes];
+  const oi = oldKids.findIndex(n => n.nodeType === 1 && holds(n)), ni = newKids.findIndex(n => n.nodeType === 1 && holds(n));
+  if (oi < 0 || ni < 0) { root.replaceChildren(...newKids); return; }
+  const keep = oldKids[oi];
+  oldKids.forEach((n, i) => { if (i !== oi) n.remove(); });
+  newKids.slice(0, ni).forEach(n => root.insertBefore(n, keep));
+  let after = keep.nextSibling;
+  newKids.slice(ni + 1).forEach(n => root.insertBefore(n, after));
+  if (keep.id === id) return;                            // само поле: значение и фокус — как есть
+  if (newKids[ni].className !== undefined) keep.className = newKids[ni].className;
+  keepInputPatch(keep, newKids[ni], id);
 }
 /* <img> не умеет слать Authorization, поэтому тянем файл fetch'ем и подставляем blob. */
 async function loadAuthImage(img) {
