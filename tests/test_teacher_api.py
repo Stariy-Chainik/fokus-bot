@@ -405,6 +405,41 @@ def test_teacher_bill_shows_only_own_directions(api, monkeypatch):
                  json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 404
 
 
+def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monkeypatch):
+    """FULL_BILL_TEACHER_IDS (Контарева, 30.09.2026): полный счёт ученика своей группы, включая занятия
+    у других педагогов, и уведомление в Telegram о каждой оплате такого ученика."""
+    from bot.services import payment_events
+    from tests.fakes import mk_teacher
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "TCH-0001")
+    other = mk_teacher("TCH-0002", "Никишин Андрей", rate_group=1000, rate_for_teacher=1500, rate_for_student=3000)
+    dp["teacher_repo"].items.append(other)
+    dp["lesson_repo"].items.append(mk_lesson("LES-BT", other, f"{YM}-20", students=[("STU-0001", "Иванов Иван")]))
+    b = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    assert sorted(r["key"] for r in b["rows"]) == ["TCH-0001", "TCH-0002"] and b["total"] == 4800 + 3000
+    g = _call(app, "GET", f"/api/teacher/bills/group/GRP-0001?ym={YM}")[1]
+    assert next(x for x in g["students"] if x["id"] == "STU-0001")["rest"] == 7800
+
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"])
+    teacher_tg = next(u.tg_id for u in dp["user_repo"].items if u.teacher_id == "TCH-0001")
+
+    async def pay_and_wait(actor):
+        await dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 3000, actor, ["TCH-0002"],
+                                                   payment_method="cash")
+        await asyncio.gather(*payment_events._tasks)
+    asyncio.run(pay_and_wait(555))                                  # отметил администратор
+    assert sent and sent[0][0] == teacher_tg and "3000 ₽" in sent[0][1] and "Иванов Иван" in sent[0][1]
+    sent.clear()
+    asyncio.run(pay_and_wait(teacher_tg))                           # отметила сама — не дублируем
+    assert sent == []
+
+
 def test_revenue_share_individuals_stay_visible_to_their_teacher(api, monkeypatch):
     """Индивидуальные Яковлевой пишутся в служебную группу revenue-share: в её счёте они видны (регрессия 29.09)."""
     from tests.fakes import mk_group

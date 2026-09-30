@@ -7,6 +7,7 @@ from config.settings import settings
 _RESET = {
     "direct_pay_teacher_ids": "",
     "billing_teacher_ids": "",
+    "full_bill_teacher_ids": "",
     "revenue_share_groups": "",
     "salary_duration_groups": "",
     "shift_groups": "",
@@ -24,7 +25,8 @@ _RESET = {
 def _neutral_settings(monkeypatch):
     for name, value in _RESET.items():
         monkeypatch.setattr(settings, name, value)
-    from bot.services import activity, rate_history
+    from bot.services import activity, payment_events, rate_history
+    payment_events._deps.clear()
     rate_history.load([])
     activity.setup(None)      # лента изменений: тест DI включает её на живой лист — сбрасываем до и после
     yield

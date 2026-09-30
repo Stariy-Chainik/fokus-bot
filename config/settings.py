@@ -222,6 +222,14 @@ class Settings(BaseSettings):
     # Старшие тренеры (TCH-XXXX через запятую): в своём кабинете меняют ученикам своих групп «2 / 3 раза в неделю».
     senior_teacher_ids: str = Field(default="", alias="SENIOR_TEACHER_IDS")
 
+    # Педагоги со счетами, которые видят полный счёт ученика своих групп (включая занятия у других педагогов)
+    # и получают в Telegram уведомление о каждой оплате таких учеников (решение владельца 30.09.2026).
+    full_bill_teacher_ids: str = Field(default="", alias="FULL_BILL_TEACHER_IDS")
+
+    @property
+    def full_bill_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.full_bill_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
     @property
     def senior_teacher_id_set(self) -> set:
         return {t.strip() for t in self.senior_teacher_ids.replace("|", ",").split(",") if t.strip()}

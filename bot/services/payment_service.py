@@ -19,7 +19,7 @@ from .payment_ledger import (
 )
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
-from . import activity
+from . import activity, payment_events
 logger = logging.getLogger(__name__)
 
 # Ключ «педагога» для абонементного начисления в счетах/долгах: SUB:{group_id}.
@@ -578,6 +578,8 @@ class PaymentService:
         if credited > 0:
             await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
                                   + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id, ref=student_id)
+            payment_events.payment_received(student_id, period_month, credited, payment_method,
+                                            confirmed_by_tg_id, student_name)
         return credited, rows
 
     async def _add_paid_row(
@@ -730,6 +732,8 @@ class PaymentService:
             await activity.record(activity.PAYMENT, f"Оплата {payment.total_amount} ₽: {payment.student_id}"
                                   f" · {payment.period_month} · {payment_method} · {payment.teacher_id}",
                                   actor=confirmed_by_tg_id, ref=payment.student_id)
+            payment_events.payment_received(payment.student_id, payment.period_month, payment.total_amount,
+                                            payment_method, confirmed_by_tg_id)
         return ok
 
     async def create_yookassa_payment(
