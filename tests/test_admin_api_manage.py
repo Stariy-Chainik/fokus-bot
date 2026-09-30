@@ -64,10 +64,12 @@ def test_group_billing_and_overrides(api):
                                              attendees=None, group_id="GRP-0001"))
     body = {"mode": "subscription", "priceFull": 7000, "effectivePeriod": YM}
     status, r = _call(app, "PUT", "/api/admin/groups/GRP-0001/billing", json=body)
-    assert status == 200 and r["pinned"] == 1                                  # август зафиксирован нулём (первое включение)
+    # прошлые активные месяцы — с августа (первое занятие) до текущего — зафиксированы нулём (первое включение)
+    past = [m for m in ("2026-08", "2026-09", "2026-10", "2026-11", "2026-12") if m < YM]
+    assert status == 200 and r["pinned"] == len(past)
     g = _call(app, "GET", "/api/admin/groups/GRP-0001")[1]
     assert (g["mode"], g["priceFull"]) == ("subscription", 7000)
-    assert g["overrides"] == [{"periodMonth": "2026-08", "studentId": None, "studentName": None, "amount": 0}]
+    assert g["overrides"] == [{"periodMonth": m, "studentId": None, "studentName": None, "amount": 0} for m in past]
     assert _call(app, "GET", f"/api/admin/bill/STU-0001?ym={YM}")[1]["total"] == 4800 + 7000
 
     ovr = {"periodMonth": "*", "studentId": "STU-0002", "amount": 0}

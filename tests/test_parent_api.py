@@ -80,7 +80,8 @@ def test_home_attention_lessons_and_month_blocks(api):
     c = h["children"][0]
     assert h["today"] == today and c["unpaid"] == [{"ym": YM, "accrued": 4800, "paid": 0, "rest": 4800}]
     assert c["pending"] == [{"kind": "cash", "amount": 4800, "ym": YM, "method": "cash"}]
-    assert c["grades"][0] == {"date": today, "grade": 5, "topics": ["Самба"], "teacher": "Река Станислав", "comment": "Молодец"}
+    fresh_grade = next(g for g in c["grades"] if g["date"] == today)     # оценки «на 7-е» 1-го числа ещё впереди
+    assert fresh_grade == {"date": today, "grade": 5, "topics": ["Самба"], "teacher": "Река Станислав", "comment": "Молодец"}
     lessons = c["lessons"]
     assert (lessons["month"], lessons["minutes"], lessons["last"]) == (3, 150, f"{YM}-12")
     assert all(x["teacher"] == "Река Станислав" and x["durationMin"] in (45, 60) for x in lessons["today"])

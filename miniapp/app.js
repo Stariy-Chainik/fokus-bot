@@ -138,10 +138,10 @@ SCREENS['a.unpaid'] = async ({ ym }) => {
   return { title: `Оплаты · ${mon}`, html: `
     <div class="kpis">${kpi(fmt(d.rest), `не оплачено за ${mon.toLowerCase()}`, d.rest ? 'bad' : 'ok')}${kpi(fmt(d.paid), `оплачено из ${fmt(d.accrued)}`, 'ok')}</div>
     <div class="eyebrow">Филиалы</div>
-    ${list(d.branches.map(b => cell({ lead: b.id === 'IND' ? '👤' : '🏢', plain: true, t: esc(b.name),
+    ${list(d.branches.map(b => cell({ lead: b.id === 'NOGROUP' ? '👤' : '🏢', plain: true, t: esc(b.name),
       s: b.rest ? `не оплатили ${plural(b.unpaid, ['ученик', 'ученика', 'учеников'])} · оплачено ${fmt(b.paid)} из ${fmt(b.accrued)}` : `всё оплачено · ${fmt(b.accrued)}`,
       r: b.rest ? `<b class="money bad">${fmt(b.rest)}</b>` : pill('✓', 'ok'), go: 'a.unpaid.branch', p: { ym, bid: b.id } })))}
-    <p class="hint" style="margin-top:8px">Долг — начислено за месяц минус оплачено. Индивидуальные занятия — отдельно, по педагогам.</p>` };
+    <p class="hint" style="margin-top:8px">Долг — начислено за месяц минус оплачено: абонемент, групповые и индивидуальные занятия ученика. Индивидуальные — в группе ученика у того же педагога, иначе в его первой группе.</p>` };
 };
 const unpaidGroup = (g, ym) => `<details class="acc">
   <summary><span><span class="chev">›</span>${esc(plainName(g.name))} <span class="hint">· оплатили ${g.students.length - g.unpaid} из ${g.students.length}</span></span>
@@ -150,7 +150,7 @@ const unpaidGroup = (g, ym) => `<details class="acc">
     <div class="accsum">начислено ${fmt(g.accrued)} · оплачено ${fmt(g.paid)}${g.rest ? ` · долг ${fmt(g.rest)}` : ''}</div>
     ${g.students.map(st => `<button class="lesson-line pick" data-go="a.bill" data-p='${esc(JSON.stringify({ ym, sid: st.id }))}'>
       <span style="width:22px;text-align:center">${payStatus(st)}</span>
-      <span>${esc(st.name)}<div class="d">${st.status === 'paid' ? `оплачено ${fmt(st.paid)}` : st.status === 'partial' ? `оплачено ${fmt(st.paid)} из ${fmt(st.accrued)}` : `начислено ${fmt(st.accrued)}`}</div></span>
+      <span>${esc(st.name)}<div class="d">${[st.sub ? `абонемент ${fmt(st.sub)}` : '', st.group ? `групповые ${fmt(st.group)}` : '', st.ind ? `индивидуальные ${fmt(st.ind)}` : ''].filter(Boolean).join(' · ')}${st.status === 'partial' ? ` · оплачено ${fmt(st.paid)}` : ''}</div></span>
       <span class="amt ${st.rest ? 'money bad' : 'hint'}">${st.rest ? fmt(st.rest) : 'оплачено'}</span></button>`).join('')}
   </div></details>`;
 SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {

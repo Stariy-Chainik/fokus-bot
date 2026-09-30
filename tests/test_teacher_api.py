@@ -85,7 +85,8 @@ def test_home_and_lessons_are_own_only(api):
     app, dp = api
     status, h = _call(app, "GET", "/api/teacher/home")
     assert status == 200 and h["lessonsMonth"] == 3 and h["earnedMonth"] == 4333
-    assert h["prevSubmitted"] is True and h["periodSubmitted"] is False        # август сдан, текущий — нет
+    # в данных сдан только август: «прошлый месяц сдан» — только пока прошлый месяц и есть август
+    assert h["prevSubmitted"] is (h["prevPeriod"] == "2026-08") and h["periodSubmitted"] is False
 
     status, d = _call(app, "GET", f"/api/teacher/lessons?ym={YM}")
     assert status == 200 and [x["id"] for x in d["lessons"]] == ["LES-1", "LES-2", "LES-3"]
@@ -148,7 +149,8 @@ def test_period_lock_blocks_delete_and_record(api):
     assert _call(app, "POST", "/api/teacher/record", json=body)[0] == 409
     # свой открытый месяц: запись и удаление работают
     status, r = _call(app, "POST", "/api/teacher/record",
-                      json={"kind": "soloist", "date": f"{YM}-14", "durationMin": 45, "studentIds": ["STU-0002"]})
+                      json={"kind": "soloist", "date": date.today().isoformat(),   # не в будущем: 1-го числа «YM-14» ещё не наступило
+                            "durationMin": 45, "studentIds": ["STU-0002"]})
     assert status == 200 and r["created"] == 1
     assert _call(app, "DELETE", f"/api/teacher/lessons/{r['lessons'][0]}")[1]["ok"] is True
 
