@@ -372,10 +372,29 @@ SCREENS['a.student'] = async ({ id }) => {
     <div class="eyebrow">Группы</div>${s.groups.length ? list(s.groups.map(g => g.freq ? `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${esc(g.branch)} · абонемент ${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)}${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>` : cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : '<div class="empty">Не состоит в группах</div>'}
     ${s.teachers.length ? `<div class="eyebrow">Педагоги</div><div class="card pad">${esc(s.teachers.join(', '))}</div>` : ''}
+    <div class="eyebrow">Занятия</div>${list([cell({ lead: '📅', plain: true, t: 'Занятия ученика', s: 'по месяцам: педагог, группа, сумма, оплата', go: 'a.student.lessons', p: { id, name: s.name } })])}
     <div class="eyebrow">Счета</div>${list(s.months.map(m => cell({ lead: m.total ? (m.rest ? '⏳' : '✅') : '—', plain: true, t: fmon(m.period), s: m.total ? `начислено ${fmt(m.total)} · оплачено ${fmt(m.paid)}` : 'начислений нет', r: m.rest ? pill(fmt(m.rest), m.period < lastPeriods(1)[0] ? 'bad' : 'warn') : '', go: 'a.bill', p: { ym: m.period, sid: id } })))}
     <div style="margin-top:12px">${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym: lastPeriods(1)[0], sid: id }, 'sec')}</div>
     <div class="eyebrow">Карточка</div>${list([cell({ lead: '💃', plain: true, t: 'Группы ученика', s: 'добавить / убрать', go: 'a.student.groups', p: { id, name: s.name } }), cell({ lead: '👫', plain: true, t: s.partner ? `Партнёр: ${esc(s.partner.name)}` : 'Партнёр не назначен', s: 'сменить / убрать', go: 'a.partner', p: { id, name: s.name } }), cell({ lead: '👨‍👩‍👧', plain: true, t: s.client ? 'Сменить родителя' : 'Привязать родителя', s: s.client ? esc(s.client.name) + (s.client.phone ? ' · ' + esc(s.client.phone) : '') : 'карточка клиента: имя и телефон', go: 'a.parent.link', p: { id, name: s.name } })].concat(s.groups.some(g => g.hasShort) ? [`<button class="cell" data-act="tierToggle" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">⏱</span><span><div class="t">Тариф: ${s.tier === 'short' ? 'короткое занятие' : 'полное занятие'}</div><div class="s">переключить · действует в: ${esc(s.groups.filter(g => g.hasShort).map(g => plainName(g.name)).join(', '))}</div></span><span class="r"><span class="chev">›</span></span></button>`] : []).concat(s.isAthlete ? [`<button class="cell" data-act="athleteUnlink" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">🏃</span><span><div class="t">Кабинет спортсмена привязан</div><div class="s">отвязать Telegram ученика</div></span><span class="r"><span class="chev">›</span></span></button>`] : []))}
     <div style="margin-top:12px">${btn('✏️ Переименовать', 'studentRename', { id, name: s.name }, 'ghost')}${btn('🗑 Удалить ученика', 'studentDelete', { id, name: s.name }, 'danger')}</div>` };
+};
+
+/* Занятия ученика по месяцам: кто вёл, группа, длительность, доля ученика и ✅/⬜ оплаты (как в счёте). */
+SCREENS['a.student.lessons'] = async ({ id, name, ym }) => {
+  const period = ym || lastPeriods(1)[0];
+  const d = await api(`/students/${id}/lessons?ym=${period}`);
+  const free = x => x.mode === 'subscription' ? 'абонемент' : x.mode === 'none' ? 'без оплаты' : 'бесплатно';
+  const days = {};
+  d.lessons.forEach(x => { (days[x.date] = days[x.date] || []).push(x); });
+  const body = Object.keys(days).map(day => `<div class="grp"><span>${fdate(day)}</span></div>${days[day].map(x => `<button class="lesson-line pick" data-go="a.lesson" data-p='${esc(JSON.stringify({ id: x.id }))}'>
+      ${x.amount ? `<span class="mark ${x.paid ? 'paid' : ''}">${x.paid ? '✓' : ''}</span>` : '<span class="mark" style="visibility:hidden"></span>'}
+      <span>${x.type === 'group' ? '👥' : '👤'} ${esc(x.group ? plainName(x.group) : 'индивидуальное')} · ${x.durationMin} мин<div class="d">${esc(x.teacher)}${x.attended ? '' : ' · посещение не отмечается'}</div></span>
+      <span class="amt">${x.amount ? fmt(x.amount) : x.direct ? `<span class="hint">${fmt(x.direct)} напрямую</span>` : `<span class="hint">${free(x)}</span>`}</span></button>`).join('')}`).join('');
+  return { title: name || d.student.name, html: `
+    <div class="chips scroll">${periodsSince(LESSONS_SINCE).map(m => `<button class="chip" aria-pressed="${m === period}" data-go="a.student.lessons" data-p='${esc(JSON.stringify({ id, name, ym: m }))}' data-replace="1">${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>
+    ${d.lessons.length ? `<div class="card pad" style="margin-top:10px"><b>${plural(d.lessons.length, ['занятие', 'занятия', 'занятий'])}</b>${d.total ? ` · за занятия начислено ${fmt(d.total)}, оплачено ${fmt(d.paid)}` : ''}</div>
+      <div class="card bill" style="margin-top:10px">${body}</div>
+      <p class="hint" style="margin-top:8px">✓ — занятие оплачено, пустой квадрат — ещё нет. Абонемент считается за месяц — он в счёте. «Напрямую» — родитель платит педагогу лично. Тап по занятию — его карточка.</p>` : `<div class="empty" style="margin-top:10px">За ${MON_NOM[+period.slice(5) - 1].toLowerCase()} занятий нет</div>`}` };
 };
 
 SCREENS['a.teachers'] = async () => {

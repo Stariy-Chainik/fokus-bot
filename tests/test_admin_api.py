@@ -367,3 +367,23 @@ def test_twice_a_week_price_from_a_month_and_back(api, monkeypatch):
     assert (("GRP-0001", YM, "STU-0001", 6000) in [(o.group_id, o.period_month, o.student_id, o.amount) for o in rows])
     assert not any(o.period_month == "*" for o in rows)
     assert _call(app, "PUT", "/api/admin/students/STU-0001/frequency", json={"groupId": "GRP-0099", "times": 2, "since": YM})[0] == 400
+
+
+def test_student_lessons_by_month_with_share_and_paid_mark(api):
+    """Карточка ученика → «Занятия»: занятия месяца с долей ученика и ✅ оплаты, как в счёте;
+    занятие абонементной группы без отметки посещения — по членству в группе."""
+    app, dp = api
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Абонемент", billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=5000))
+    asyncio.run(dp["student_group_repo"].add("STU-0001", "GRP-0002", "2026-01"))
+    teacher = dp["teacher_repo"].items[0]
+    dp["lesson_repo"].items.append(mk_lesson("LES-S", teacher, f"{YM}-15", duration=60, lesson_type=LessonType.GROUP,
+                                             group_id="GRP-0002"))
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 2000, ADMIN_TG, ["TCH-0001"]))
+    status, d = _call(app, "GET", f"/api/admin/students/STU-0001/lessons?ym={YM}")
+    assert status == 200
+    assert [(x["id"], x["amount"], x["paid"], x["attended"]) for x in d["lessons"]] == [
+        ("LES-1", 2000, True, True), ("LES-2", 2000, False, True), ("LES-3", 800, False, True),
+        ("LES-S", 0, False, False)]
+    assert (d["total"], d["paid"]) == (4800, 2000)
+    assert _call(app, "GET", f"/api/admin/students/STU-0002/lessons?ym={YM}")[1]["lessons"][0]["id"] == "LES-3"
+    assert _call(app, "GET", "/api/admin/students/STU-9999/lessons")[0] == 404
