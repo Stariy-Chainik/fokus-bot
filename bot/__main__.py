@@ -129,7 +129,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     from bot.services.parent_notifier import ParentNotifier
     notifier = ParentNotifier(tg_bot=tg_bot).set_as_default()
     from bot.services import payment_events    # педагогам с полным счётом — об оплатах их учеников
-    payment_events.setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_repo)
+    payment_events.setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_repo,
+                         teacher_repo)
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
         settings.cloudkassir_api_secret,

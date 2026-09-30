@@ -426,7 +426,8 @@ def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monk
     class Bot:
         async def send_message(self, chat_id, text, **kw):
             sent.append((chat_id, text))
-    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"])
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"],
+                         dp["teacher_repo"])
     teacher_tg = next(u.tg_id for u in dp["user_repo"].items if u.teacher_id == "TCH-0001")
 
     async def pay_and_wait(actor):
@@ -436,8 +437,9 @@ def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monk
     asyncio.run(pay_and_wait(555))                                  # отметил администратор
     assert sent and sent[0][0] == teacher_tg and "3000 ₽" in sent[0][1] and "Иванов Иван" in sent[0][1]
     sent.clear()
-    asyncio.run(pay_and_wait(teacher_tg))                           # отметила сама — не дублируем
-    assert sent == []
+    asyncio.run(pay_and_wait(teacher_tg))                           # отметила сама — ей не дублируем,
+    assert [c for c, _ in sent] == [ADMIN_TG]                       # а администратор узнаёт, что деньги у неё
+    assert "деньги у педагога" in sent[0][1] and "Река Станислав" in sent[0][1]
 
 
 def test_full_bill_only_for_listed_groups(api, monkeypatch):
@@ -575,3 +577,47 @@ def test_payment_request_copy_goes_to_full_bill_teacher_with_buttons(api, monkey
     teacher = asyncio.run(dp["user_repo"].get_by_tg_id(TEACHER_TG))
     assert asyncio.run(payment_events.may_decide(teacher, "STU-0001"))
     assert not asyncio.run(payment_events.may_decide(teacher, "STU-9999"))
+
+
+def test_cash_scenarios_debt_until_marked_and_admin_told_when_teacher_marks(api, monkeypatch):
+    """1) Родитель сообщил о наличных, но оплату никто не подтвердил — долг остаётся (заявка висит в очереди).
+    2) Педагог подтвердил наличные — администратору приходит сообщение «деньги у педагога»."""
+    from bot.repositories.pending_action_repo import KIND_CASH, OPEN
+    from bot.services import payment_events
+    from bot.services.pending_queue import queue_action
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    ps = dp["payment_service"]
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"],
+                         dp["student_repo"], dp["teacher_repo"])
+    student = next(s for s in dp["student_repo"].items if s.student_id == "STU-0001")
+    before = asyncio.run(ps.compute_debt_map()).get("STU-0001", {}).get(YM, 0)
+    assert before > 0
+    dp["pending_repo"] = PendingRepoFake()
+    action = asyncio.run(queue_action(dp["pending_repo"], KIND_CASH, student, YM, amount=before, method="cash"))
+    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before       # сообщение ≠ оплата: долг на месте
+    assert action.status == OPEN
+
+    async def pay():                                 # запрос и фоновые уведомления — в одном цикле событий
+        web_app = web.Application()
+        register_teacher_api(web_app, dp)
+        client = TestClient(TestServer(web_app))
+        await client.start_server()
+        try:
+            resp = await client.post("/api/teacher/bills/student/STU-0001/pay",
+                                     headers={"Authorization": f"tma {make_init_data(user_id=TEACHER_TG)}"},
+                                     json={"ym": YM, "key": "TCH-0001", "amount": 1000, "method": "cash"})
+            await asyncio.gather(*payment_events._tasks)
+            return resp.status
+        finally:
+            await client.close()
+    assert asyncio.run(pay()) == 200
+    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before - 1000
+    admin_msgs = [t for c, t in sent if c == ADMIN_TG]
+    assert admin_msgs and "1000 ₽" in admin_msgs[0] and "деньги у педагога" in admin_msgs[0]

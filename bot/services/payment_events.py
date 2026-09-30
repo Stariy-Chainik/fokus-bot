@@ -19,15 +19,19 @@ _deps: dict = {}
 _tasks: set = set()
 
 
-def setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_repo) -> None:
-    _deps.update(bot=tg_bot, users=user_repo, tg=teacher_group_repo, sg=student_group_repo, students=student_repo)
+def setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_repo, teacher_repo=None) -> None:
+    _deps.update(bot=tg_bot, users=user_repo, tg=teacher_group_repo, sg=student_group_repo, students=student_repo,
+                 teachers=teacher_repo)
 
 
 def payment_received(student_id: str, period: str, amount: int, method: str, actor: int,
                      student_name: str = "") -> None:
-    """Запланировать уведомление; вызывается сразу после зачёта оплаты."""
-    if not _deps.get("bot") or amount <= 0 or not (settings.full_bill_teacher_id_set
-                                                    or settings.full_bill_group_map):
+    """Запланировать уведомления; вызывается сразу после зачёта оплаты.
+
+    Педагогам с полным счётом — об оплатах их учеников; администраторам — если оплату
+    подтвердил педагог (деньги, особенно наличные, у него — админ должен это видеть).
+    """
+    if not _deps.get("bot") or amount <= 0:
         return
     task = asyncio.get_running_loop().create_task(
         _send(student_id, period, amount, method, int(actor or 0), student_name))
@@ -54,23 +58,36 @@ async def recipients(student_id: str, actor: int) -> list[int]:
 
 
 async def _send(student_id: str, period: str, amount: int, method: str, actor: int, name: str) -> None:
+    from bot.services.payment_methods import CASH
     from bot.utils.dates import period_label
     try:
+        users = await _deps["users"].get_all()
+        by_tg = {u.tg_id: u for u in users}
+        who = by_tg.get(actor)
+        by_teacher = who is not None and bool(who.teacher_id) and not who.is_admin
         to = await recipients(student_id, actor)
-        if not to:
+        admins = [u.tg_id for u in users if u.is_admin and u.tg_id != actor] if by_teacher else []
+        if not to and not admins:
             return
         if not name:
             s = await _deps["students"].get_by_id(student_id)
             name = s.name if s else student_id
-        text = (f"💳 Оплата {amount} ₽ — {name}, {period_label(period).lower()}\n"
-                f"{payment_methods.label(method, confirmed_by_tg_id=actor)}")
-        for tg_id in to:
+        head = f"💳 Оплата {amount} ₽ — {name}, {period_label(period).lower()}"
+        if by_teacher and who is not None:
+            t = await _deps["teachers"].get_by_id(who.teacher_id) if _deps.get("teachers") else None
+            tname = t.name if t else who.teacher_id
+            how = ("💵 Наличные — деньги у педагога" if method == CASH
+                   else payment_methods.label(method, confirmed_by_tg_id=actor).split(" — ")[0])
+            text = f"{head}\n{how}\nПодтвердил педагог: {tname}"
+        else:
+            text = f"{head}\n{payment_methods.label(method, confirmed_by_tg_id=actor)}"
+        for tg_id in dict.fromkeys(to + admins):
             try:
                 await _deps["bot"].send_message(tg_id, text)
             except Exception as exc:
-                logger.warning("Педагогу %s не ушло уведомление об оплате: %s", tg_id, exc)
+                logger.warning("%s не ушло уведомление об оплате: %s", tg_id, exc)
     except Exception as exc:                        # уведомление вспомогательное
-        logger.warning("Уведомление педагогам об оплате %s: %s", student_id, exc)
+        logger.warning("Уведомление об оплате %s: %s", student_id, exc)
 
 
 # ── заявки родителей об оплате (наличные, чеки) — педагогам, которые решают их сами ──
