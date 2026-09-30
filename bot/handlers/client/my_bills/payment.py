@@ -13,11 +13,11 @@ from aiogram.types import CallbackQuery, Message, BufferedInputFile
 
 from typing import cast
 
-from bot.handlers.filters import AdminOnly
+from bot.handlers.filters import AdminOnly, PaymentDecider
 from bot.models import User
 from bot.models.enums import PaymentStatus
 from bot.repositories import StudentRepository, ClientRepository, UserRepository
-from bot.services import PaymentService
+from bot.services import PaymentService, payment_events
 from bot.services.payment_methods import (
     CASH, RECEIPT_UNKNOWN, callback_code, from_callback_code,
 )
@@ -781,7 +781,7 @@ async def _edit_admin_msg(callback: CallbackQuery, suffix: str, keep_rows=None) 
         pass
 
 
-@router.callback_query(F.data.startswith("pact:"), AdminOnly())
+@router.callback_query(F.data.startswith("pact:"), PaymentDecider())
 async def cb_action_confirm(
     callback: CallbackQuery, user: User, payment_service: PaymentService,
     student_repo: StudentRepository, client_repo: ClientRepository,
@@ -790,7 +790,7 @@ async def cb_action_confirm(
     """Подтверждение оплаты по строке очереди: повторные нажатия ничего не зачитывают."""
     action_id, amount, method, force = _parse_pact(callback.data or "")
     action = await pending_repo.get_by_id(action_id) if pending_repo else None
-    if action is None:
+    if action is None or not await payment_events.may_decide(user, action.student_id):
         await callback.answer("Заявка не найдена", show_alert=True)
         return
     if action.status != OPEN:
@@ -861,13 +861,13 @@ async def cb_action_confirm(
             )
 
 
-@router.callback_query(F.data.startswith("pnay:"), AdminOnly())
+@router.callback_query(F.data.startswith("pnay:"), PaymentDecider())
 async def cb_action_reject(
     callback: CallbackQuery, user: User, student_repo: StudentRepository, pending_repo=None,
 ) -> None:
     action_id = (callback.data or "").split(":", 1)[-1]
     action = await pending_repo.get_by_id(action_id) if pending_repo else None
-    if action is None:
+    if action is None or not await payment_events.may_decide(user, action.student_id):
         await callback.answer("Заявка не найдена", show_alert=True)
         return
     if not await claim_action(pending_repo, action_id, REJECTED, callback.from_user.id):
@@ -881,7 +881,7 @@ async def cb_action_reject(
     if addr is not None:
         await resolve_notifier(callback.bot).send(
             addr,
-            f"❌ Оплата за {_period_label(action.period_month)} ({name}) не подтверждена администратором.\n"
+            f"❌ Оплата за {_period_label(action.period_month)} ({name}) не подтверждена школой.\n"
             f"Проверьте сумму или свяжитесь со школой.",
             rows=bill_back_rows(action.student_id, action.period_month),
         )

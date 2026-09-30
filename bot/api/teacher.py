@@ -24,6 +24,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import GroupBillingMode, LessonType
 from bot.services import LessonService, payment_ledger
+from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
@@ -249,6 +250,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             # «требует внимания»: записи спортсменов без оценки; у педагога со счетами — остаток в своих группах
             "unrated": unrated,
             "bills": await _bills_summary(teacher, period) if can_bill else None,
+            "inbox": await _queue_count(teacher, user),     # заявки об оплате (FULL_BILL_TEACHER_IDS)
             # «сегодня»: занятия дня целиком, чтобы сводка не ходила за ними вторым запросом
             "lessonsToday": len(today_lessons),
             "todayLessons": today_items,
@@ -712,6 +714,21 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _own_group_ids(teacher) -> set:
         return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
 
+    async def _queue_scope(user) -> set:
+        """Ученики, чьи заявки об оплате педагог решает сам: все ученики его групп."""
+        members: set[str] = set()
+        for gid in await teacher_group_repo.get_groups_for_teacher(user.teacher_id):
+            members.update(await student_group_repo.get_students_for_group(gid))
+        return members
+
+    async def _queue_count(teacher, user) -> int | None:
+        pending_repo = _dp_get(dp, "pending_repo")
+        if teacher.teacher_id not in settings.full_bill_teacher_id_set or pending_repo is None:
+            return None
+        members = await _queue_scope(user)
+        return sum(1 for a in await pending_repo.get_open()
+                   if a.kind in (KIND_CASH, KIND_RECEIPT) and a.student_id in members)
+
     async def _full_bill(teacher, sid: str) -> bool:
         """Полный счёт ученика: педагог из FULL_BILL_TEACHER_IDS или ученик в группе из FULL_BILL_GROUPS."""
         if teacher.teacher_id in settings.full_bill_teacher_id_set:
@@ -944,4 +961,16 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))
+
+    # «Ждут решения» — заявки родителей об оплате (наличные, чеки) учеников своих групп;
+    # решение то же, что у администратора (общий claim и замок оплат) — FULL_BILL_TEACHER_IDS
+    def queue_only(handler):
+        async def wrapped(request: web.Request, user, teacher) -> web.Response:
+            if teacher.teacher_id not in settings.full_bill_teacher_id_set:
+                return _json({"error": "forbidden"}, status=403)
+            return await handler(request, user)
+        return teacher_only(wrapped)
+
+    from bot.api.admin_inbox import register_inbox_routes
+    register_inbox_routes(app, dp, queue_only, PREFIX, bot, scope=_queue_scope)
     logger.info("Teacher API зарегистрирован: %d маршрутов на %s", len(routes), PREFIX)

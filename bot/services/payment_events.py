@@ -1,4 +1,4 @@
-"""Уведомления педагогам об оплатах учеников их групп (FULL_BILL_TEACHER_IDS — все группы
+"""Педагогам: заявки родителей об оплате с кнопками решения и уведомления об оплатах учеников их групп (FULL_BILL_TEACHER_IDS — все группы
 педагога, FULL_BILL_GROUPS — только перечисленные).
 
 Одна точка для всех путей зачёта: ЮКасса, очередь решений, кабинеты админа и педагога,
@@ -71,3 +71,74 @@ async def _send(student_id: str, period: str, amount: int, method: str, actor: i
                 logger.warning("Педагогу %s не ушло уведомление об оплате: %s", tg_id, exc)
     except Exception as exc:                        # уведомление вспомогательное
         logger.warning("Уведомление педагогам об оплате %s: %s", student_id, exc)
+
+
+# ── заявки родителей об оплате (наличные, чеки) — педагогам, которые решают их сами ──
+
+def request_created(action) -> None:
+    """Новая заявка в очереди решений: педагогу из FULL_BILL_TEACHER_IDS — копия с кнопками.
+
+    Кнопки те же, что у администратора (`pact:` / `pnay:` по action_id), поэтому решение
+    одно на всех: кто нажал первым, тот и зачёл, остальным бот ответит «уже обработано».
+    """
+    from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
+    if (not _deps.get("bot") or action is None or action.kind not in (KIND_CASH, KIND_RECEIPT)
+            or not settings.full_bill_teacher_id_set):
+        return
+    task = asyncio.get_running_loop().create_task(_send_request(action))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
+async def deciders(student_id: str) -> list[int]:
+    """tg_id педагогов с полным счётом, в чьих группах учится ученик."""
+    groups = set(await _deps["sg"].get_groups_for_student(student_id))
+    out: list[int] = []
+    for u in await _deps["users"].get_all():
+        tid = u.teacher_id
+        if (tid and tid in settings.full_bill_teacher_id_set and u.tg_id not in out
+                and groups & set(await _deps["tg"].get_groups_for_teacher(tid))):
+            out.append(u.tg_id)
+    return out
+
+
+async def may_decide(user, student_id: str) -> bool:
+    """Может ли пользователь решить заявку ученика: админ — любую, педагог — учеников своих групп."""
+    if user is None:
+        return False
+    if user.is_admin:
+        return True
+    if not _deps or user.teacher_id not in settings.full_bill_teacher_id_set:
+        return False
+    groups = set(await _deps["sg"].get_groups_for_student(student_id))
+    return bool(groups & set(await _deps["tg"].get_groups_for_teacher(user.teacher_id)))
+
+
+async def _send_request(action) -> None:
+    from bot.repositories.pending_action_repo import KIND_CASH
+    from bot.screens.adapters import to_aiogram_markup
+    from bot.services.parent_views import admin_confirm_rows
+    from bot.utils.dates import period_label
+    try:
+        to = await deciders(action.student_id)
+        if not to:
+            return
+        title = "💵 Оплата наличными" if action.kind == KIND_CASH else "🧾 Чек об оплате"
+        text = (f"{title}: {action.amount} ₽ — {action.student_name}, {period_label(action.period_month).lower()}\n"
+                f"Родитель ждёт подтверждения. Решение видно и в кабинете → «Ждут решения».")
+        kb = to_aiogram_markup(admin_confirm_rows(action.student_id, action.period_month, "", False,
+                                                  None, action.amount, action.method or "",
+                                                  action_id=action.action_id))
+        bot = _deps["bot"]
+        for tg_id in to:
+            try:
+                if action.file_id and action.file_type == "photo":
+                    await bot.send_photo(tg_id, action.file_id, caption=text, reply_markup=kb)
+                elif action.file_id:
+                    await bot.send_document(tg_id, action.file_id, caption=text, reply_markup=kb)
+                else:
+                    await bot.send_message(tg_id, text, reply_markup=kb)
+            except Exception as exc:
+                logger.warning("Педагогу %s не ушла заявка %s: %s", tg_id, action.action_id, exc)
+    except Exception as exc:
+        logger.warning("Заявка %s педагогам: %s", getattr(action, "action_id", "?"), exc)

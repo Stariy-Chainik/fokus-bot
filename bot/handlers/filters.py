@@ -17,7 +17,7 @@ from __future__ import annotations
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery
 
-from bot.handlers.access import can_teacher_bill, is_admin, is_teacher, is_teacher_or_admin
+from bot.handlers.access import can_decide_payments, can_teacher_bill, is_admin, is_teacher, is_teacher_or_admin
 from bot.models import User
 
 DENIED_TEXT = "Нет доступа"
@@ -56,3 +56,10 @@ class BillingTeacherOnly(_RoleFilter):
 
     def allowed(self, user: User | None) -> bool:
         return can_teacher_bill(user)
+
+
+class PaymentDecider(_RoleFilter):
+    """Кнопки заявок об оплате (`pact:` / `pnay:`): админ или педагог из FULL_BILL_TEACHER_IDS."""
+
+    def allowed(self, user: User | None) -> bool:
+        return can_decide_payments(user)

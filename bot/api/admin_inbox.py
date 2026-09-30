@@ -37,7 +37,10 @@ def _json(data, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
-def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot=None) -> None:
+def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot=None, scope=None) -> None:
+    """scope — async (user) → множество student_id, чьи заявки об оплате видны (кабинет педагога,
+    FULL_BILL_TEACHER_IDS): только наличные и чеки этих учеников, без привязок и заявок педагогов.
+    None — администратор, видно всё."""
     pending_repo = dp["pending_repo"] if "pending_repo" in getattr(dp, "workflow_data", dp) else None
     student_repo = dp["student_repo"]
     payment_service = dp["payment_service"]
@@ -53,10 +56,17 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             "hasFile": bool(a.file_id), "fileType": a.file_type, "rest": rest,
         }
 
+    async def _allowed(user, action) -> bool:
+        if scope is None:
+            return True
+        return action.kind in (KIND_CASH, KIND_RECEIPT) and action.student_id in await scope(user)
+
     async def inbox(request: web.Request, user) -> web.Response:
         items = []
         if pending_repo is not None:
             for a in sorted(await pending_repo.get_open(), key=lambda x: x.created_at):
+                if not await _allowed(user, a):
+                    continue
                 rest = None
                 if a.period_month and a.kind in (KIND_CASH, KIND_RECEIPT):
                     student = await student_repo.get_by_id(a.student_id)
@@ -65,7 +75,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                         rest = sum(v.remainder for v in ledgers.values())
                 items.append(_action_dto(a, rest))
         requests = []
-        if request_repo is not None:
+        if request_repo is not None and scope is None:
             for r in await request_repo.get_pending():
                 requests.append({
                     "id": r.request_id, "kind": "student_request",
@@ -81,7 +91,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         if pending_repo is None or bot is None:
             return _json({"error": "unavailable"}, status=503)
         action = await pending_repo.get_by_id(request.match_info["aid"])
-        if action is None or not action.file_id:
+        if action is None or not action.file_id or not await _allowed(user, action):
             return _json({"error": "not_found"}, status=404)
         try:
             file = await bot.get_file(action.file_id)
@@ -101,7 +111,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         if pending_repo is None:
             return _json({"error": "unavailable"}, status=503)
         action = await pending_repo.get_by_id(request.match_info["aid"])
-        if action is None:
+        if action is None or not await _allowed(user, action):
             return _json({"error": "not_found"}, status=404)
         try:
             body = await request.json()

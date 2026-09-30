@@ -34,6 +34,12 @@ def can_teacher_bill(user: User | None) -> TypeGuard[TeacherUser]:
     return is_teacher(user) and user.teacher_id in settings.billing_teacher_id_set
 
 
+def can_decide_payments(user: User | None) -> bool:
+    """Решать заявки родителей об оплате: админ или педагог из FULL_BILL_TEACHER_IDS
+    (учеников своих групп — проверяется в хендлере через payment_events.may_decide)."""
+    return is_admin(user) or (is_teacher(user) and user.teacher_id in settings.full_bill_teacher_id_set)
+
+
 def is_teacher(user: User | None) -> TypeGuard[TeacherUser]:
     return user is not None and user.teacher_id is not None
 

@@ -11,6 +11,7 @@ SCREENS['t.home'] = async () => {
   const h = await api('/home');
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1];
   const attention = [
+    h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.bills && h.bills.rest ? cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: `к оплате за ${mon.toLowerCase()} · ${fmt(h.bills.rest)}`, r: pill(h.bills.students, 'bad'), go: 't.groups' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',

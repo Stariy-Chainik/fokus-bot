@@ -524,3 +524,54 @@ def test_admin_and_teacher_marking_same_lesson_at_once_credit_once(api, monkeypa
     statuses = asyncio.run(run())
     paid = sum(p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID)
     assert sorted(statuses) == [200, 409] and paid in (2000, 4800)       # кто первый — тот и зачёл, без двойного
+
+
+def test_full_bill_teacher_decides_parent_payment_requests(api, monkeypatch):
+    """FULL_BILL_TEACHER_IDS (Контарева): «Ждут решения» — наличные и чеки учеников своих групп;
+    решение то же, что у администратора: зачитывает оплату, закрывает заявку, повтор — 409."""
+    from bot.repositories.pending_action_repo import DONE, KIND_CASH, KIND_CHILD
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    dp["pending_repo"] = PendingRepoFake()
+    own = asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-0001", "Иванов Иван", YM, 2000, "cash", str(PARENT_TG)))
+    asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-9999", "Чужой ученик", YM, 800, "cash"))
+    asyncio.run(dp["pending_repo"].add(KIND_CHILD, "STU-0001", "Иванов Иван", "", 0, "", str(PARENT_TG)))
+    assert _call(app, "GET", "/api/teacher/inbox")[0] == 403                     # без права — нет раздела
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "TCH-0001")
+    assert _call(app, "GET", "/api/teacher/home")[1]["inbox"] == 1
+    d = _call(app, "GET", "/api/teacher/inbox")[1]
+    assert [a["id"] for a in d["items"]] == [own.action_id] and d["requests"] == []   # чужие и привязки не видны
+    status, r = _call(app, "POST", f"/api/teacher/inbox/{own.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["credited"] == 2000 and dp["pending_repo"].items[0].status == DONE
+    assert _call(app, "POST", f"/api/teacher/inbox/{own.action_id}/decide", json={"approve": True})[0] == 409
+    other = dp["pending_repo"].items[1].action_id
+    assert _call(app, "POST", f"/api/teacher/inbox/{other}/decide", json={"approve": True})[0] == 404
+
+
+def test_payment_request_copy_goes_to_full_bill_teacher_with_buttons(api, monkeypatch):
+    """Новая заявка об оплате — педагогу из FULL_BILL_TEACHER_IDS копия с теми же кнопками pact:/pnay:;
+    решать её он может только для учеников своих групп."""
+    from bot.repositories.pending_action_repo import KIND_CASH
+    from bot.services import payment_events
+    from bot.services.pending_queue import queue_action
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "TCH-0001")
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, reply_markup=None, **kw):
+            sent.append((chat_id, text, [b.callback_data for row in reply_markup.inline_keyboard for b in row]))
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"])
+    student = next(s for s in dp["student_repo"].items if s.student_id == "STU-0001")
+
+    async def run():
+        a = await queue_action(PendingRepoFake(), KIND_CASH, student, YM, amount=2000, method="cash")
+        await asyncio.gather(*payment_events._tasks)
+        return a
+    action = asyncio.run(run())
+    assert len(sent) == 1 and sent[0][0] == TEACHER_TG and "2000 ₽" in sent[0][1]
+    assert sent[0][2] == [f"pact:{action.action_id}:2000:c", f"pnay:{action.action_id}"]
+    teacher = asyncio.run(dp["user_repo"].get_by_tg_id(TEACHER_TG))
+    assert asyncio.run(payment_events.may_decide(teacher, "STU-0001"))
+    assert not asyncio.run(payment_events.may_decide(teacher, "STU-9999"))
