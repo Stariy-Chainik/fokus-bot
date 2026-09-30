@@ -398,3 +398,22 @@ def test_ledger_without_sync_does_not_write(api):
     assert ledgers["TCH-0001"].remainder == 4800 and dp["payment_repo"].rows == []   # 2000 + 2000 + 800
     asyncio.run(dp["payment_service"].ledger_for(student, YM))
     assert dp["payment_repo"].rows                                     # обычный вызов строку-остаток создаёт
+
+
+def test_pay_breakdown_branches_groups_students_match_collection(api):
+    """Плитка «Не оплатили за …»: филиал → группа → ученик; итоги совпадают с плиткой сводки,
+    групповое занятие — в своей группе, индивидуальные — отдельно по педагогу, частичная оплата — 🟡."""
+    app, dp = api
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 3000, ADMIN_TG, ["TCH-0001"]))
+    status, d = _call(app, "GET", f"/api/admin/pay/breakdown?ym={YM}")
+    assert status == 200
+    assert (d["accrued"], d["paid"], d["rest"]) == (5600, 3000, 2600)       # Иванов 4000 + 800, Петрова 800
+    by = {b["id"]: b for b in d["branches"]}
+    grp = by["BRN-0001"]["groups"][0]
+    assert grp["name"] == "БП Джаз" and (grp["accrued"], grp["rest"]) == (1600, 1600)
+    ind = by["IND"]["groups"][0]
+    assert ind["name"] == "Индивидуальные — Река Станислав"
+    ivanov = ind["students"][0]
+    assert (ivanov["accrued"], ivanov["paid"], ivanov["rest"], ivanov["status"]) == (4000, 3000, 1000, "partial")
+    # 3000 закрыли первое занятие LES-1 (2000) и 1000 из LES-2; групповое 800 не тронуто
+    assert next(s for s in grp["students"] if s["id"] == "STU-0001")["status"] == "unpaid"

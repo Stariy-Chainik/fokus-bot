@@ -157,6 +157,11 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "activityNew": await _activity_count(request.query.get("seen") or today, strict=bool(request.query.get("seen"))),
         })
 
+    async def pay_breakdown(request: web.Request, user) -> web.Response:
+        """Оплаты месяца: филиалы → группы → ученики (плитка «Не оплатили за …»)."""
+        from bot.services.payment_breakdown import month_breakdown
+        return _json(await month_breakdown(dp, request.query.get("ym") or current_period()))
+
     async def _activity_count(since: str, strict: bool = False) -> int:
         repo = _dp_get(dp, "activity_repo")
         if repo is None:
@@ -567,6 +572,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home), ("GET", "/activity", activity),
+        ("GET", "/pay/breakdown", pay_breakdown),
         ("GET", "/students", students), ("GET", "/students/{sid}", student_card),
         ("GET", "/students/{sid}/lessons", student_lessons), ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/teachers", teachers), ("GET", "/teachers/{tid}", teacher_card),

@@ -129,6 +129,42 @@ const todayTeacherBlock = t => `<details class="acc">
     <div class="accsum">${!t.income && !t.salary ? 'только абонементные занятия — деньги считаются по месяцу' : t.owner ? `выручка ${fmt(t.income)} — руководитель, зарплата в прибыли` : `выручка ${fmt(t.income)} − зарплата ${fmt(t.salary)} = прибыль ${fmt(t.profit)}`}</div>
     ${t.items.map(todayLessonLine).join('')}
   </div></details>`;
+/* Оплаты месяца по филиалам (плитка «Не оплатили за …»): филиалы → группы (раскрываются) → ученики.
+   Цифры — те же, что плитка на сводке (/pay/breakdown). */
+const payStatus = s => s.status === 'paid' ? '✅' : s.status === 'partial' ? '🟡' : '⬜';
+SCREENS['a.unpaid'] = async ({ ym }) => {
+  const d = await api(`/pay/breakdown?ym=${ym}`);
+  const mon = MON_NOM[+ym.slice(5) - 1];
+  return { title: `Оплаты · ${mon}`, html: `
+    <div class="kpis">${kpi(fmt(d.rest), `не оплачено за ${mon.toLowerCase()}`, d.rest ? 'bad' : 'ok')}${kpi(fmt(d.paid), `оплачено из ${fmt(d.accrued)}`, 'ok')}</div>
+    <div class="eyebrow">Филиалы</div>
+    ${list(d.branches.map(b => cell({ lead: b.id === 'IND' ? '👤' : '🏢', plain: true, t: esc(b.name),
+      s: b.rest ? `не оплатили ${plural(b.unpaid, ['ученик', 'ученика', 'учеников'])} · оплачено ${fmt(b.paid)} из ${fmt(b.accrued)}` : `всё оплачено · ${fmt(b.accrued)}`,
+      r: b.rest ? `<b class="money bad">${fmt(b.rest)}</b>` : pill('✓', 'ok'), go: 'a.unpaid.branch', p: { ym, bid: b.id } })))}
+    <p class="hint" style="margin-top:8px">Долг — начислено за месяц минус оплачено. Индивидуальные занятия — отдельно, по педагогам.</p>` };
+};
+const unpaidGroup = (g, ym) => `<details class="acc">
+  <summary><span><span class="chev">›</span>${esc(plainName(g.name))} <span class="hint">· оплатили ${g.students.length - g.unpaid} из ${g.students.length}</span></span>
+    <span class="r ${g.rest ? 'money bad' : 'hint'}">${g.rest ? fmt(g.rest) : '✓'}</span></summary>
+  <div class="accbody">
+    <div class="accsum">начислено ${fmt(g.accrued)} · оплачено ${fmt(g.paid)}${g.rest ? ` · долг ${fmt(g.rest)}` : ''}</div>
+    ${g.students.map(st => `<button class="lesson-line pick" data-go="a.bill" data-p='${esc(JSON.stringify({ ym, sid: st.id }))}'>
+      <span style="width:22px;text-align:center">${payStatus(st)}</span>
+      <span>${esc(st.name)}<div class="d">${st.status === 'paid' ? `оплачено ${fmt(st.paid)}` : st.status === 'partial' ? `оплачено ${fmt(st.paid)} из ${fmt(st.accrued)}` : `начислено ${fmt(st.accrued)}`}</div></span>
+      <span class="amt ${st.rest ? 'money bad' : 'hint'}">${st.rest ? fmt(st.rest) : 'оплачено'}</span></button>`).join('')}
+  </div></details>`;
+SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {
+  const d = await api(`/pay/breakdown?ym=${ym}`);
+  const b = d.branches.find(x => x.id === bid);
+  if (!b) return { title: 'Оплаты', html: '<div class="empty">Нет начислений</div>' };
+  const debt = b.groups.filter(g => g.rest), done = b.groups.filter(g => !g.rest);
+  return { title: b.name, html: `
+    <div class="card pad"><div style="font-size:24px;font-weight:800" class="${b.rest ? 'money bad' : 'money ok'}">${b.rest ? fmt(b.rest) : '✓ всё оплачено'}</div>
+      <div class="hint">${MON_NOM[+ym.slice(5) - 1]} · оплачено ${fmt(b.paid)} из ${fmt(b.accrued)}${b.rest ? ` · не оплатили ${plural(b.unpaid, ['ученик', 'ученика', 'учеников'])}` : ''}</div></div>
+    ${debt.length ? `<div class="eyebrow">Группы с долгом</div>${debt.map(g => unpaidGroup(g, ym)).join('')}` : ''}
+    ${done.length ? `<div class="eyebrow">Оплачено полностью</div>${done.map(g => unpaidGroup(g, ym)).join('')}` : ''}
+    <p class="hint" style="margin-top:8px">✅ оплачено · 🟡 частично · ⬜ не оплачено. Тап по ученику — его счёт: там же отмечается оплата.</p>` };
+};
 /* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
    Быстрых действий нет: всё это есть во вкладках, а дубли плиток и кнопок только путали. */
 SCREENS['a.home'] = async () => {
@@ -144,7 +180,7 @@ SCREENS['a.home'] = async () => {
     <div style="margin-top:10px">${h.todayTeachers.map(todayTeacherBlock).join('')}</div>` : '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
   // плитки месяца наверху: кто ещё должен за месяц и ожидаемая прибыль (если все оплатят)
   const tiles = `<div class="kpis" style="margin-bottom:6px">
-      ${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, c.rest ? 'bad' : 'ok', 'a.pay.students', { ym: h.period, g: '', gname: `Не оплатили · ${mon}`, unpaid: true })}
+      ${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, c.rest ? 'bad' : 'ok', 'a.unpaid', { ym: h.period })}
       ${kpi(fmt(h.profitMonth), `ожидаемая прибыль за ${mon.toLowerCase()} · собрано ${c.percent}%`, h.profitMonth < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}
     </div>`;
   return { title: 'Сводка', html: `
