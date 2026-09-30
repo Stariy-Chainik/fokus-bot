@@ -440,6 +440,28 @@ def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monk
     assert sent == []
 
 
+def test_payment_notice_only_for_listed_groups(api, monkeypatch):
+    """PAYMENT_NOTIFY_GROUPS (Лобачева — ЮБ школа): уведомление только за учеников перечисленных групп."""
+    from bot.services import payment_events
+    app, dp = api
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, **kw):
+            sent.append(chat_id)
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"])
+
+    async def pay():
+        await dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 1000, 555, payment_method="cash")
+        await asyncio.gather(*payment_events._tasks)
+    monkeypatch.setattr(settings, "payment_notify_groups", "TCH-0001:GRP-0999")
+    asyncio.run(pay())
+    assert sent == []                                              # ученик не в группе из списка
+    monkeypatch.setattr(settings, "payment_notify_groups", "TCH-0001:GRP-0001")
+    asyncio.run(pay())
+    assert len(sent) == 1
+
+
 def test_revenue_share_individuals_stay_visible_to_their_teacher(api, monkeypatch):
     """Индивидуальные Яковлевой пишутся в служебную группу revenue-share: в её счёте они видны (регрессия 29.09)."""
     from tests.fakes import mk_group

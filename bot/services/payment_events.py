@@ -1,4 +1,5 @@
-"""Уведомления педагогам об оплатах учеников их групп (FULL_BILL_TEACHER_IDS).
+"""Уведомления педагогам об оплатах учеников их групп (FULL_BILL_TEACHER_IDS — все группы
+педагога, PAYMENT_NOTIFY_GROUPS — только перечисленные).
 
 Одна точка для всех путей зачёта: ЮКасса, очередь решений, кабинеты админа и педагога,
 кнопки в боте — все они идут через PaymentService, а он зовёт `payment_received()`.
@@ -25,7 +26,8 @@ def setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_rep
 def payment_received(student_id: str, period: str, amount: int, method: str, actor: int,
                      student_name: str = "") -> None:
     """Запланировать уведомление; вызывается сразу после зачёта оплаты."""
-    if not _deps.get("bot") or amount <= 0 or not settings.full_bill_teacher_id_set:
+    if not _deps.get("bot") or amount <= 0 or not (settings.full_bill_teacher_id_set
+                                                    or settings.payment_notify_group_map):
         return
     task = asyncio.get_running_loop().create_task(
         _send(student_id, period, amount, method, int(actor or 0), student_name))
@@ -34,14 +36,19 @@ def payment_received(student_id: str, period: str, amount: int, method: str, act
 
 
 async def recipients(student_id: str, actor: int) -> list[int]:
-    """tg_id педагогов с полным счётом, в чьих группах учится ученик; кто отметил сам — не уведомляем."""
+    """tg_id педагогов, которым интересна оплата ученика; кто отметил сам — не уведомляем.
+
+    С полным счётом — если ученик в любой группе педагога; по списку групп — если в одной из них.
+    """
     groups = set(await _deps["sg"].get_groups_for_student(student_id))
+    full, by_group = settings.full_bill_teacher_id_set, settings.payment_notify_group_map
     out: list[int] = []
     for u in await _deps["users"].get_all():
         tid = u.teacher_id
-        if not tid or tid not in settings.full_bill_teacher_id_set or u.tg_id == actor:
+        if not tid or u.tg_id == actor or u.tg_id in out:
             continue
-        if groups & set(await _deps["tg"].get_groups_for_teacher(tid)):
+        if groups & by_group.get(tid, set()) or (
+                tid in full and groups & set(await _deps["tg"].get_groups_for_teacher(tid))):
             out.append(u.tg_id)
     return out
 

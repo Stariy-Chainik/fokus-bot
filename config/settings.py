@@ -230,6 +230,20 @@ class Settings(BaseSettings):
     def full_bill_teacher_id_set(self) -> set:
         return {t.strip() for t in self.full_bill_teacher_ids.replace("|", ",").split(",") if t.strip()}
 
+    # Уведомления об оплатах учеников отдельных групп: TCH-XXXX:GRP-XXXX,... (пара на каждую группу).
+    # На проде Лобачева — ЮБ школа (решение владельца 30.09.2026).
+    payment_notify_groups: str = Field(default="", alias="PAYMENT_NOTIFY_GROUPS")
+
+    @property
+    def payment_notify_group_map(self) -> dict:
+        """teacher_id → {group_id} — за оплаты учеников каких групп педагог получает уведомление."""
+        out: dict[str, set] = {}
+        for pair in self.payment_notify_groups.replace("|", ",").split(","):
+            tid, _, gid = pair.strip().partition(":")
+            if tid.strip() and gid.strip():
+                out.setdefault(tid.strip(), set()).add(gid.strip())
+        return out
+
     @property
     def senior_teacher_id_set(self) -> set:
         return {t.strip() for t in self.senior_teacher_ids.replace("|", ",").split(",") if t.strip()}

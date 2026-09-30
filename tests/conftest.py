@@ -8,6 +8,7 @@ _RESET = {
     "direct_pay_teacher_ids": "",
     "billing_teacher_ids": "",
     "full_bill_teacher_ids": "",
+    "payment_notify_groups": "",
     "revenue_share_groups": "",
     "salary_duration_groups": "",
     "shift_groups": "",
