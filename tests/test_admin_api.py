@@ -387,3 +387,14 @@ def test_student_lessons_by_month_with_share_and_paid_mark(api):
     assert (d["total"], d["paid"]) == (4800, 2000)
     assert _call(app, "GET", f"/api/admin/students/STU-0002/lessons?ym={YM}")[1]["lessons"][0]["id"] == "LES-3"
     assert _call(app, "GET", "/api/admin/students/STU-9999/lessons")[0] == 404
+
+
+def test_ledger_without_sync_does_not_write(api):
+    """Экраны-списки считают остаток без записи строки-остатка: запись по каждому ученику группы
+    делала сводку педагога 11-секундной (30.09.2026)."""
+    _app, dp = api
+    student = dp["student_repo"].items[0]
+    ledgers = asyncio.run(dp["payment_service"].ledger_for(student, YM, sync=False))
+    assert ledgers["TCH-0001"].remainder == 4800 and dp["payment_repo"].rows == []   # 2000 + 2000 + 800
+    asyncio.run(dp["payment_service"].ledger_for(student, YM))
+    assert dp["payment_repo"].rows                                     # обычный вызов строку-остаток создаёт

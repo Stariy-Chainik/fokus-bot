@@ -200,7 +200,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             elif g is not None and g.billing_mode == GroupBillingMode.SUBSCRIPTION:
                 lkey = ("ledger", sid, period)
                 if lkey not in cache:
-                    cache[lkey] = await payment_service.ledger_for(students[sid], period)
+                    cache[lkey] = await payment_service.ledger_for(students[sid], period, sync=False)
                 sub = cache[lkey].get(f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}")
                 out.append(None if sub is None or sub.accrued <= 0
                            else ("sub_paid" if sub.remainder <= 0 else "sub_unpaid"))

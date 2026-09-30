@@ -87,6 +87,9 @@ def test_confirm_writes_method_to_column_14():
     repo = _Repo([{"payment_id": "PAY-000001"}])
     assert asyncio.run(repo.confirm("PAY-000001", 7, "cash"))
     assert (2, 14, "cash") in repo.updated
+    # все поля строки — одним запросом к Google (раньше 5 запросов по ~0,25 с)
+    assert [c[0] for c in repo.ws.calls if c[0] in ("batch_update", "update")] == ["batch_update"]
+    assert len(next(c[1] for c in repo.ws.calls if c[0] == "batch_update")) == 5
 
 
 def test_confirm_period_writes_method_to_each_paid_row():

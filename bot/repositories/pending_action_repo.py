@@ -136,9 +136,8 @@ class PendingActionRepository(BaseRepository):
                 if row_idx is None:
                     return closed
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                await self._update_cell(row_idx, _STATUS_COL, status)
-                await self._update_cell(row_idx, _DECIDED_AT_COL, now)
-                await self._update_cell(row_idx, _DECIDED_BY_COL, decided_by_tg_id)
+                await self._update_cells(row_idx, {_STATUS_COL: status, _DECIDED_AT_COL: now,
+                                                   _DECIDED_BY_COL: decided_by_tg_id})
                 closed += 1
 
     async def claim(self, action_id: str, status: str, decided_by_tg_id: int = 0) -> bool:

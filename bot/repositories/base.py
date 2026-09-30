@@ -83,6 +83,10 @@ def _norm(value: Any) -> str:
 class BaseRepository:
     # Кеш разделяется между всеми инстансами: sheet_name → (records, timestamp)
     _cache: dict[str, tuple[list, float]] = {}
+    # Разобранные строки (dataclass'ы) поверх кеша записей: номер версии листа растёт при любой
+    # правке/сбросе кеша — пока он тот же и список записей тот же, парсинг не повторяется.
+    _gen: dict[str, int] = {}
+    _parsed: dict[str, tuple[int, int, list]] = {}
     # Замок на лист: «найти строку → записать» не перемешивается между корутинами
     _locks: dict[str, asyncio.Lock] = {}
     # Заголовки листов (строка 1) — для проверки ключевой ячейки по живому листу
@@ -152,6 +156,20 @@ class BaseRepository:
             )
             raise
 
+    def _sync_update_cells(self, row_index: int, cells: dict[int, Any]) -> None:
+        """Несколько ячеек строки — одним запросом (batch_update): каждое update_cell — ~0,25 с,
+        подтверждение оплаты писало 10–15 ячеек подряд и отвечало 4–13 с."""
+        from gspread.utils import rowcol_to_a1
+        t0 = time.monotonic()
+        data = [{"range": rowcol_to_a1(row_index, col), "values": [[value]]} for col, value in cells.items()]
+        try:
+            _with_retry(self._ws.batch_update, data, raw=False)     # USER_ENTERED — как update_cell
+            logger.info("SHEETS update_cells %s row=%d cols=%s in %.0f ms", self._sheet_name, row_index,
+                        ",".join(str(c) for c in cells), (time.monotonic() - t0) * 1000)
+        except Exception as exc:
+            logger.error("Ошибка обновления ячеек строки %d в листе %s: %s", row_index, self._sheet_name, exc)
+            raise
+
     def _sync_row_values(self, row_index: int) -> list:
         return _with_retry(self._ws.row_values, row_index)
 
@@ -214,7 +232,11 @@ class BaseRepository:
 
     # ── Инвалидация кеша ──────────────────────────────────────────────────────
 
+    def _bump(self) -> None:
+        BaseRepository._gen[self._sheet_name] = BaseRepository._gen.get(self._sheet_name, 0) + 1
+
     def _invalidate_cache(self) -> None:
+        self._bump()
         BaseRepository._cache.pop(self._sheet_name, None)
 
     # ── Правка кеша на месте (экономит чтение листа после каждой записи) ─────
@@ -236,6 +258,7 @@ class BaseRepository:
 
     def _patch_cache(self, row_index: int, values: list[Any] | None = None,
                      cell: tuple[int, Any] | None = None, delete: bool = False, append: bool = False) -> None:
+        self._bump()
         records = self._cached_records()
         headers = BaseRepository._headers.get(self._sheet_name)
         if records is None or headers is None:
@@ -270,7 +293,23 @@ class BaseRepository:
         480-й каждый запрос кабинета читал Google сам (по 0,3–0,7 с на лист).
         """
         records: list[dict[str, Any]] = await asyncio.to_thread(self._sync_all_records)
+        self._bump()
         BaseRepository._cache[self._sheet_name] = (records, time.monotonic())
+
+    async def _parsed_all(self, parse) -> list:
+        """Все строки листа, разобранные `parse`, — один раз на версию листа (копия списка).
+
+        Сводка педагога вызывала get_all() занятий 124 раза за запрос: 235 тыс. dataclass'ов.
+        Объекты общие между вызовами — менять их можно только перед записью в лист.
+        """
+        records = await self._all_records()
+        gen = BaseRepository._gen.get(self._sheet_name, 0)
+        memo = BaseRepository._parsed.get(self._sheet_name)
+        if memo is not None and memo[0] == gen and memo[1] == id(records):
+            return list(memo[2])
+        items = [parse(r) for r in records]
+        BaseRepository._parsed[self._sheet_name] = (gen, id(records), items)
+        return list(items)
 
     async def _all_records(self) -> list[dict[str, Any]]:
         """Читает все записи листа с TTL-кешированием."""
@@ -279,6 +318,7 @@ class BaseRepository:
         if cached and (now - cached[1]) < _CACHE_TTL:
             return cached[0]
         records: list[dict[str, Any]] = await asyncio.to_thread(self._sync_all_records)
+        self._bump()
         BaseRepository._cache[self._sheet_name] = (records, now)
         return records
 
@@ -309,3 +349,11 @@ class BaseRepository:
     async def _update_cell(self, row_index: int, col: int, value: Any) -> None:
         await asyncio.to_thread(self._sync_update_cell, row_index, col, value)
         self._patch_cache(row_index, cell=(col, value))
+
+    async def _update_cells(self, row_index: int, cells: dict[int, Any]) -> None:
+        """Записать несколько ячеек строки одним запросом к Google ({колонка: значение})."""
+        if not cells:
+            return
+        await asyncio.to_thread(self._sync_update_cells, row_index, cells)
+        for col, value in cells.items():
+            self._patch_cache(row_index, cell=(col, value))

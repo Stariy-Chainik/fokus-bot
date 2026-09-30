@@ -109,8 +109,7 @@ class PaymentRepository(BaseRepository):
         async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 15, lesson_ids)
-            await self._update_cell(row_idx, 11, now_str())
+            await self._update_cells(row_idx, {15: lesson_ids, 11: now_str()})
         return True
 
     async def update_amount(self, payment_id: str, new_amount: int, student_id: str = "") -> bool:
@@ -118,9 +117,9 @@ class PaymentRepository(BaseRepository):
         async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 5, new_amount)   # total_amount
-            await self._update_cell(row_idx, 11, ts_now)      # updated_at
-            self._invalidate_cache()
+            # кеш правится на месте (_patch_cache): полный сброс листа заставлял следующий запрос
+            # скачивать все ~1000 строк оплат заново (0,4 с на каждую правку остатка)
+            await self._update_cells(row_idx, {5: new_amount, 11: ts_now})   # total_amount, updated_at
             return True
 
     async def confirm_all_for_period(
@@ -142,11 +141,8 @@ class PaymentRepository(BaseRepository):
             async with self._locked_row(payment_id=payment_id) as row_idx:
                 if row_idx is None:
                     continue
-                await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)
-                await self._update_cell(row_idx, 7, ts_now)
-                await self._update_cell(row_idx, 8, confirmed_by_tg_id)
-                await self._update_cell(row_idx, 11, ts_now)
-                await self._update_cell(row_idx, 14, payment_method)
+                await self._update_cells(row_idx, {6: PaymentStatus.PAID.value, 7: ts_now, 8: confirmed_by_tg_id,
+                                                   11: ts_now, 14: payment_method})
                 count += 1
         if count:
             self._invalidate_cache()
@@ -161,9 +157,7 @@ class PaymentRepository(BaseRepository):
         async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 6, PaymentStatus.PAID.value)  # status
-            await self._update_cell(row_idx, 7, ts_now)                     # paid_at
-            await self._update_cell(row_idx, 8, confirmed_by_tg_id)         # confirmed_by_tg_id
-            await self._update_cell(row_idx, 11, ts_now)                    # updated_at
-            await self._update_cell(row_idx, 14, payment_method)             # payment_method
+            # status, paid_at, confirmed_by_tg_id, updated_at, payment_method — одним запросом
+            await self._update_cells(row_idx, {6: PaymentStatus.PAID.value, 7: ts_now, 8: confirmed_by_tg_id,
+                                               11: ts_now, 14: payment_method})
             return True

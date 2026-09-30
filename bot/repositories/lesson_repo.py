@@ -31,7 +31,7 @@ def _row_to_lesson(row: dict) -> Lesson:
 
 class LessonRepository(BaseRepository):
     async def get_all(self) -> list[Lesson]:
-        return [_row_to_lesson(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_lesson)
 
     async def get_by_id(self, lesson_id: str) -> Optional[Lesson]:
         for ls in await self.get_all():

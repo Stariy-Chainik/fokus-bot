@@ -94,7 +94,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                 if a.period_month and a.kind in (KIND_CASH, KIND_RECEIPT):
                     student = await student_repo.get_by_id(a.student_id)
                     if student is not None:
-                        ledgers = await payment_service.ledger_for(student, a.period_month)
+                        ledgers = await payment_service.ledger_for(student, a.period_month, sync=False)
                         rest = sum(v.remainder for v in ledgers.values())
                 items.append(_action_dto(a, rest, user, names))
         requests = []

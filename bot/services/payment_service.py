@@ -421,11 +421,13 @@ class PaymentService:
             agg.name = ", ".join(names)
             agg.group = True
 
-    async def ledger_for(self, student: Student, period_month: str) -> dict:
+    async def ledger_for(self, student: Student, period_month: str, sync: bool = True) -> dict:
         """Накопительный счёт по педагогам за месяц: teacher_id → TeacherLedger.
 
         Синхронизирует строку-остаток (pending) в листе: остаток = начислено − оплачено.
         Оплаченные строки не трогаются — их может быть несколько (оплата после каждого урока).
+        sync=False — только посчитать (экраны-списки): запись остатка по каждому ученику группы
+        делала сводку педагога 11-секундной после новой отметки занятия.
         """
         bills = await self.compute_bills_for_student_period(student.student_id, period_month)
         if not bills:
@@ -441,7 +443,9 @@ class PaymentService:
             pending = next((r for r in t_rows if r.status != PaymentStatus.PAID), None)
             paid = sum(r.total_amount for r in paid_rows)
             remainder = max(agg.total - paid, 0)
-            if pending is None:
+            if not sync:
+                pass                                  # остаток считается из accrued − paid (TeacherLedger.remainder)
+            elif pending is None:
                 if remainder > 0:
                     pending = await self._create_invoice(student, period_month, teacher_id, agg.name, remainder)
             elif pending.total_amount != remainder:

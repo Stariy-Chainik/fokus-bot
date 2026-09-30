@@ -221,3 +221,20 @@ def test_payment_writes_verify_the_student_when_ids_are_duplicated():
     repo = PaymentRepository(FakeSheetsClient(ws), "student_payments")
     assert run(repo.confirm("PAY-000863", 664410718, "receipt_bank", student_id="STU-0142")) is True
     assert ws.rows[0][5] == "pending" and ws.rows[1][5] == "paid"
+
+
+def test_parsed_lessons_reused_until_sheet_changes():
+    """Занятия разбираются один раз на версию листа; запись в лист сбрасывает разобранный список."""
+    from bot.repositories.lesson_repo import LessonRepository
+    headers = ["lesson_id", "teacher_id", "teacher_name", "type", "student_1_id", "student_1_name",
+               "student_2_id", "student_2_name", "date", "duration_min", "earned", "recorded_at", "updated_at"]
+    BaseRepository._cache.pop("lessons", None)
+    BaseRepository._headers.pop("lessons", None)
+    ws = FakeWorksheet(headers, [["LES-1", "TCH-1", "Р", "individual", "STU-1", "А", "", "", "2026-09-01", 45, 0, "x", "x"]])
+    repo = LessonRepository(FakeSheetsClient(ws), "lessons")
+    a, b = run(repo.get_all()), run(repo.get_all())
+    assert a[0] is b[0] and a is not b                     # объекты общие, список — копия
+    run(repo._update_cell(2, 10, 60))
+    c = run(repo.get_all())
+    assert c[0] is not a[0] and c[0].duration_min == 60
+    BaseRepository._cache.pop("lessons", None)

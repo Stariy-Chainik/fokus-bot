@@ -601,6 +601,16 @@ class FakeWorksheet:
         padded[col - 1] = value
         self.rows[row - 2] = padded
 
+    def batch_update(self, data, raw=True, **kw):
+        from gspread.utils import a1_to_rowcol
+        self.calls.append(("batch_update", [d["range"] for d in data]))
+        for d in data:                       # по ячейке — как update_cell, чтобы проверки записей не зависели от способа
+            row, col = a1_to_rowcol(d["range"])
+            self.calls.append(("update_cell", row, col, d["values"][0][0]))
+            padded = self._pad(self.rows[row - 2])
+            padded[col - 1] = d["values"][0][0]
+            self.rows[row - 2] = padded
+
     def update(self, range_name: str, values):
         self.calls.append(("update", range_name))
         self.rows[int(range_name[1:]) - 2] = list(values[0])
