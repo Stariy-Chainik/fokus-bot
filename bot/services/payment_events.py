@@ -74,8 +74,7 @@ async def _send(student_id: str, period: str, amount: int, method: str, actor: i
             name = s.name if s else student_id
         head = f"💳 Оплата {amount} ₽ — {name}, {period_label(period).lower()}"
         if by_teacher and who is not None:
-            t = await _deps["teachers"].get_by_id(who.teacher_id) if _deps.get("teachers") else None
-            tname = t.name if t else who.teacher_id
+            tname = await teacher_name(who.teacher_id)
             how = ("💵 Наличные — деньги у педагога" if method == CASH
                    else payment_methods.label(method, confirmed_by_tg_id=actor).split(" — ")[0])
             text = f"{head}\n{how}\nПодтвердил педагог: {tname}"
@@ -93,18 +92,76 @@ async def _send(student_id: str, period: str, amount: int, method: str, actor: i
 # ── заявки родителей об оплате (наличные, чеки) — педагогам, которые решают их сами ──
 
 def request_created(action) -> None:
-    """Новая заявка в очереди решений: педагогу из FULL_BILL_TEACHER_IDS — копия с кнопками.
+    """Новая заявка в очереди решений.
 
-    Кнопки те же, что у администратора (`pact:` / `pnay:` по action_id), поэтому решение
-    одно на всех: кто нажал первым, тот и зачёл, остальным бот ответит «уже обработано».
+    Наличные у педагога (held_by) — администраторам: «зачтите, когда получите деньги».
+    Заявка родителя — педагогу из FULL_BILL_TEACHER_IDS копия с кнопками: чек он подтверждает
+    сам (`pact:`), наличные — только «✋ Деньги у меня» (тот же `pact:`, хендлер не зачитывает
+    оплату педагогу, а передаёт заявку администратору). Решение одно на всех: `claim()`.
     """
     from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
-    if (not _deps.get("bot") or action is None or action.kind not in (KIND_CASH, KIND_RECEIPT)
-            or not settings.full_bill_teacher_id_set):
+    if not _deps.get("bot") or action is None or action.kind not in (KIND_CASH, KIND_RECEIPT):
         return
-    task = asyncio.get_running_loop().create_task(_send_request(action))
+    if action.held_by:
+        _spawn(_send_held(action))
+    elif settings.full_bill_teacher_id_set:
+        _spawn(_send_request(action))
+
+
+def cash_held(action, teacher_id: str) -> None:
+    """Педагог подтвердил, что наличные родителя у него — администраторам заявка на зачёт."""
+    if _deps.get("bot") and action is not None:
+        action.held_by = teacher_id
+        _spawn(_send_held(action))
+
+
+def _spawn(coro) -> None:
+    task = asyncio.get_running_loop().create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+
+
+def held_rows(action) -> list:
+    """Кнопки администратору по наличным у педагога: зачесть, когда деньги переданы."""
+    from bot.screens import cb
+    return [[cb(f"✅ Деньги получены — зачесть {action.amount} ₽", f"pact:{action.action_id}:{action.amount}:c")],
+            [cb("❌ Отклонить", f"pnay:{action.action_id}")]]
+
+
+def teacher_rows(action) -> list:
+    """Кнопки педагогу по заявке родителя: чек — подтвердить, наличные — «деньги у меня»."""
+    from bot.repositories.pending_action_repo import KIND_CASH
+    from bot.screens import cb
+    from bot.services.payment_methods import callback_code
+    if action.kind == KIND_CASH:
+        return [[cb("✋ Деньги у меня — передам администратору", f"pact:{action.action_id}:{action.amount}:c")],
+                [cb("❌ Денег не получала", f"pnay:{action.action_id}")]]
+    return [[cb("✅ Подтвердить оплату", f"pact:{action.action_id}:{action.amount}:{callback_code(action.method or '')}")],
+            [cb("❌ Не подтверждать", f"pnay:{action.action_id}")]]
+
+
+async def teacher_name(teacher_id: str) -> str:
+    t = await _deps["teachers"].get_by_id(teacher_id) if _deps.get("teachers") else None
+    return t.name if t else teacher_id
+
+
+async def _send_held(action) -> None:
+    from bot.screens.adapters import to_aiogram_markup
+    from bot.utils.dates import period_label
+    try:
+        admins = [u.tg_id for u in await _deps["users"].get_all() if u.is_admin]
+        text = (f"💵 Наличные у педагога: {action.amount} ₽ — {action.student_name}, "
+                f"{period_label(action.period_month).lower()}\n"
+                f"Деньги у: {await teacher_name(action.held_by)}\n"
+                f"Зачтите оплату, когда педагог передаст деньги. Заявка — в «Ждут решения».")
+        kb = to_aiogram_markup(held_rows(action))
+        for tg_id in admins:
+            try:
+                await _deps["bot"].send_message(tg_id, text, reply_markup=kb)
+            except Exception as exc:
+                logger.warning("Админу %s не ушла заявка %s: %s", tg_id, action.action_id, exc)
+    except Exception as exc:
+        logger.warning("Наличные у педагога %s: %s", getattr(action, "action_id", "?"), exc)
 
 
 async def deciders(student_id: str) -> list[int]:
@@ -134,7 +191,6 @@ async def may_decide(user, student_id: str) -> bool:
 async def _send_request(action) -> None:
     from bot.repositories.pending_action_repo import KIND_CASH
     from bot.screens.adapters import to_aiogram_markup
-    from bot.services.parent_views import admin_confirm_rows
     from bot.utils.dates import period_label
     try:
         to = await deciders(action.student_id)
@@ -142,10 +198,9 @@ async def _send_request(action) -> None:
             return
         title = "💵 Оплата наличными" if action.kind == KIND_CASH else "🧾 Чек об оплате"
         text = (f"{title}: {action.amount} ₽ — {action.student_name}, {period_label(action.period_month).lower()}\n"
-                f"Родитель ждёт подтверждения. Решение видно и в кабинете → «Ждут решения».")
-        kb = to_aiogram_markup(admin_confirm_rows(action.student_id, action.period_month, "", False,
-                                                  None, action.amount, action.method or "",
-                                                  action_id=action.action_id))
+                + ("Если деньги у вас — нажмите «Деньги у меня», оплату зачтёт администратор, когда вы их передадите."
+                   if action.kind == KIND_CASH else "Родитель ждёт подтверждения. Решение видно и в кабинете → «Ждут решения»."))
+        kb = to_aiogram_markup(teacher_rows(action))
         bot = _deps["bot"]
         for tg_id in to:
             try:

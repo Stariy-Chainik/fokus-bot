@@ -251,6 +251,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "unrated": unrated,
             "bills": await _bills_summary(teacher, period) if can_bill else None,
             "inbox": await _queue_count(teacher, user),     # заявки об оплате (FULL_BILL_TEACHER_IDS)
+            "heldCash": await _held_cash(teacher) if can_bill else 0,   # наличные на руках — передать админу
             # «сегодня»: занятия дня целиком, чтобы сводка не ходила за ними вторым запросом
             "lessonsToday": len(today_lessons),
             "todayLessons": today_items,
@@ -726,8 +727,17 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if teacher.teacher_id not in settings.full_bill_teacher_id_set or pending_repo is None:
             return None
         members = await _queue_scope(user)
+        # наличные, которые уже «у меня», решения педагога не ждут — их зачтёт администратор
         return sum(1 for a in await pending_repo.get_open()
-                   if a.kind in (KIND_CASH, KIND_RECEIPT) and a.student_id in members)
+                   if a.kind in (KIND_CASH, KIND_RECEIPT) and a.student_id in members and not a.held_by)
+
+    async def _held_cash(teacher) -> int:
+        """Наличные у педагога, которые ещё не зачёл администратор (не переданы)."""
+        pending_repo = _dp_get(dp, "pending_repo")
+        if pending_repo is None:
+            return 0
+        return sum(a.amount for a in await pending_repo.get_open()
+                   if a.kind == KIND_CASH and a.held_by == teacher.teacher_id)
 
     async def _full_bill(teacher, sid: str) -> bool:
         """Полный счёт ученика: педагог из FULL_BILL_TEACHER_IDS или ученик в группе из FULL_BILL_GROUPS."""
@@ -857,11 +867,16 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "bad_request"}, status=400)
         period = (body or {}).get("ym") or current_period()
         key, amount = (body or {}).get("key"), (body or {}).get("amount")
-        method = (body or {}).get("method") or ADMIN_MANUAL
+        method = (body or {}).get("method") or RECEIPT_BANK
         lessons = [x for x in ((body or {}).get("lessonIds") or []) if isinstance(x, str)]
         if not isinstance(key, str) or not key or not isinstance(amount, int) or amount <= 0:
             return _json({"error": "bad_request", "message": "Нужны начисление и сумма"}, status=400)
-        if method not in (ADMIN_MANUAL, CASH, RECEIPT_BANK):
+        if method in (CASH, ADMIN_MANUAL):
+            # наличные педагог не зачитывает (решение владельца 30.09.2026): «Приняла наличные» →
+            # заявка администратору, он зачтёт, когда получит деньги (POST …/cash)
+            return _json({"error": "cash_via_admin",
+                          "message": "Наличные зачитывает администратор — отметьте «Приняла наличные»"}, status=400)
+        if method != RECEIPT_BANK:
             return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
         if not await visibility.is_visible(teacher.teacher_id, sid):
             return _json({"error": "not_found"}, status=404)
@@ -893,6 +908,59 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         await settle_actions(_dp_get(dp, "pending_repo"), payment_service, s, period, credited, user.tg_id)
         await notify_payment_confirmed(notifier, s, period, credited)
         return _json({"credited": credited, "rows": rows, "overpaid": max(0, credited - rest)})
+
+    @billing_only
+    async def bills_cash(request: web.Request, user, teacher) -> web.Response:
+        """«Приняла наличные»: не оплата, а заявка администратору «деньги у педагога».
+
+        body: {ym, parts: [{key, amount, lessonIds}]}. Выбранные занятия запоминаются намерением
+        на строке-остатке — администратор зачтёт именно их, когда получит деньги.
+        """
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        period = (body or {}).get("ym") or current_period()
+        parts = [p for p in ((body or {}).get("parts") or []) if isinstance(p, dict)]
+        if not parts or any(not isinstance(p.get("key"), str) or not isinstance(p.get("amount"), int)
+                            or p["amount"] <= 0 for p in parts):
+            return _json({"error": "bad_request", "message": "Отметьте, за что приняли деньги"}, status=400)
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        visible = await _visible_marks(teacher, sid, period)
+        full = await _full_bill(teacher, sid)
+        for p in parts:
+            v = visible.get(p["key"])
+            if v is None:
+                return _json({"error": "not_found"}, status=404)
+            ids = [x for x in (p.get("lessonIds") or []) if isinstance(x, str)]
+            if v[1] is not None and p["key"] != teacher.teacher_id and not full:
+                own = {m["lesson_id"] for m in v[1] if not m["paid"]}
+                if not ids or not set(ids) <= own:
+                    return _json({"error": "bad_request", "message": "Отметьте занятия своего направления"}, status=400)
+        total = sum(p["amount"] for p in parts)
+        keys = [p["key"] for p in parts]
+        async with payment_lock(sid, period):
+            rest = rest_for_keys(await payment_service.ledger_for(s, period), keys)
+            if total > rest:
+                return _json({"error": "overpay", "message": f"К оплате осталось {rest} ₽", "rest": rest}, status=409)
+            for p in parts:
+                ids = [x for x in (p.get("lessonIds") or []) if isinstance(x, str)]
+                if ids:
+                    await payment_service.set_payment_intent(s, period, p["key"], ids)
+            from bot.services.pending_queue import queue_action
+            action = await queue_action(_dp_get(dp, "pending_repo"), KIND_CASH, s, period, amount=total,
+                                        method=CASH, comment=f"принял педагог {teacher.name}",
+                                        teacher_keys=keys, held_by=teacher.teacher_id)
+        if action is None:
+            return _json({"error": "unavailable"}, status=503)
+        logger.info("Mini App: педагог %s принял наличные %d ₽ — %s %s (%s)",
+                    teacher.teacher_id, total, sid, period, action.action_id)
+        return _json({"ok": True, "actionId": action.action_id, "amount": total})
 
     @billing_only
     async def bills_student_send(request: web.Request, user, teacher) -> web.Response:
@@ -958,6 +1026,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/bills/group/{gid}/send", bills_group_send),
         ("GET", "/bills/student/{sid}", bills_student), ("POST", "/bills/student/{sid}/send", bills_student_send),
         ("GET", "/bills/student/{sid}/marks", bills_marks), ("POST", "/bills/student/{sid}/pay", bills_pay),
+        ("POST", "/bills/student/{sid}/cash", bills_cash),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

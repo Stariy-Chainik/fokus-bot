@@ -206,9 +206,12 @@ SCREENS['a.inbox'] = async () => {
       ${a.amount ? `<div class="money" style="font-weight:800;white-space:nowrap">${fmt(a.amount)}</div>` : ''}
     </div>
     ${a.hasFile ? `<img data-file="/inbox/${a.id}/file" alt="Чек" style="display:block;width:100%;max-height:320px;object-fit:contain;border-radius:10px;margin-top:10px;background:var(--bg)">` : ''}
-    <div style="margin-top:10px">${btn(a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`, 'inboxDecide', { id: a.id, approve: true })}${btn('❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>
+    ${a.note ? `<div class="calm" style="margin-top:10px">${esc(a.note)}</div>` : `<div style="margin-top:10px">${btn(a.approveLabel || (a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`), 'inboxDecide', { id: a.id, approve: true })}${btn(a.rejectLabel || '❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>`}
   </div>`;
+  // наличные на руках у педагогов — контроль администратора: у кого и сколько ещё не передано
+  const held = (d.held || []).length ? `<div class="card pad" style="margin-bottom:10px"><div style="font-weight:700">💵 Наличные у педагогов</div>${d.held.map(h => `<div style="display:flex;justify-content:space-between;margin-top:6px"><span>${esc(h.name)} · ${plural(h.count, ['заявка', 'заявки', 'заявок'])}</span><b class="money">${fmt(h.amount)}</b></div>`).join('')}<div class="hint" style="margin-top:6px">Зачтите оплату, когда педагог передаст деньги.</div></div>` : '';
   return { title: 'Ждут решения', html: `
+    ${ROLE === 'admin' ? held : ''}
     ${d.items.length ? d.items.map(card).join('') : empty('Ничего не ждёт решения', '<p class="hint" style="margin:0">Сюда попадают чеки, наличные и заявки родителей</p>')}
     ${d.requests.length ? `<div class="eyebrow">Заявки педагогов</div>${list(d.requests.map(r => cell({
       lead: '🧑‍🏫', plain: true, cls: 'wrap', t: esc(r.student), s: `${esc(r.comment)} · ${esc(r.createdAt)}`,
@@ -918,6 +921,7 @@ ACT.inboxDecide = async ({ id, approve, amount, force }) => {
   try {
     const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force } });
     closeSheet(); render();
+    if (r.status === 'held') { toast('Передано администратору — он зачтёт, когда получит деньги'); return; }
     toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : (r.status === 'done' ? 'Заявка закрыта — оплата уже была отмечена' : 'Готово')) : 'Отклонено');
   } catch (e) {
     // сумма больше остатка — спрашиваем, что зачесть; повтор решения — сообщаем и обновляем

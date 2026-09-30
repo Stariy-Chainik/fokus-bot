@@ -283,7 +283,7 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
     assert m["ledger"]["remainder"] == 4800
 
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "cash"})
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank"})
     assert status == 200 and r["credited"] == 2000
     assert [p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID] == [2000]
 
@@ -293,12 +293,15 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
                  json={"ym": YM, "key": "TCH-0001", "amount": 0})[0] == 400
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
                  json={"ym": YM, "key": "TCH-0001", "amount": 100, "method": "yookassa"})[0] == 400
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",   # наличные — только через админа
+                      json={"ym": YM, "key": "TCH-0001", "amount": 100, "method": "cash"})
+    assert status == 400 and r["error"] == "cash_via_admin"
 
 
 def test_billing_teacher_cannot_overpay_silently(api, monkeypatch):
     app, _dp = api
     monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
-    body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "cash"}
+    body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "receipt_bank"}
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json=body)
     assert status == 409 and r["needsConfirm"] and r["rest"] == 4800
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "force": True})
@@ -402,7 +405,7 @@ def test_teacher_bill_shows_only_own_directions(api, monkeypatch):
     assert next(x for x in g["students"] if x["id"] == "STU-0001")["rest"] == 4800
     assert _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0002")[0] == 404
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 404
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank"})[0] == 404
 
 
 def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monkeypatch):
@@ -456,7 +459,7 @@ def test_full_bill_only_for_listed_groups(api, monkeypatch):
     monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0001")
     assert _call(app, "GET", url)[1]["total"] == 4800 + 3000                 # ученик группы из списка — полный счёт
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 200
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank"})[0] == 200
 
 
 def test_payment_notice_only_for_listed_groups(api, monkeypatch):
@@ -518,7 +521,7 @@ def test_admin_and_teacher_marking_same_lesson_at_once_credit_once(api, monkeypa
                 "studentId": "STU-0001", "periodMonth": YM, "key": "TCH-0001", "amount": 2000,
                 "method": "cash", "lessonIds": [lesson.lesson_id]})
             t = client.post("/api/teacher/bills/student/STU-0001/pay", headers=teacher_h, json={
-                "ym": YM, "key": "TCH-0001", "amount": 4800, "method": "cash"})
+                "ym": YM, "key": "TCH-0001", "amount": 4800, "method": "receipt_bank"})
             ra, rt = await asyncio.gather(a, t)
             return ra.status, rt.status
         finally:
@@ -531,7 +534,7 @@ def test_admin_and_teacher_marking_same_lesson_at_once_credit_once(api, monkeypa
 def test_full_bill_teacher_decides_parent_payment_requests(api, monkeypatch):
     """FULL_BILL_TEACHER_IDS (Контарева): «Ждут решения» — наличные и чеки учеников своих групп;
     решение то же, что у администратора: зачитывает оплату, закрывает заявку, повтор — 409."""
-    from bot.repositories.pending_action_repo import DONE, KIND_CASH, KIND_CHILD
+    from bot.repositories.pending_action_repo import DONE, KIND_CASH, KIND_CHILD, OPEN
     from tests.test_admin_inbox_api import PendingRepoFake
     app, dp = api
     dp["pending_repo"] = PendingRepoFake()
@@ -544,8 +547,19 @@ def test_full_bill_teacher_decides_parent_payment_requests(api, monkeypatch):
     d = _call(app, "GET", "/api/teacher/inbox")[1]
     assert [a["id"] for a in d["items"]] == [own.action_id] and d["requests"] == []   # чужие и привязки не видны
     status, r = _call(app, "POST", f"/api/teacher/inbox/{own.action_id}/decide", json={"approve": True})
-    assert status == 200 and r["credited"] == 2000 and dp["pending_repo"].items[0].status == DONE
+    # наличные педагог не зачитывает: «деньги у меня» → заявка ждёт администратора
+    assert status == 200 and r["status"] == "held"
+    assert dp["pending_repo"].items[0].status == OPEN and dp["pending_repo"].items[0].held_by == "TCH-0001"
+    assert not [p for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID]
     assert _call(app, "POST", f"/api/teacher/inbox/{own.action_id}/decide", json={"approve": True})[0] == 409
+    assert _call(app, "GET", "/api/teacher/home")[1]["heldCash"] == 0             # счета выключены — без суммы
+    item = _call(app, "GET", "/api/teacher/inbox")[1]["items"][0]
+    assert item["note"] and item["approveLabel"] is None                          # у педагога — только пометка
+    from tests.test_admin_inbox_api import _call as admin_call
+    held = admin_call(dp, "GET", "/api/admin/inbox")[1]
+    assert held["held"] == [{"name": "Река Станислав", "amount": 2000, "count": 1}]
+    status, r = admin_call(dp, "POST", f"/api/admin/inbox/{own.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["credited"] == 2000 and dp["pending_repo"].items[0].status == DONE
     other = dp["pending_repo"].items[1].action_id
     assert _call(app, "POST", f"/api/teacher/inbox/{other}/decide", json={"approve": True})[0] == 404
 
@@ -579,16 +593,17 @@ def test_payment_request_copy_goes_to_full_bill_teacher_with_buttons(api, monkey
     assert not asyncio.run(payment_events.may_decide(teacher, "STU-9999"))
 
 
-def test_cash_scenarios_debt_until_marked_and_admin_told_when_teacher_marks(api, monkeypatch):
-    """1) Родитель сообщил о наличных, но оплату никто не подтвердил — долг остаётся (заявка висит в очереди).
-    2) Педагог подтвердил наличные — администратору приходит сообщение «деньги у педагога»."""
-    from bot.repositories.pending_action_repo import KIND_CASH, OPEN
+def test_cash_scenarios_debt_until_admin_gets_money(api, monkeypatch):
+    """Наличные (решение владельца 30.09.2026): педагог «приняла наличные» — это не оплата, а заявка
+    администратору «деньги у педагога». Долг остаётся, напоминание не уходит; администратор зачитывает,
+    когда получит деньги, — тогда долг закрывается и родителю приходит «оплата подтверждена»."""
+    from bot.repositories.pending_action_repo import OPEN
     from bot.services import payment_events
-    from bot.services.pending_queue import queue_action
-    from tests.test_admin_inbox_api import PendingRepoFake
+    from tests.test_admin_inbox_api import PendingRepoFake, _call as admin_call
     app, dp = api
     monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
     ps = dp["payment_service"]
+    dp["pending_repo"] = PendingRepoFake()
     sent = []
 
     class Bot:
@@ -596,28 +611,33 @@ def test_cash_scenarios_debt_until_marked_and_admin_told_when_teacher_marks(api,
             sent.append((chat_id, text))
     payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"],
                          dp["student_repo"], dp["teacher_repo"])
-    student = next(s for s in dp["student_repo"].items if s.student_id == "STU-0001")
-    before = asyncio.run(ps.compute_debt_map()).get("STU-0001", {}).get(YM, 0)
-    assert before > 0
-    dp["pending_repo"] = PendingRepoFake()
-    action = asyncio.run(queue_action(dp["pending_repo"], KIND_CASH, student, YM, amount=before, method="cash"))
-    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before       # сообщение ≠ оплата: долг на месте
-    assert action.status == OPEN
+    before = asyncio.run(ps.compute_debt_map())["STU-0001"][YM]
 
-    async def pay():                                 # запрос и фоновые уведомления — в одном цикле событий
+    async def cash():                               # запрос и фоновые уведомления — в одном цикле событий
         web_app = web.Application()
         register_teacher_api(web_app, dp)
         client = TestClient(TestServer(web_app))
         await client.start_server()
         try:
-            resp = await client.post("/api/teacher/bills/student/STU-0001/pay",
+            resp = await client.post("/api/teacher/bills/student/STU-0001/cash",
                                      headers={"Authorization": f"tma {make_init_data(user_id=TEACHER_TG)}"},
-                                     json={"ym": YM, "key": "TCH-0001", "amount": 1000, "method": "cash"})
+                                     json={"ym": YM, "parts": [{"key": "TCH-0001", "amount": 1000}]})
             await asyncio.gather(*payment_events._tasks)
-            return resp.status
+            return resp.status, await resp.json()
         finally:
             await client.close()
-    assert asyncio.run(pay()) == 200
-    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before - 1000
+    status, r = asyncio.run(cash())
+    assert status == 200 and r["amount"] == 1000
+    action = dp["pending_repo"].items[0]
+    assert action.status == OPEN and action.held_by == "TCH-0001"
+    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before           # деньги не у школы — долг на месте
+    assert _call(app, "GET", "/api/teacher/home")[1]["heldCash"] == 1000
     admin_msgs = [t for c, t in sent if c == ADMIN_TG]
-    assert admin_msgs and "1000 ₽" in admin_msgs[0] and "деньги у педагога" in admin_msgs[0]
+    assert admin_msgs and "Наличные у педагога" in admin_msgs[0] and "Река Станислав" in admin_msgs[0]
+    from bot.services.pending_queue import awaiting_periods
+    assert ("STU-0001", YM) in asyncio.run(awaiting_periods(dp["pending_repo"]))   # напоминание не уйдёт
+
+    status, r = admin_call(dp, "POST", f"/api/admin/inbox/{action.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["credited"] == 1000
+    assert asyncio.run(ps.compute_debt_map())["STU-0001"][YM] == before - 1000
+    assert _call(app, "GET", "/api/teacher/home")[1]["heldCash"] == 0

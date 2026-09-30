@@ -11,6 +11,7 @@ from aiohttp import web
 
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services.payment_service import build_debtor_rows
+from bot.services.pending_queue import awaiting_periods
 from bot.utils.attendees import parse_attendees
 from bot.utils.dates import current_period, display_period
 from bot.utils.locks import InProgressGuard
@@ -90,6 +91,11 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         try:
             current = current_period()
             rows = await _debtor_rows()
+            # родитель сообщил об оплате (наличные у педагога, чек) — ждём решения, не напоминаем
+            awaiting = await awaiting_periods(_dp_get(dp, "pending_repo"))
+            waiting = {d.student.student_id for d in rows
+                       if any((d.student.student_id, p) in awaiting for p in d.periods if p < current)}
+            rows = [d for d in rows if d.student.student_id not in waiting]
             targets = [d for d in rows if d.closed_total > 0 and d.has_parent]
             skipped = sum(1 for d in rows if d.closed_total > 0 and not d.has_parent)
             sent = failed = 0
@@ -109,7 +115,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         finally:
             _reminding.discard(key)
         logger.info("Mini App: напоминания о долгах от %s — доставлено %d, не доставлено %d", user.tg_id, sent, failed)
-        return _json({"sent": sent, "failed": failed, "skipped": skipped,
+        return _json({"sent": sent, "failed": failed, "skipped": skipped, "awaiting": len(waiting),
                       "total": sum(d.closed_total for d in targets)})
 
     # ── прибыль ──────────────────────────────────────────────────────────

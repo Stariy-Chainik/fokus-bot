@@ -18,6 +18,7 @@ from bot.repositories import StudentRepository
 from bot.services import PaymentService
 from bot.services.payment_service import DebtorRow, build_debtor_rows
 from bot.services.parent_notifier import resolve_notifier
+from bot.services.pending_queue import awaiting_periods
 from bot.utils.dates import display_period
 from bot.keyboards.common import nav_row
 from bot.utils.constants import DEBTORS_PAGE_SIZE
@@ -163,7 +164,7 @@ async def cb_debtors_remind_confirm(
 @router.callback_query(F.data == "debtors:remind_go", AdminOnly())
 async def cb_debtors_remind_go(
     callback: CallbackQuery, user: User,
-    payment_service: PaymentService, student_repo: StudentRepository,
+    payment_service: PaymentService, student_repo: StudentRepository, pending_repo=None,
 ) -> None:
     lock_key = str(callback.from_user.id)
     if lock_key in _reminding:
@@ -172,8 +173,11 @@ async def cb_debtors_remind_go(
     _reminding.add(lock_key)
     try:
         debtors = await _collect_debtors(payment_service, student_repo)
-        targets = [d for d in debtors if d.closed_total > 0 and d.has_parent]
         current = _current_period()
+        # родитель сообщил об оплате (наличные у педагога, чек) — ждём решения, не напоминаем
+        awaiting = await awaiting_periods(pending_repo)
+        targets = [d for d in debtors if d.closed_total > 0 and d.has_parent
+                   and not any((d.student.student_id, p) in awaiting for p in d.periods if p < current)]
 
         sent_parents = 0
         failed = 0

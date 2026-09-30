@@ -30,13 +30,20 @@ class PendingRepoFake:
         return next((a for a in self.items if a.action_id == action_id), None)
 
     async def add(self, kind, student_id, student_name, period_month="", amount=0, method="",
-                  parent_addr="", file_id="", file_type="", comment="", teacher_keys=""):
+                  parent_addr="", file_id="", file_type="", comment="", teacher_keys="", held_by=""):
         from bot.repositories.pending_action_repo import PendingAction
         a = PendingAction(f"ACT-{len(self.items) + 1:06d}", kind, student_id, student_name,
                           period_month, amount, method, parent_addr, file_id, file_type,
-                          comment, "2026-09-20 10:00:00", teacher_keys=teacher_keys)
+                          comment, "2026-09-20 10:00:00", teacher_keys=teacher_keys, held_by=held_by)
         self.items.append(a)
         return a
+
+    async def set_held_by(self, action_id, teacher_id):
+        a = await self.get_by_id(action_id)
+        if a is None or a.status != OPEN:
+            return False
+        a.held_by = teacher_id
+        return True
 
     async def claim(self, action_id, status, decided_by_tg_id=0):
         a = await self.get_by_id(action_id)
@@ -55,7 +62,8 @@ class PendingRepoFake:
     async def close_for_period(self, student_id, period_month, status, decided_by_tg_id=0, kinds=()):
         n = 0
         for a in await self.get_open():
-            if a.student_id == student_id and a.period_month == period_month and (not kinds or a.kind in kinds):
+            if (a.student_id == student_id and a.period_month == period_month and (not kinds or a.kind in kinds)
+                    and not a.held_by):
                 await self.close(a.action_id, status, decided_by_tg_id)
                 n += 1
         return n

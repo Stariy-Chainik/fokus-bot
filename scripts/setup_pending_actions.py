@@ -23,7 +23,8 @@ HEADER = [
 ]
 
 
-EXTRA_COLUMNS = ["teacher_keys"]     # добавлены позже: за каких педагогов платил родитель
+# добавлены позже: за каких педагогов платил родитель; у какого педагога наличные (ждут администратора)
+EXTRA_COLUMNS = ["teacher_keys", "held_by"]
 
 
 def ensure_columns(sh) -> None:

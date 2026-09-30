@@ -23,7 +23,7 @@ async def queue_action(
     pending_repo, kind: str, student=None, period_month: str = "", *,
     amount: int = 0, method: str = "", parent_addr: str = "",
     student_id: str = "", student_name: str = "", file_id: str = "", file_type: str = "",
-    comment: str = "", teacher_keys: list | None = None,
+    comment: str = "", teacher_keys: list | None = None, held_by: str = "",
 ):
     """Поставить решение в очередь. Ошибка листа не прерывает сценарий — только лог.
 
@@ -37,7 +37,7 @@ async def queue_action(
     try:
         action = await pending_repo.add(
             kind, sid, name, period_month, amount, method, parent_addr,
-            file_id, file_type, comment, "|".join(teacher_keys or []),
+            file_id, file_type, comment, "|".join(teacher_keys or []), held_by,
         )
         await activity.record(activity.QUEUE, f"Заявка от родителя ({kind}): {sid} · {period_month}"
                               + (f" · {amount} ₽ · {method}" if amount else ""), ref=action.action_id)
@@ -96,7 +96,7 @@ async def settle_actions(
     try:
         open_rows = [a for a in await pending_repo.get_open()
                      if a.student_id == student.student_id and a.period_month == period_month
-                     and a.kind in (KIND_CASH, KIND_RECEIPT)]
+                     and a.kind in (KIND_CASH, KIND_RECEIPT) and not a.held_by]   # наличные у педагога — отдельно
         if not open_rows:
             return 0
         ledgers = await payment_service.ledger_for(student, period_month)
@@ -114,3 +114,16 @@ async def settle_actions(
     except Exception as exc:
         logger.error("Очередь решений: не закрыли заявки %s %s: %s", student.student_id, period_month, exc)
         return 0
+
+
+async def awaiting_periods(pending_repo) -> set:
+    """(student_id, period) с открытой заявкой об оплате: родитель сообщил, что заплатил
+    (наличные, чек) или деньги у педагога. Таким не шлём напоминание о долге."""
+    if pending_repo is None:
+        return set()
+    try:
+        return {(a.student_id, a.period_month) for a in await pending_repo.get_open()
+                if a.kind in (KIND_CASH, KIND_RECEIPT)}
+    except Exception as exc:
+        logger.warning("Очередь решений: не прочитали открытые заявки: %s", exc)
+        return set()

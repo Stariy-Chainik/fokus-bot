@@ -22,7 +22,7 @@ from bot.services.payment_methods import (
     CASH, RECEIPT_UNKNOWN, callback_code, from_callback_code,
 )
 from bot.services.payment_watcher import start_payment_watch
-from bot.services.parent_notifier import resolve_notifier, parse_addr, tg_addr
+from bot.services.parent_notifier import notify_payment_confirmed, resolve_notifier, parse_addr, tg_addr
 from bot.services.pending_queue import (
     DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, queue_action, rest_for_keys,
 )
@@ -802,6 +802,19 @@ async def cb_action_confirm(
     if student is None:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    if not user.is_admin and action.kind == KIND_CASH:
+        # педагог наличные не зачитывает: отмечает, что деньги у него, зачтёт администратор
+        if action.held_by:
+            await callback.answer("Деньги уже у педагога — зачтёт администратор", show_alert=True)
+            return
+        if not await pending_repo.set_held_by(action_id, user.teacher_id):
+            await callback.answer("Эта заявка уже обработана", show_alert=True)
+            return
+        payment_events.cash_held(action, user.teacher_id or "")
+        await _edit_admin_msg(callback, "\n\n✋ Деньги у вас. Передайте их администратору — он зачтёт оплату.")
+        logger.info("Педагог %s: наличные %s у него", user.teacher_id, action_id)
+        await callback.answer("Передано администратору")
+        return
     claimed = action.amount if amount is None else amount
     ledgers = await payment_service.ledger_for(student, action.period_month)
     rest = rest_for_keys(ledgers, action.keys)      # остаток по педагогам, за которых платили
@@ -850,6 +863,8 @@ async def cb_action_confirm(
             f"✅ Оплата {credited} руб. за {_period_label(action.period_month)} ({student.name}) подтверждена.",
             rows=bill_back_rows(action.student_id, action.period_month),
         )
+    else:                                       # наличные принял педагог — сообщаем всем родителям ученика
+        await notify_payment_confirmed(resolve_notifier(callback.bot), student, action.period_month, credited)
     logger.info("Админ %s подтвердил %s: %d руб. (%d строк)", callback.from_user.id, action_id, credited, count)
     await callback.answer("Оплата подтверждена")
 
@@ -869,6 +884,9 @@ async def cb_action_reject(
     action = await pending_repo.get_by_id(action_id) if pending_repo else None
     if action is None or not await payment_events.may_decide(user, action.student_id):
         await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if action.held_by and not user.is_admin:
+        await callback.answer("Деньги у педагога — решает администратор", show_alert=True)
         return
     if not await claim_action(pending_repo, action_id, REJECTED, callback.from_user.id):
         await _edit_admin_msg(callback, "\n\n↩️ Уже обработано — повтор не учтён")

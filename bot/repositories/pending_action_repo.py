@@ -20,10 +20,12 @@ logger = logging.getLogger(__name__)
 
 # Колонки листа `pending_actions` (1-based):
 # action_id | kind | student_id | student_name | period_month | amount | method |
-# parent_addr | file_id | file_type | comment | created_at | status | decided_at | decided_by_tg_id
+# parent_addr | file_id | file_type | comment | created_at | status | decided_at | decided_by_tg_id |
+# teacher_keys | held_by
 _STATUS_COL = 13
 _DECIDED_AT_COL = 14
 _DECIDED_BY_COL = 15
+_HELD_BY_COL = 17
 
 KIND_CASH = "cash"          # родитель сообщил об оплате наличными
 KIND_RECEIPT = "receipt"    # родитель прислал чек о переводе
@@ -52,6 +54,7 @@ class PendingAction:
     decided_at: str = ""
     decided_by_tg_id: int = 0
     teacher_keys: str = ""    # за кого платили: ключи начислений через «|» (пусто — за всё по порядку имён)
+    held_by: str = ""         # наличные у педагога (teacher_id): зачтёт администратор, когда получит деньги
 
     @property
     def keys(self) -> list[str]:
@@ -76,6 +79,7 @@ def _row_to_action(row: dict) -> PendingAction:
         decided_at=str(row.get("decided_at") or ""),
         decided_by_tg_id=int(row.get("decided_by_tg_id") or 0),
         teacher_keys=str(row.get("teacher_keys") or ""),
+        held_by=str(row.get("held_by") or ""),
     )
 
 
@@ -95,6 +99,7 @@ class PendingActionRepository(BaseRepository):
         self, kind: str, student_id: str, student_name: str, period_month: str = "",
         amount: int = 0, method: str = "", parent_addr: str = "",
         file_id: str = "", file_type: str = "", comment: str = "", teacher_keys: str = "",
+        held_by: str = "",
     ) -> PendingAction:
         # Номер выдаём под замком листа: два тапа родителя подряд (наличные «оплатить»
         # дважды в секунду) иначе читали один max и получали один ACT-номер на обоих.
@@ -104,11 +109,19 @@ class PendingActionRepository(BaseRepository):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             await self._append_row([
                 action_id, kind, student_id, student_name, period_month, amount, method,
-                parent_addr, file_id, file_type, comment, now, OPEN, "", "", teacher_keys,
+                parent_addr, file_id, file_type, comment, now, OPEN, "", "", teacher_keys, held_by,
             ])
         return PendingAction(action_id, kind, student_id, student_name, period_month, amount,
                              method, parent_addr, file_id, file_type, comment, now,
-                             teacher_keys=teacher_keys)
+                             teacher_keys=teacher_keys, held_by=held_by)
+
+    async def set_held_by(self, action_id: str, teacher_id: str) -> bool:
+        """Педагог подтвердил, что наличные у него: заявка остаётся открытой — ждёт администратора."""
+        async with self._locked_row(action_id=action_id, status=OPEN) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _HELD_BY_COL, teacher_id)
+            return True
 
     async def _close_open_rows(self, action_id: str, status: str, decided_by_tg_id: int) -> int:
         """Закрыть все ОТКРЫТЫЕ строки с этим id (задвоенные номера — тоже).
@@ -142,10 +155,15 @@ class PendingActionRepository(BaseRepository):
         self, student_id: str, period_month: str, status: str, decided_by_tg_id: int = 0,
         kinds: tuple = (KIND_CASH, KIND_RECEIPT),
     ) -> int:
-        """Закрыть все открытые оплаты ученика за месяц — решение принято в чате или кабинете."""
+        """Закрыть все открытые оплаты ученика за месяц — решение принято в чате или кабинете.
+
+        Наличные у педагога (held_by) не трогаем: деньги ещё не у школы, заявку закрывает
+        только решение по ней самой — иначе администратор потерял бы их из виду.
+        """
         closed = 0
         for a in await self.get_open():
-            if a.student_id == student_id and a.period_month == period_month and a.kind in kinds:
+            if (a.student_id == student_id and a.period_month == period_month and a.kind in kinds
+                    and not a.held_by):
                 if await self.close(a.action_id, status, decided_by_tg_id):
                     closed += 1
         return closed

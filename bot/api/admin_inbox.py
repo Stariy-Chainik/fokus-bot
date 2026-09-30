@@ -18,7 +18,7 @@ from aiohttp import web
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
-from bot.services.parent_notifier import parse_addr
+from bot.services.parent_notifier import notify_payment_confirmed, parse_addr
 from bot.services.pending_queue import rest_for_keys
 from bot.services.payment_service import payment_lock
 from bot.services.parent_views import METHOD_LABELS
@@ -45,10 +45,30 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
     student_repo = dp["student_repo"]
     payment_service = dp["payment_service"]
     request_repo = (getattr(dp, "workflow_data", dp)).get("student_request_repo")
+    teacher_repo = (getattr(dp, "workflow_data", dp)).get("teacher_repo")
 
-    def _action_dto(a, rest: int | None = None) -> dict:
+    async def _teacher_names() -> dict:
+        return {t.teacher_id: t.name for t in await teacher_repo.get_all()} if teacher_repo else {}
+
+    def _action_dto(a, rest: int | None = None, user=None, names: dict | None = None) -> dict:
+        """Кнопки зависят от того, кто смотрит: наличные педагог не зачитывает (только «деньги у меня»),
+        администратор зачитывает наличные у педагога, когда получит деньги."""
+        teacher_view = scope is not None
+        held = names.get(a.held_by, a.held_by) if a.held_by and names is not None else a.held_by
+        title = KIND_LABEL.get(a.kind, a.kind)
+        approve, reject, note = None, None, ""
+        if a.kind == KIND_CASH and a.held_by:
+            title = f"Наличные у педагога · {held}"
+            if teacher_view:
+                note = "Деньги у вас — передайте администратору, он зачтёт оплату"
+            else:
+                approve = f"✅ Деньги получены — зачесть{' ' + str(a.amount) + ' ₽' if a.amount else ''}"
+                reject = "❌ Отклонить"
+        elif a.kind == KIND_CASH and teacher_view:
+            approve, reject = "✋ Деньги у меня", "❌ Денег не было"
         return {
-            "id": a.action_id, "kind": a.kind, "title": KIND_LABEL.get(a.kind, a.kind),
+            "id": a.action_id, "kind": a.kind, "title": title,
+            "heldBy": held or "", "approveLabel": approve, "rejectLabel": reject, "note": note,
             "studentId": a.student_id, "student": a.student_name,
             "period": a.period_month, "periodLabel": period_label(a.period_month) if a.period_month else "",
             "amount": a.amount, "method": METHOD_LABELS.get(a.method, a.method),
@@ -59,10 +79,13 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
     async def _allowed(user, action) -> bool:
         if scope is None:
             return True
+        if action.held_by and action.held_by != user.teacher_id:      # чужие наличные у другого педагога
+            return False
         return action.kind in (KIND_CASH, KIND_RECEIPT) and action.student_id in await scope(user)
 
     async def inbox(request: web.Request, user) -> web.Response:
         items = []
+        names = await _teacher_names()
         if pending_repo is not None:
             for a in sorted(await pending_repo.get_open(), key=lambda x: x.created_at):
                 if not await _allowed(user, a):
@@ -73,7 +96,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                     if student is not None:
                         ledgers = await payment_service.ledger_for(student, a.period_month)
                         rest = sum(v.remainder for v in ledgers.values())
-                items.append(_action_dto(a, rest))
+                items.append(_action_dto(a, rest, user, names))
         requests = []
         if request_repo is not None and scope is None:
             for r in await request_repo.get_pending():
@@ -83,8 +106,16 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                     "student": r.student_name, "comment": f"от {r.teacher_name}",
                     "createdAt": r.created_at,
                 })
-        return _json({"items": items, "requests": requests,
-                      "total": len(items) + len(requests)})
+        # наличные на руках у педагогов: сколько и у кого — контроль администратора
+        held: dict[str, dict] = {}
+        for it in items:
+            if it["heldBy"]:
+                h = held.setdefault(it["heldBy"], {"name": it["heldBy"], "amount": 0, "count": 0})
+                h["amount"] += it["amount"] or 0
+                h["count"] += 1
+        actionable = sum(1 for it in items if it["approveLabel"] is not None or it["kind"] != KIND_CASH)
+        return _json({"items": items, "requests": requests, "held": list(held.values()),
+                      "total": (actionable if scope is not None else len(items)) + len(requests)})
 
     async def inbox_file(request: web.Request, user) -> web.Response:
         """Чек картинкой: отдаём файл из Telegram, не раскрывая file_id."""
@@ -124,6 +155,18 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             return _json({"error": "not_found"}, status=404)
         if action.status != OPEN:
             return _json({"error": "already_decided", "status": action.status}, status=409)
+
+        if scope is not None and action.kind == KIND_CASH:
+            # педагог наличные не зачитывает: «деньги у меня» → заявка ждёт администратора
+            if action.held_by:
+                return _json({"error": "held", "message": "Деньги у педагога — зачтёт администратор"}, status=409)
+            if approve:
+                if not await pending_repo.set_held_by(action.action_id, user.teacher_id):
+                    return _json({"error": "already_decided"}, status=409)
+                from bot.services import payment_events
+                payment_events.cash_held(action, user.teacher_id)
+                logger.info("Очередь решений: педагог %s — наличные %s у него", user.teacher_id, action.action_id)
+                return _json({"ok": True, "status": "held"})
 
         if not approve:
             if not await pending_repo.claim(action.action_id, REJECTED, user.tg_id):
@@ -175,6 +218,10 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
     async def _notify_parent(action, student, approved: bool, credited: int = 0) -> None:
         notifier = (getattr(dp, "workflow_data", dp)).get("notifier")
         addr = parse_addr(action.parent_addr) if action.parent_addr else None
+        if notifier is not None and addr is None and approved and credited:
+            # наличные принял педагог (заявка без родителя) — «оплата подтверждена» всем родителям ученика
+            await notify_payment_confirmed(notifier, student, action.period_month, credited)
+            return
         if notifier is None or addr is None:
             return
         if action.kind == KIND_CHILD:
