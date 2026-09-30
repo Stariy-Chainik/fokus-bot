@@ -4,6 +4,8 @@ Billing-строки больше не хранятся: счёт ученика
 """
 from __future__ import annotations
 
+import math
+
 from bot.models import Lesson, Billing, Teacher
 from bot.models.enums import LessonType
 from bot.utils import parse_attendees
@@ -81,7 +83,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = 
     """
     rows: list[Billing] = []
 
-    def _make(sid: str, sname: str, amount: int, duration_min: int) -> Billing:
+    def _make(sid: str, sname: str, amount: int, duration_min: int, exact: float = 0.0) -> Billing:
         return Billing(
             billing_id="",
             lesson_id=lesson.lesson_id,
@@ -98,6 +100,7 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = 
             updated_at=lesson.updated_at,
             lesson_type=lesson.type.value,
             group_id=lesson.group_id or None,
+            exact=exact,
         )
 
     if lesson.type == LessonType.GROUP:
@@ -142,14 +145,45 @@ def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = 
         # У кого-то своя цена (STUDENT_LESSON_RATES): каждый платит свою долю,
         # а не половину общей стоимости урока.
         for (sid, sname), rate in zip(participants, rates, strict=False):
-            amount = round(rate * lesson.duration_min / MINUTES_PER_UNIT / n)
-            rows.append(_make(sid, sname, amount, lesson.duration_min))
+            exact = rate * lesson.duration_min / MINUTES_PER_UNIT / n
+            rows.append(_make(sid, sname, round(exact), lesson.duration_min, exact if n == 1 else 0.0))
         return rows
 
     per = base_amount // n
     remainder = base_amount - per * n
+    # месячное округление — только у занятия одного ученика: в паре урок уже делится ровно
+    exact = rate_for_student * lesson.duration_min / MINUTES_PER_UNIT if n == 1 else 0.0
     for i, (sid, sname) in enumerate(participants):
         amount = per + (remainder if i == 0 else 0)
-        rows.append(_make(sid, sname, amount, lesson.duration_min))
+        rows.append(_make(sid, sname, amount, lesson.duration_min, exact))
 
+    return rows
+
+
+def _half_up(x: float) -> int:
+    return math.floor(x + 0.5 + 1e-9)
+
+
+def round_month(rows: list[Billing]) -> list[Billing]:
+    """Месяц сходится ровно (решение владельца 30.09.2026): 2000 ₽ за 45 мин × 60 мин = 2666,67 —
+    три занятия дают 8000, а не 3 × 2667 = 8001.
+
+    Только занятия одного ученика: сумма пары уже делится ровно между партнёрами.
+    По каждой связке (ученик, педагог, месяц) занятия идут по дате, сумма занятия =
+    округлённый нарастающий итог − округлённый итог до него. Прошлые занятия месяца от
+    нового не меняются. Только с MONTH_ROUNDING_SINCE: в уже оплаченных месяцах суммы
+    прежние, иначе в них появились бы долги и переплаты по рублю. Меняет rows на месте.
+    """
+    from config.settings import settings
+    since = settings.month_rounding_since
+    series: dict[tuple, list[Billing]] = {}
+    for r in rows:
+        if r.exact and (not since or r.period_month >= since):
+            series.setdefault((r.student_id, r.teacher_id, r.period_month), []).append(r)
+    for items in series.values():
+        cum = 0.0
+        for r in sorted(items, key=lambda x: (x.date, x.lesson_id)):
+            before = _half_up(cum)
+            cum += r.exact
+            r.amount = _half_up(cum) - before
     return rows

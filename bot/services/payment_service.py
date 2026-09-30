@@ -12,7 +12,7 @@ from bot.utils.dates import last_periods
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
-from .billing_service import build_billing_rows
+from .billing_service import build_billing_rows, round_month
 from .payment_ledger import (
     BillAggregate, StudentMonthLessons, TeacherLedger, direct_pay_rows, lesson_marks,
     mark_student_lessons, paid_lesson_ids,
@@ -385,6 +385,7 @@ class PaymentService:
         lessons = await self._lesson_repo.get_by_student_and_period(student_id, period_month)
         teachers_cache: dict[str, Teacher] = {}
         result: dict[str, BillAggregate] = {}
+        rows = []
         for ls in lessons:
             teacher = teachers_cache.get(ls.teacher_id)
             if teacher is None:
@@ -393,12 +394,11 @@ class PaymentService:
                     logger.warning("Педагог %s не найден для занятия %s", ls.teacher_id, ls.lesson_id)
                     continue
                 teachers_cache[ls.teacher_id] = teacher
-            for b in build_billing_rows(ls, teacher):
-                if b.student_id != student_id:
-                    continue
-                agg = result.setdefault(b.teacher_id, BillAggregate(name=b.teacher_name))
-                agg.total += b.amount
-                agg.items.append(b)
+            rows += [b for b in build_billing_rows(ls, teacher) if b.student_id == student_id]
+        for b in round_month(rows):
+            agg = result.setdefault(b.teacher_id, BillAggregate(name=b.teacher_name))
+            agg.total += b.amount
+            agg.items.append(b)
         await self._label_group_bills(result)
         result.update(await self._subscription_bills_for_student(student_id, period_month))
         return result
@@ -629,15 +629,17 @@ class PaymentService:
         teachers = {t.teacher_id: t for t in await self._teacher_repo.get_all()}
 
         accrued: dict[tuple[str, str, str], int] = {}  # (student, teacher, period) → ₽
+        all_rows: list = []
         for ls in lessons:
             teacher = teachers.get(ls.teacher_id)
             if teacher is None:
                 logger.warning("compute_ledger_map: педагог %s не найден (занятие %s)",
                                ls.teacher_id, ls.lesson_id)
                 continue
-            for b in build_billing_rows(ls, teacher):
-                key = (b.student_id, b.teacher_id, b.period_month)
-                accrued[key] = accrued.get(key, 0) + b.amount
+            all_rows += build_billing_rows(ls, teacher)
+        for b in round_month(all_rows):
+            key = (b.student_id, b.teacher_id, b.period_month)
+            accrued[key] = accrued.get(key, 0) + b.amount
 
         # Абонементные начисления: цена месяца (учитывая переопределения ученик → группа →
         # price_full) каждому участнику SUBSCRIPTION-группы за каждый месяц с ≥1 занятием.

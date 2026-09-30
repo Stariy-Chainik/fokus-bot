@@ -172,6 +172,7 @@ class Billing:
     updated_at: str
     lesson_type: Optional[str] = None  # "pair" | "soloist" | "group" — для отображения
     group_id: Optional[str] = None     # группа занятия (для подписи счёта названием группы)
+    exact: float = 0.0                 # точная доля до округления (0 — amount точная); см. round_month
 
 
 @dataclass

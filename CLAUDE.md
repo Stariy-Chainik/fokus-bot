@@ -347,6 +347,11 @@ earned (teacher) = rate × (duration_min / 45)
 
 amount (student invoice) = rate_for_student × (duration_min / 45)
   split equally across all students; first student absorbs the integer remainder
+  месяц одного ученика у педагога сходится ровно (с MONTH_ROUNDING_SINCE=2026-09, решение владельца
+  30.09.2026): billing_service.round_month — сумма занятия = округлённый нарастающий итог точных долей
+  по дате минус итог до него (2000 ₽/45 мин × 3 по 60 мин = 2667 + 2666 + 2667 = 8000). Только занятия
+  одного ученика; пары — по-прежнему. Применяется в compute_bills_for_student_period, compute_ledger_map,
+  mark_student_lessons; «Прибыль» считает по занятию (расхождение ≤ 1 ₽ на ученика в месяц).
 
 amount (PER_VISIT group) = group.price_full or group.price_short
   stored as snapshot in lesson.attendees at creation time: STU-001:60:700

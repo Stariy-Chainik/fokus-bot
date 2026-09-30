@@ -148,18 +148,20 @@ def mark_student_lessons(
     ставится, пока хватает оплаченной суммы (любой платёж закрывает самые ранние уроки).
     Занятие педагога, которого нет в справочнике, суммы не получает.
     """
-    from bot.services.billing_service import build_billing_rows
+    from bot.services.billing_service import build_billing_rows, round_month
 
     ordered = sorted(month_lessons, key=lambda ls: ls.date)
     paid_by = paid_sums(payment_rows)
     linked_by = paid_lesson_ids(payment_rows)
     amounts: dict[str, int] = {}
+    rows = []
     for ls in ordered:
         teacher = teachers_by_id.get(ls.teacher_id)
         if teacher:
-            amounts[ls.lesson_id] = sum(
-                row.amount for row in build_billing_rows(ls, teacher) if row.student_id == student_id
-            )
+            amounts[ls.lesson_id] = 0
+            rows += [row for row in build_billing_rows(ls, teacher) if row.student_id == student_id]
+    for row in round_month(rows):
+        amounts[row.lesson_id] += row.amount
     by_teacher: dict[str, list] = {}
     for ls in ordered:
         if amounts.get(ls.lesson_id, 0) > 0:

@@ -261,3 +261,21 @@ def test_personal_rate_in_a_pair_charges_each_their_own_half(monkeypatch):
     pair = _lesson(student_1_id="STU-1", student_1_name="Прудникова Дарья",
                    student_2_id="STU-2", student_2_name="Другой Ученик")
     assert [r.amount for r in build_billing_rows(pair, t)] == [1750, 1500]
+
+
+def test_round_month_individual_month_sums_exactly(monkeypatch):
+    """2000 ₽ за 45 мин, три занятия по 60 мин: месяц 8000 (2667 + 2666 + 2667), а не 3 × 2667.
+    Пара не трогается — урок уже делится между партнёрами ровно; до MONTH_ROUNDING_SINCE — как было."""
+    from config.settings import settings
+    from bot.services.billing_service import round_month
+    from tests.fakes import mk_lesson, mk_teacher
+    t = mk_teacher(rate_for_student=2000)
+    monkeypatch.setattr(settings, "month_rounding_since", "2026-09")
+
+    def rows(ym, students=(("STU-1", "А"),)):
+        return [r for d in ("08", "15", "22")
+                for r in build_billing_rows(mk_lesson(f"L{d}", t, f"{ym}-{d}", 60, students=students), t)]
+    assert [r.amount for r in round_month(rows("2026-09"))] == [2667, 2666, 2667]
+    assert [r.amount for r in round_month(rows("2026-08"))] == [2667, 2667, 2667]
+    pair = round_month(rows("2026-09", (("STU-1", "А"), ("STU-2", "Б"))))
+    assert [r.amount for r in pair] == [1334, 1333] * 3
