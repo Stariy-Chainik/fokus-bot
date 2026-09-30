@@ -14,8 +14,9 @@ def welcome_text(students: list) -> str:
 def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
               receipt_email: bool = True) -> list:
     if platform == "max":
-        # Релиз 1 в MAX: счета и оплата; занятия/дневник/email появятся позже
+        # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже
         return [
+            [cb("📅 Занятия", "client:lessons")],
             [cb("💳 Оплата занятий", "client:my_bills")],
             [cb("➕ Добавить ребёнка", "client:add_child")],
         ]

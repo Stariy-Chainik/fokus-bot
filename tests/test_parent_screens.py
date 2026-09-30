@@ -22,7 +22,7 @@ def test_menu_rows_by_platform():
     tg = [b.value for row in menu_rows(can_switch_athlete=True) for b in row]
     assert tg == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "client:email", "mode:athlete"]
     mx = [b.value for row in menu_rows(platform="max") for b in row]
-    assert mx == ["client:my_bills", "client:add_child"]
+    assert mx == ["client:lessons", "client:my_bills", "client:add_child"]
     # PARENT_RECEIPT_EMAIL=false: кнопки «Email для чеков» нет, остальное на месте
     off = [b.value for row in menu_rows(can_switch_athlete=True, receipt_email=False) for b in row]
     assert off == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "mode:athlete"]
@@ -297,3 +297,22 @@ def test_receipt_goes_through_the_miniapp_when_configured():
     assert kb.inline_keyboard[1][0].callback_data == "client_pay:STU-0001:2026-09"
     legacy = receipt_rows("bank", "STU-0001", "2026-09")
     assert legacy[0][0].kind == "cb" and legacy[0][0].value == "receipt_upload:bank:STU-0001:2026-09"
+
+
+def test_max_lessons_month_screen_without_money():
+    """MAX: занятия ребёнка за месяц — расписание по дням без сумм, навигация по месяцам."""
+    from bot.screens.parent_lessons import child_select_screen, lessons_month_screen
+    items = [
+        {"date": "2026-09-01", "type": "group", "group": "БП БТ Детская", "durationMin": 60, "teacher": "Лобачев Иван"},
+        {"date": "2026-09-01", "type": "individual", "group": "", "durationMin": 45, "teacher": "Контарева Елизавета"},
+        {"date": "2026-09-03", "type": "individual", "group": "", "durationMin": 45, "teacher": "Контарева Елизавета"},
+    ]
+    text, rows = lessons_month_screen("Вихрова Елизавета", "STU-0056", "2026-09", items, None, "2026-10", several=True)
+    assert "Всего: 3 занятия · 2 ч 30 мин" in text and "👥 БП БТ Детская · 60 мин · Лобачев Иван" in text
+    assert "₽" not in text and text.count("<b>1 сен") == 1
+    assert _payloads(rows) == [[("Октябрь 2026 ▶", "cb", "mxl:STU-0056:2026-10")],
+                           [("👨‍👩‍👧 Другой ребёнок", "cb", "client:lessons:2026-09")], [("« Меню", "cb", "go:home")]]
+    empty, _ = lessons_month_screen("Иванов", "STU-1", "2026-10", [], "2026-09", None, several=False)
+    assert "Занятий в этом месяце нет" in empty
+    _, sel = child_select_screen([SimpleNamespace(name="А", student_id="STU-1")], "2026-09")
+    assert sel[0][0].value == "mxl:STU-1:2026-09"

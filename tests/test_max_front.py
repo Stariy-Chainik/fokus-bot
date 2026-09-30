@@ -18,7 +18,7 @@ EXPECTED = [
     "client:my_bills", "cl_bills_stu:", "cl_bills_more:", "client_bill:", "client_pay:",
     "pselt:", "pselgo", "pay_method:", "cash_notify:", "receipt_upload:", "rcpick:",
     "go:home", "client:add_child", "client_reg:", "client_reg_retry",
-    "client_add_req:", "client_add_retry", "glink:", "glink_none:",
+    "client_add_req:", "client_add_retry", "glink:", "glink_none:", "client:lessons", "mxl:",
 ]
 
 
