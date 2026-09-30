@@ -1,5 +1,5 @@
 """Уведомления педагогам об оплатах учеников их групп (FULL_BILL_TEACHER_IDS — все группы
-педагога, PAYMENT_NOTIFY_GROUPS — только перечисленные).
+педагога, FULL_BILL_GROUPS — только перечисленные).
 
 Одна точка для всех путей зачёта: ЮКасса, очередь решений, кабинеты админа и педагога,
 кнопки в боте — все они идут через PaymentService, а он зовёт `payment_received()`.
@@ -27,7 +27,7 @@ def payment_received(student_id: str, period: str, amount: int, method: str, act
                      student_name: str = "") -> None:
     """Запланировать уведомление; вызывается сразу после зачёта оплаты."""
     if not _deps.get("bot") or amount <= 0 or not (settings.full_bill_teacher_id_set
-                                                    or settings.payment_notify_group_map):
+                                                    or settings.full_bill_group_map):
         return
     task = asyncio.get_running_loop().create_task(
         _send(student_id, period, amount, method, int(actor or 0), student_name))
@@ -41,7 +41,7 @@ async def recipients(student_id: str, actor: int) -> list[int]:
     С полным счётом — если ученик в любой группе педагога; по списку групп — если в одной из них.
     """
     groups = set(await _deps["sg"].get_groups_for_student(student_id))
-    full, by_group = settings.full_bill_teacher_id_set, settings.payment_notify_group_map
+    full, by_group = settings.full_bill_teacher_id_set, settings.full_bill_group_map
     out: list[int] = []
     for u in await _deps["users"].get_all():
         tid = u.teacher_id

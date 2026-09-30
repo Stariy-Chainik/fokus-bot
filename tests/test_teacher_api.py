@@ -440,8 +440,25 @@ def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monk
     assert sent == []
 
 
+def test_full_bill_only_for_listed_groups(api, monkeypatch):
+    """FULL_BILL_GROUPS (Лобачева — ЮБ школа): полный счёт только у учеников перечисленных групп."""
+    from tests.fakes import mk_teacher
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    other = mk_teacher("TCH-0002", "Контарева Елизавета", rate_group=1000, rate_for_teacher=1500, rate_for_student=3000)
+    dp["teacher_repo"].items.append(other)
+    dp["lesson_repo"].items.append(mk_lesson("LES-BT", other, f"{YM}-20", students=[("STU-0001", "Иванов Иван")]))
+    url = f"/api/teacher/bills/student/STU-0001?ym={YM}"
+    monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0999")
+    assert _call(app, "GET", url)[1]["total"] == 4800                        # не та группа — свои направления
+    monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0001")
+    assert _call(app, "GET", url)[1]["total"] == 4800 + 3000                 # ученик группы из списка — полный счёт
+    assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "cash"})[0] == 200
+
+
 def test_payment_notice_only_for_listed_groups(api, monkeypatch):
-    """PAYMENT_NOTIFY_GROUPS (Лобачева — ЮБ школа): уведомление только за учеников перечисленных групп."""
+    """FULL_BILL_GROUPS (Лобачева — ЮБ школа): уведомление только за учеников перечисленных групп."""
     from bot.services import payment_events
     app, dp = api
     sent = []
@@ -454,10 +471,10 @@ def test_payment_notice_only_for_listed_groups(api, monkeypatch):
     async def pay():
         await dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 1000, 555, payment_method="cash")
         await asyncio.gather(*payment_events._tasks)
-    monkeypatch.setattr(settings, "payment_notify_groups", "TCH-0001:GRP-0999")
+    monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0999")
     asyncio.run(pay())
     assert sent == []                                              # ученик не в группе из списка
-    monkeypatch.setattr(settings, "payment_notify_groups", "TCH-0001:GRP-0001")
+    monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0001")
     asyncio.run(pay())
     assert len(sent) == 1
 

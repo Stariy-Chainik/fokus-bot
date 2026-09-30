@@ -276,12 +276,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         own = await _own_group_ids(teacher)
         for gid in own:
             members.update(await student_group_repo.get_students_for_group(gid))
-        full = teacher.teacher_id in settings.full_bill_teacher_id_set
+        full = {sid for sid in members if await _full_bill(teacher, sid)}
         keys = {teacher.teacher_id} | {f"SUB:{g}" for g in own}
         ledger = await payment_service.compute_ledger_map(since_period=period)
         rest_by_student: dict[str, int] = {}
         for (sid, tid, ym), (accrued, paid) in ledger.items():
-            if ym == period and sid in members and (full or tid in keys) and accrued > paid:
+            if ym == period and sid in members and (sid in full or tid in keys) and accrued > paid:
                 rest_by_student[sid] = rest_by_student.get(sid, 0) + accrued - paid
         return {"students": len(rest_by_student), "rest": sum(rest_by_student.values())}
 
@@ -712,6 +712,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _own_group_ids(teacher) -> set:
         return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
 
+    async def _full_bill(teacher, sid: str) -> bool:
+        """Полный счёт ученика: педагог из FULL_BILL_TEACHER_IDS или ученик в группе из FULL_BILL_GROUPS."""
+        if teacher.teacher_id in settings.full_bill_teacher_id_set:
+            return True
+        gids = settings.full_bill_group_map.get(teacher.teacher_id)
+        return bool(gids and gids & set(await student_group_repo.get_groups_for_student(sid)))
+
     async def _visible_marks(teacher, sid: str, period: str) -> dict:
         """Счёт ученика глазами педагога — только его направления (решение владельца 29.09.2026).
 
@@ -724,7 +731,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         pay_rows = await payment_repo.get_by_student_and_period(sid, period)
         paid_map, linked = payment_ledger.paid_sums(pay_rows), payment_ledger.paid_lesson_ids(pay_rows)
         group_of = {ls.lesson_id: ls.group_id or "" for ls in await lesson_repo.get_by_student_and_period(sid, period)}
-        full = teacher.teacher_id in settings.full_bill_teacher_id_set    # полный счёт (FULL_BILL_TEACHER_IDS)
+        full = await _full_bill(teacher, sid)             # полный счёт (FULL_BILL_TEACHER_IDS / FULL_BILL_GROUPS)
         out: dict[str, tuple] = {}
         for key, agg in bills.items():
             if agg.subscription:
@@ -848,7 +855,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if visible is None:
             return _json({"error": "not_found"}, status=404)
         foreign = (visible[1] is not None and key != teacher.teacher_id
-                   and teacher.teacher_id not in settings.full_bill_teacher_id_set)
+                   and not await _full_bill(teacher, sid))
         if foreign:
             # чужое начисление (занятие другого педагога в своей группе): только выбранные видимые занятия
             ids = {m["lesson_id"] for m in visible[1] if not m["paid"]}
