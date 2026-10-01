@@ -281,6 +281,9 @@ class Settings(BaseSettings):
     # «Открыть кабинет», старые кнопки счетов/оплаты/занятий/дневника и файлы в чат отвечают подсказкой.
     # Нужен MINIAPP_URL. Код бота не удалён — выключается переменной. MAX не затрагивается.
     parent_cabinet_only: bool = Field(default=False, alias="PARENT_CABINET_ONLY")
+    # Педагог работает только через кабинет (решение владельца 01.10.2026): в боте — одна кнопка «Войти в кабинет»,
+    # прежние кнопки меню отвечают подсказкой. Администратора (в т.ч. в режиме педагога) не затрагивает. Нужен MINIAPP_URL.
+    teacher_cabinet_only: bool = Field(default=False, alias="TEACHER_CABINET_ONLY")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
     payment_qr_data: str = Field(default="", alias="PAYMENT_QR_DATA")

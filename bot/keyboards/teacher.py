@@ -1,5 +1,5 @@
 from __future__ import annotations
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from bot.keyboards.common import nav_row
 from bot.utils.paging import paginate
@@ -8,7 +8,18 @@ from bot.utils.attendees import TRIAL_TIER
 from config.settings import settings
 
 
+def teacher_cabinet_only(can_switch_role: bool = False) -> bool:
+    """Чистый педагог работает только через кабинет (TEACHER_CABINET_ONLY); администратору бот-меню остаётся."""
+    return bool(settings.teacher_cabinet_only and settings.miniapp_url and not can_switch_role)
+
+
+TEACHER_CABINET_TEXT = "Добро пожаловать!\n\nВсё для работы — занятия, группы, зарплата, счета — в кабинете. Нажмите кнопку ниже."
+
+
 def kb_teacher_menu(can_switch_role: bool = False, teacher_id: str | None = None) -> InlineKeyboardMarkup:
+    if teacher_cabinet_only(can_switch_role):
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text="📱 Войти в кабинет", web_app=WebAppInfo(url=settings.miniapp_url))]])
     rows = [
         [InlineKeyboardButton(text="✏️ Отметить занятие", callback_data="teacher:record_lesson")],
         [InlineKeyboardButton(text="💃 Пары", callback_data="teacher:my_pairs")],

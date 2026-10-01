@@ -103,7 +103,9 @@ async def send_teacher_reminders(dp, bot, day: date) -> int:
         for t in m.teacher_ids:
             by_teacher.setdefault(t, []).append(m)
     rows = [[cb("✏️ Отметить занятие", "teacher:record_lesson")]]
-    if settings.miniapp_url:
+    if settings.teacher_cabinet_only and settings.miniapp_url:       # педагог работает в кабинете — кнопки бота нет
+        rows = [[webapp("📱 Войти в кабинет", settings.miniapp_url)]]
+    elif settings.miniapp_url:
         rows.append([webapp("📱 Открыть кабинет", settings.miniapp_url)])
     sent = 0
     for tid, items in by_teacher.items():

@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository, StudentRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
+from bot.keyboards.teacher import TEACHER_CABINET_TEXT, teacher_cabinet_only
 from bot.keyboards.common import kb_mode_select_family, kb_welcome_choice
 from bot.keyboards.client import kb_client_menu, client_welcome_text
 from bot.keyboards.athlete import kb_athlete_menu, athlete_welcome_text
@@ -100,7 +101,8 @@ async def cmd_start(
         return
 
     if user.teacher_id:
-        await message.answer("Добро пожаловать!\n\nВыберите действие:", reply_markup=kb_teacher_menu(teacher_id=user.teacher_id))
+        await message.answer(TEACHER_CABINET_TEXT if teacher_cabinet_only() else "Добро пожаловать!\n\nВыберите действие:",
+                             reply_markup=kb_teacher_menu(teacher_id=user.teacher_id))
         return
 
     # Пользователь зарегистрирован, но teacher_id не привязан.
