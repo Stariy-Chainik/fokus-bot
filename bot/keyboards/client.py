@@ -14,10 +14,17 @@ def client_welcome_text(students: list) -> str:
     return welcome_text(students)
 
 
+def cabinet_only_url() -> str:
+    """Адрес кабинета, если родитель в Telegram работает только через него (PARENT_CABINET_ONLY), иначе пусто."""
+    from config.settings import settings
+    return settings.miniapp_url if settings.parent_cabinet_only and settings.miniapp_url else ""
+
+
 def kb_client_menu(can_switch_athlete: bool = False) -> InlineKeyboardMarkup:
     from config.settings import settings
     markup = to_aiogram_markup(menu_rows(
         can_switch_athlete, receipt_email=settings.parent_receipt_email,
+        cabinet_url=cabinet_only_url(),
     ))
     assert markup is not None  # меню всегда содержит кнопки
     return markup

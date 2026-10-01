@@ -36,7 +36,7 @@ from bot.services import (
     CloudKassirService, StudentService, StudentRequestService, ProfitService,
     DiaryService,
 )
-from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware
+from bot.middlewares import AuthMiddleware, DedupUpdateMiddleware, ParentCabinetOnlyMiddleware
 from bot.handlers import common_router, admin_router, teacher_router, athlete_router, client_router
 
 logging.basicConfig(
@@ -174,6 +174,9 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     # ── Middleware ────────────────────────────────────────────────────────────
     dp.update.outer_middleware(DedupUpdateMiddleware())
     dp.update.middleware(AuthMiddleware(user_repo))
+    if settings.parent_cabinet_only and settings.miniapp_url:       # родитель в Telegram — только кабинет
+        dp.callback_query.outer_middleware(ParentCabinetOnlyMiddleware())
+        dp.message.outer_middleware(ParentCabinetOnlyMiddleware())
 
     # ── Роутеры ──────────────────────────────────────────────────────────────
     dp.include_routers(common_router, admin_router, teacher_router, athlete_router, client_router)

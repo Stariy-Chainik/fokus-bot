@@ -277,6 +277,10 @@ class Settings(BaseSettings):
     # Email родителя для фискальных чеков: кнопка «✉️ Email для чеков» в меню и шаг
     # при регистрации по ссылке группы. False — родителю чеки не упоминаются.
     parent_receipt_email: bool = Field(default=True, alias="PARENT_RECEIPT_EMAIL")
+    # Родитель в Telegram работает только через кабинет (решение владельца 01.10.2026): меню бота — кнопка
+    # «Открыть кабинет», старые кнопки счетов/оплаты/занятий/дневника и файлы в чат отвечают подсказкой.
+    # Нужен MINIAPP_URL. Код бота не удалён — выключается переменной. MAX не затрагивается.
+    parent_cabinet_only: bool = Field(default=False, alias="PARENT_CABINET_ONLY")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
     payment_qr_data: str = Field(default="", alias="PAYMENT_QR_DATA")
