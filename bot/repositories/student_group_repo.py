@@ -82,7 +82,10 @@ class StudentGroupRepository(BaseRepository):
         async with self._locked_row(student_id=student_id, group_id=group_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, col, value)
+            # Google при записи «2026-09» делает из строки дату/число и хранит «2026-9» — месяц перестаёт
+            # сравниваться как строка и абонемент не начисляется. Апостроф — признак текста; в кеше значение чистое.
+            await self._update_cell(row_idx, col, f"'{value}" if value else value)
+            self._patch_cache(row_idx, cell=(col, value))
             return True
 
     async def remove(self, student_id: str, group_id: str) -> bool:

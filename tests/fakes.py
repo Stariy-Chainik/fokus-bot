@@ -598,7 +598,8 @@ class FakeWorksheet:
     def update_cell(self, row: int, col: int, value):
         self.calls.append(("update_cell", row, col, value))
         padded = self._pad(self.rows[row - 2])
-        padded[col - 1] = value
+        # USER_ENTERED: ведущий апостроф — признак текста, сам лист его не хранит
+        padded[col - 1] = value[1:] if isinstance(value, str) and value.startswith("'") else value
         self.rows[row - 2] = padded
 
     def batch_update(self, data, raw=True, **kw):
