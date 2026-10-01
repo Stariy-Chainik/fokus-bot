@@ -91,6 +91,7 @@ SCREENS['p.bills'] = async () => {
     ${shown.length ? list(shown.map(monthCell))
       : d.months.length ? empty('Всё оплачено', '<p class="hint" style="margin:0">Новый счёт появится после следующих занятий</p>')
       : empty('Счетов пока нет', '<p class="hint" style="margin:0">Они появятся после первых занятий</p>')}
+    ${open.length >= 2 ? `<div style="margin-top:12px">${btn(`💳 Оплатить всё · ${fmt(open.reduce((a, m) => a + m.rest, 0))} (${open.length} мес.)`, 'pPayAllAsk', { periods: open.map(m => m.ym), rest: open.reduce((a, m) => a + m.rest, 0) })}</div>` : ''}
     ${closed.length ? `<div style="margin-top:12px">${btn(showAll ? 'Скрыть оплаченные' : `📜 Оплаченные месяцы · ${closed.length}`, 'pAllBills', {}, 'ghost')}</div>` : ''}` };
 };
 ACT.pAllBills = () => { state.ui.pAllBills = !state.ui.pAllBills; render(); };
@@ -221,7 +222,7 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
 /* Чек из кабинета: файл уходит администраторам в Telegram и в очередь решений — как чек из бота. */
-ACT.pReceipt = async ({ ym, method, amount }) => {
+ACT.pReceipt = async ({ ym, method, amount, periods }) => {
   const input = document.getElementById('rc-file');
   const file = input && input.files && input.files[0];
   if (!file) { toast('Выберите фото чека или PDF'); return; }
@@ -231,17 +232,31 @@ ACT.pReceipt = async ({ ym, method, amount }) => {
   const form = new FormData();
   form.append('studentId', kid()); form.append('ym', ym); form.append('method', method); form.append('amount', String(amount || 0));
   form.append('file', file, file.name);
+  if (periods && periods.length > 1) form.append('periods', periods.join(','));
   try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.duplicate ? 'Этот чек уже у нас и ждёт подтверждения — второй раз отправлять не нужно' : r.notified ? 'Чек получен — администратор подтвердит оплату, вам придёт сообщение' : 'Чек принят, администраторы пока не получили уведомление'); }
   catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; } toast(errText(e)); }
   finally { state.ui.paying = false; }
 };
-ACT.pPayDo = async ({ ym, method, sel }) => {
+/* «Оплатить всё»: наличные или реквизиты сразу за все месяцы с остатком (СБП онлайн — по месяцам, ссылка одна на месяц). */
+ACT.pPayAllAsk = ({ periods, rest }) => {
+  const m = (state.me && state.me.methods) || {};
+  const child = (state.me.children || []).find(c => c.id === kid()) || {};
+  const rows = [];
+  if (m.cash && child.cashAllowed !== false) rows.push(btn('💵 Наличные', 'pPayDo', { periods, ym: periods[0], method: 'cash' }));
+  if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { periods, ym: periods[0], method: 'bank' }, 'ghost'));
+  sheet(`<h3>Оплатить всё ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${periods.map(p => MON_NOM[+p.slice(5) - 1]).join(' и ')}</div>
+    <p class="hint" style="margin-top:10px">Сумма — остаток по каждому месяцу. Наличные: передайте администратору или педагогу. По реквизитам — переведите всю сумму и прикрепите один чек. СБП онлайн — оплачивайте каждый месяц в его счёте.</p>
+    <div style="margin-top:12px">${rows.join('') || '<div class="hint">Способы оплаты не настроены — напишите администратору.</div>'}
+    ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.pPayDo = async ({ ym, method, sel, periods }) => {
   if (state.ui.paying) { toast('Отправляем, подождите…'); return; }
   state.ui.paying = true;
   // блокируем кнопки: запрос к таблицам может идти несколько секунд
   const sheetEl = document.querySelector('.sheet');
   if (sheetEl) sheetEl.querySelectorAll('.btn').forEach(b => { b.disabled = true; if (b.dataset.act === 'pPayDo') b.textContent = 'Отправляем…'; });
   const body = { studentId: kid(), ym, method };
+  if (periods && periods.length > 1) body.periods = periods;      // «Оплатить всё»: сразу несколько месяцев
   if (sel && state.ui.bsel) {                        // что отмечено в счёте: позиции и занятия внутри них
     const st = state.ui.bsel.sel;
     body.keys = Object.keys(st);
@@ -256,7 +271,7 @@ ACT.pPayDo = async ({ ym, method, sel }) => {
     <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div>
     <label class="hint" for="rc-file" style="display:block;margin:12px 0 4px">Чек об оплате (фото или PDF)</label>
     <input class="search" id="rc-file" type="file" accept="image/*,application/pdf" style="margin:0">
-    <div style="margin-top:12px">${btn('📎 Прикрепить чек', 'pReceipt', { ym, method, amount: r.amount })}${btn('Прикреплю позже', 'closeSheet', {}, 'ghost')}</div>`); return; }
+    <div style="margin-top:12px">${btn('📎 Прикрепить чек', 'pReceipt', { ym, method, amount: r.amount, periods: r.periods })}${btn('Прикреплю позже', 'closeSheet', {}, 'ghost')}</div>`); return; }
     if (r.ok) { render(); toast(r.duplicate ? 'Уведомление уже отправлено' : 'Администратор получил уведомление'); return; }
   } catch (e) { closeSheet(); toast(errText(e)); }
   finally { state.ui.paying = false; }

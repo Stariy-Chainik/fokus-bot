@@ -307,3 +307,65 @@ def test_receipt_upload_from_the_cabinet(api, monkeypatch):
     assert chat == ADMIN_TG and "Чек об оплате" in caption and "Иванов Иван" in caption and first_markup is None
     callbacks = [b.callback_data for row in bot.markups[0][2].inline_keyboard for b in row]
     assert any(c.startswith(f"pact:{a.action_id}:4800:") for c in callbacks)   # кнопки — по номеру решения
+
+
+def _with_previous_month_lesson(dp, monkeypatch):
+    """Занятие прошлого месяца: счёт за него остаётся неоплаченным, пока родитель не заплатит."""
+    from datetime import date
+
+    from dateutil.relativedelta import relativedelta
+
+    from bot.utils.dates import last_periods
+    from tests.fakes import mk_lesson
+    prev = last_periods(2)[1]
+    monkeypatch.setattr(settings, "parent_bills_since_period", "")
+    teacher = asyncio.run(dp["teacher_repo"].get_by_id("TCH-0001"))
+    lesson_date = (date.today().replace(day=1) - relativedelta(days=2)).isoformat()
+    assert lesson_date[:7] == prev
+    dp["lesson_repo"].items += [mk_lesson("LES-P1", teacher, lesson_date, students=[("STU-0001", "Иванов Иван")]),
+                                mk_lesson("LES-P2", teacher, lesson_date[:8] + "10", students=[("STU-0001", "Иванов Иван")])]
+    return prev
+
+
+def test_single_lesson_can_be_paid_in_previous_and_current_month(api, monkeypatch):
+    """Оплата отдельных занятий работает и за прошлый месяц, и за текущий — выбранные занятия, не весь остаток."""
+    app, dp = api
+    prev = _with_previous_month_lesson(dp, monkeypatch)
+    for ym in (prev, YM):
+        status, d = _call(app, "GET", f"/api/parent/bill/STU-0001/{ym}")
+        assert status == 200
+        lesson = next(x for x in d["rows"][0]["lessons"] if not x["paid"])
+        status, r = _call(app, "POST", "/api/parent/pay", bot=FakeBot(), json={
+            "studentId": "STU-0001", "ym": ym, "method": "cash", "keys": [d["rows"][0]["key"]], "lessonIds": [lesson["id"]]})
+        assert status == 200 and r["amount"] == lesson["amount"] < d["rows"][0]["rest"], ym      # ровно за занятие
+    pending = {(p.period_month, p.lesson_ids) for p in dp["payment_repo"].rows if p.status != PaymentStatus.PAID}
+    assert any(pm == prev and ids for pm, ids in pending) and any(pm == YM and ids for pm, ids in pending)
+
+
+def test_pay_all_months_by_cash_creates_a_request_per_month(api, monkeypatch):
+    """«Оплатить всё»: наличные за все месяцы с остатком — заявка и сообщение админу на каждый месяц."""
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    prev = _with_previous_month_lesson(dp, monkeypatch)
+    dp["pending_repo"] = PendingRepoFake()
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/parent/pay", bot=bot,
+                      json={"studentId": "STU-0001", "ym": YM, "method": "cash", "periods": [prev, YM]})
+    assert status == 200 and r["months"] == 2 and r["notified"] == 2
+    items = dp["pending_repo"].items
+    assert sorted(a.period_month for a in items) == sorted([prev, YM])
+    assert r["amount"] == sum(a.amount for a in items) and len(bot.sent) == 2
+    # повторное нажатие новых заявок не создаёт
+    status, again = _call(app, "POST", "/api/parent/pay", bot=bot,
+                          json={"studentId": "STU-0001", "ym": YM, "method": "cash", "periods": [prev, YM]})
+    assert status == 200 and again["duplicate"] and len(dp["pending_repo"].items) == 2
+
+
+def test_pay_all_months_by_bank_returns_total_with_one_purpose(api, monkeypatch):
+    app, dp = api
+    prev = _with_previous_month_lesson(dp, monkeypatch)
+    monkeypatch.setattr(settings, "payment_bank_details", "Банк\\nсчёт 1")
+    status, r = _call(app, "POST", "/api/parent/pay",
+                      json={"studentId": "STU-0001", "ym": YM, "method": "bank", "periods": [prev, YM]})
+    assert status == 200 and r["months"] == 2 and r["periods"] == sorted([prev, YM])
+    assert "Оплата занятий, Иванов Иван," in r["details"] and prev[:4] in r["details"]

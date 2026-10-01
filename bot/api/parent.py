@@ -32,7 +32,7 @@ from bot.services.parent_views import (
 from bot.services.payment_methods import CASH
 from bot.repositories.pending_action_repo import KIND_RECEIPT
 from bot.services.pending_queue import KIND_CASH, open_receipt, queue_action
-from bot.utils.dates import current_period
+from bot.utils.dates import current_period, display_period
 from bot.utils.notify import notify
 from config.settings import settings
 
@@ -289,6 +289,54 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         })
 
     # ── оплата ───────────────────────────────────────────────────────────
+    async def pay_months(student, periods: list, method: str, tg_id) -> web.Response:
+        """«Оплатить всё»: наличные или реквизиты сразу за несколько месяцев (весь остаток каждого).
+
+        Зачёт идёт по месяцам, поэтому наличные — по заявке на месяц (администратору по сообщению на
+        месяц), реквизиты — общая сумма и общее назначение платежа; чек потом прикрепляется один раз
+        за все месяцы (`/receipt` с `periods`)."""
+        due = {}
+        for ym in sorted(set(periods)):
+            ledgers = await payment_service.ledger_for(student, ym)
+            amount = sum(v.remainder for v in ledgers.values())
+            if amount > 0:
+                due[ym] = (amount, ledgers)
+        if not due:
+            return _json({"error": "nothing_to_pay"}, status=409)
+        total = sum(a for a, _ in due.values())
+        if method == "cash":
+            if bot is None:
+                return _json({"error": "bot_unavailable"}, status=503)
+            pending_repo = _dp_get(dp, "pending_repo")
+            admins = [u.tg_id for u in await user_repo.get_admins()]
+            notified = new = 0
+            for ym, (amount, ledgers) in due.items():
+                try:
+                    open_cash = [a for a in await pending_repo.get_open() if a.student_id == student.student_id
+                                 and a.period_month == ym and a.kind == KIND_CASH] if pending_repo is not None else []
+                except Exception:
+                    open_cash = []
+                if open_cash:
+                    continue                                      # за этот месяц уже заявлено
+                breakdown = "\n".join(f"  • {v.name} — {v.remainder} руб." for v in ledgers.values() if v.remainder)
+                pids = ".".join(str(v.pending_pid) for v in ledgers.values() if v.pending_pid)
+                action = await queue_action(pending_repo, KIND_CASH, student, ym, amount=amount, method=CASH,
+                                            parent_addr=str(tg_id))
+                rows = admin_confirm_rows(student.student_id, ym, pids, False, ("tg", tg_id), amount, CASH,
+                                          action_id=action.action_id if action else "")
+                await notify(bot, admins, cash_notice(student.name, ym, amount, breakdown),
+                             reply_markup=to_aiogram_markup(rows))
+                notified += len(admins)
+                new += 1
+            logger.info("Кабинет родителя: наличные за %d мес., %s ₽ — %s", len(due), total, student.student_id)
+            return _json({"ok": True, "amount": total, "months": len(due), "notified": notified,
+                          "duplicate": new == 0})
+        details = settings.payment_bank_details if method == "bank" else settings.payment_sbp_details
+        purpose = f"Оплата занятий, {student.name.strip()}, " + ", ".join(display_period(ym) for ym in due)
+        return _json({"amount": total, "months": len(due), "periods": list(due), "qr": "",
+                      "details": details.replace("\\n", "\n") + f"\n\nНазначение платежа (скопируйте):\n{purpose}",
+                      "hint": "После перевода прикрепите один чек — он будет отправлен за все месяцы."})
+
     async def pay(request: web.Request, tg_id, children) -> web.Response:
         """method=yookassa|ysbp — ссылка на оплату; cash — уведомление администратору.
 
@@ -305,6 +353,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         lesson_ids = [x for x in ((body or {}).get("lessonIds") or []) if isinstance(x, str)]
         if student is None:
             return _json({"error": "not_found"}, status=404)
+        periods = [x for x in ((body or {}).get("periods") or []) if isinstance(x, str) and not _hidden(x)]
+        if len(periods) >= 2 and method in ("cash", "bank", "sbp"):
+            return await pay_months(student, periods, method, tg_id)
 
         ledgers = await payment_service.ledger_for(student, period)
         chosen = {k: v for k, v in ledgers.items() if not keys or k in keys}
@@ -398,6 +449,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
 
         Файл уходит администраторам в Telegram с теми же кнопками, что чек из бота, и ставится
         в очередь решений с file_id — в кабинете администратора чек виден картинкой.
+        `periods` («2026-09,2026-10») — один чек за несколько месяцев сразу: на каждый месяц своя заявка
+        на его остаток (оплата зачитывается по месяцам), администратору — по сообщению на месяц.
         """
         if bot is None:
             return _json({"error": "bot_unavailable"}, status=503)
@@ -422,52 +475,75 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             amount = int(str(form.get("amount") or 0))
         except ValueError:
             amount = 0
-        if await open_receipt(_dp_get(dp, "pending_repo"), student.student_id, period):
-            return _json({"ok": True, "duplicate": True, "amount": amount, "notified": 0})
-        if amount <= 0:
-            amount, _ = await unpaid_for(student, period, payment_service)
-        bills = await payment_service.compute_bills_for_student_period(student.student_id, period)
-        ledgers = await payment_service.ledger_for(student, period)
-        caption = receipt_caption(method, student.name, period, amount,
-                                  "\n".join(breakdown_lines(bills, list(bills), ledgers=ledgers)))
         filename = upload.filename or ("receipt.jpg" if is_image else "receipt.pdf")
         admins = [u.tg_id for u in await user_repo.get_admins()]
-        if not admins:
-            return _json({"error": "bot_unavailable"}, status=503)
 
-        async def send(admin_id: int, markup):
-            payload = BufferedInputFile(data, filename=filename)
-            if is_image:
-                return await bot.send_photo(admin_id, payload, caption=caption, reply_markup=markup)
-            return await bot.send_document(admin_id, payload, caption=caption, reply_markup=markup)
+        async def submit(period: str, amount: int) -> dict:
+            """Один месяц: заявка в очередь и сообщения админам. {"error"} — отказ, иначе итог для родителя."""
+            pending_repo = _dp_get(dp, "pending_repo")
+            if await open_receipt(pending_repo, student.student_id, period):
+                return {"ok": True, "duplicate": True, "amount": amount, "notified": 0}
+            if amount <= 0:
+                amount, _ = await unpaid_for(student, period, payment_service)
+            bills = await payment_service.compute_bills_for_student_period(student.student_id, period)
+            ledgers = await payment_service.ledger_for(student, period)
+            caption = receipt_caption(method, student.name, period, amount,
+                                      "\n".join(breakdown_lines(bills, list(bills), ledgers=ledgers)))
+            if not admins:
+                return {"error": "bot_unavailable"}
 
-        # первому админу — без кнопок, чтобы получить file_id для очереди; затем кнопки по номеру решения
-        first, file_id, file_type = None, "", "photo" if is_image else "document"
-        try:
-            first = await send(admins[0], None)
-            file_id = (first.photo[-1].file_id if is_image else first.document.file_id) if first else ""
-        except Exception as exc:
-            logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admins[0], exc)
-        action = await queue_action(_dp_get(dp, "pending_repo"), KIND_RECEIPT, student, period, amount=amount,
-                                    method=method, parent_addr=str(tg_id), file_id=file_id, file_type=file_type)
-        rows = admin_confirm_rows(student.student_id, period, "", False, ("tg", tg_id), amount, method,
-                                  action_id=action.action_id if action else "")
-        markup = to_aiogram_markup(rows)
-        sent = 0
-        if first is not None:
+            async def send(admin_id: int, markup):
+                payload = BufferedInputFile(data, filename=filename)
+                if is_image:
+                    return await bot.send_photo(admin_id, payload, caption=caption, reply_markup=markup)
+                return await bot.send_document(admin_id, payload, caption=caption, reply_markup=markup)
+
+            # первому админу — без кнопок, чтобы получить file_id для очереди; затем кнопки по номеру решения
+            first, file_id, file_type = None, "", "photo" if is_image else "document"
             try:
-                await bot.edit_message_reply_markup(admins[0], first.message_id, reply_markup=markup)
-                sent += 1
+                first = await send(admins[0], None)
+                file_id = (first.photo[-1].file_id if is_image else first.document.file_id) if first else ""
             except Exception as exc:
-                logger.warning("Кабинет родителя: кнопки к чеку не добавились: %s", exc)
-        for admin_id in admins[1:]:
-            try:
-                await send(admin_id, markup)
-                sent += 1
-            except Exception as exc:
-                logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admin_id, exc)
-        logger.info("Кабинет родителя: чек %s ₽ — %s %s (%s), админов: %d", amount, student.student_id, period, method, sent)
-        return _json({"ok": True, "amount": amount, "notified": sent})
+                logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admins[0], exc)
+            action = await queue_action(pending_repo, KIND_RECEIPT, student, period, amount=amount,
+                                        method=method, parent_addr=str(tg_id), file_id=file_id, file_type=file_type)
+            rows = admin_confirm_rows(student.student_id, period, "", False, ("tg", tg_id), amount, method,
+                                      action_id=action.action_id if action else "")
+            markup = to_aiogram_markup(rows)
+            sent = 0
+            if first is not None:
+                try:
+                    await bot.edit_message_reply_markup(admins[0], first.message_id, reply_markup=markup)
+                    sent += 1
+                except Exception as exc:
+                    logger.warning("Кабинет родителя: кнопки к чеку не добавились: %s", exc)
+            for admin_id in admins[1:]:
+                try:
+                    await send(admin_id, markup)
+                    sent += 1
+                except Exception as exc:
+                    logger.warning("Кабинет родителя: чек не ушёл админу %s: %s", admin_id, exc)
+            logger.info("Кабинет родителя: чек %s ₽ — %s %s (%s), админов: %d", amount, student.student_id, period, method, sent)
+            return {"ok": True, "amount": amount, "notified": sent}
+
+        periods = [x for x in str(form.get("periods") or "").split(",") if x and not _hidden(x)]
+        if len(periods) >= 2:
+            results = []
+            for ym in periods:
+                due, _ = await unpaid_for(student, ym, payment_service)
+                if due > 0:
+                    results.append(await submit(ym, due))
+            if not results:
+                return _json({"error": "nothing_to_pay"}, status=409)
+            if any("error" in r for r in results):
+                return _json({"error": "bot_unavailable"}, status=503)
+            return _json({"ok": True, "months": len(results), "amount": sum(r["amount"] for r in results),
+                          "notified": sum(r["notified"] for r in results),
+                          "duplicate": all(r.get("duplicate") for r in results)})
+        result = await submit(period, amount)
+        if "error" in result:
+            return _json({"error": result["error"]}, status=503)
+        return _json(result)
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
