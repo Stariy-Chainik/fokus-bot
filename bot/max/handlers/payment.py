@@ -286,7 +286,7 @@ async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, studen
                            kind, url, filename, max_uid, pending_repo=None) -> bool:
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
-    caption = receipt_caption("bank", student.name, period_month, total,
+    caption = receipt_caption(RECEIPT_UNKNOWN, student.name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
     try:
         blob = await event_bot.download_bytes(url)

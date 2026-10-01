@@ -14,10 +14,11 @@ from tests.test_admin_inbox_api import PendingRepoFake  # noqa: E402
 
 def _run(monkeypatch, pending):
     dp, _ = make_api(monkeypatch)
-    sent = []
+    sent, captions = [], []
 
     async def notify(tg_bot, user_repo, caption, rows, **kw):
         sent.append(rows)
+        captions.append(caption)
 
     async def download(url):
         return b"img"
@@ -27,12 +28,13 @@ def _run(monkeypatch, pending):
     bot = SimpleNamespace(download_bytes=download)
     ok = asyncio.run(mx._forward_unbound(bot, None, dp["user_repo"], dp["payment_service"], student, YM, 4800,
                                          "image", "http://x", "r.jpg", 777, pending))
-    return ok, sent
+    return ok, sent, captions
 
 
 def test_unbound_max_receipt_is_queued(monkeypatch):
     pending = PendingRepoFake()
-    ok, sent = _run(monkeypatch, pending)
+    ok, sent, captions = _run(monkeypatch, pending)
+    assert "Не указан" in captions[0] and "По реквизитам" not in captions[0]
     assert ok and len(pending.items) == 1
     a = pending.items[0]
     assert (a.kind, a.student_id, a.period_month, a.amount, a.parent_addr) == ("receipt", "STU-0001", YM, 4800, "m777")
@@ -41,5 +43,5 @@ def test_unbound_max_receipt_is_queued(monkeypatch):
 
 
 def test_unbound_max_receipt_without_queue_still_reaches_admins(monkeypatch):
-    ok, sent = _run(monkeypatch, None)
+    ok, sent, _ = _run(monkeypatch, None)
     assert ok and sent

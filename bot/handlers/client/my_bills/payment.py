@@ -692,7 +692,7 @@ async def _send_unbound_receipt(
 ) -> None:
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
-    caption = receipt_caption("bank", student.name, period_month, total,
+    caption = receipt_caption(RECEIPT_UNKNOWN, student.name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
     # Та же очередь решений, что у чека через «Прикрепить»: иначе чек виден только в чате,
     # а в кабинете «Ждут решения» его нет (случай Сталяровой 26.09.2026).
