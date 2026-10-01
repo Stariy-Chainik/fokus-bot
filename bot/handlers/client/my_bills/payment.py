@@ -482,6 +482,23 @@ async def cb_receipt_reject(
     await callback.answer("Оплата не подтверждена")
 
 
+async def _already_paid(callback: CallbackQuery, payment_service: PaymentService, student,
+                        period_month: str, claimed: int) -> bool:
+    """Кнопка с суммой зачитывает её без оглядки на остаток — повторное нажатие писало бы переплату.
+    Остатка нет → счёт уже закрыт (другим решением, ЮКассой, педагогом): ничего не зачитываем."""
+    if not claimed or student is None:
+        return False
+    ledgers = await payment_service.ledger_for(student, period_month)
+    if any(ledger.remainder > 0 for ledger in ledgers.values()):
+        return False
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+    await callback.answer("Счёт уже оплачен — повторно не зачитываю", show_alert=True)
+    return True
+
+
 @router.callback_query(F.data.startswith("rcpp:"), AdminOnly())
 async def cb_receipt_confirm_partial(
     callback: CallbackQuery,
@@ -503,6 +520,8 @@ async def cb_receipt_confirm_partial(
         return
 
     repo = payment_service._payment_repo
+    if await _already_paid(callback, payment_service, await student_repo.get_by_id(student_id), period_month, claimed):
+        return
     confirmed_total = 0
     count = 0
     if claimed:
@@ -576,6 +595,8 @@ async def cb_receipt_confirm(
         ledgers = await payment_service.ledger_for(student, period_month)
         pending_total = sum(ledger.remainder for ledger in ledgers.values())
 
+    if await _already_paid(callback, payment_service, student, period_month, claimed):
+        return
     if claimed:
         pending_total, count = await payment_service.record_payment(
             student_id, student.name if student else student_id, period_month,
