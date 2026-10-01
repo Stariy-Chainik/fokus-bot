@@ -16,7 +16,7 @@ from bot.services import activity, payment_events
 logger = logging.getLogger(__name__)
 
 __all__ = ["KIND_CASH", "KIND_CHILD", "KIND_RECEIPT", "OPEN", "DONE", "REJECTED",
-           "queue_action", "close_actions", "claim_action", "settle_actions", "rest_for_keys"]
+           "queue_action", "open_receipt", "close_actions", "claim_action", "settle_actions", "rest_for_keys"]
 
 
 async def queue_action(
@@ -45,6 +45,24 @@ async def queue_action(
         return action
     except Exception as exc:                      # очередь — вспомогательная, платёж важнее
         logger.error("Очередь решений: не записали %s для %s: %s", kind, sid, exc)
+        return None
+
+
+async def open_receipt(pending_repo, student_id: str, period_month: str):
+    """Открытая заявка-чек родителя по ученику и месяцу или None.
+
+    Родители присылают один чек по нескольку раз — каждая копия приходила админам отдельным
+    сообщением с кнопкой «Подтвердить». Пока первый чек ждёт решения, новые не пересылаем.
+    Наличные у педагога (`held_by`) сюда не входят — это другая очередь.
+    """
+    if pending_repo is None:
+        return None
+    try:
+        return next((a for a in await pending_repo.get_open()
+                     if a.kind == KIND_RECEIPT and a.student_id == student_id
+                     and a.period_month == period_month and not a.held_by), None)
+    except Exception as exc:                      # очередь вспомогательная: при сбое чек пересылается как раньше
+        logger.error("Очередь решений: не проверили дубль чека %s %s: %s", student_id, period_month, exc)
         return None
 
 

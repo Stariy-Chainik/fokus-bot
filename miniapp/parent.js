@@ -231,7 +231,7 @@ ACT.pReceipt = async ({ ym, method, amount }) => {
   const form = new FormData();
   form.append('studentId', kid()); form.append('ym', ym); form.append('method', method); form.append('amount', String(amount || 0));
   form.append('file', file, file.name);
-  try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.notified ? 'Чек отправлен — администратор подтвердит оплату' : 'Чек принят, администраторы пока не получили уведомление'); }
+  try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.duplicate ? 'Этот чек уже у нас и ждёт подтверждения — второй раз отправлять не нужно' : r.notified ? 'Чек получен — администратор подтвердит оплату, вам придёт сообщение' : 'Чек принят, администраторы пока не получили уведомление'); }
   catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; } toast(errText(e)); }
   finally { state.ui.paying = false; }
 };

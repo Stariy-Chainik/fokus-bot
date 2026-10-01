@@ -3,6 +3,11 @@ from __future__ import annotations
 from bot.utils.dates import display_period, format_date_short_with_wd
 
 
+def payment_purpose(student_name: str, period_month: str) -> str:
+    """Назначение платежа: одно и то же в QR, в тексте реквизитов и в СБП — админ по нему видит, за кого платёж."""
+    return f"Оплата занятий, {student_name.strip()}, {display_period(period_month)}"
+
+
 def build_bill_text(
     student_name: str, group_names: list[str], period_month: str, bills: dict,  # {ключ → BillAggregate}
     paid: int = 0,

@@ -21,6 +21,7 @@ from aiohttp import web
 from aiogram.types import BufferedInputFile
 
 from bot.api.admin import auth_tg_id
+from bot.utils.bill_format import payment_purpose
 from bot.services import payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
@@ -30,7 +31,7 @@ from bot.services.parent_views import (
 )
 from bot.services.payment_methods import CASH
 from bot.repositories.pending_action_repo import KIND_RECEIPT
-from bot.services.pending_queue import KIND_CASH, queue_action
+from bot.services.pending_queue import KIND_CASH, open_receipt, queue_action
 from bot.utils.dates import current_period
 from bot.utils.notify import notify
 from config.settings import settings
@@ -386,7 +387,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if method in ("bank", "sbp"):
             details = (settings.payment_bank_details if method == "bank" else settings.payment_sbp_details)
             qr = qr_png(student.name, period, amount) if method == "bank" else None
-            return _json({"amount": amount, "details": details.replace("\\n", "\n"),
+            details = details.replace("\\n", "\n") + f"\n\nНазначение платежа (скопируйте):\n{payment_purpose(student.name, period)}"
+            return _json({"amount": amount, "details": details,
                           "qr": ("data:image/png;base64," + b64encode(qr).decode()) if qr else "",
                           "hint": "После перевода прикрепите чек кнопкой ниже — администратор подтвердит оплату."})
         return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
@@ -420,6 +422,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             amount = int(str(form.get("amount") or 0))
         except ValueError:
             amount = 0
+        if await open_receipt(_dp_get(dp, "pending_repo"), student.student_id, period):
+            return _json({"ok": True, "duplicate": True, "amount": amount, "notified": 0})
         if amount <= 0:
             amount, _ = await unpaid_for(student, period, payment_service)
         bills = await payment_service.compute_bills_for_student_period(student.student_id, period)

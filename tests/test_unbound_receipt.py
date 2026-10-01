@@ -49,3 +49,24 @@ def test_free_form_receipt_without_queue_still_reaches_admins(monkeypatch):
                                    dp["user_repo"], pending_repo=None))
     callbacks = [b.callback_data for row in bot.sent[0][2].inline_keyboard for b in row]
     assert any(c.startswith(f"receipt_confirm:STU-0001:{YM}:4800:") for c in callbacks)
+
+
+def test_repeated_receipt_is_not_forwarded_twice(monkeypatch):
+    """Родитель шлёт чек повторно, пока первый ждёт решения: админам второй раз не приходит,
+    родителю — «уже у нас» (случай Манохиной 01.10.2026: два одинаковых уведомления)."""
+    dp, _ = make_api(monkeypatch)
+    pending, bot, answers = PendingRepoFake(), FakeBot(), []
+
+    async def answer(text, reply_markup=None, **_):
+        answers.append(text)
+
+    def send(file_id):
+        message = SimpleNamespace(photo=[SimpleNamespace(file_id=file_id)], document=None,
+                                  from_user=SimpleNamespace(id=PARENT_TG), bot=bot, answer=answer)
+        asyncio.run(on_unbound_receipt(message, None, FakeState(), dp["student_repo"], dp["payment_service"],
+                                       dp["user_repo"], pending_repo=pending))
+
+    send("FILE-1")
+    send("FILE-2")
+    assert len(pending.items) == 1 and len(bot.sent) == 1, "повторный чек ушёл админам"
+    assert "Чек получен" in answers[0] and "уже у нас" in answers[1]

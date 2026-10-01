@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from bot.services.payment_ledger import lesson_paid_marks
+from bot.utils.bill_format import payment_purpose
 from bot.utils.dates import format_date_display, period_label
 from .types import cb, url, webapp
 
@@ -255,18 +256,28 @@ def _receipt_hint(webapp_url: str) -> str:
             else "После оплаты прикрепите фото чека.")
 
 
-def bank_screen(total: int, student_id: str, period_month: str, bank_details: str, webapp_url: str = "") -> tuple:
+def _purpose_lines(student_name: str, period_month: str) -> list:
+    if not student_name:
+        return []
+    return ["Назначение платежа (скопируйте):", f"<code>{payment_purpose(student_name, period_month)}</code>", ""]
+
+
+def bank_screen(total: int, student_id: str, period_month: str, bank_details: str, webapp_url: str = "",
+                student_name: str = "") -> tuple:
     lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b>", ""]
     if bank_details:
         lines += [bank_details.replace("\\n", "\n"), ""]
+    lines += _purpose_lines(student_name, period_month)
     lines.append(_receipt_hint(webapp_url))
     return "\n".join(lines), receipt_rows("bank", student_id, period_month, webapp_url)
 
 
-def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str, webapp_url: str = "") -> tuple:
+def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str, webapp_url: str = "",
+               student_name: str = "") -> tuple:
     lines = ["<b>📱 Оплата через СБП</b>", f"Сумма: <b>{total} руб.</b>", ""]
     if sbp_details:
         lines += [sbp_details, ""]
+    lines += _purpose_lines(student_name, period_month)
     lines.append(_receipt_hint(webapp_url))
     return "\n".join(lines), receipt_rows("sbp", student_id, period_month, webapp_url)
 
@@ -295,7 +306,14 @@ def receipt_prompt_screen(student_id: str, period_month: str) -> tuple:
 
 
 def receipt_sent_screen(student_id: str, period_month: str) -> tuple:
-    return "✅ Чек отправлен администратору. Ожидайте подтверждения.", bill_back_rows(student_id, period_month)
+    return ("✅ Чек получен. Администратор проверит его и подтвердит оплату — вам придёт сообщение.\n"
+            "Повторно отправлять чек не нужно."), bill_back_rows(student_id, period_month)
+
+
+def receipt_duplicate_screen(student_id: str, period_month: str) -> tuple:
+    return ("✅ Ваш чек за этот месяц уже у нас и ждёт подтверждения — второй раз администратору "
+            "его не отправляю. Как только оплату подтвердят, вам придёт сообщение.\n"
+            "Если это другой платёж, напишите администратору."), bill_back_rows(student_id, period_month)
 
 
 def cash_sent_screen(student_id: str, period_month: str) -> tuple:

@@ -9,7 +9,8 @@ import logging
 from dataclasses import dataclass
 from io import BytesIO
 
-from bot.utils.dates import display_period, last_periods, period_label
+from bot.utils.bill_format import payment_purpose
+from bot.utils.dates import last_periods, period_label
 from bot.services.parent_notifier import fmt_addr
 from bot.screens.parent_bills import BillDetail, render_bill_detail  # noqa: F401 — BillDetail реэкспорт
 from bot.services.payment_ledger import ledger_totals
@@ -168,7 +169,7 @@ def qr_png(student_name: str, period_month: str, total: int) -> bytes | None:
         return None
     try:
         import qrcode
-        purpose = f"Оплата занятий, {student_name}, {display_period(period_month)}"
+        purpose = payment_purpose(student_name, period_month)
         base = settings.payment_qr_data.replace("|INN=", "|PayeeINN=")
         img = qrcode.make(f"{base}|Purpose={purpose}|Sum={total * 100}")
         buf = BytesIO()

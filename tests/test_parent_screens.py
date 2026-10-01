@@ -316,3 +316,13 @@ def test_max_lessons_month_screen_without_money():
     assert "Занятий в этом месяце нет" in empty
     _, sel = child_select_screen([SimpleNamespace(name="А", student_id="STU-1")], "2026-09")
     assert sel[0][0].value == "mxl:STU-1:2026-09"
+
+
+def test_bank_and_sbp_screens_show_copyable_purpose():
+    """Назначение платежа — готовой строкой для копирования (то же, что в QR): админ видит, за кого платёж."""
+    from bot.screens.parent_bills import bank_screen, sbp_screen
+    for screen in (bank_screen, sbp_screen):
+        text, _ = screen(2550, "STU-0211", "2026-09", "Реквизиты", student_name="Манохина Полина")
+        assert "<code>Оплата занятий, Манохина Полина, 09.2026</code>" in text
+    text, _ = bank_screen(2550, "STU-0211", "2026-09", "Реквизиты")      # имя неизвестно — строки нет
+    assert "Назначение" not in text

@@ -20,10 +20,10 @@ from bot.services.parent_views import (
     period_label, unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
     breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
-from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, queue_action
+from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, open_receipt, queue_action
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import (
-    teacher_select_screen, methods_screen, cash_screen, bank_screen, sbp_screen,
+    teacher_select_screen, methods_screen, cash_screen, bank_screen, sbp_screen, receipt_duplicate_screen,
     online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
 )
 from ..render import edit_screen, send_screen, alert
@@ -126,7 +126,7 @@ async def on_method(event: MessageCallback, context, max_uid, student_repo, paym
     if method == "cash":
         await edit_screen(event, *cash_screen(total, student_id, period_month))
     elif method == "bank":
-        text, rows = bank_screen(total, student_id, period_month, settings.payment_bank_details)
+        text, rows = bank_screen(total, student_id, period_month, settings.payment_bank_details, student_name=student.name)
         png = qr_png(student.name, period_month, total)
         if png:
             await edit_screen(event, text, [])
@@ -135,7 +135,7 @@ async def on_method(event: MessageCallback, context, max_uid, student_repo, paym
         else:
             await edit_screen(event, text, rows)
     elif method == "sbp":
-        await edit_screen(event, *sbp_screen(total, student_id, period_month, settings.payment_sbp_details))
+        await edit_screen(event, *sbp_screen(total, student_id, period_month, settings.payment_sbp_details, student_name=student.name))
     elif method in ("ysbp", "yookassa"):
         try:
             phone, email = await client_contact(student, client_repo)
@@ -231,6 +231,9 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     students = await student_repo.get_by_parent_max_id(max_uid)
     student = next((s for s in students if s.student_id == student_id), None)
     student_name = student.name if student else student_id
+    if await open_receipt(pending_repo, student_id, period_month):          # чек за этот счёт уже ждёт решения
+        await send_screen(event.bot, max_uid, *receipt_duplicate_screen(student_id, period_month))
+        return
     sel_total = data.get("receipt_sel_total")
     sel_pids = data.get("receipt_sel_pids") or ""
     sel_partial = bool(data.get("receipt_sel_partial"))
@@ -328,6 +331,9 @@ async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_re
         return
     if len(bills) == 1:
         student, period_month, total = bills[0]
+        if await open_receipt(pending_repo, student.student_id, period_month):
+            await send_screen(event.bot, max_uid, *receipt_duplicate_screen(student.student_id, period_month))
+            return
         ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
                                     kind, url, filename, max_uid, pending_repo)
         text, rows = receipt_sent_screen(student.student_id, period_month) if ok else ("Не удалось получить файл. Попробуйте ещё раз.", [])
@@ -350,6 +356,9 @@ async def on_receipt_pick(event: MessageCallback, context, max_uid, student_repo
     student = next((s for s in students if s.student_id == student_id), None)
     if student is None or not data.get("rc_url"):
         await alert(event, "Не удалось привязать чек, отправьте его ещё раз")
+        return
+    if await open_receipt(pending_repo, student.student_id, period_month):
+        await edit_screen(event, *receipt_duplicate_screen(student_id, period_month))
         return
     total, _ = await unpaid_for(student, period_month, payment_service)
     ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,

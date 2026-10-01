@@ -24,7 +24,7 @@ from bot.services.payment_methods import (
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import notify_payment_confirmed, resolve_notifier, parse_addr, tg_addr
 from bot.services.pending_queue import (
-    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, queue_action, rest_for_keys,
+    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, open_receipt, queue_action, rest_for_keys,
 )
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
@@ -35,7 +35,7 @@ from bot.screens.adapters import to_aiogram_markup
 from bot.screens import cb as cb_btn
 from bot.screens.parent_bills import (
     bill_back_rows, teacher_select_screen, methods_screen, cash_screen, bank_screen, lesson_select_screen,
-    sbp_screen, online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
+    sbp_screen, online_pay_screen, receipt_prompt_screen, receipt_sent_screen, receipt_duplicate_screen, cash_sent_screen,
 )
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
@@ -292,7 +292,8 @@ async def cb_pay_method(
         await _edit(callback, cash_screen(total, student_id, period_month))
 
     elif method == "bank":
-        await _edit(callback, bank_screen(total, student_id, period_month, settings.payment_bank_details, webapp_url=settings.miniapp_url))
+        await _edit(callback, bank_screen(total, student_id, period_month, settings.payment_bank_details, webapp_url=settings.miniapp_url,
+                                       student_name=student.name))
         png = qr_png(student.name, period_month, total)
         try:
             if png:
@@ -306,7 +307,8 @@ async def cb_pay_method(
             logger.warning("Не удалось отправить QR-код: %s", exc)
 
     elif method == "sbp":
-        await _edit(callback, sbp_screen(total, student_id, period_month, settings.payment_sbp_details, webapp_url=settings.miniapp_url))
+        await _edit(callback, sbp_screen(total, student_id, period_month, settings.payment_sbp_details, webapp_url=settings.miniapp_url,
+                                      student_name=student.name))
 
     elif method in ("ysbp", "yookassa"):
         try:
@@ -403,6 +405,10 @@ async def on_receipt_photo(
     students = await student_repo.get_by_parent_tg_id(message.from_user.id)
     student = next((s for s in students if s.student_id == student_id), None)
     student_name = student.name if student else student_id
+    if await open_receipt(pending_repo, student_id, period_month):          # чек за этот счёт уже ждёт решения
+        text, rows = receipt_duplicate_screen(student_id, period_month)
+        await message.answer(text, reply_markup=to_aiogram_markup(rows))
+        return
 
     sel_total = data.get("receipt_sel_total")
     sel_pids = data.get("receipt_sel_pids") or ""
@@ -689,7 +695,10 @@ async def _send_unbound_receipt(
     bot, user_repo: UserRepository, payment_service: PaymentService,
     student, period_month: str, total: int, kind: str, file_id: str, parent_tg_id: int,
     pending_repo=None,
-) -> None:
+) -> bool:
+    """False — чек за этот счёт уже ждёт решения, повторно админам не пересылаем."""
+    if await open_receipt(pending_repo, student.student_id, period_month):
+        return False
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
     caption = receipt_caption(RECEIPT_UNKNOWN, student.name, period_month, total,
@@ -707,6 +716,7 @@ async def _send_unbound_receipt(
     )
     await _forward_receipt(bot, user_repo, kind, file_id, caption, rows)
     logger.info("Чек без шага «Прикрепить»: tg_id=%s → %s %s", parent_tg_id, student.student_id, period_month)
+    return True
 
 
 @router.message(StateFilter(None), F.photo | F.document)
@@ -734,10 +744,10 @@ async def on_unbound_receipt(
         return
     if len(bills) == 1:
         student, period_month, total = bills[0]
-        await _send_unbound_receipt(message.bot, user_repo, payment_service,
-                                    student, period_month, total, kind, file_id, message.from_user.id,
-                                    pending_repo=pending_repo)
-        text, rows = receipt_sent_screen(student.student_id, period_month)
+        sent = await _send_unbound_receipt(message.bot, user_repo, payment_service,
+                                           student, period_month, total, kind, file_id, message.from_user.id,
+                                           pending_repo=pending_repo)
+        text, rows = (receipt_sent_screen if sent else receipt_duplicate_screen)(student.student_id, period_month)
         await message.answer(text, reply_markup=to_aiogram_markup(rows))
         return
     await state.set_state(ReceiptStates.choosing_bill)
@@ -765,10 +775,10 @@ async def cb_receipt_pick(
         await callback.answer("Не удалось привязать чек, отправьте его ещё раз", show_alert=True)
         return
     total, _ = await unpaid_for(student, period_month, payment_service)
-    await _send_unbound_receipt(callback.bot, user_repo, payment_service,
-                                student, period_month, total, cast(str, kind), file_id, callback.from_user.id,
-                                pending_repo=pending_repo)
-    await _edit(callback, receipt_sent_screen(student_id, period_month))
+    sent = await _send_unbound_receipt(callback.bot, user_repo, payment_service,
+                                       student, period_month, total, cast(str, kind), file_id, callback.from_user.id,
+                                       pending_repo=pending_repo)
+    await _edit(callback, (receipt_sent_screen if sent else receipt_duplicate_screen)(student_id, period_month))
     await callback.answer()
 
 
