@@ -283,20 +283,24 @@ async def _unpaid_bills_of_parent(students: list, payment_service) -> list:
 
 
 async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, student, period_month, total,
-                           kind, url, filename, max_uid) -> bool:
+                           kind, url, filename, max_uid, pending_repo=None) -> bool:
     bills_map = await payment_service.compute_bills_for_student_period(student.student_id, period_month)
     ledgers = await payment_service.ledger_for(student, period_month)
     caption = receipt_caption("bank", student.name, period_month, total,
                               "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
-    rows = admin_confirm_rows(
-        student.student_id, period_month, "", False,
-        max_addr(max_uid), total, RECEIPT_UNKNOWN,
-    )
     try:
         blob = await event_bot.download_bytes(url)
     except Exception as exc:
         logger.error("MAX: не удалось скачать чек: %s", exc)
         return False
+    action = await queue_action(pending_repo, KIND_RECEIPT, student, period_month,   # очередь решений
+                                amount=total, method=RECEIPT_UNKNOWN, parent_addr=f"m{max_uid}",
+                                comment="чек пришёл в MAX — смотрите в чате бота")
+    rows = admin_confirm_rows(
+        student.student_id, period_month, "", False,
+        max_addr(max_uid), total, RECEIPT_UNKNOWN,
+        action_id=action.action_id if action else "",
+    )
     if kind == "image":
         await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
     else:
@@ -306,7 +310,8 @@ async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, studen
 
 
 @router.message_created(F.message.body.attachments, None)
-async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
+                             pending_repo=None):
     att = _receipt_attachment(event.message)
     if att is None:
         return
@@ -324,7 +329,7 @@ async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_re
     if len(bills) == 1:
         student, period_month, total = bills[0]
         ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
-                                    kind, url, filename, max_uid)
+                                    kind, url, filename, max_uid, pending_repo)
         text, rows = receipt_sent_screen(student.student_id, period_month) if ok else ("Не удалось получить файл. Попробуйте ещё раз.", [])
         await send_screen(event.bot, max_uid, text, rows)
         return
@@ -336,7 +341,8 @@ async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_re
 
 
 @router.message_callback(F.callback.payload.startswith("rcpick:"), MaxParentStates.choosing_bill)
-async def on_receipt_pick(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot):
+async def on_receipt_pick(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
+                          pending_repo=None):
     _, student_id, period_month = event.callback.payload.split(":", 2)
     data = await context.get_data()
     await context.clear()
@@ -347,7 +353,7 @@ async def on_receipt_pick(event: MessageCallback, context, max_uid, student_repo
         return
     total, _ = await unpaid_for(student, period_month, payment_service)
     ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
-                                data.get("rc_kind"), data["rc_url"], data.get("rc_filename") or "receipt", max_uid)
+                                data.get("rc_kind"), data["rc_url"], data.get("rc_filename") or "receipt", max_uid, pending_repo)
     if ok:
         await edit_screen(event, *receipt_sent_screen(student_id, period_month))
     else:
