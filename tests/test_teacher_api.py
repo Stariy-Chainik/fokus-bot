@@ -799,3 +799,21 @@ def test_teacher_marks_student_left_only_without_debt(api, monkeypatch):
     assert row.left_period == opts[1]["ym"]
     assert _call(app, "PUT", "/api/teacher/groups/GRP-0099/members/STU-0001/leave", json={"leftPeriod": YM})[0] == 404
     assert _call(app, "PUT", "/api/teacher/groups/GRP-0001/members/STU-0001/leave", json={"leftPeriod": "2020-01"})[0] == 400
+
+
+def test_teacher_adds_student_to_own_group(api):
+    """«Добавить ученика»: поиск по базе, новая карточка, существующий ученик; дубль имени — 409; чужая группа — 404."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    found = _call(app, "GET", "/api/teacher/students/search?q=иван")[1]["students"]
+    assert [s["name"] for s in found] == ["Иванов Иван"] and _call(app, "GET", "/api/teacher/students/search?q=ив")[1]["students"] == []
+    bot = FakeBot()
+    status, r = _call(app, "POST", "/api/teacher/groups/GRP-0001/members", bot=bot, json={"name": "  Сидорова   Мария "})
+    assert status == 200 and r["created"] and r["name"] == "Сидорова Мария"
+    assert r["studentId"] in asyncio.run(dp["student_group_repo"].get_students_for_group("GRP-0001"))
+    assert bot.sent and "добавил ученика" in bot.sent[0][1] and "новая карточка" in bot.sent[0][1]
+    status, dup = _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "сидорова мария"})
+    assert status == 409 and dup["error"] == "duplicate" and dup["students"][0]["id"] == r["studentId"]
+    assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"studentId": "STU-0001"})[0] == 409   # уже в группе
+    assert _call(app, "POST", "/api/teacher/groups/GRP-0099/members", json={"name": "Новый Ученик"})[0] == 404
+    assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "Я"})[0] == 400

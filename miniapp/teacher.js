@@ -161,6 +161,26 @@ SCREENS['t.groups'] = async () => {
 /* Строка состава: имя ведёт в карточку, «✖» — «Ушёл из группы» (только без долгов; решение владельца 02.10.2026).
    Это div: кнопка внутри кнопки-cell ломает разметку. */
 const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead">${initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${s.partnerId ? 'в паре' : 'солист'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
+/* «Добавить ученика»: сначала поиск по базе (чтобы не завести дубль), затем существующий или новая карточка. */
+ACT.tAddAsk = ({ gid, group }) => sheet(`<h3>Добавить ученика</h3><div class="hint">${esc(plainName(group))}. Введите фамилию и имя — сначала проверим, нет ли ученика в базе. Администратор получит сообщение.</div>
+  ${field('add-n', 'Фамилия и имя', '', 'placeholder="Иванова Мария" autocomplete="off"')}
+  <div id="add-res"></div>
+  <div style="margin-top:12px">${btn('🔎 Найти', 'tAddFind', { gid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tAddFind = async ({ gid }) => {
+  const name = val('add-n').trim().replace(/\s+/g, ' ');
+  if (name.length < 3) { toast('Введите фамилию и имя'); return; }
+  try {
+    const d = await api(`/students/search?q=${encodeURIComponent(name.split(' ')[0])}`);
+    document.getElementById('add-res').innerHTML = (d.students.length
+      ? `<div class="hint" style="margin:10px 0 4px">Уже есть в базе — выберите, если это он:</div>${d.students.map(s => btn(`${esc(s.name)} · ${s.groups.length ? esc(s.groups.map(plainName).join(', ')) : 'без группы'}`, 'tAddDo', { gid, studentId: s.id }, 'ghost')).join('')}`
+      : '<div class="hint" style="margin:10px 0 4px">В базе такого ученика нет.</div>')
+      + btn(`➕ Создать новую карточку «${esc(name)}»`, 'tAddDo', { gid, name, force: true }, 'sec');
+  } catch (e) { toast(errText(e)); }
+};
+ACT.tAddDo = async ({ gid, studentId, name, force }) => {
+  try { const r = await api(`/groups/${gid}/members`, { method: 'POST', body: studentId ? { studentId } : { name, force: !!force } }); closeSheet(); render(); toast(r.created ? `Добавлен новый ученик: ${r.name}` : `${r.name} — в группе`); }
+  catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Администратор получит сообщение. Если у ученика есть долг, убрать его нельзя — сначала закройте оплаты.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
@@ -177,7 +197,8 @@ SCREENS['t.group'] = async ({ id, ym }) => {
     ? (g.pairs.length ? list(g.pairs.map(p => cell({ lead: '💃', plain: true, t: `${esc(p.aName)} ↔ ${esc(p.bName)}`, go: 't.student', p: { id: p.aId } }))) : '<div class="empty">Пар нет</div>')
     : tab === 'solo'
       ? (g.soloists.length ? list(g.soloists.map(s => cell({ lead: initials(s.name), t: esc(s.name), go: 't.student', p: { id: s.id } }))) : '<div class="empty">Солистов нет</div>')
-      : (g.students.length ? list(g.students.map(s => tMemberRow(g, id, s))) : '<div class="empty">В группе никого нет</div>');
+      : (g.students.length ? list(g.students.map(s => tMemberRow(g, id, s))) : '<div class="empty">В группе никого нет</div>')
+        + `<div style="margin-top:12px">${btn('➕ Добавить ученика', 'tAddAsk', { gid: id, group: g.name }, 'sec')}</div>`;
   return { title: g.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div></div>
     ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`],

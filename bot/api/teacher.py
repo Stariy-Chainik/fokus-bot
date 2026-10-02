@@ -436,6 +436,65 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "pairs": pairs, "soloists": [{"id": s.student_id, "name": s.name} for s in solo],
         })
 
+    def _norm_name(name: str) -> str:
+        return " ".join(name.lower().replace("ё", "е").split())
+
+    async def students_search(request: web.Request, user, teacher) -> web.Response:
+        """Поиск по базе для «Добавить ученика»: имя и группы — чтобы педагог не завёл вторую карточку."""
+        q = _norm_name(request.query.get("q") or "")
+        if len(q) < 3:
+            return _json({"students": []})
+        names = await _group_names()
+        groups_of: dict[str, list] = {}
+        for m in await student_group_repo.get_all():
+            if not m.left_period:
+                groups_of.setdefault(m.student_id, []).append(names.get(m.group_id, m.group_id))
+        found = [{"id": s.student_id, "name": s.name, "groups": groups_of.get(s.student_id, [])}
+                 for s in await student_repo.get_all() if q in _norm_name(s.name)]
+        found.sort(key=lambda x: x["name"])
+        return _json({"students": found[:10]})
+
+    async def member_add(request: web.Request, user, teacher) -> web.Response:
+        """«Добавить ученика» в свою группу (решение владельца 02.10.2026): существующий ученик (`studentId`)
+        или новая карточка (`name`; точный дубль имени — 409, пока педагог не подтвердит `force`).
+        Абонемент начисляется с текущего месяца (`student_groups.add`); администраторам — сообщение."""
+        gid = request.match_info["gid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        if gid not in await _own_group_ids(teacher):
+            return _json({"error": "not_found"}, status=404)
+        group = await group_repo.get_by_id(gid)
+        if group is None:
+            return _json({"error": "not_found"}, status=404)
+        sid = (body or {}).get("studentId")
+        name = " ".join(str((body or {}).get("name") or "").split())
+        if sid:
+            s = await student_repo.get_by_id(sid)
+            if s is None:
+                return _json({"error": "not_found"}, status=404)
+            if sid in await student_group_repo.get_students_for_group(gid):
+                return _json({"error": "already", "message": "Ученик уже в этой группе"}, status=409)
+            await student_group_repo.add(sid, gid)
+            created = False
+        else:
+            if not 3 <= len(name) <= 60:
+                return _json({"error": "bad_request", "message": "Введите фамилию и имя"}, status=400)
+            same = [x for x in await student_repo.get_all() if _norm_name(x.name) == _norm_name(name)]
+            if same and not bool((body or {}).get("force")):
+                return _json({"error": "duplicate", "message": "Ученик с таким именем уже есть в базе — выберите его из списка",
+                              "students": [{"id": x.student_id, "name": x.name} for x in same]}, status=409)
+            s = (await dp["student_service"].create_with_group(name, gid)).student
+            created = True
+        if bot is not None:
+            text = (f"➕ Педагог {teacher.name} добавил ученика в группу\nУченик: {s.name}"
+                    f"{' (новая карточка)' if created else ''}\nГруппа: {group.name}")
+            await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
+        logger.info("Mini App: педагог %s добавил %s в %s (%s)", teacher.teacher_id, s.student_id, gid,
+                    "новый" if created else "существующий")
+        return _json({"ok": True, "studentId": s.student_id, "name": s.name, "created": created})
+
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа и только ученик без долгов (решение владельца
         02.10.2026). Абонементная группа — пометка `left_period` (история и оплаты сохраняются), остальные —
@@ -1257,10 +1316,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
-        ("GET", "/groups", groups), ("GET", "/groups/{gid}", group), ("GET", "/students/{sid}", student),
+        ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),
+        ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
+        ("GET", "/students/{sid}", student),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
+        ("POST", "/groups/{gid}/members", member_add),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),
         ("POST", "/diary/entries/{eid}/grade", diary_grade),
