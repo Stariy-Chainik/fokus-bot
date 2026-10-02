@@ -37,7 +37,7 @@ async function apiForm(path, form) {
   if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);
   return data;
 }
-const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.' };
+const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.', receipt_required: 'Прикрепите чек перевода — без него оплату отметить нельзя.' };
 const errText = e => e instanceof ApiError ? (ERR_TEXT[e.code] || `Ошибка сервера (${e.status})`) : 'Нет связи с сервером';
 
 /* ── форматирование ──────────────────────────────────────────────────── */

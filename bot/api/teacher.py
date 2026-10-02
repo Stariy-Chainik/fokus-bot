@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from datetime import date
 
+from aiogram.types import BufferedInputFile
 from aiohttp import web
 
 from types import SimpleNamespace
@@ -36,7 +39,7 @@ from bot.services.subscription_frequency import frequency_info, set_frequency
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
-from bot.utils.dates import current_period, last_periods, now_str
+from bot.utils.dates import current_period, last_periods, now_str, period_label
 from bot.utils.groups import hide_service_groups
 from bot.utils.ids import generate_submission_id
 from bot.utils.locks import InProgressGuard
@@ -118,6 +121,11 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
         "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
         "rent": lesson_rent(ls),
     }
+
+
+# Чеки переводов, прикреплённые педагогами: receiptId → (teacher_id, student_id, ts, file_id). В памяти:
+# чек нужен только на время отметки оплаты (6 часов), сам файл остаётся в Telegram у администраторов.
+_teacher_receipts: dict[str, tuple[str, str, float, str]] = {}
 
 
 def register_teacher_api(app: web.Application, dp, bot=None) -> None:
@@ -880,6 +888,64 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         })
 
     @billing_only
+    async def bills_receipt(request: web.Request, user, teacher) -> web.Response:
+        """Чек перевода к отметке оплаты педагогом (решение владельца 02.10.2026: без чека перевод педагог
+        не зачитывает). multipart (ym, amount, file): файл уходит администраторам в Telegram, ответ —
+        `receiptId` для `POST …/pay`; один чек годится на несколько начислений ученика (6 часов)."""
+        if bot is None:
+            return _json({"error": "bot_unavailable"}, status=503)
+        sid = request.match_info["sid"]
+        try:
+            form = await request.post()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        period = str(form.get("ym") or current_period())
+        upload = form.get("file")
+        if not hasattr(upload, "file"):
+            return _json({"error": "bad_request", "message": "Прикрепите чек"}, status=400)
+        data = upload.file.read()
+        if not data or len(data) > 15 * 1024 * 1024:
+            return _json({"error": "file_too_big" if data else "bad_request"}, status=400)
+        ctype = (upload.content_type or "").lower()
+        is_image = ctype.startswith("image/")
+        if not is_image and ctype != "application/pdf":
+            return _json({"error": "bad_file_type"}, status=400)
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            amount = int(str(form.get("amount") or 0))
+        except ValueError:
+            amount = 0
+        caption = (f"🧾 Чек перевода от педагога {teacher.name}\nУченик: {s.name}\nПериод: {period_label(period)}"
+                   + (f"\nСумма: {amount} руб." if amount else ""))
+        filename = upload.filename or ("receipt.jpg" if is_image else "receipt.pdf")
+        file_id, sent = "", 0
+        for admin in await user_repo.get_admins():
+            try:
+                media = file_id or BufferedInputFile(data, filename=filename)
+                msg = (await bot.send_photo(admin.tg_id, media, caption=caption) if is_image
+                       else await bot.send_document(admin.tg_id, media, caption=caption))
+                if msg is not None and not file_id:      # следующим админам — тем же файлом, без повторной загрузки
+                    file_id = msg.photo[-1].file_id if is_image else msg.document.file_id
+                sent += 1
+            except Exception as exc:
+                logger.warning("Чек педагога не ушёл админу %s: %s", admin.tg_id, exc)
+        if not sent:
+            return _json({"error": "bot_unavailable"}, status=503)
+        receipt_id = uuid.uuid4().hex
+        _teacher_receipts[receipt_id] = (teacher.teacher_id, sid, time.time(), file_id)
+        logger.info("Mini App: педагог %s прикрепил чек %s — %s %s, админов: %d",
+                    teacher.teacher_id, receipt_id, sid, period, sent)
+        return _json({"receiptId": receipt_id, "notified": sent})
+
+    def _receipt_ok(receipt_id, teacher_id: str, sid: str) -> bool:
+        rec = _teacher_receipts.get(receipt_id or "") if isinstance(receipt_id, str) else None
+        return rec is not None and rec[0] == teacher_id and rec[1] == sid and time.time() - rec[2] < 6 * 3600
+
+    @billing_only
     async def bills_pay(request: web.Request, user, teacher) -> web.Response:
         """Отметить оплату ученика своей группы: сумма зачитывается в остаток начисления."""
         sid = request.match_info["sid"]
@@ -900,6 +966,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                           "message": "Наличные зачитывает администратор — отметьте «Приняла наличные»"}, status=400)
         if method != RECEIPT_BANK:
             return _json({"error": "bad_request", "message": "Неизвестный способ оплаты"}, status=400)
+        if not _receipt_ok((body or {}).get("receiptId"), teacher.teacher_id, sid):
+            # перевод педагог зачитывает только с чеком (решение владельца 02.10.2026): чек — POST …/receipt
+            return _json({"error": "receipt_required", "message": "Прикрепите чек перевода"}, status=400)
         if not await visibility.is_visible(teacher.teacher_id, sid):
             return _json({"error": "not_found"}, status=404)
         s = await student_repo.get_by_id(sid)
@@ -923,7 +992,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
             credited, rows = await payment_service.record_payment(
                 sid, s.name, period, amount, user.tg_id, [key],
-                f"отметил педагог {teacher.name}", method, lesson_ids=lessons,
+                f"отметил педагог {teacher.name} · чек", method, lesson_ids=lessons,
             )
         logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
                     teacher.teacher_id, credited, sid, period, key)
@@ -1050,6 +1119,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/bills/student/{sid}", bills_student), ("POST", "/bills/student/{sid}/send", bills_student_send),
         ("GET", "/bills/student/{sid}/marks", bills_marks), ("POST", "/bills/student/{sid}/pay", bills_pay),
         ("POST", "/bills/student/{sid}/cash", bills_cash),
+        ("POST", "/bills/student/{sid}/receipt", bills_receipt),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

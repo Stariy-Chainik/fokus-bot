@@ -35,6 +35,17 @@ def _call(dp, method, path, tg_id=TEACHER_TG, json=None, headers=None, bot=None)
     return asyncio.run(run())
 
 
+@pytest.fixture(autouse=True)
+def _receipt_rc():
+    """Чек перевода, уже прикреплённый педагогом TCH-0001 к ученику STU-0001 (отметка перевода без чека — 400)."""
+    import time
+
+    from bot.api import teacher as teacher_api
+    teacher_api._teacher_receipts["RC"] = ("TCH-0001", "STU-0001", time.time(), "")
+    yield
+    teacher_api._teacher_receipts.clear()
+
+
 @pytest.fixture()
 def api(monkeypatch):
     dp, _ = make_api(monkeypatch)
@@ -285,7 +296,7 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
     assert m["ledger"]["remainder"] == 4800
 
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank"})
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank", "receiptId": "RC"})
     assert status == 200 and r["credited"] == 2000
     assert [p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID] == [2000]
 
@@ -303,7 +314,7 @@ def test_billing_teacher_marks_payment_in_own_group(api, monkeypatch):
 def test_billing_teacher_cannot_overpay_silently(api, monkeypatch):
     app, _dp = api
     monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
-    body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "receipt_bank"}
+    body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "receipt_bank", "receiptId": "RC"}
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json=body)
     assert status == 409 and r["needsConfirm"] and r["rest"] == 4800
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "force": True})
@@ -407,7 +418,7 @@ def test_teacher_bill_shows_only_own_directions(api, monkeypatch):
     assert next(x for x in g["students"] if x["id"] == "STU-0001")["rest"] == 4800
     assert _call(app, "GET", f"/api/teacher/bills/student/STU-0001/marks?ym={YM}&key=TCH-0002")[0] == 404
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank"})[0] == 404
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank", "receiptId": "RC"})[0] == 404
 
 
 def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monkeypatch):
@@ -461,7 +472,7 @@ def test_full_bill_only_for_listed_groups(api, monkeypatch):
     monkeypatch.setattr(settings, "full_bill_groups", "TCH-0001:GRP-0001")
     assert _call(app, "GET", url)[1]["total"] == 4800 + 3000                 # ученик группы из списка — полный счёт
     assert _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
-                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank"})[0] == 200
+                 json={"ym": YM, "key": "TCH-0002", "amount": 3000, "method": "receipt_bank", "receiptId": "RC"})[0] == 200
 
 
 def test_payment_notice_only_for_listed_groups(api, monkeypatch):
@@ -523,7 +534,7 @@ def test_admin_and_teacher_marking_same_lesson_at_once_credit_once(api, monkeypa
                 "studentId": "STU-0001", "periodMonth": YM, "key": "TCH-0001", "amount": 2000,
                 "method": "cash", "lessonIds": [lesson.lesson_id]})
             t = client.post("/api/teacher/bills/student/STU-0001/pay", headers=teacher_h, json={
-                "ym": YM, "key": "TCH-0001", "amount": 4800, "method": "receipt_bank"})
+                "ym": YM, "key": "TCH-0001", "amount": 4800, "method": "receipt_bank", "receiptId": "RC"})
             ra, rt = await asyncio.gather(a, t)
             return ra.status, rt.status
         finally:
@@ -664,3 +675,43 @@ def test_teacher_sees_student_lessons_in_own_directions(api, monkeypatch):
     bt = next(x for x in d["lessons"] if x["id"] == "LES-BT")
     assert d["all"] and d["money"] and bt["amount"] == 3000 and not bt["mine"]
     assert _call(app, "GET", f"/api/teacher/students/STU-9999/lessons?ym={YM}")[0] == 404
+
+
+
+def test_transfer_needs_a_receipt_from_the_teacher(api, monkeypatch):
+    """Перевод педагог зачитывает только с чеком: без receiptId — 400, чек уходит админам и даёт receiptId."""
+    from aiohttp import FormData
+
+    from tests.fakes import FakeBot
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank"})
+    assert status == 400 and r["error"] == "receipt_required"
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",       # чужой/выдуманный чек
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank", "receiptId": "x"})
+    assert status == 400 and r["error"] == "receipt_required"
+
+    bot = FakeBot()
+
+    async def upload():
+        web_app = web.Application()
+        register_teacher_api(web_app, dp, bot)
+        client = TestClient(TestServer(web_app))
+        await client.start_server()
+        try:
+            form = FormData()
+            form.add_field("ym", YM)
+            form.add_field("amount", "2000")
+            form.add_field("file", b"\x89PNG", filename="r.png", content_type="image/png")
+            h = {"Authorization": f"tma {make_init_data(user_id=TEACHER_TG)}"}
+            resp = await client.post("/api/teacher/bills/student/STU-0001/receipt", headers=h, data=form)
+            return resp.status, await resp.json()
+        finally:
+            await client.close()
+    status, up = asyncio.run(upload())
+    assert status == 200 and up["receiptId"] and up["notified"] >= 1
+    assert bot.sent and "Чек перевода от педагога" in str(bot.sent[0])
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank", "receiptId": up["receiptId"]})
+    assert status == 200 and r["credited"] == 2000

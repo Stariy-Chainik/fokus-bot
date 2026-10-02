@@ -335,8 +335,7 @@ ACT.tbillPick = ({ key, id }) => { const a = state.ui.tbill; const cur = a.rows[
 ACT.tbillSub = ({ key }) => { const a = state.ui.tbill; a.sub[key] = !a.sub[key]; render(); };
 ACT.tbillAsk = ({ sid, ym, name }) => {
   const total = tbillTotal(); if (!total) { toast('Отметьте галочками оплаченные уроки'); return; }
-  state.ui.tPayMethod = 'cash';
-  state.ui.tPayMethod = 'cash';
+  state.ui.tPayMethod = 'cash'; state.ui.tReceipt = null;
   sheet(`<h3>Отметить оплату?</h3><div class="hint">${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(total)}</div>
     <div class="hint" style="margin:10px 0 4px">Способ оплаты</div>
     ${tPayChips()}
@@ -344,6 +343,7 @@ ACT.tbillAsk = ({ sid, ym, name }) => {
 };
 ACT.tbillDo = async ({ sid, ym }) => {
   if (state.ui.tPaying) return;
+  if ((state.ui.tPayMethod || 'cash') !== 'cash' && !tReceiptChosen(sid)) { toast('Прикрепите чек перевода'); return; }
   state.ui.tPaying = true;
   document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
   const a = state.ui.tbill; let credited = 0;
@@ -358,11 +358,12 @@ ACT.tbillDo = async ({ sid, ym }) => {
       closeSheet(); state.ui.tbill = null; render(); toast(`Передано администратору: ${fmt(amount)} — он зачтёт, когда получит деньги`);
       return;
     }
+    const receiptId = await tReceiptId(sid, ym, tbillTotal());
     for (const r of a.data) {
       const ids = r.subscription ? [] : (a.rows[r.key] || []);
       const amount = r.subscription ? (a.sub[r.key] ? r.rest : 0) : r.items.filter(i => ids.includes(i.lessonId)).reduce((x, i) => x + i.amount, 0);
       if (!amount) continue;
-      const res = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key: r.key, amount, method: 'receipt_bank', lessonIds: ids } });
+      const res = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key: r.key, amount, method: 'receipt_bank', lessonIds: ids, receiptId } });
       credited += res.credited;
     }
     closeSheet(); state.ui.tbill = null; render(); toast(`Оплата ${fmt(credited)} отмечена`);
@@ -416,7 +417,7 @@ ACT.tTaskAdd = async ({ sid }) => {
 };
 ACT.tTaskClose = async ({ id }) => { try { await api(`/diary/tasks/${id}/close`, { method: 'POST' }); render(); toast('Задание закрыто'); } catch (e) { toast(errText(e)); } };
 ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
-  state.ui.tPayMethod = 'cash';
+  state.ui.tPayMethod = 'cash'; state.ui.tReceipt = null;
   sheet(`<h3>Отметить оплату</h3><div class="hint">${esc(student)} · ${esc(name)} · ${fmon(ym)}. ${picked ? 'За выбранные занятия' : 'Остаток'} ${fmt(rest)}.</div>
     ${field('pay-a', 'Сумма, ₽', String(rest), 'inputmode="numeric"')}
     <div class="hint" style="margin:10px 0 4px">Способ оплаты</div>
@@ -426,7 +427,20 @@ ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
 /* Наличные педагог не зачитывает (решение владельца 30.09.2026): «Приняла наличные» — заявка
    администратору, он зачтёт оплату, когда получит деньги. Перевод на счёт школы — зачёт сразу. */
 const tPayChips = () => `<div class="chips">${[['cash', '💵 Наличные'], ['receipt_bank', '🏦 Перевод на счёт школы']].map(([v, n]) => `<button class="chip" id="pm-${v}" aria-pressed="${v === (state.ui.tPayMethod || 'cash')}" data-act="tPayMethod" data-p='${esc(JSON.stringify({ v }))}'>${n}</button>`).join('')}</div>
-  <div class="hint" id="pm-note" style="margin-top:6px">${(state.ui.tPayMethod || 'cash') === 'cash' ? 'Наличные зачтёт администратор, когда вы передадите ему деньги. Родитель до этого видит «ждёт подтверждения школы».' : 'Деньги пришли на счёт школы — оплата зачтётся сразу.'}</div>`;
+  <div class="hint" id="pm-note" style="margin-top:6px">${(state.ui.tPayMethod || 'cash') === 'cash' ? 'Наличные зачтёт администратор, когда вы передадите ему деньги. Родитель до этого видит «ждёт подтверждения школы».' : 'Деньги пришли на счёт школы — оплата зачтётся сразу.'}</div>
+  <div id="pm-file" style="margin-top:8px;display:${(state.ui.tPayMethod || 'cash') === 'cash' ? 'none' : 'block'}"><label class="hint" for="tp-file" style="display:block;margin-bottom:4px">Чек перевода (фото или PDF) — обязательно</label>
+    <input class="search" id="tp-file" type="file" accept="image/*,application/pdf" style="margin:0"></div>`;
+/* Перевод педагог зачитывает только с чеком (решение владельца 02.10.2026): файл уходит администраторам,
+   receiptId прикладывается к каждой отметке оплаты этого ученика. */
+const tReceiptChosen = sid => (state.ui.tReceipt && state.ui.tReceipt.sid === sid) || !!(document.getElementById('tp-file') || {}).files?.length;
+async function tReceiptId(sid, ym, amount) {
+  if (state.ui.tReceipt && state.ui.tReceipt.sid === sid) return state.ui.tReceipt.id;
+  const file = document.getElementById('tp-file').files[0];
+  const form = new FormData(); form.append('ym', ym); form.append('amount', String(amount || 0)); form.append('file', file, file.name);
+  const r = await apiForm(`/bills/student/${sid}/receipt`, form);
+  state.ui.tReceipt = { sid, id: r.receiptId };
+  return r.receiptId;
+}
 async function tCashDo(sid, ym, parts) {
   const r = await api(`/bills/student/${sid}/cash`, { method: 'POST', body: { ym, parts } });
   return r.amount;
@@ -437,11 +451,13 @@ ACT.tPayMethod = ({ v }) => {
   const note = document.getElementById('pm-note');
   if (note) note.textContent = v === 'cash' ? 'Наличные зачтёт администратор, когда вы передадите ему деньги. Родитель до этого видит «ждёт подтверждения школы».' : 'Деньги пришли на счёт школы — оплата зачтётся сразу.';
   document.querySelectorAll('[data-act="tbillDo"],[data-act="tPayDo"]').forEach(b => { b.textContent = v === 'cash' ? '💵 Приняла наличные — передам администратору' : '✅ Подтвердить'; });
+  const pf = document.getElementById('pm-file'); if (pf) pf.style.display = v === 'cash' ? 'none' : 'block';
 };
 ACT.tPayDo = async ({ sid, ym, key, amount: forced, force }) => {
   const amount = forced || +val('pay-a');
   if (!amount) { toast('Укажите сумму'); return; }
-  if (state.ui.tPaying) return;                     // двойное нажатие зачитывало оплату дважды (Андреянова 28.09)
+  if (state.ui.tPaying) return;
+  if ((state.ui.tPayMethod || 'cash') !== 'cash' && !tReceiptChosen(sid)) { toast('Прикрепите чек перевода'); return; }                     // двойное нажатие зачитывало оплату дважды (Андреянова 28.09)
   state.ui.tPaying = true;
   document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
   try {
@@ -452,7 +468,8 @@ ACT.tPayDo = async ({ sid, ym, key, amount: forced, force }) => {
       closeSheet(); render(); toast(`Передано администратору: ${fmt(sum)} — он зачтёт, когда получит деньги`);
       return;
     }
-    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, force: !!force, method: 'receipt_bank', lessonIds } });
+    const receiptId = await tReceiptId(sid, ym, amount);
+    const r = await api(`/bills/student/${sid}/pay`, { method: 'POST', body: { ym, key, amount, force: !!force, method: 'receipt_bank', lessonIds, receiptId } });
     if (state.ui.tsel) state.ui.tsel.key = '';
     closeSheet(); render(); toast(r.credited ? `Зачтено ${fmt(r.credited)}${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : 'Закрывать нечего — остатков нет');
   } catch (e) {
