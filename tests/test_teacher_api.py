@@ -778,3 +778,24 @@ def test_teacher_unpaid_screen_shows_own_groups_and_students(api, monkeypatch):
     asyncio.run(dp["payment_service"].record_payment("STU-0002", "Петрова Анна", YM, 800, ADMIN_TG, None, None, "cash"))
     d = _call(app, "GET", f"/api/teacher/unpaid?ym={YM}")[1]
     assert d["rest"] == 4800 and next(s for s in d["groups"][0]["students"] if s["id"] == "STU-0002")["status"] == "paid"
+
+
+def test_teacher_marks_student_left_only_without_debt(api, monkeypatch):
+    """«Ушёл из группы» у педагога: с долгом — 409; без долга — пометка ухода (абонемент) и сообщение админам."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    g = dp["group_repo"].items[0]
+    g.billing_mode, g.price_full = GroupBillingMode.SUBSCRIPTION, 6000
+    opts = _call(app, "GET", "/api/teacher/groups/GRP-0001")[1]["leaveOptions"]
+    assert len(opts) == 2 and opts[0]["ym"] == YM
+    bot = FakeBot()
+    status, r = _call(app, "PUT", "/api/teacher/groups/GRP-0001/members/STU-0002/leave", bot=bot, json={"leftPeriod": opts[1]["ym"]})
+    assert status == 409 and r["error"] == "has_debt" and r["debt"] == 6800          # абонемент 6000 + занятие 800
+    asyncio.run(dp["payment_service"].record_payment("STU-0002", "Петрова Анна", YM, 6800, ADMIN_TG, None, None, "cash"))
+    status, r = _call(app, "PUT", "/api/teacher/groups/GRP-0001/members/STU-0002/leave", bot=bot, json={"leftPeriod": opts[1]["ym"]})
+    assert status == 200 and r["result"] == "marked"
+    assert bot.sent and "уходит из группы" in bot.sent[0][1] and "Петрова Анна" in bot.sent[0][1]
+    row = next(x for x in asyncio.run(dp["student_group_repo"].get_all()) if x.student_id == "STU-0002" and x.group_id == "GRP-0001")
+    assert row.left_period == opts[1]["ym"]
+    assert _call(app, "PUT", "/api/teacher/groups/GRP-0099/members/STU-0001/leave", json={"leftPeriod": YM})[0] == 404
+    assert _call(app, "PUT", "/api/teacher/groups/GRP-0001/members/STU-0001/leave", json={"leftPeriod": "2020-01"})[0] == 400

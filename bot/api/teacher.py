@@ -31,6 +31,7 @@ from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
+from bot.services.membership import leave_group, leave_options
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services.profit_service import lesson_rent
@@ -430,8 +431,48 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "priceFull": g.price_full, "priceShort": g.price_short,
             "students": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value,
                           "partnerId": s.partner_id or ""} for s in members],
+            # «Ушёл из группы»: с какого месяца не начислять абонемент (решение владельца 02.10.2026)
+            "leaveOptions": [{"ym": ym, "label": label} for ym, label in leave_options()],
             "pairs": pairs, "soloists": [{"id": s.student_id, "name": s.name} for s in solo],
         })
+
+    async def member_leave(request: web.Request, user, teacher) -> web.Response:
+        """«Ушёл из группы» у педагога: только своя группа и только ученик без долгов (решение владельца
+        02.10.2026). Абонементная группа — пометка `left_period` (история и оплаты сохраняются), остальные —
+        строка членства удаляется; карточка ученика не трогается. Администраторам — сообщение."""
+        gid, sid = request.match_info["gid"], request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        left = str((body or {}).get("leftPeriod") or "")
+        if left not in {ym for ym, _ in leave_options()}:
+            return _json({"error": "bad_request", "message": "Выберите месяц ухода"}, status=400)
+        if gid not in await _own_group_ids(teacher) or sid not in await student_group_repo.get_students_for_group(gid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        group = await group_repo.get_by_id(gid)
+        if s is None or group is None:
+            return _json({"error": "not_found"}, status=404)
+        ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
+        debt = sum(a - p for (st_id, _k, _ym), (a, p) in ledger.items() if st_id == sid and a > p)
+        if debt > 0:
+            return _json({"error": "has_debt", "debt": debt,
+                          "message": f"У ученика долг {debt} ₽ — сначала закройте оплаты или обратитесь к администратору"},
+                         status=409)
+        result = await leave_group(sid, gid, left, group_repo, student_group_repo)
+        if result == "missing":
+            return _json({"error": "not_found"}, status=404)
+        if result == "removed":                                   # не абонемент: строки нет, записываем событие сами
+            await activity.record(activity.STUDENT, f"Ученик {sid} убран из группы {gid} педагогом {teacher.name}",
+                                  actor=user.tg_id, ref=sid)
+        if bot is not None:
+            text = (f"👋 Педагог {teacher.name}: ученик уходит из группы\nУченик: {s.name}\nГруппа: {group.name}\n"
+                    + (f"С месяца: {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
+                       else "Убран из состава (оплата по посещениям — история сохранена)") + "\nДолгов нет.")
+            await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
+        logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s)", teacher.teacher_id, sid, gid, left, result)
+        return _json({"ok": True, "result": result, "leftPeriod": left})
 
     async def student_frequency(request: web.Request, user, teacher) -> web.Response:
         """Старший тренер: «2 / 3 раза в неделю» ученику своей группы (SENIOR_TEACHER_IDS)."""
@@ -1219,6 +1260,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group), ("GET", "/students/{sid}", student),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
+        ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),
         ("POST", "/diary/entries/{eid}/grade", diary_grade),

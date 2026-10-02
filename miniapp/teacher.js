@@ -158,6 +158,17 @@ SCREENS['t.groups'] = async () => {
   }))) : empty('Групп нет', '<p class="hint" style="margin:0">Группы назначает администратор</p>')) };
 };
 
+/* Строка состава: имя ведёт в карточку, «✖» — «Ушёл из группы» (только без долгов; решение владельца 02.10.2026).
+   Это div: кнопка внутри кнопки-cell ломает разметку. */
+const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead">${initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${s.partnerId ? 'в паре' : 'солист'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
+ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Администратор получит сообщение. Если у ученика есть долг, убрать его нельзя — сначала закройте оплаты.</div>
+  <div style="margin-top:12px">${mode === 'subscription'
+    ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
+    : btn('✖ Убрать из группы', 'tLeaveDo', { gid, sid, ym: (options[0] || {}).ym }, 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tLeaveDo = async ({ gid, sid, ym }) => {
+  try { const r = await api(`/groups/${gid}/members/${sid}/leave`, { method: 'PUT', body: { leftPeriod: ym } }); closeSheet(); render(); toast(r.result === 'marked' ? `Ученик ушёл с ${fmon(r.leftPeriod)}` : 'Ученик убран из группы'); }
+  catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 SCREENS['t.group'] = async ({ id, ym }) => {
   const g = await api(`/groups/${id}`);
   const tab = state.ui.tGroupTab || 'all';
@@ -166,7 +177,7 @@ SCREENS['t.group'] = async ({ id, ym }) => {
     ? (g.pairs.length ? list(g.pairs.map(p => cell({ lead: '💃', plain: true, t: `${esc(p.aName)} ↔ ${esc(p.bName)}`, go: 't.student', p: { id: p.aId } }))) : '<div class="empty">Пар нет</div>')
     : tab === 'solo'
       ? (g.soloists.length ? list(g.soloists.map(s => cell({ lead: initials(s.name), t: esc(s.name), go: 't.student', p: { id: s.id } }))) : '<div class="empty">Солистов нет</div>')
-      : (g.students.length ? list(g.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: s.partnerId ? 'в паре' : 'солист', go: 't.student', p: { id: s.id } }))) : '<div class="empty">В группе никого нет</div>');
+      : (g.students.length ? list(g.students.map(s => tMemberRow(g, id, s))) : '<div class="empty">В группе никого нет</div>');
   return { title: g.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div></div>
     ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`],
