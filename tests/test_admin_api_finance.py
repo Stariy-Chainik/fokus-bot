@@ -5,7 +5,7 @@ import pytest
 
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
 from tests.fakes import mk_group, mk_lesson, mk_payment
-from tests.test_admin_api import YM, _call, make_api
+from tests.test_admin_api import YM, _call, make_api, _not_today
 
 PARENT_TG = 5037902894
 
@@ -151,7 +151,7 @@ def test_profit_breakdown_explains_income_and_profit_by_days(api):
     status, b = _call(app, "GET", f"/api/admin/profit/breakdown?ym={YM}")
     assert status == 200
     assert [(d["date"][8:], d["income"], d["salary"], d["profit"], d["lessons"]) for d in b["days"]] == [
-        ("03", 2000, 1500, 500, 1), ("10", 2000, 1500, 500, 1), ("12", 1600, 1333, 267, 1),
+        (_not_today(3)[8:], 2000, 1500, 500, 1), (_not_today(10)[8:], 2000, 1500, 500, 1), ("12", 1600, 1333, 267, 1),
     ]
     assert sum(d["income"] for d in b["days"]) == b["totals"]["lessonIncome"] == 5600
     assert sum(d["profit"] for d in b["days"]) == b["totals"]["profit"] == 1267

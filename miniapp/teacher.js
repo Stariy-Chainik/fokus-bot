@@ -181,12 +181,12 @@ ACT.tAddDo = async ({ gid, studentId, name, force }) => {
   try { const r = await api(`/groups/${gid}/members`, { method: 'POST', body: studentId ? { studentId } : { name, force: !!force } }); closeSheet(); render(); toast(r.created ? `Добавлен новый ученик: ${r.name}` : `${r.name} — в группе`); }
   catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
-ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Администратор получит сообщение. Если у ученика есть долг, убрать его нельзя — сначала закройте оплаты.</div>
+ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
     : btn('✖ Убрать из группы', 'tLeaveDo', { gid, sid, ym: (options[0] || {}).ym }, 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 ACT.tLeaveDo = async ({ gid, sid, ym }) => {
-  try { const r = await api(`/groups/${gid}/members/${sid}/leave`, { method: 'PUT', body: { leftPeriod: ym } }); closeSheet(); render(); toast(r.result === 'marked' ? `Ученик ушёл с ${fmon(r.leftPeriod)}` : 'Ученик убран из группы'); }
+  try { const r = await api(`/groups/${gid}/members/${sid}/leave`, { method: 'PUT', body: { leftPeriod: ym } }); closeSheet(); render(); toast((r.result === 'marked' ? `Ученик ушёл с ${fmon(r.leftPeriod)}` : 'Ученик убран из группы') + (r.debt ? ` · долг ${fmt(r.debt)} остаётся` : '')); }
   catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 SCREENS['t.group'] = async ({ id, ym }) => {

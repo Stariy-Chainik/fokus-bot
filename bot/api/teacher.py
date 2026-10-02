@@ -496,9 +496,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return _json({"ok": True, "studentId": s.student_id, "name": s.name, "created": created})
 
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
-        """«Ушёл из группы» у педагога: только своя группа и только ученик без долгов (решение владельца
-        02.10.2026). Абонементная группа — пометка `left_period` (история и оплаты сохраняются), остальные —
-        строка членства удаляется; карточка ученика не трогается. Администраторам — сообщение."""
+        """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
+        он остаётся за учеником и пишется в сообщение администраторам. Абонементная группа — пометка
+        `left_period` (история и оплаты сохраняются), остальные — строка членства удаляется; карточка не трогается."""
         gid, sid = request.match_info["gid"], request.match_info["sid"]
         try:
             body = await request.json()
@@ -515,10 +515,6 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
         debt = sum(a - p for (st_id, _k, _ym), (a, p) in ledger.items() if st_id == sid and a > p)
-        if debt > 0:
-            return _json({"error": "has_debt", "debt": debt,
-                          "message": f"У ученика долг {debt} ₽ — сначала закройте оплаты или обратитесь к администратору"},
-                         status=409)
         result = await leave_group(sid, gid, left, group_repo, student_group_repo)
         if result == "missing":
             return _json({"error": "not_found"}, status=404)
@@ -528,10 +524,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if bot is not None:
             text = (f"👋 Педагог {teacher.name}: ученик уходит из группы\nУченик: {s.name}\nГруппа: {group.name}\n"
                     + (f"С месяца: {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
-                       else "Убран из состава (оплата по посещениям — история сохранена)") + "\nДолгов нет.")
+                       else "Убран из состава (оплата по посещениям — история сохранена)")
+                    + (f"\n⚠️ Долг ученика: {debt} ₽ — остаётся за ним" if debt > 0 else "\nДолгов нет."))
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
-        logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s)", teacher.teacher_id, sid, gid, left, result)
-        return _json({"ok": True, "result": result, "leftPeriod": left})
+        logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s, долг %d)", teacher.teacher_id, sid, gid, left, result, debt)
+        return _json({"ok": True, "result": result, "leftPeriod": left, "debt": debt})
 
     async def student_frequency(request: web.Request, user, teacher) -> web.Response:
         """Старший тренер: «2 / 3 раза в неделю» ученику своей группы (SENIOR_TEACHER_IDS)."""

@@ -98,13 +98,18 @@ class NotifierFake:
         return len(addrs)
 
 
+def _not_today(day: int) -> str:
+    """Дата занятия в текущем месяце, но не сегодня: блоки «сегодня» в сводках должны оставаться пустыми."""
+    return f"{YM}-{day + (1 if date.today().day == day else 0):02d}"
+
+
 def _dp():
     teacher = mk_teacher("TCH-0001", "Река Станислав", rate_group=1000, rate_for_teacher=1500, rate_for_student=2000)
     students = [mk_student("STU-0001", "Иванов Иван", parent_tg_ids=[PARENT_TG]), mk_student("STU-0002", "Петрова Анна")]
     groups = [mk_group("GRP-0001", "БП Джаз", billing_mode=GroupBillingMode.PER_VISIT, price_full=800)]
     lessons = [
-        mk_lesson("LES-1", teacher, f"{YM}-03", students=[("STU-0001", "Иванов Иван")]),                 # 2000 ₽
-        mk_lesson("LES-2", teacher, f"{YM}-10", students=[("STU-0001", "Иванов Иван")]),                 # 2000 ₽
+        mk_lesson("LES-1", teacher, _not_today(3), students=[("STU-0001", "Иванов Иван")]),              # 2000 ₽
+        mk_lesson("LES-2", teacher, _not_today(10), students=[("STU-0001", "Иванов Иван")]),             # 2000 ₽
         mk_lesson("LES-3", teacher, f"{YM}-12", duration=60, lesson_type=LessonType.GROUP,
                   attendees="STU-0001:60:800,STU-0002:60:800", group_id="GRP-0001"),
     ]
