@@ -14,7 +14,6 @@ SCREENS['t.home'] = async () => {
     h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
     h.heldCash ? cell({ lead: '💵', plain: true, t: 'Наличные у вас', s: 'передайте администратору — он зачтёт оплату', r: `<b>${fmt(h.heldCash)}</b>` }) : '',
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
-    h.bills && h.bills.rest ? cell({ lead: '🧾', plain: true, t: 'Счета моих групп', s: `к оплате за ${mon.toLowerCase()} · ${fmt(h.bills.rest)}`, r: pill(h.bills.students, 'bad'), go: 't.groups' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
   ].filter(Boolean);
   const today = h.lessonsToday ? `
@@ -23,8 +22,14 @@ SCREENS['t.home'] = async () => {
   // Сдача периода отключена (periodSubmit=false): ни замка, ни напоминаний «не сдан».
   const lockNote = !h.periodSubmit ? '' : h.periodSubmitted ? ' · период сдан' : h.canSubmit ? ' · можно сдать период' : '';
   const monthLine = `${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}${h.groupLessonsMonth ? ` · 👥 ${h.groupLessonsMonth}` : ''}${h.individualLessonsMonth ? ` · 👤 ${h.individualLessonsMonth}` : ''}${lockNote}`;
+  // плитка месяца как у администратора: кто из учеников моих групп ещё не оплатил (педагоги со счетами)
+  const tiles = h.bills ? `<div class="kpis" style="margin-bottom:6px">
+      ${kpi(h.bills.rest ? fmt(h.bills.rest) : '✓', h.bills.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(h.bills.students, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, h.bills.rest ? 'bad' : 'ok', 't.unpaid', { ym: h.period })}
+      ${kpi(fmt(h.earnedMonth), `зарплата за ${mon.toLowerCase()} · ${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}`, 'ok', 't.money', { ym: h.period })}
+    </div>` : '';
   return { title: 'Сводка', html: `
     ${hero(`${esc(h.name)} · ${fdate(h.today)}`)}
+    ${tiles}
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
     <div class="eyebrow">Сегодня</div>
@@ -36,6 +41,21 @@ SCREENS['t.home'] = async () => {
       ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
     ])}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
+};
+
+/* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */
+SCREENS['t.unpaid'] = async ({ ym }) => {
+  ym = ym || lastPeriods(1)[0];
+  const d = await api(`/unpaid?ym=${ym}`);
+  const mon = MON_NOM[+ym.slice(5) - 1];
+  const debt = d.groups.filter(g => g.rest), done = d.groups.filter(g => !g.rest);
+  return { title: `Оплаты · ${mon}`, html: `
+    ${monthChips('t.unpaid', ym, {})}
+    <div class="kpis">${kpi(d.rest ? fmt(d.rest) : '✓', d.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(d.unpaidStudents, ['ученик', 'ученика', 'учеников'])}` : 'всё оплачено', d.rest ? 'bad' : 'ok')}${kpi(fmt(d.paid), `оплачено из ${fmt(d.accrued)}`, 'ok')}</div>
+    ${debt.length ? `<div class="eyebrow">Группы с долгом</div>${debt.map(g => unpaidGroup(g, ym, 't.bill')).join('')}` : ''}
+    ${done.length ? `<div class="eyebrow">Оплачено полностью</div>${done.map(g => unpaidGroup(g, ym, 't.bill')).join('')}` : ''}
+    ${!d.groups.length ? '<div class="empty">За этот месяц начислений в ваших группах нет</div>' : ''}
+    <p class="hint" style="margin-top:8px">✅ оплачено · 🟡 частично · ⬜ не оплачено. Тап по ученику — его счёт: там же отмечается оплата.</p>` };
 };
 
 /* ── Занятия ─────────────────────────────────────────────────────────── */

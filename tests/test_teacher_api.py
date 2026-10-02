@@ -762,3 +762,19 @@ def test_billing_teacher_sets_subscription_amount_for_the_month(api, monkeypatch
     assert status == 409 and r["error"] == "paid_more"
     assert _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription",
                  json={"ym": YM, "groupId": "GRP-0099", "amount": 1000})[0] == 404
+
+
+def test_teacher_unpaid_screen_shows_own_groups_and_students(api, monkeypatch):
+    """/unpaid — плитка «не оплатили за …» педагога: свои группы → ученики с долгом; без права счетов — 403."""
+    app, dp = api
+    assert _call(app, "GET", f"/api/teacher/unpaid?ym={YM}")[0] == 403
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    status, d = _call(app, "GET", f"/api/teacher/unpaid?ym={YM}")
+    assert status == 200 and [g["id"] for g in d["groups"]] == ["GRP-0001"]
+    g = d["groups"][0]
+    assert [(s["name"], s["rest"], s["status"]) for s in g["students"]] == [
+        ("Иванов Иван", 4800, "unpaid"), ("Петрова Анна", 800, "unpaid")]
+    assert (g["rest"], g["unpaid"], d["rest"], d["unpaidStudents"]) == (5600, 2, 5600, 2)
+    asyncio.run(dp["payment_service"].record_payment("STU-0002", "Петрова Анна", YM, 800, ADMIN_TG, None, None, "cash"))
+    d = _call(app, "GET", f"/api/teacher/unpaid?ym={YM}")[1]
+    assert d["rest"] == 4800 and next(s for s in d["groups"][0]["students"] if s["id"] == "STU-0002")["status"] == "paid"

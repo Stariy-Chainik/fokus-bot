@@ -832,6 +832,49 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return visible, summary, rows
 
     @billing_only
+    async def unpaid(request: web.Request, user, teacher) -> web.Response:
+        """Оплаты месяца по своим группам — как плитка «не оплатили за …» у администратора: группы →
+        ученики ✅/🟡/⬜ с долгом и его расшифровкой. Расчёт общий с администратором
+        (`payment_breakdown.month_breakdown`), оставлены только свои группы; ученику без полного счёта
+        (не FULL_BILL_*) цифры считаются по видимым направлениям (`_bill_rows`)."""
+        from bot.services.payment_breakdown import month_breakdown
+        period = request.query.get("ym") or current_period()
+        own = await _own_group_ids(teacher)
+        names = await _group_names()
+        branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
+        by_branch = {g.group_id: g.branch_id for g in await group_repo.get_all(include_archived=True)}
+        breakdown = {g["id"]: g for b in (await month_breakdown(dp, period))["branches"] for g in b["groups"]}
+        out = []
+        for gid in sorted(own, key=lambda g: names.get(g, g)):
+            members = set(await student_group_repo.get_students_for_group(gid))
+            src = breakdown.get(gid, {"students": []})
+            students = []
+            for st in src["students"]:
+                if st["id"] not in members:
+                    continue
+                if not await _full_bill(teacher, st["id"]):       # свои направления, как в счёте педагога
+                    _v, summary, rows = await _bill_rows(st["id"], period, teacher)
+                    if not summary["total"]:
+                        continue
+                    sub_ = sum(r["total"] for r in rows if r["subscription"])
+                    st = {**st, "accrued": summary["total"], "paid": summary["paid"], "rest": summary["rest"],
+                          "sub": sub_, "group": 0, "ind": summary["total"] - sub_,
+                          "status": "paid" if not summary["rest"] else "partial" if summary["paid"] else "unpaid"}
+                students.append(st)
+            if not students:
+                continue
+            students.sort(key=lambda x: (-x["rest"], x["name"]))
+            out.append({"id": gid, "name": names.get(gid, gid), "branchName": branches.get(by_branch.get(gid, ""), ""),
+                        "students": students, "accrued": sum(x["accrued"] for x in students),
+                        "paid": sum(x["paid"] for x in students), "rest": sum(x["rest"] for x in students),
+                        "unpaid": sum(1 for x in students if x["rest"])})
+        out.sort(key=lambda g: (-g["rest"], g["name"]))
+        return _json({"period": period, "groups": out,
+                      "accrued": sum(g["accrued"] for g in out), "paid": sum(g["paid"] for g in out),
+                      "rest": sum(g["rest"] for g in out),
+                      "unpaidStudents": len({s["id"] for g in out for s in g["students"] if s["rest"]})})
+
+    @billing_only
     async def bills_groups(request: web.Request, user, teacher) -> web.Response:
         period = request.query.get("ym") or current_period()
         gids = await _own_group_ids(teacher)
@@ -1181,7 +1224,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/diary/entries/{eid}/grade", diary_grade),
         ("GET", "/diary/{sid}/tasks", diary_tasks), ("POST", "/diary/{sid}/tasks", diary_task_add),
         ("POST", "/diary/tasks/{tid}/close", diary_task_close),
-        ("GET", "/bills", bills_groups), ("GET", "/bills/group/{gid}", bills_group),
+        ("GET", "/bills", bills_groups), ("GET", "/unpaid", unpaid), ("GET", "/bills/group/{gid}", bills_group),
         ("POST", "/bills/group/{gid}/send", bills_group_send),
         ("GET", "/bills/student/{sid}", bills_student), ("POST", "/bills/student/{sid}/send", bills_student_send),
         ("GET", "/bills/student/{sid}/marks", bills_marks), ("POST", "/bills/student/{sid}/pay", bills_pay),

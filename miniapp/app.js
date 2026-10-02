@@ -147,12 +147,12 @@ SCREENS['a.unpaid'] = async ({ ym }) => {
       r: b.rest ? `<b class="money bad">${fmt(b.rest)}</b>` : pill('✓', 'ok'), go: 'a.unpaid.branch', p: { ym, bid: b.id } })))}
     <p class="hint" style="margin-top:8px">Долг — начислено за месяц минус оплачено: абонемент, групповые и индивидуальные занятия ученика. Индивидуальные — в группе ученика у того же педагога, иначе в его первой группе.</p>` };
 };
-const unpaidGroup = (g, ym) => `<details class="acc">
+const unpaidGroup = (g, ym, billScreen = 'a.bill') => `<details class="acc">
   <summary><span><span class="chev">›</span>${esc(plainName(g.name))} <span class="hint">· оплатили ${g.students.length - g.unpaid} из ${g.students.length}</span></span>
     <span class="r ${g.rest ? 'money bad' : 'hint'}">${g.rest ? fmt(g.rest) : '✓'}</span></summary>
   <div class="accbody">
     <div class="accsum">начислено ${fmt(g.accrued)} · оплачено ${fmt(g.paid)}${g.rest ? ` · долг ${fmt(g.rest)}` : ''}</div>
-    ${g.students.map(st => `<button class="lesson-line pick" data-go="a.bill" data-p='${esc(JSON.stringify({ ym, sid: st.id }))}'>
+    ${g.students.map(st => `<button class="lesson-line pick" data-go="${billScreen}" data-p='${esc(JSON.stringify({ ym, sid: st.id }))}'>
       <span style="width:22px;text-align:center">${payStatus(st)}</span>
       <span>${esc(st.name)}<div class="d">${[st.sub ? `абонемент ${fmt(st.sub)}` : '', st.group ? `групповые ${fmt(st.group)}` : '', st.ind ? `индивидуальные ${fmt(st.ind)}` : ''].filter(Boolean).join(' · ')}${st.status === 'partial' ? ` · оплачено ${fmt(st.paid)}` : ''}</div></span>
       <span class="amt ${st.rest ? 'money bad' : 'hint'}">${st.rest ? fmt(st.rest) : 'оплачено'}</span></button>`).join('')}
