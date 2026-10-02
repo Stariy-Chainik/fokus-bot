@@ -112,6 +112,14 @@ class PaymentRepository(BaseRepository):
             await self._update_cells(row_idx, {15: lesson_ids, 11: now_str()})
         return True
 
+    async def delete(self, payment_id: str, student_id: str = "") -> bool:
+        """Удалить строку оплаты — снятие ошибочной отметки; остаток месяца пересчитает ledger_for."""
+        async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:
+            if row_idx is None:
+                return False
+            await self._delete_row(row_idx)
+            return True
+
     async def update_amount(self, payment_id: str, new_amount: int, student_id: str = "") -> bool:
         ts_now = now_str()
         async with self._locked_row(**self._key(payment_id, student_id)) as row_idx:

@@ -25,7 +25,7 @@ from bot.api.admin import auth_tg_id
 from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
-from bot.models.enums import GroupBillingMode, LessonType
+from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
 from bot.services import LessonService, payment_ledger
 from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
@@ -802,9 +802,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 out[key] = (agg, marks)
         return out
 
-    async def _bill_rows(sid: str, period: str, teacher=None) -> tuple[dict, dict, list]:
+    async def _bill_rows(sid: str, period: str, teacher=None, viewer_tg_id: int | None = None) -> tuple[dict, dict, list]:
         visible = await _visible_marks(teacher, sid, period)
-        paid_map = payment_ledger.paid_sums(await payment_repo.get_by_student_and_period(sid, period))
+        pays = await payment_repo.get_by_student_and_period(sid, period)
+        paid_map = payment_ledger.paid_sums(pays)
         rows = []
         for key, (agg, marks) in visible.items():
             if marks is None:                             # абонемент своей группы — целиком
@@ -817,7 +818,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 items = [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
                           "amount": m["amount"], "paid": m["paid"]} for m in marks]
             rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": total,
-                         "paid": paid, "rest": max(total - paid, 0), "items": items})
+                         "paid": paid, "rest": max(total - paid, 0), "items": items,
+                         # оплаты по начислению; mine — отметил сам педагог, такую он может снять («Убрать оплату»)
+                         "paidRows": [{"id": x.payment_id, "amount": x.total_amount, "date": (x.paid_at or "")[:10],
+                                       "method": x.payment_method or "",
+                                       "mine": bool(viewer_tg_id and x.confirmed_by_tg_id == viewer_tg_id)}
+                                      for x in pays if x.teacher_id == key and x.status == PaymentStatus.PAID and x.total_amount > 0]})
         summary = {"total": sum(r["total"] for r in rows), "paid": sum(r["paid"] for r in rows),
                    "rest": sum(r["rest"] for r in rows)}
         return visible, summary, rows
@@ -854,7 +860,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
-        _bills, summary, rows = await _bill_rows(sid, period, teacher)
+        _bills, summary, rows = await _bill_rows(sid, period, teacher, viewer_tg_id=user.tg_id)
         return _json({"student": {"id": sid, "name": s.name, "hasParent": bool(s.parent_addrs)},
                       "period": period, "rows": rows, **summary,
                       "groups": await _student_group_names(sid, student_group_repo, group_repo)})
@@ -886,6 +892,24 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "marks": [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
                        "amount": m["amount"], "paid": m["paid"]} for m in marks],
         })
+
+    @billing_only
+    async def bills_cancel(request: web.Request, user, teacher) -> web.Response:
+        """«Убрать оплату»: педагог снимает только свою отметку (confirmed_by — он сам) у видимого ученика."""
+        pid = request.match_info["pid"]
+        row = await payment_repo.get_by_id(pid)
+        if row is None or not await visibility.is_visible(teacher.teacher_id, row.student_id):
+            return _json({"error": "not_found"}, status=404)
+        if row.confirmed_by_tg_id != user.tg_id:
+            return _json({"error": "forbidden", "message": "Снять можно только свою отметку — напишите администратору"},
+                         status=403)
+        done = await payment_service.cancel_payment(pid, user.tg_id, (request.query.get("reason") or "")[:120],
+                                                    only_by_tg_id=user.tg_id)
+        if done is None:
+            return _json({"error": "not_found", "message": "Оплата не найдена или уже снята"}, status=404)
+        logger.info("Mini App: педагог %s снял свою оплату %s — %d ₽, %s %s", teacher.teacher_id, pid,
+                    done.total_amount, done.student_id, done.period_month)
+        return _json({"ok": True, "amount": done.total_amount})
 
     @billing_only
     async def bills_receipt(request: web.Request, user, teacher) -> web.Response:
@@ -1120,6 +1144,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/bills/student/{sid}/marks", bills_marks), ("POST", "/bills/student/{sid}/pay", bills_pay),
         ("POST", "/bills/student/{sid}/cash", bills_cash),
         ("POST", "/bills/student/{sid}/receipt", bills_receipt),
+        ("DELETE", "/payments/{pid}", bills_cancel),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

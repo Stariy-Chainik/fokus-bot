@@ -91,6 +91,27 @@ async def _send(student_id: str, period: str, amount: int, method: str, actor: i
 
 # ── заявки родителей об оплате (наличные, чеки) — педагогам, которые решают их сами ──
 
+def payment_cancelled(row, actor: int, reason: str = "") -> None:
+    """Педагогу, чью отметку оплаты снял администратор, — сообщение; свою отметку снял сам — молчим."""
+    if not _deps.get("bot") or not row.confirmed_by_tg_id or row.confirmed_by_tg_id == actor:
+        return
+    _spawn(_send_cancelled(row, reason))
+
+
+async def _send_cancelled(row, reason: str) -> None:
+    from bot.utils.dates import period_label
+    user = await _deps["users"].get_by_tg_id(row.confirmed_by_tg_id)
+    if user is None or not user.teacher_id or user.is_admin:
+        return
+    text = (f"↩️ Администратор снял вашу отметку оплаты\nУченик: {row.student_name}\n"
+            f"Период: {period_label(row.period_month)}\nСумма: {row.total_amount} руб."
+            + (f"\nПричина: {reason}" if reason else "") + "\n\nНачисление снова числится неоплаченным.")
+    try:
+        await _deps["bot"].send_message(row.confirmed_by_tg_id, text)
+    except Exception as exc:
+        logger.warning("payment_events: педагогу %s не доставлено: %s", row.confirmed_by_tg_id, exc)
+
+
 def request_created(action) -> None:
     """Новая заявка в очереди решений.
 

@@ -50,7 +50,10 @@ const fmon = ym => `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`;
 const plural = (n, f) => { const m = n % 10, h = n % 100; return `${n} ${h > 10 && h < 20 ? f[2] : m === 1 ? f[0] : m > 1 && m < 5 ? f[1] : f[2]}`; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const initials = n => n.split(' ').map(x => x[0]).join('').slice(0, 2);
-const METHOD = { yookassa: 'Картой онлайн', yookassa_sbp: 'СБП онлайн', receipt_bank: 'По реквизитам', receipt_sbp: 'СБП по чеку', cash: 'Наличные', admin_manual: 'Вручную', '': '' };
+/* Оплаченная строка с «❌ Убрать»: снимает ошибочную отметку оплаты (DELETE /payments/{id} — у админа любую,
+   у педагога только свою). Это div, а не cell(): кнопка внутри кнопки ломает разметку. */
+const paidCell = (title, sub, pid, amount) => `<div class="cell static"><span class="lead plain">✅</span><span><div class="t">${title}</div><div class="s">${sub}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="cancelPayAsk" data-p='${esc(JSON.stringify({ pid, title, amount }))}'>❌ Убрать</button></span></div>`;
+const METHOD = { yookassa: 'Картой онлайн', yookassa_sbp: 'СБП онлайн', receipt_bank: 'По реквизитам', receipt_sbp: 'СБП по чеку', bank: 'По реквизитам', sbp: 'СБП', receipt_unknown: 'Чек', cash: 'Наличные', admin_manual: 'Вручную', '': '' };
 const MODE = { subscription: 'абонемент', per_visit: 'по посещению', none: 'без оплаты' };
 function lastPeriods(n) { const out = []; const d = new Date(); for (let i = 0; i < n; i++) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`); } return out; }
 
@@ -279,7 +282,7 @@ SCREENS['a.pay.student'] = async ({ ym, sid }) => {
   const rows = []; let total = 0, paid = 0, rest = 0;
   d.positions.forEach(p => {
     total += p.accrued; paid += Math.min(p.paid, p.accrued); rest += p.remainder;
-    p.paidRows.forEach(r => rows.push(cell({ lead: '✅', plain: true, t: `${esc(p.name)} — ${fmt(r.amount)}`, s: `${fdate(r.date)}${r.method ? ' · ' + (METHOD[r.method] || r.method) : ''}` })));
+    p.paidRows.forEach(r => rows.push(paidCell(`${esc(p.name)} — ${fmt(r.amount)}`, `${fdate(r.date)}${r.method ? ' · ' + (METHOD[r.method] || r.method) : ''}`, r.id, r.amount)));
     if (p.remainder > 0) rows.push(cell({ lead: '⏳', plain: true, t: `${esc(p.name)} — к ${p.paid ? 'доплате' : 'оплате'} ${fmt(p.remainder)}`, s: p.subscription ? 'абонемент — только целиком' : `${plural(p.unpaidLessons, ['занятие', 'занятия', 'занятий'])} не оплачено`, go: p.subscription ? 'a.pay.sub' : 'a.pay.select', p: { ym, sid, key: p.key, name: p.name, pendingId: p.pending && p.pending.id, amount: p.remainder } }));
   });
   return { title: d.student.name, html: `<div class="hint" style="margin-bottom:10px">${fmon(ym)} — выберите счёт для подтверждения</div>${list(rows.length ? rows : [cell({ t: '✅ Всё оплачено' })])}<div class="total"><span>Итого ${fmt(total)} · оплачено ${fmt(paid)}</span><span>${rest ? `к оплате ${fmt(rest)}` : '✓'}</span></div><div style="margin-top:12px">${goBtn('🧾 Открыть счёт ученика', 'a.bill', { ym, sid }, 'sec')}</div>` };
@@ -621,10 +624,12 @@ SCREENS['a.payhist.months'] = async ({ sid }) => {
 };
 SCREENS['a.payhist.month'] = async ({ sid, ym }) => {
   const d = await api(`/payhist/${sid}/${ym}`);
-  const row = p => cell({ lead: '✅', plain: true, t: `${esc(p.teacherName)} — ${fmt(p.amount)}`, s: `${p.paidAt ? fdate(p.paidAt.slice(0, 10)) + ' · ' : ''}${p.byTgId === 0 ? 'ЮКасса' : (METHOD[p.method] || p.method || 'вручную')}${p.comment && !['чек', 'ЮКасса'].includes(p.comment) ? ' · ' + esc(p.comment) : ''}` });
+  const row = p => paidCell(`${esc(p.teacherName)} — ${fmt(p.amount)}`, `${p.paidAt ? fdate(p.paidAt.slice(0, 10)) + ' · ' : ''}${p.byTgId === 0 ? 'ЮКасса' : (METHOD[p.method] || p.method || 'вручную')}${p.comment && !['чек', 'ЮКасса'].includes(p.comment) ? ' · ' + esc(p.comment) : ''}`, p.id, p.amount);
   return { title: `${d.student.name} · ${MON_NOM[+ym.slice(5) - 1]}`, html: `${d.paid.length ? `<div class="eyebrow">Оплачено</div>${list(d.paid.map(row))}` : ''}${d.pending.length ? `<div class="eyebrow">Ожидает</div>${list(d.pending.map(p => cell({ lead: '⏳', plain: true, t: `${esc(p.teacherName)} — ${fmt(p.amount)}`, s: 'остаток к оплате' })))}` : ''}${!d.paid.length && !d.pending.length ? '<div class="empty">За этот месяц записей нет</div>' : ''}` };
 };
 Object.assign(ACT, {
+  cancelPayAsk: ({ pid, title, amount }) => sheet(`<h3>Убрать оплату?</h3><div class="hint">${title}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(amount)}</div><p class="hint">Запись об оплате удалится, сумма снова станет неоплаченной: ученик вернётся в должники, родитель увидит остаток в счёте. Педагог, который отмечал оплату, получит сообщение.</p>${field('cp-r', 'Причина (необязательно)', '', 'placeholder="ошибочная отметка, перевод не пришёл…"')}<div style="margin-top:12px">${btn('❌ Убрать оплату', 'cancelPayDo', { pid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
+  cancelPayDo: async ({ pid }) => { try { const r = await api(`/payments/${pid}?reason=${encodeURIComponent(val('cp-r').trim())}`, { method: 'DELETE' }); closeSheet(); render(); toast(`Оплата ${fmt(r.amount)} снята`); } catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); } },
   finForm: ({ ym, kind }) => sheet(`<h3>${kind === 'income' ? '➕ Доход' : '➕ Расход'} · ${fmon(ym)}</h3>${field('fin-t', 'Название', '', kind === 'income' ? 'placeholder="Турнир, аренда костюмов…"' : 'placeholder="Аренда зала, реклама…"')}${field('fin-a', 'Сумма, ₽', '', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить', 'addFin', { ym, kind })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   addFin: async ({ ym, kind }) => { const title = val('fin-t').trim(), amount = +val('fin-a'); if (!title || !amount) { toast('Нужны название и сумма'); return; } try { await api('/finance', { method: 'POST', body: { periodMonth: ym, kind, title, amount } }); closeSheet(); render(); toast('Записано'); } catch (e) { toast(errText(e)); } },
   delFin: async ({ id }) => { try { await api(`/finance/${id}`, { method: 'DELETE' }); render(); toast('Запись удалена'); } catch (e) { toast(errText(e)); } },

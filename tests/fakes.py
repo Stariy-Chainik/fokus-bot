@@ -296,6 +296,11 @@ class PaymentRepoFake:
         self.added.append(payment)
         return payment
 
+    async def delete(self, payment_id, student_id=""):
+        before = len(self.rows)
+        self.rows = [r for r in self.rows if r.payment_id != payment_id]
+        return len(self.rows) < before
+
     async def set_lesson_ids(self, payment_id, lesson_ids, student_id=""):
         for r in self.rows:
             if r.payment_id == payment_id:

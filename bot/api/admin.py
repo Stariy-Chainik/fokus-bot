@@ -488,6 +488,16 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         await notify_payment_confirmed(_dp_get(dp, "notifier"), student, period, credited)
         return _json({"credited": credited, "rows": rows, "overpaid": max(0, credited - rest)})
 
+    async def pay_cancel(request: web.Request, user) -> web.Response:
+        """«Убрать оплату»: снять ошибочную отметку — строка удаляется, остаток месяца пересчитывается."""
+        pid = request.match_info["pid"]
+        row = await payment_service.cancel_payment(pid, user.tg_id, (request.query.get("reason") or "")[:120])
+        if row is None:
+            return _json({"error": "not_found", "message": "Оплата не найдена или уже снята"}, status=404)
+        logger.info("Mini App: админ %s снял оплату %s — %d ₽, %s %s", user.tg_id, pid, row.total_amount,
+                    row.student_id, row.period_month)
+        return _json({"ok": True, "amount": row.total_amount, "studentId": row.student_id, "period": row.period_month})
+
     async def pay_confirm_invoice(request: web.Request, user) -> web.Response:
         try:
             body = await request.json()
@@ -583,6 +593,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/pay/groups", pay_groups), ("GET", "/pay/students", pay_students),
         ("GET", "/pay/student/{sid}", pay_student), ("GET", "/pay/marks/{sid}", pay_marks),
         ("POST", "/pay/confirm", pay_confirm), ("POST", "/pay/confirm-invoice", pay_confirm_invoice),
+        ("DELETE", "/payments/{pid}", pay_cancel),
         ("GET", "/bill/{sid}", bill), ("POST", "/bill/{sid}/send", bill_send),
         ("GET", "/debtors", debtors),
     ]

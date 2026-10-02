@@ -714,6 +714,31 @@ class PaymentService:
             per_student[period] = per_student.get(period, 0) + debt
         return debts
 
+    async def cancel_payment(
+        self, payment_id: str, actor_tg_id: int, reason: str = "", only_by_tg_id: int | None = None,
+    ) -> StudentPeriodPayment | None:
+        """Снять ошибочную отметку оплаты («Убрать оплату»): строка PAID удаляется, остаток месяца растёт.
+
+        only_by_tg_id — педагог снимает только свои отметки (строки с его confirmed_by_tg_id); None —
+        администратор, любая строка. Возвращает снятую строку; None — не найдена, не оплата или чужая.
+        Заявки очереди не трогаем: они уже закрыты решением; педагог, чью отметку сняли, получает сообщение.
+        """
+        row = await self._payment_repo.get_by_id(payment_id)
+        if row is None or row.status != PaymentStatus.PAID or row.total_amount <= 0:
+            return None
+        if only_by_tg_id is not None and row.confirmed_by_tg_id != only_by_tg_id:
+            return None
+        async with payment_lock(row.student_id, row.period_month):
+            if not await self._payment_repo.delete(payment_id, student_id=row.student_id):
+                return None
+            # строка-остаток должна вырасти сразу, а не при следующем открытии счёта
+            await self.ledger_for(Student(student_id=row.student_id, name=row.student_name), row.period_month)
+        await activity.record(activity.PAYMENT, f"Снята оплата {row.total_amount} ₽: {row.student_id} · {row.period_month}"
+                              f" · {row.teacher_name or row.teacher_id}" + (f" · {reason}" if reason else ""),
+                              actor=actor_tg_id, ref=row.student_id)
+        payment_events.payment_cancelled(row, actor_tg_id, reason)
+        return row
+
     async def confirm_payment(
         self, payment_id: str, confirmed_by_tg_id: int,
         payment_method: str = ADMIN_MANUAL,

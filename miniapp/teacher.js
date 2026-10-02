@@ -302,7 +302,9 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
   const picked = tbillTotal();
   const mark = (on, paid) => `<span class="mark ${paid ? 'paid' : on ? 'on' : ''}">${paid || on ? '✓' : ''}</span>`;
   const rowsHtml = b.rows.map(r => {
-    const head = `<div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>`;
+    const head = `<div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>`
+      // оплаты по начислению; свою отметку педагог может снять («❌» — тот же лист, что у администратора)
+      + (r.paidRows || []).map(p => `<div class="lesson-line">${mark(false, true)}<span class="hint">оплачено ${fdate(p.date)}${p.method ? ' · ' + (METHOD[p.method] || p.method) : ''}</span><span class="amt">${fmt(p.amount)}${p.mine ? ` <button class="chip" style="padding:2px 8px;margin-left:6px" data-act="cancelPayAsk" data-p='${esc(JSON.stringify({ pid: p.id, title: `${b.student.name} · ${r.name} · ${fmon(ym)}`, amount: p.amount }))}' aria-label="Убрать оплату">❌</button>` : ''}</span></div>`).join('');
     if (r.subscription) {
       return head + (r.rest
         ? `<button class="lesson-line pick" data-act="tbillSub" data-p='${esc(JSON.stringify({ key: r.key }))}'>${mark(!!sel.sub[r.key], false)}<span>абонемент за месяц · к оплате</span><span class="amt">${fmt(r.rest)}</span></button>`

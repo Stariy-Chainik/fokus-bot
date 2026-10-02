@@ -715,3 +715,25 @@ def test_transfer_needs_a_receipt_from_the_teacher(api, monkeypatch):
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
                       json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank", "receiptId": up["receiptId"]})
     assert status == 200 and r["credited"] == 2000
+
+
+def test_teacher_cancels_only_own_payment_mark(api, monkeypatch):
+    """«Убрать оплату» у педагога: свою отметку снимает, чужую (администратора) — 403."""
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay",
+                      json={"ym": YM, "key": "TCH-0001", "amount": 2000, "method": "receipt_bank", "receiptId": "RC"})
+    assert status == 200
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 800, ADMIN_TG, ["TCH-0001"], None, "cash"))
+    bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    rows = next(x for x in bill["rows"] if x["key"] == "TCH-0001")["paidRows"]
+    mine = next(x for x in rows if x["mine"])
+    admins = next(x for x in rows if not x["mine"])
+    assert (mine["amount"], admins["amount"]) == (2000, 800)
+    assert _call(app, "DELETE", f"/api/teacher/payments/{admins['id']}")[0] == 403
+    status, r = _call(app, "DELETE", f"/api/teacher/payments/{mine['id']}")
+    assert status == 200 and r["amount"] == 2000
+    bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    row = next(x for x in bill["rows"] if x["key"] == "TCH-0001")
+    assert [x["amount"] for x in row["paidRows"]] == [800]          # осталась только отметка администратора
+    assert _call(app, "DELETE", "/api/teacher/payments/PAY-999999")[0] == 404

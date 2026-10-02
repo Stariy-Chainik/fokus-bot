@@ -428,3 +428,21 @@ def test_home_month_tiles_can_show_a_previous_month(monkeypatch):
     assert past["collected"]["accrued"] == 0 < now["collected"]["accrued"]          # занятия теста — в текущем месяце
     assert past["debtorsCount"] == now["debtorsCount"]                              # должники — от текущего месяца
     assert _call(app, "GET", "/api/admin/home?ym=2999-01")[1]["period"] == YM
+
+
+def test_admin_cancels_a_wrong_payment_mark(monkeypatch):
+    """«Убрать оплату»: строка PAID удаляется, остаток месяца возвращается; повтор — 404."""
+    app, dp = make_api(monkeypatch)
+    ps = dp["payment_repo"]
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 4800, ADMIN_TG, None, "ошибка", "cash"))
+    paid = [p for p in ps.rows if p.status == PaymentStatus.PAID]
+    assert len(paid) == 1
+    assert _call(app, "GET", f"/api/admin/pay/student/STU-0001?ym={YM}")[1]["positions"][0]["remainder"] == 0
+    status, r = _call(app, "DELETE", f"/api/admin/payments/{paid[0].payment_id}?reason=перевод%20не%20пришёл")
+    assert status == 200 and r["amount"] == 4800
+    assert not [p for p in ps.rows if p.status == PaymentStatus.PAID]
+    pos = _call(app, "GET", f"/api/admin/pay/student/STU-0001?ym={YM}")[1]["positions"][0]
+    assert pos["remainder"] == 4800 and pos["paidRows"] == []
+    assert _call(app, "DELETE", f"/api/admin/payments/{paid[0].payment_id}")[0] == 404
+    pending = next(p for p in ps.rows if p.status != PaymentStatus.PAID)         # строку-остаток снять нельзя
+    assert _call(app, "DELETE", f"/api/admin/payments/{pending.payment_id}")[0] == 404
