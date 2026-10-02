@@ -737,3 +737,28 @@ def test_teacher_cancels_only_own_payment_mark(api, monkeypatch):
     row = next(x for x in bill["rows"] if x["key"] == "TCH-0001")
     assert [x["amount"] for x in row["paidRows"]] == [800]          # осталась только отметка администратора
     assert _call(app, "DELETE", "/api/teacher/payments/PAY-999999")[0] == 404
+
+
+def test_billing_teacher_sets_subscription_amount_for_the_month(api, monkeypatch):
+    """«Абонемент за этот месяц»: педагог своей группы ставит сумму на месяц; ниже оплаченного — 409; чужая группа — 404."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    g = dp["group_repo"].items[0]
+    g.billing_mode, g.price_full = GroupBillingMode.SUBSCRIPTION, 6000      # LES-3 — занятие группы в этом месяце
+    bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    row = next(x for x in bill["rows"] if x["key"] == "SUB:GRP-0001")
+    assert row["total"] == 6000 and row["ownGroup"] is True
+    bot = FakeBot()
+    status, r = _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription", bot=bot,
+                      json={"ym": YM, "groupId": "GRP-0001", "amount": 3000, "reason": "пришёл с 15 числа"})
+    assert status == 200 and (r["old"], r["amount"]) == (6000, 3000)
+    assert bot.sent and "изменил абонемент" in bot.sent[0][1] and "6000 ₽ → стало 3000 ₽" in bot.sent[0][1]
+    bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
+    assert next(x for x in bill["rows"] if x["key"] == "SUB:GRP-0001")["total"] == 3000
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 3000, ADMIN_TG, ["SUB:GRP-0001"], None, "cash"))
+    status, r = _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription",
+                      json={"ym": YM, "groupId": "GRP-0001", "amount": 2000})
+    assert status == 409 and r["error"] == "paid_more"
+    assert _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription",
+                 json={"ym": YM, "groupId": "GRP-0099", "amount": 1000})[0] == 404

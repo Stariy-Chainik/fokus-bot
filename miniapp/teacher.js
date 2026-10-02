@@ -302,7 +302,7 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
   const picked = tbillTotal();
   const mark = (on, paid) => `<span class="mark ${paid ? 'paid' : on ? 'on' : ''}">${paid || on ? '✓' : ''}</span>`;
   const rowsHtml = b.rows.map(r => {
-    const head = `<div class="grp"><span>${esc(r.name)}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>`
+    const head = `<div class="grp"><span>${esc(r.name)}${r.ownGroup ? ` <button class="chip" style="padding:1px 7px;margin-left:6px" data-act="tSubAsk" data-p='${esc(JSON.stringify({ sid, ym, gid: r.key.split(':')[1], total: r.total, paid: r.paid, student: b.student.name }))}' aria-label="Абонемент за этот месяц">✏️</button>` : ''}</span><span>${fmt(r.total)}${r.paid ? ` · оплачено ${fmt(r.paid)}` : ''}</span></div>`
       // оплаты по начислению; свою отметку педагог может снять («❌» — тот же лист, что у администратора)
       + (r.paidRows || []).map(p => `<div class="lesson-line">${mark(false, true)}<span class="hint">оплачено ${fdate(p.date)}${p.method ? ' · ' + (METHOD[p.method] || p.method) : ''}</span><span class="amt">${fmt(p.amount)}${p.mine ? ` <button class="chip" style="padding:2px 8px;margin-left:6px" data-act="cancelPayAsk" data-p='${esc(JSON.stringify({ pid: p.id, title: `${b.student.name} · ${r.name} · ${fmon(ym)}`, amount: p.amount }))}' aria-label="Убрать оплату">❌</button>` : ''}</span></div>`).join('');
     if (r.subscription) {
@@ -323,6 +323,15 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
     <div style="margin-top:12px">${b.student.hasParent
       ? btn('📨 Отправить родителю', 'tBillSend', { sid, ym, name: b.student.name }, 'ghost')
       : '<div class="card pad hint">Родитель не привязан к ученику — отправлять некому.</div>'}</div>` };
+};
+/* «Абонемент за этот месяц»: ученик пришёл не с начала месяца — педагог ставит сумму за месяц, администратору уходит сообщение. */
+ACT.tSubAsk = ({ sid, ym, gid, total, paid, student }) => sheet(`<h3>Абонемент за ${fmon(ym)}</h3><div class="hint">${esc(student)}. Сейчас начислено ${fmt(total)}${paid ? `, оплачено ${fmt(paid)}` : ''}. Новая сумма действует только на этот месяц — например, если ребёнок пришёл в середине месяца.</div>
+  ${field('sub-a', 'Сумма абонемента за месяц, ₽', String(total), 'inputmode="numeric"')}${field('sub-r', 'Причина (необязательно)', '', 'placeholder="пришла с 15 числа, 2 занятия…"')}
+  <div style="margin-top:12px">${btn('💾 Сохранить', 'tSubDo', { sid, ym, gid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tSubDo = async ({ sid, ym, gid }) => {
+  const amount = +val('sub-a'); if (!(amount >= 0) || val('sub-a').trim() === '') { toast('Укажите сумму'); return; }
+  try { const r = await api(`/bills/student/${sid}/subscription`, { method: 'PUT', body: { ym, groupId: gid, amount, reason: val('sub-r').trim() } }); closeSheet(); state.ui.tbill = null; render(); toast(`Абонемент за месяц: ${fmt(r.old)} → ${fmt(r.amount)}`); }
+  catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 function tbillTotal() {
   const a = state.ui.tbill; if (!a || !a.data) return 0;

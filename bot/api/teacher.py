@@ -26,7 +26,7 @@ from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
-from bot.services import LessonService, payment_ledger
+from bot.services import LessonService, activity, payment_ledger
 from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
@@ -804,6 +804,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
 
     async def _bill_rows(sid: str, period: str, teacher=None, viewer_tg_id: int | None = None) -> tuple[dict, dict, list]:
         visible = await _visible_marks(teacher, sid, period)
+        own_groups = await _own_group_ids(teacher) if teacher else set()
         pays = await payment_repo.get_by_student_and_period(sid, period)
         paid_map = payment_ledger.paid_sums(pays)
         rows = []
@@ -819,6 +820,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                           "amount": m["amount"], "paid": m["paid"]} for m in marks]
             rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": total,
                          "paid": paid, "rest": max(total - paid, 0), "items": items,
+                         # абонемент своей группы — педагог может поменять сумму за месяц («Абонемент за этот месяц»)
+                         "ownGroup": bool(agg.subscription and key.split(":", 1)[-1] in own_groups),
                          # оплаты по начислению; mine — отметил сам педагог, такую он может снять («Убрать оплату»)
                          "paidRows": [{"id": x.payment_id, "amount": x.total_amount, "date": (x.paid_at or "")[:10],
                                        "method": x.payment_method or "",
@@ -892,6 +895,46 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "marks": [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
                        "amount": m["amount"], "paid": m["paid"]} for m in marks],
         })
+
+    @billing_only
+    async def bills_sub_amount(request: web.Request, user, teacher) -> web.Response:
+        """«Абонемент за этот месяц»: педагог со счетами ставит ученику своей группы сумму абонемента на месяц
+        (пришёл не с начала месяца и т. п.). Это переопределение ученик/месяц, как у администратора; ниже уже
+        оплаченного поставить нельзя; администраторам — сообщение (решение владельца 02.10.2026)."""
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            return _json({"error": "bad_request"}, status=400)
+        period = (body or {}).get("ym") or current_period()
+        gid, amount = (body or {}).get("groupId"), (body or {}).get("amount")
+        reason = str((body or {}).get("reason") or "")[:120]
+        if not isinstance(gid, str) or not isinstance(amount, int) or amount < 0:
+            return _json({"error": "bad_request", "message": "Нужны группа и сумма"}, status=400)
+        if gid not in await _own_group_ids(teacher) or not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        group = await group_repo.get_by_id(gid)
+        if s is None or group is None or group.billing_mode != GroupBillingMode.SUBSCRIPTION \
+                or gid not in await student_group_repo.get_groups_for_student(sid, include_left=True):
+            return _json({"error": "not_found"}, status=404)
+        key = f"{SUBSCRIPTION_KEY_PREFIX}{gid}"
+        async with payment_lock(sid, period):
+            led = (await payment_service.ledger_for(s, period)).get(key)
+            old = led.accrued if led else group.price_full
+            if led and led.paid > amount:
+                return _json({"error": "paid_more", "message": f"За этот месяц уже оплачено {led.paid} ₽ — "
+                              f"сумму ниже оплаченного поставить нельзя"}, status=409)
+            await dp["subscription_override_repo"].upsert(gid, period, sid, amount)
+            await payment_service.ledger_for(s, period)                  # остаток пересчитать сразу
+        await activity.record(activity.PAYMENT, f"Абонемент {sid} в {gid} за {period}: {old} → {amount} ₽"
+                              f" · педагог {teacher.name}" + (f" · {reason}" if reason else ""), actor=user.tg_id, ref=sid)
+        if bot is not None:
+            text = (f"✏️ Педагог {teacher.name} изменил абонемент\nУченик: {s.name}\nГруппа: {group.name}\n"
+                    f"Месяц: {period_label(period)}\nБыло {old} ₽ → стало {amount} ₽" + (f"\nПричина: {reason}" if reason else ""))
+            await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
+        logger.info("Mini App: педагог %s изменил абонемент %s %s %s: %d → %d", teacher.teacher_id, sid, gid, period, old, amount)
+        return _json({"ok": True, "old": old, "amount": amount})
 
     @billing_only
     async def bills_cancel(request: web.Request, user, teacher) -> web.Response:
@@ -1145,6 +1188,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/bills/student/{sid}/cash", bills_cash),
         ("POST", "/bills/student/{sid}/receipt", bills_receipt),
         ("DELETE", "/payments/{pid}", bills_cancel),
+        ("PUT", "/bills/student/{sid}/subscription", bills_sub_amount),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))
