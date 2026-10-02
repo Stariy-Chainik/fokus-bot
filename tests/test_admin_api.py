@@ -414,3 +414,17 @@ def test_pay_breakdown_branches_groups_students_match_collection(api):
     ivanov = next(s for s in grp["students"] if s["id"] == "STU-0001")
     assert (ivanov["accrued"], ivanov["paid"], ivanov["rest"], ivanov["status"]) == (4800, 3000, 1800, "partial")
     assert (ivanov["group"], ivanov["ind"], ivanov["sub"]) == (800, 4000, 0)
+
+
+def test_home_month_tiles_can_show_a_previous_month(monkeypatch):
+    """Сводка `?ym=`: плитки сбора оплат и прибыли за прошлый месяц; будущий месяц — не принимается."""
+    from bot.utils.dates import last_periods
+    app, _ = make_api(monkeypatch)
+    prev = last_periods(2)[1]
+    now = _call(app, "GET", "/api/admin/home")[1]
+    past = _call(app, "GET", f"/api/admin/home?ym={prev}")[1]
+    assert now["period"] == now["currentPeriod"] == YM
+    assert past["period"] == prev and past["currentPeriod"] == YM
+    assert past["collected"]["accrued"] == 0 < now["collected"]["accrued"]          # занятия теста — в текущем месяце
+    assert past["debtorsCount"] == now["debtorsCount"]                              # должники — от текущего месяца
+    assert _call(app, "GET", "/api/admin/home?ym=2999-01")[1]["period"] == YM

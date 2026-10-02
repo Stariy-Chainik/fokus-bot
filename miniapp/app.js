@@ -136,6 +136,7 @@ SCREENS['a.unpaid'] = async ({ ym }) => {
   const d = await api(`/pay/breakdown?ym=${ym}`);
   const mon = MON_NOM[+ym.slice(5) - 1];
   return { title: `Оплаты · ${mon}`, html: `
+    ${monthChips('a.unpaid', ym, {})}
     <div class="kpis">${kpi(fmt(d.rest), `не оплачено за ${mon.toLowerCase()}`, d.rest ? 'bad' : 'ok')}${kpi(fmt(d.paid), `оплачено из ${fmt(d.accrued)}`, 'ok')}</div>
     <div class="eyebrow">Филиалы</div>
     ${list(d.branches.map(b => cell({ lead: b.id === 'NOGROUP' ? '👤' : '🏢', plain: true, t: esc(b.name),
@@ -167,8 +168,10 @@ SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {
 };
 /* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
    Быстрых действий нет: всё это есть во вкладках, а дубли плиток и кнопок только путали. */
-SCREENS['a.home'] = async () => {
-  const [h, inbox] = await Promise.all([api(`/home${actSeen() ? `?seen=${encodeURIComponent(actSeen())}` : ''}`), api('/inbox').catch(() => ({ total: 0 }))]);
+SCREENS['a.home'] = async ({ ym } = {}) => {
+  const q = [ym ? `ym=${ym}` : '', actSeen() ? `seen=${encodeURIComponent(actSeen())}` : ''].filter(Boolean).join('&');
+  const [h, inbox] = await Promise.all([api(`/home${q ? `?${q}` : ''}`), api('/inbox').catch(() => ({ total: 0 }))]);
+  const past = h.currentPeriod && h.period !== h.currentPeriod;      // плитки за прошлый месяц
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase();
   const c = h.collected;
   const attention = [
@@ -181,10 +184,11 @@ SCREENS['a.home'] = async () => {
   // плитки месяца наверху: кто ещё должен за месяц и ожидаемая прибыль (если все оплатят)
   const tiles = `<div class="kpis" style="margin-bottom:6px">
       ${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, c.rest ? 'bad' : 'ok', 'a.unpaid', { ym: h.period })}
-      ${kpi(fmt(h.profitMonth), `ожидаемая прибыль за ${mon.toLowerCase()} · собрано ${c.percent}%`, h.profitMonth < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}
+      ${kpi(fmt(h.profitMonth), `${past ? 'прибыль' : 'ожидаемая прибыль'} за ${mon.toLowerCase()} · собрано ${c.percent}%`, h.profitMonth < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}
     </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
+    ${monthChips('a.home', h.period, {})}
     ${tiles}
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}

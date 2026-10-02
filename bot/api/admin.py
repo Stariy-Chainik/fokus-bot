@@ -130,18 +130,22 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                       "name": teacher.name if teacher else ""})
 
     async def home(request: web.Request, user) -> web.Response:
-        """Сводка: «требует внимания» (должники) → «сегодня» (занятия дня) → «месяц» (сбор оплат, прибыль)."""
-        period = current_period()
-        prev = _prev_period(period)
+        """Сводка: «требует внимания» (должники) → «сегодня» (занятия дня) → «месяц» (сбор оплат, прибыль).
+
+        `?ym=` — плитки месяца (сбор оплат и прибыль) за прошлый месяц; должники и «сегодня» — всегда от текущего."""
+        current = current_period()
+        ym = request.query.get("ym") or ""
+        period = ym if re.fullmatch(r"\d{4}-\d{2}", ym) and ym <= current else current
+        prev = _prev_period(current)
         ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
         collected = period_collection(ledger, period)
-        debtors_count, debtors_total = debtors_summary(ledger, period)
+        debtors_count, debtors_total = debtors_summary(ledger, current)
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
         day = await profit_service.get_lesson_summary(today)      # только занятия дня
         month = await profit_service.get_month_summary(period)    # как экран «Прибыль»
         return _json({
-            "today": today, "period": period, "prevPeriod": prev,
+            "today": today, "period": period, "currentPeriod": current, "prevPeriod": prev,
             "debtorsCount": debtors_count, "debtorsTotal": debtors_total,
             "lessonsToday": len(lessons_today), "todayTeachers": await _today_by_teacher(lessons_today),
             "incomeToday": day.total_income, "profitToday": day.profit,
