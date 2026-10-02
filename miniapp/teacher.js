@@ -336,7 +336,7 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
   }).join('');
   return { title: b.student.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
-      <div class="hint">${fmon(b.period)}${b.groups.length ? ` · ${esc(b.groups.join(', '))}` : ''}${b.rest ? ' · отметьте галочками, что оплачено' : ''}</div></div>
+      <div class="hint">${fmon(b.period)}${b.groups.length ? ` · ${esc(b.groups.join(', '))}` : ''}${b.rest ? ' · отметьте галочками, что оплачено' : ''}</div>${b.rest ? billAllChip(sel, 'tbillAll') : ''}</div>
     ${b.rows.length ? `<div class="card bill" style="margin-top:10px">${rowsHtml}
       <div class="total"><span>К оплате</span><span class="big ${b.rest ? 'bad' : 'ok'}">${fmt(b.rest)}</span></div></div>` : '<div class="empty">Начислений за месяц нет</div>'}
     ${b.rest ? `<div style="margin-top:12px">${btn(picked ? `✅ Отметить оплату ${fmt(picked)}` : 'Отметьте галочками оплаченные уроки', 'tbillAsk', { sid, ym, name: b.student.name }, picked ? '' : 'sec')}</div>` : ''}
@@ -362,6 +362,7 @@ function tbillTotal() {
   });
   return t;
 }
+ACT.tbillAll = () => { if (state.ui.tbill) { billAllToggle(state.ui.tbill); render(); } };
 ACT.tbillPick = ({ key, id }) => { const a = state.ui.tbill; const cur = a.rows[key] || []; a.rows[key] = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; render(); };
 ACT.tbillSub = ({ key }) => { const a = state.ui.tbill; a.sub[key] = !a.sub[key]; render(); };
 ACT.tbillAsk = ({ sid, ym, name }) => {

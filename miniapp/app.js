@@ -313,6 +313,10 @@ function overpaySheet(d, act, base) {
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 }
 
+/* «Отметить все» в счёте: все неоплаченные занятия и абонементы разом; повторный тап снимает. */
+const billAllOn = a => (a.data || []).every(r => r.subscription ? (!r.rest || a.sub[r.key]) : r.items.filter(m => !m.paid).every(m => (a.rows[r.key] || []).includes(m.lessonId)));
+const billAllToggle = a => { const on = billAllOn(a); (a.data || []).forEach(r => { if (r.subscription) { if (r.rest) a.sub[r.key] = !on; } else a.rows[r.key] = on ? [] : r.items.filter(m => !m.paid).map(m => m.lessonId); }); };
+const billAllChip = (a, act) => `<div class="chips" style="margin-top:8px"><button class="chip" data-act="${act}" data-p="{}">${billAllOn(a) ? '⬜ Снять все' : '☑️ Отметить все'}</button></div>`;
 /* Счёт ученика: неоплаченные занятия и абонемент отмечаются галочками прямо здесь → «Отметить оплату». */
 SCREENS['a.bill'] = async ({ ym, sid }) => {
   const d = await api(`/bill/${sid}?ym=${ym}`);
@@ -333,7 +337,7 @@ SCREENS['a.bill'] = async ({ ym, sid }) => {
       : `<button class="lesson-line pick" data-act="abillPick" data-p='${esc(JSON.stringify({ key: r.key, id: m.lessonId }))}'>${mark((sel.rows[r.key] || []).includes(m.lessonId), false)}<span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></button>`).join('');
   }).join('');
   return { title: 'Счёт ученика', html: `
-    <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}${d.rest ? ' · отметьте галочками, что оплачено' : ''}</div></div>
+    <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}${d.rest ? ' · отметьте галочками, что оплачено' : ''}</div>${d.rest ? billAllChip(sel, 'abillAll') : ''}</div>
     ${d.rows.length ? rowsHtml : '<div class="empty">Начислений за месяц нет</div>'}
     <div class="total"><span>Начислено ${fmt(d.total)}<br><span class="hint">оплачено ${fmt(d.paid)}</span></span><span class="big ${d.rest ? 'bad' : 'ok'}">${d.rest ? fmt(d.rest) : '✓ оплачено'}</span></div></div>
     ${d.rest ? `<div style="margin-top:12px">${btn(picked ? `✅ Отметить оплату ${fmt(picked)}` : 'Отметьте занятия галочками', 'abillAsk', { sid, ym, name: d.student.name }, picked ? '' : 'sec')}</div>` : ''}
@@ -628,6 +632,7 @@ SCREENS['a.payhist.month'] = async ({ sid, ym }) => {
   return { title: `${d.student.name} · ${MON_NOM[+ym.slice(5) - 1]}`, html: `${d.paid.length ? `<div class="eyebrow">Оплачено</div>${list(d.paid.map(row))}` : ''}${d.pending.length ? `<div class="eyebrow">Ожидает</div>${list(d.pending.map(p => cell({ lead: '⏳', plain: true, t: `${esc(p.teacherName)} — ${fmt(p.amount)}`, s: 'остаток к оплате' })))}` : ''}${!d.paid.length && !d.pending.length ? '<div class="empty">За этот месяц записей нет</div>' : ''}` };
 };
 Object.assign(ACT, {
+  abillAll: () => { if (state.ui.abill) { billAllToggle(state.ui.abill); render(); } },
   cancelPayAsk: ({ pid, title, amount }) => sheet(`<h3>Убрать оплату?</h3><div class="hint">${title}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(amount)}</div><p class="hint">Запись об оплате удалится, сумма снова станет неоплаченной: ученик вернётся в должники, родитель увидит остаток в счёте. Педагог, который отмечал оплату, получит сообщение.</p>${field('cp-r', 'Причина (необязательно)', '', 'placeholder="ошибочная отметка, перевод не пришёл…"')}<div style="margin-top:12px">${btn('❌ Убрать оплату', 'cancelPayDo', { pid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   cancelPayDo: async ({ pid }) => { try { const r = await api(`/payments/${pid}?reason=${encodeURIComponent(val('cp-r').trim())}`, { method: 'DELETE' }); closeSheet(); render(); toast(`Оплата ${fmt(r.amount)} снята`); } catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); } },
   finForm: ({ ym, kind }) => sheet(`<h3>${kind === 'income' ? '➕ Доход' : '➕ Расход'} · ${fmon(ym)}</h3>${field('fin-t', 'Название', '', kind === 'income' ? 'placeholder="Турнир, аренда костюмов…"' : 'placeholder="Аренда зала, реклама…"')}${field('fin-a', 'Сумма, ₽', '', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить', 'addFin', { ym, kind })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
