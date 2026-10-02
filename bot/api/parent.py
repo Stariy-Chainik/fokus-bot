@@ -513,7 +513,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             sent = 0
             if first is not None:
                 try:
-                    await bot.edit_message_reply_markup(admins[0], first.message_id, reply_markup=markup)
+                    await bot.edit_message_reply_markup(chat_id=admins[0], message_id=first.message_id, reply_markup=markup)
                     sent += 1
                 except Exception as exc:
                     logger.warning("Кабинет родителя: кнопки к чеку не добавились: %s", exc)
