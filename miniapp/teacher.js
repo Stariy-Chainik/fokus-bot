@@ -428,8 +428,16 @@ ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
    администратору, он зачтёт оплату, когда получит деньги. Перевод на счёт школы — зачёт сразу. */
 const tPayChips = () => `<div class="chips">${[['cash', '💵 Наличные'], ['receipt_bank', '🏦 Перевод на счёт школы']].map(([v, n]) => `<button class="chip" id="pm-${v}" aria-pressed="${v === (state.ui.tPayMethod || 'cash')}" data-act="tPayMethod" data-p='${esc(JSON.stringify({ v }))}'>${n}</button>`).join('')}</div>
   <div class="hint" id="pm-note" style="margin-top:6px">${(state.ui.tPayMethod || 'cash') === 'cash' ? 'Наличные зачтёт администратор, когда вы передадите ему деньги. Родитель до этого видит «ждёт подтверждения школы».' : 'Деньги пришли на счёт школы — оплата зачтётся сразу.'}</div>
-  <div id="pm-file" style="margin-top:8px;display:${(state.ui.tPayMethod || 'cash') === 'cash' ? 'none' : 'block'}"><label class="hint" for="tp-file" style="display:block;margin-bottom:4px">Чек перевода (фото или PDF) — обязательно</label>
-    <input class="search" id="tp-file" type="file" accept="image/*,application/pdf" style="margin:0"></div>`;
+  <div id="pm-file" style="margin-top:10px;display:${(state.ui.tPayMethod || 'cash') === 'cash' ? 'none' : 'block'}">
+    <label for="tp-file" class="btn" id="tp-label" style="display:block;text-align:center;background:var(--warn-soft);color:var(--warn);border:2px dashed var(--warn)">📎 Прикрепить чек перевода (фото или PDF)</label>
+    <input id="tp-file" type="file" accept="image/*,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0" onchange="tReceiptPicked(this)">
+    <div class="hint" style="margin-top:4px">Без чека перевод отметить нельзя — его увидит администратор.</div></div>`;
+/* Файл выбран — подсветка снимается, в кнопке имя файла. */
+function tReceiptPicked(input) {
+  const l = document.getElementById('tp-label'); if (!l) return;
+  const f = input.files && input.files[0];
+  if (f) { l.textContent = `✅ Чек прикреплён: ${f.name}`; l.style.cssText = 'display:block;text-align:center;background:var(--ok-soft);color:var(--ok);border:2px solid var(--ok)'; }
+}
 /* Перевод педагог зачитывает только с чеком (решение владельца 02.10.2026): файл уходит администраторам,
    receiptId прикладывается к каждой отметке оплаты этого ученика. */
 const tReceiptChosen = sid => (state.ui.tReceipt && state.ui.tReceipt.sid === sid) || !!(document.getElementById('tp-file') || {}).files?.length;
