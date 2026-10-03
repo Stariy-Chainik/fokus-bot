@@ -212,15 +212,19 @@ async function tGroupPay(g, id, ym) {
   const d = await api(`/bills/group/${id}?ym=${period}`);
   const toSend = d.students.filter(s => s.total > 0).length;
   const rest = d.students.reduce((a, s) => a + (s.rest || 0), 0);
+  // статус оплаты у каждого ученика — как на экране неоплат: ✅ оплачено · 🟡 частично · ⬜ не оплачено
+  const billed = d.students.filter(s => s.total > 0), paidAll = billed.filter(s => !s.rest).length;
+  const lead = s => !s.total ? '—' : !s.rest ? '✅' : s.paid ? '🟡' : '⬜';
+  const note = s => (!s.total ? 'начислений нет' : !s.rest ? `оплачено ${fmt(s.paid)}` : s.paid ? `оплачено ${fmt(s.paid)} · остаток ${fmt(s.rest)}` : `не оплачено · ${fmt(s.rest)}`) + (s.hasParent ? '' : ' · родитель не в боте');
+  const sorted = [...d.students].sort((a, b) => (b.rest || 0) - (a.rest || 0) || a.name.localeCompare(b.name));
   return { title: g.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div>
-      <div class="hint">${fmon(period)} · начислено ${fmt(d.students.reduce((a, s) => a + s.total, 0))}${rest ? ` · к оплате ${fmt(rest)}` : ' · всё оплачено'}</div></div>
+      <div class="hint">${fmon(period)} · начислено ${fmt(d.students.reduce((a, s) => a + s.total, 0))}${rest ? ` · к оплате ${fmt(rest)}` : ' · всё оплачено'}${billed.length ? ` · оплатили ${paidAll} из ${billed.length}` : ''}</div></div>
     ${chipsAct('tGroupTab', 'pay', [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`], ['pay', '💳 Оплата']])}
     ${monthChips('t.group', period, { id })}
-    ${d.students.length ? list(d.students.map(s => cell({
-      lead: initials(s.name), t: esc(s.name),
-      s: s.hasParent ? (s.rest ? `к оплате ${fmt(s.rest)}` : 'оплачено') : 'родитель не привязан',
-      r: `<b>${fmt(s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym: period },
+    ${sorted.length ? list(sorted.map(s => cell({
+      lead: lead(s), plain: true, t: esc(s.name), s: note(s),
+      r: `<b class="${s.rest ? 'money bad' : ''}">${fmt(s.rest || s.total)}</b>`, go: 't.bill', p: { sid: s.id, ym: period },
     }))) : '<div class="empty">В группе никого нет</div>'}
     <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid: id, ym: period, count: toSend, name: g.name }, toSend ? '' : 'ghost')}</div>` };
 }
