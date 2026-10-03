@@ -170,9 +170,10 @@ def lesson_rent(lesson: Lesson) -> int:
     """Аренда зала за индивидуальное занятие педагога с прямой оплатой.
 
     Родители платят такому педагогу напрямую (DIRECT_PAY_TEACHER_IDS), а он
-    перечисляет школе фиксированную сумму за зал с каждого урока
-    (HALL_RENT_PER_LESSON) — независимо от длительности и числа учеников.
+    перечисляет школе за зал ставку HALL_RENT_PER_LESSON за каждый начатый час урока:
+    45 и 60 мин — ставка, 90 мин — вдвое (решение владельца 04.10.2026); число учеников не влияет.
     """
+    import math
     from config.settings import settings
     if lesson.type != LessonType.INDIVIDUAL:
         return 0
@@ -181,7 +182,8 @@ def lesson_rent(lesson: Lesson) -> int:
     since = settings.hall_rent_since_period
     if since and lesson.date[:7] < since:
         return 0
-    return settings.hall_rent_map.get(lesson.teacher_id, 0)
+    base = settings.hall_rent_map.get(lesson.teacher_id, 0)
+    return base * max(1, math.ceil((lesson.duration_min or 60) / 60))
 
 
 def is_owner(teacher_id: str) -> bool:

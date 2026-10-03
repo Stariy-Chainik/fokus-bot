@@ -138,6 +138,7 @@ def test_hall_rent_counts_direct_pay_individual_lessons(monkeypatch):
     lessons = [
         _lesson("LES-000001", "2026-09-01"),                    # 45 мин
         _lesson("LES-000002", "2026-09-02", duration_min=60),   # 60 мин — та же аренда
+        _lesson("LES-000004", "2026-09-04", duration_min=90),   # 90 мин — второй начатый час, ×2 (04.10.2026)
         _lesson(                                                 # группа — считается как обычно
             "LES-000003", "2026-09-03",
             type=LessonType.GROUP,
@@ -147,14 +148,14 @@ def test_hall_rent_counts_direct_pay_individual_lessons(monkeypatch):
         ),
     ]
     row = calculate_teacher_profit(_teacher(), lessons)
-    assert row.individual_lessons == 2
-    assert row.rent == 1000                 # 2 × 500, длительность не влияет
-    assert row.rent_lessons == 2
-    assert row.income == 1000 + 700         # аренда + сбор с группы
+    assert row.individual_lessons == 3
+    assert row.rent == 500 + 500 + 1000     # ставка за каждый начатый час
+    assert row.rent_lessons == 3
+    assert row.income == 2000 + 700         # аренда + сбор с группы
     assert row.salary == 500                # только за группу (500 × 45/45)
 
     detail = build_teacher_profit_detail(_teacher(), lessons, "2026-09")
-    assert [r.rent for r in detail.lessons] == [500, 500, 0]
+    assert sorted(r.rent for r in detail.lessons) == [0, 500, 500, 1000]
 
 
 def test_hall_rent_not_applied_without_direct_pay(monkeypatch):

@@ -278,7 +278,7 @@ SCREENS['t.money'] = async ({ ym }) => {
     ${d ? `<div class="eyebrow">Прямая оплата</div>
       <div class="card">
         <div class="total"><span>Родители платят вам за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</span><span class="big direct">${fmt(d.total)}</span></div>
-        ${d.rent ? `<div class="total"><span>Аренда зала школе${d.rentPerLesson ? ` · ${fmt(d.rentPerLesson)} × ${d.lessons}` : ''}</span><span class="big">${fmt(d.rent)}</span></div>` : ''}
+        ${d.rent ? `<div class="total"><span>Аренда зала школе${d.rentPerLesson ? ` · ${fmt(d.rentPerLesson)} за час, ${d.lessons} зан.` : ''}</span><span class="big">${fmt(d.rent)}</span></div>` : ''}
         <div class="pad hint" style="padding-top:0">Школа эти занятия не начисляет и оплату по ним не отслеживает — суммы справочные.</div>
       </div>
       ${d.students.length ? list(d.students.map(x => cell({
