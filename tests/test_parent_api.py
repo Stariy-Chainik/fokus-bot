@@ -369,3 +369,15 @@ def test_pay_all_months_by_bank_returns_total_with_one_purpose(api, monkeypatch)
                       json={"studentId": "STU-0001", "ym": YM, "method": "bank", "periods": [prev, YM]})
     assert status == 200 and r["months"] == 2 and r["periods"] == sorted([prev, YM])
     assert "Оплата занятий, Иванов Иван," in r["details"] and prev[:4] in r["details"]
+
+
+def test_parent_unlinks_a_wrong_child(api):
+    """«Это не мой ребёнок»: родитель снимает свою привязку, админам — сообщение; чужой ребёнок — 404."""
+    app, dp = api
+    assert _call(app, "DELETE", "/api/parent/children/STU-0002")[0] == 404
+    bot = FakeBot()
+    status, r = _call(app, "DELETE", "/api/parent/children/STU-0001", bot=bot)
+    assert status == 200 and r["left"] == 0
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_addrs == []
+    assert bot.sent and "отвязался от ученика" in bot.sent[0][1] and "Иванов Иван" in bot.sent[0][1]
+    assert _call(app, "GET", "/api/parent/me")[0] == 403                         # детей больше нет — кабинет закрыт

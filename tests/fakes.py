@@ -781,6 +781,13 @@ class StudentRepoWritable(StudentRepoFake):
     async def add_parent_tg_id(self, sid, tg_id):
         return await self.add_parent(sid, ("tg", tg_id))
 
+    async def remove_parent_tg_id(self, sid, tg_id):
+        s = self._find(sid)
+        if s is None or int(tg_id) not in s.parent_tg_ids:
+            return False
+        s.parent_tg_ids = [i for i in s.parent_tg_ids if i != int(tg_id)]
+        return True
+
     async def add_parent(self, sid, addr):
         """Привязка родителя: ('tg'|'max', id) — как StudentRepository.add_parent."""
         s = self._find(sid)

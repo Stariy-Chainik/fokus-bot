@@ -22,7 +22,7 @@ from aiogram.types import BufferedInputFile
 
 from bot.api.admin import auth_tg_id
 from bot.utils.bill_format import payment_purpose
-from bot.services import payment_ledger
+from bot.services import activity, payment_ledger
 from bot.services.diary_service import place_icon
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.parent_views import (
@@ -545,8 +545,26 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": result["error"]}, status=503)
         return _json(result)
 
+    async def unlink(request: web.Request, tg_id, children) -> web.Response:
+        """«Это не мой ребёнок»: родитель сам снимает ошибочную привязку (решение владельца 03.10.2026).
+        Снимается только его адрес; администраторам — сообщение, чтобы заметить и ошибку, и злоупотребление."""
+        student = _child(children, request.match_info["sid"])
+        if student is None:
+            return _json({"error": "not_found"}, status=404)
+        if not await student_repo.remove_parent_tg_id(student.student_id, tg_id):
+            return _json({"error": "not_found"}, status=404)
+        await activity.record(activity.STUDENT, f"Родитель отвязался сам: {student.student_id} · Telegram {tg_id}",
+                              actor=tg_id, ref=student.student_id)
+        if bot is not None:
+            await notify(bot, [u.tg_id for u in await user_repo.get_admins()],
+                         f"↩️ Родитель отвязался от ученика\nУченик: {student.name}\nTelegram: {tg_id}\n"
+                         f"Причина: «это не мой ребёнок» в кабинете. Если ошибка — привяжите заново ссылкой группы.")
+        left = len(children) - 1
+        logger.info("Кабинет родителя: %s отвязался от %s, осталось детей: %d", tg_id, student.student_id, left)
+        return _json({"ok": True, "left": left})
+
     routes = [
-        ("GET", "/me", me), ("GET", "/home", home),
+        ("GET", "/me", me), ("GET", "/home", home), ("DELETE", "/children/{sid}", unlink),
         ("GET", "/bills", bills), ("GET", "/bill/{sid}/{ym}", bill),
         ("GET", "/lessons/{sid}", lessons), ("GET", "/diary/{sid}", diary),
         ("POST", "/pay", pay), ("POST", "/receipt", receipt),

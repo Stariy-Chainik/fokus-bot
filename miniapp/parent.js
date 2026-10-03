@@ -66,7 +66,19 @@ SCREENS['p.home'] = async () => {
     ${list(lessonRows)}
     <div class="eyebrow">${mon(h.period)}</div>
     <div class="list">${monthRows.join('')}</div>
-    <p class="hint" style="margin-top:12px">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>` };
+    <p class="hint" style="margin-top:12px">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>
+    <div style="margin-top:14px">${h.children.map(c => btn(`↩️ ${many ? esc(firstName(c.name)) + ' — ' : ''}это не мой ребёнок`, 'pUnlinkAsk', { id: c.id, name: c.name }, 'ghost')).join('')}</div>` };
+};
+/* Ошибочная привязка: родитель снимает её сам, администратору уходит сообщение. */
+ACT.pUnlinkAsk = ({ id, name }) => sheet(`<h3>Отвязаться от ученика?</h3><div class="hint">${esc(name)}. Вы перестанете видеть его счета и занятия. Если привязались по ошибке — после этого откройте ссылку своей группы ещё раз и выберите правильного ребёнка. Администратор получит сообщение.</div>
+  <div style="margin-top:12px">${btn('↩️ Да, это не мой ребёнок', 'pUnlinkDo', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.pUnlinkDo = async ({ id }) => {
+  try {
+    const r = await api(`/children/${id}`, { method: 'DELETE' });
+    closeSheet();
+    if (!r.left) { document.getElementById('content').innerHTML = `<div class="empty" style="margin-top:40px"><div>Привязка снята.</div><p class="hint">Чтобы подключиться к своему ребёнку, откройте ссылку вашей группы из родительского чата.</p></div>`; return; }
+    state.me = await api('/me'); state.ui.kid = ''; render(); toast('Привязка снята');
+  } catch (e) { closeSheet(); toast(errText(e)); }
 };
 ACT.pOpen = ({ id, screen, p }) => { state.ui.kid = id; go(screen, p || {}); };
 
