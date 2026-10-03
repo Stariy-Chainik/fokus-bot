@@ -10,6 +10,7 @@ from datetime import date
 from aiohttp import web
 
 from bot.models.enums import LessonType, PaymentStatus
+from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
 from bot.utils.attendees import parse_attendees
@@ -239,7 +240,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         return {tid: by_lessons.get(tid) or by_link.get(tid, set()) for tid in set(by_lessons) | set(by_link)}
 
     async def _unpaid_lessons(period: str, tid: str, col: dict[str, tuple[int, int]],
-                              cache: dict[str, object]) -> dict[str, int]:
+                              cache: dict[str, StudentMonthLessons]) -> dict[str, int]:
         """Сколько занятий педагога не оплачено у каждого ученика с остатком (отметка та же, что в счёте)."""
         out: dict[str, int] = {}
         for sid, (a, p) in col.items():
@@ -274,7 +275,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         paid_by = await _paid_by_teacher(period)
         ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
         sub_groups = await _sub_groups_by_teacher(period)
-        marks_cache: dict[str, object] = {}
+        marks_cache: dict[str, StudentMonthLessons] = {}
         out = []
         for t in sorted(await teacher_repo.get_all(), key=lambda x: x.name.lower()):
             lines = await salary_service.lines_for(t, period)
