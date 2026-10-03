@@ -815,3 +815,30 @@ def test_teacher_adds_student_to_own_group(api):
     assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"studentId": "STU-0001"})[0] == 409   # уже в группе
     assert _call(app, "POST", "/api/teacher/groups/GRP-0099/members", json={"name": "Новый Ученик"})[0] == 404
     assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "Я"})[0] == 400
+
+
+def test_payment_notify_teacher_gets_notice_without_full_bill(api, monkeypatch):
+    """PAYMENT_NOTIFY_TEACHER_IDS (Яковлева, Фомина): уведомление об оплате ученика своей группы приходит,
+    хотя полного счёта у педагога нет."""
+    from bot.services import payment_events
+    app, dp = api
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "")
+    monkeypatch.setattr(settings, "payment_notify_teacher_ids", "TCH-0001")
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, **kw):
+            sent.append((chat_id, text))
+    payment_events.setup(Bot(), dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"],
+                         dp["teacher_repo"])
+    teacher_tg = next(u.tg_id for u in dp["user_repo"].items if u.teacher_id == "TCH-0001")
+
+    async def pay_and_wait():
+        await dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 2000, 555, None, payment_method="receipt_bank")
+        await asyncio.gather(*payment_events._tasks)
+    asyncio.run(pay_and_wait())
+    assert [c for c, _ in sent] == [teacher_tg] and "2000 ₽" in sent[0][1] and "реквизитам" in sent[0][1]
+    sent.clear()
+    monkeypatch.setattr(settings, "payment_notify_teacher_ids", "")
+    asyncio.run(pay_and_wait())
+    assert sent == []                                               # без настройки — как раньше, тишина

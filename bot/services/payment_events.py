@@ -42,10 +42,12 @@ def payment_received(student_id: str, period: str, amount: int, method: str, act
 async def recipients(student_id: str, actor: int) -> list[int]:
     """tg_id педагогов, которым интересна оплата ученика; кто отметил сам — не уведомляем.
 
-    С полным счётом — если ученик в любой группе педагога; по списку групп — если в одной из них.
+    С полным счётом (FULL_BILL_TEACHER_IDS) и из PAYMENT_NOTIFY_TEACHER_IDS — если ученик в любой группе
+    педагога; по списку групп (FULL_BILL_GROUPS) — если в одной из них.
     """
     groups = set(await _deps["sg"].get_groups_for_student(student_id))
-    full, by_group = settings.full_bill_teacher_id_set, settings.full_bill_group_map
+    full = settings.full_bill_teacher_id_set | settings.payment_notify_teacher_id_set
+    by_group = settings.full_bill_group_map
     out: list[int] = []
     for u in await _deps["users"].get_all():
         tid = u.teacher_id

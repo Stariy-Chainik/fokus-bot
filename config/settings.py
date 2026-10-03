@@ -245,6 +245,14 @@ class Settings(BaseSettings):
     def full_bill_teacher_id_set(self) -> set:
         return {t.strip() for t in self.full_bill_teacher_ids.replace("|", ",").split(",") if t.strip()}
 
+    # Педагоги, которым приходят уведомления об оплатах учеников их групп без полного счёта
+    # (решение владельца 03.10.2026: Яковлева, Фомина). FULL_BILL_* получают их и так.
+    payment_notify_teacher_ids: str = Field(default="", alias="PAYMENT_NOTIFY_TEACHER_IDS")
+
+    @property
+    def payment_notify_teacher_id_set(self) -> set:
+        return {t.strip() for t in self.payment_notify_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
     # С какого месяца сумма занятий ученика у педагога округляется за месяц целиком, а не по каждому
     # занятию (billing_service.round_month). Раньше — прежние суммы: те месяцы уже оплачены.
     month_rounding_since: str = Field(default="2026-09", alias="MONTH_ROUNDING_SINCE")
