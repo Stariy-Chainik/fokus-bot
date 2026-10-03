@@ -107,7 +107,25 @@ const TABS = {
 const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];
 let renderSeq = 0;
-function go(n, p = {}) { state.stack.push({ n, p }); render(); }
+function go(n, p = {}) { state.stack.push({ n, p }); render(); checkFresh(); }
+/* Telegram держит кабинет открытым сутками: после деплоя на телефоне крутился старый app.js, пока его
+   не закрыли вручную. Раз в минуту при переходе (и при возврате в приложение) сверяем ETag app.js —
+   изменился → перезагрузка на тот же экран. */
+let _etag = null, _etagAt = 0;
+async function checkFresh(force) {
+  const now = Date.now();
+  if (!force && now - _etagAt < 60000) return;
+  _etagAt = now;
+  try {
+    const r = await fetch('app.js', { method: 'HEAD', cache: 'no-store' });
+    const tag = r.headers.get('etag') || r.headers.get('last-modified');
+    if (!tag) return;
+    if (_etag && tag !== _etag) location.reload();
+    _etag = tag;
+  } catch (e) { /* офлайн — не мешаем */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFresh(true); });
+checkFresh(true);
 function back() { if (state.stack.length > 1) { state.stack.pop(); render(); } }
 function root(n) { state.stack = [{ n }]; render(); }
 function refresh() { render(); }
