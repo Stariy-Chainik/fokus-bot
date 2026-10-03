@@ -19,6 +19,7 @@ EXPECTED = [
     "pselt:", "pselgo", "pay_method:", "cash_notify:", "receipt_upload:", "rcpick:",
     "go:home", "client:add_child", "client_reg:", "client_reg_retry",
     "client_add_req:", "client_add_retry", "glink:", "glink_none:", "client:lessons", "mxl:",
+    "client_payall:", "payall:", "receipt_upload_all:", "client:unlink", "client_unlink:", "client_unlink_do:",
 ]
 
 

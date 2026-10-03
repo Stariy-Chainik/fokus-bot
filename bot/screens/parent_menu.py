@@ -19,6 +19,7 @@ def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
             [cb("📅 Занятия", "client:lessons")],
             [cb("💳 Оплата занятий", "client:my_bills")],
             [cb("➕ Добавить ребёнка", "client:add_child")],
+            [cb("↩️ Это не мой ребёнок", "client:unlink")],
         ]
     if cabinet_url:      # родитель в Telegram — только кабинет: счета, оплата, занятия, дневник внутри него
         rows = [[webapp("📱 Открыть кабинет", cabinet_url)], [cb("➕ Добавить ребёнка", "client:add_child")]]

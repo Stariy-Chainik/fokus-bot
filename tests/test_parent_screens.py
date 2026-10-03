@@ -22,7 +22,7 @@ def test_menu_rows_by_platform():
     tg = [b.value for row in menu_rows(can_switch_athlete=True) for b in row]
     assert tg == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "client:email", "mode:athlete"]
     mx = [b.value for row in menu_rows(platform="max") for b in row]
-    assert mx == ["client:lessons", "client:my_bills", "client:add_child"]
+    assert mx == ["client:lessons", "client:my_bills", "client:add_child", "client:unlink"]
     # PARENT_RECEIPT_EMAIL=false: кнопки «Email для чеков» нет, остальное на месте
     off = [b.value for row in menu_rows(can_switch_athlete=True, receipt_email=False) for b in row]
     assert off == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "mode:athlete"]
@@ -326,3 +326,22 @@ def test_bank_and_sbp_screens_show_copyable_purpose():
         assert "<code>Оплата занятий, Манохина Полина, 09.2026</code>" in text
     text, _ = bank_screen(2550, "STU-0211", "2026-09", "Реквизиты")      # имя неизвестно — строки нет
     assert "Назначение" not in text
+
+
+def test_pay_all_and_unlink_screens_for_max():
+    """MAX: «Оплатить всё» в списке счетов (от двух месяцев с остатком) и экраны отвязки."""
+    from types import SimpleNamespace
+
+    from bot.screens.parent_bills import bills_list_screen, pay_all_bank_screen, pay_all_screen, unlink_confirm_screen
+    from bot.services.parent_views import PeriodRow
+    rows = [PeriodRow("2026-09", "Сентябрь", "⏳"), PeriodRow("2026-10", "Октябрь", "⏳")]
+    _t, kb = bills_list_screen(rows, "STU-1", "Иванов", False, False, pay_all=(11000, 2))
+    assert any(b.value == "client_payall:STU-1" and "11000" in b.label for r in kb for b in r)
+    _t, kb = bills_list_screen(rows, "STU-1", "Иванов", False, False, pay_all=(6000, 1))     # один месяц — кнопки нет
+    assert not any(b.value.startswith("client_payall") for r in kb for b in r)
+    text, kb = pay_all_screen("STU-1", "Иванов Иван", [("2026-09", 5000), ("2026-10", 6000)], 11000)
+    assert "11000" in text and [b.value for r in kb for b in r][:2] == ["payall:cash:STU-1", "payall:bank:STU-1"]
+    text, kb = pay_all_bank_screen("STU-1", "Иванов Иван", [("2026-09", 5000), ("2026-10", 6000)], 11000, "Банк")
+    assert "Оплата занятий, Иванов Иван, 09.2026, 10.2026" in text and kb[0][0].value == "receipt_upload_all:STU-1"
+    text, kb = unlink_confirm_screen(SimpleNamespace(student_id="STU-1", name="Иванов Иван"))
+    assert "Иванов Иван" in text and kb[0][0].value == "client_unlink_do:STU-1"

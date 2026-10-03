@@ -4,7 +4,7 @@ from __future__ import annotations
 from maxapi import F
 from maxapi.types import MessageCallback
 
-from bot.services.parent_views import bills_periods, bill_detail, history_hidden, visible_periods
+from bot.services.parent_views import bills_periods, bill_detail, history_hidden, unpaid_for, visible_periods
 from bot.screens.parent_bills import student_select_screen, bills_list_screen, bill_detail_screen
 from ..render import edit_screen, alert
 from . import router
@@ -18,8 +18,22 @@ async def _show_bills(event, students_all: list, student_id: str, payment_servic
         return
     period_rows = await bills_periods(students, payment_service, show_older)
     who = students[0].name if student_id != "all" and len(students) == 1 else "все дети"
+    pay_all = None
+    if student_id != "all" and len(students) == 1 and not show_older:        # «Оплатить всё» — по одному ребёнку
+        due = await unpaid_periods(students[0], payment_service)
+        pay_all = (sum(a for _ym, a in due), len(due))
     await edit_screen(event, *bills_list_screen(period_rows, student_id, who, show_older, show_back=len(students_all) > 1,
-                                                has_older=len(visible_periods(6)) > 2))
+                                                has_older=len(visible_periods(6)) > 2, pay_all=pay_all))
+
+
+async def unpaid_periods(student, payment_service) -> list:
+    """[(месяц, остаток)] по видимым месяцам с остатком > 0 — для «Оплатить всё»."""
+    out = []
+    for ym in sorted(visible_periods(6)):
+        total, _ = await unpaid_for(student, ym, payment_service)
+        if total > 0:
+            out.append((ym, total))
+    return out
 
 
 @router.message_callback(F.callback.payload == "client:my_bills")

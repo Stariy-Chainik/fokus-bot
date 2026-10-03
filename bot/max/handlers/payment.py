@@ -20,16 +20,19 @@ from bot.services.parent_views import (
     period_label, unpaid_for, selected_from, selection_fsm_data, client_contact, qr_png,
     breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
+from bot.services import activity
 from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, open_receipt, queue_action
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import (
     teacher_select_screen, methods_screen, cash_screen, bank_screen, sbp_screen, receipt_duplicate_screen,
     online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
+    pay_all_screen, pay_all_bank_screen, unlink_pick_screen, unlink_confirm_screen,
 )
 from ..render import edit_screen, send_screen, alert
 from ..states import MaxParentStates
 from . import router
-from ._common import require_parent
+from ._common import require_parent, show_menu
+from .bills import unpaid_periods
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +199,121 @@ async def on_cash_notify(event: MessageCallback, context, max_uid, student_repo,
     await edit_screen(event, *cash_sent_screen(student_id, period_month))
 
 
+# ─── «Оплатить всё»: наличные или реквизиты сразу за все месяцы с остатком (как в кабинете) ───
+
+async def _student_due(event, max_uid, student_repo, payment_service, student_id: str):
+    students = await require_parent(event, student_repo, max_uid)
+    student = next((s for s in (students or []) if s.student_id == student_id), None)
+    if student is None:
+        await alert(event, "Ученик не найден")
+        return None, []
+    due = await unpaid_periods(student, payment_service)
+    if not due:
+        await alert(event, "К оплате ничего нет")
+        return None, []
+    return student, due
+
+
+@router.message_callback(F.callback.payload.startswith("client_payall:"))
+async def on_pay_all(event: MessageCallback, max_uid, student_repo, payment_service):
+    student, due = await _student_due(event, max_uid, student_repo, payment_service, event.callback.payload.split(":", 1)[1])
+    if student is None:
+        return
+    await edit_screen(event, *pay_all_screen(student.student_id, student.name, due, sum(a for _ym, a in due),
+                                             cash=settings.payment_cash_enabled, bank=bool(settings.payment_bank_details)))
+
+
+@router.message_callback(F.callback.payload.startswith("payall:"))
+async def on_pay_all_method(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
+                            pending_repo=None):
+    _, method, student_id = event.callback.payload.split(":", 2)
+    student, due = await _student_due(event, max_uid, student_repo, payment_service, student_id)
+    if student is None:
+        return
+    total = sum(a for _ym, a in due)
+    if method == "bank":
+        await edit_screen(event, *pay_all_bank_screen(student_id, student.name, due, total, settings.payment_bank_details))
+        return
+    new = 0
+    for ym, amount in due:                            # заявка и сообщение администратору — на каждый месяц
+        try:
+            already = [a for a in await pending_repo.get_open() if a.student_id == student_id
+                       and a.period_month == ym and a.kind == KIND_CASH] if pending_repo is not None else []
+        except Exception:
+            already = []
+        if already:
+            continue
+        bills_map = await payment_service.compute_bills_for_student_period(student_id, ym)
+        ledgers = await payment_service.ledger_for(student, ym)
+        action = await queue_action(pending_repo, KIND_CASH, student, ym, amount=amount, method=CASH, parent_addr=f"m{max_uid}")
+        breakdown = "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers))
+        await _notify_admins_tg(tg_bot, user_repo, cash_notice(student.name, ym, amount, breakdown),
+                                admin_confirm_rows(student_id, ym, "", False, max_addr(max_uid), amount, CASH,
+                                                   action_id=action.action_id if action else ""))
+        new += 1
+    logger.info("MAX: наличные за %d мес., %s ₽ — %s (новых заявок %d)", len(due), total, student_id, new)
+    await edit_screen(event, ("✅ Администратор уведомлён по всем месяцам. Ожидайте подтверждения." if new
+                              else "✅ Уведомление уже отправлено раньше. Ожидайте подтверждения."),
+                      [[cb("« К счетам", f"cl_bills_stu:{student_id}")], [cb("« Меню", "go:home")]])
+
+
+@router.message_callback(F.callback.payload.startswith("receipt_upload_all:"))
+async def on_receipt_upload_all(event: MessageCallback, context, max_uid, student_repo, payment_service):
+    student_id = event.callback.payload.split(":", 1)[1]
+    student, due = await _student_due(event, max_uid, student_repo, payment_service, student_id)
+    if student is None:
+        return
+    await context.set_state(MaxParentStates.waiting_receipt)
+    await context.update_data(receipt_method="bank", receipt_student_id=student_id, receipt_period_month=due[0][0],
+                              receipt_periods=[ym for ym, _ in due])
+    await edit_screen(event, *receipt_prompt_screen(student_id, due[0][0]))
+
+
+# ─── «Это не мой ребёнок»: родитель снимает ошибочную привязку сам ───────────
+
+@router.message_callback(F.callback.payload == "client:unlink")
+async def on_unlink(event: MessageCallback, max_uid, student_repo):
+    students = await require_parent(event, student_repo, max_uid)
+    if not students:
+        return
+    if len(students) > 1:
+        await edit_screen(event, *unlink_pick_screen(students))
+    else:
+        await edit_screen(event, *unlink_confirm_screen(students[0]))
+
+
+@router.message_callback(F.callback.payload.startswith("client_unlink:"))
+async def on_unlink_pick(event: MessageCallback, max_uid, student_repo):
+    sid = event.callback.payload.split(":", 1)[1]
+    students = await require_parent(event, student_repo, max_uid)
+    student = next((s for s in (students or []) if s.student_id == sid), None)
+    if student is None:
+        await alert(event, "Ученик не найден")
+        return
+    await edit_screen(event, *unlink_confirm_screen(student))
+
+
+@router.message_callback(F.callback.payload.startswith("client_unlink_do:"))
+async def on_unlink_do(event: MessageCallback, context, max_uid, student_repo, user_repo, tg_bot):
+    sid = event.callback.payload.split(":", 1)[1]
+    students = await require_parent(event, student_repo, max_uid)
+    student = next((s for s in (students or []) if s.student_id == sid), None)
+    if student is None or not await student_repo.remove_parent(sid, ("max", max_uid)):
+        await alert(event, "Ученик не найден")
+        return
+    await activity.record(activity.STUDENT, f"Родитель отвязался сам: {sid} · MAX {max_uid}", ref=sid)
+    await _notify_admins_tg(tg_bot, user_repo, f"↩️ Родитель отвязался от ученика\nУченик: {student.name}\nMAX: {max_uid}\n"
+                            f"Причина: «это не мой ребёнок». Если ошибка — привяжите заново ссылкой группы.", [])
+    logger.info("MAX: %s отвязался от %s", max_uid, sid)
+    rest = [s for s in students if s.student_id != sid]
+    if rest:
+        await context.clear()
+        await show_menu(event, rest, max_uid)
+    else:
+        await edit_screen(event, "Привязка снята.\n\nЧтобы подключиться к своему ребёнку, откройте ссылку вашей группы "
+                                 "из родительского чата.", [])
+
+
 @router.message_callback(F.callback.payload.startswith("receipt_upload:"))
 async def on_receipt_upload(event: MessageCallback, context, max_uid, student_repo):
     _, method, student_id, period_month = event.callback.payload.split(":", 3)
@@ -231,6 +349,39 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     students = await student_repo.get_by_parent_max_id(max_uid)
     student = next((s for s in students if s.student_id == student_id), None)
     student_name = student.name if student else student_id
+    periods = data.get("receipt_periods") or []
+    if len(periods) >= 2 and student is not None:                         # «Оплатить всё»: один чек за все месяцы
+        kind, url, filename = att
+        try:
+            blob = await event.bot.download_bytes(url)
+        except Exception as exc:
+            logger.error("MAX: не удалось скачать чек: %s", exc)
+            await event.message.answer("Не удалось получить файл. Попробуйте ещё раз.")
+            return
+        sent = 0
+        for ym in periods:
+            if await open_receipt(pending_repo, student_id, ym):
+                continue
+            total, _u = await unpaid_for(student, ym, payment_service)
+            if total <= 0:
+                continue
+            bills_map = await payment_service.compute_bills_for_student_period(student_id, ym)
+            ledgers = await payment_service.ledger_for(student, ym)
+            caption = receipt_caption(method, student_name, ym, total,
+                                      "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
+            action = await queue_action(pending_repo, KIND_RECEIPT, student, ym, amount=total, method=method,
+                                        parent_addr=f"m{max_uid}", comment="чек пришёл в MAX — смотрите в чате бота")
+            rows = admin_confirm_rows(student_id, ym, "", False, max_addr(max_uid), total, method,
+                                      action_id=action.action_id if action else "")
+            if kind == "image":
+                await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
+            else:
+                await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+            sent += 1
+        logger.info("MAX: чек за %d мес. — %s, заявок %d", len(periods), student_id, sent)
+        screen = receipt_sent_screen if sent else receipt_duplicate_screen
+        await send_screen(event.bot, max_uid, *screen(student_id, periods[0]))
+        return
     if await open_receipt(pending_repo, student_id, period_month):          # чек за этот счёт уже ждёт решения
         await send_screen(event.bot, max_uid, *receipt_duplicate_screen(student_id, period_month))
         return

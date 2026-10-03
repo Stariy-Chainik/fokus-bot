@@ -130,7 +130,7 @@ def student_select_screen(students: list, section: str) -> tuple:
 
 def bills_list_screen(
     period_rows: list, student_id: str, who: str, show_older: bool, show_back: bool,
-    has_older: bool = True,
+    has_older: bool = True, pay_all: tuple | None = None,
 ) -> tuple:
     """period_rows: [PeriodRow]. Пустой список — сообщение «не найдено».
     has_older=False — раньше показывать нечего (история с сентября), кнопки «Другие месяцы» нет."""
@@ -140,6 +140,8 @@ def bills_list_screen(
     else:
         text = f"<b>💳 Оплата занятий — {who}</b>" + ("\nДругие месяцы:" if show_older else "")
     rows = [[cb(f"{r.icon} {r.label}", f"client_bill:{student_id}:{r.period}")] for r in period_rows]
+    if pay_all and pay_all[1] >= 2:          # «Оплатить всё» — остатки нескольких месяцев разом (как в кабинете)
+        rows.append([cb(f"💳 Оплатить всё · {pay_all[0]} руб. ({pay_all[1]} мес.)", f"client_payall:{student_id}")])
     if show_older:
         rows.append([cb("« К текущим месяцам", f"cl_bills_stu:{student_id}")])
     else:
@@ -302,6 +304,50 @@ def online_pay_screen(kind: str, total: int, pay_url: str, student_id: str, peri
 def receipt_prompt_screen(student_id: str, period_month: str) -> tuple:
     return "📎 Отправьте фото или документ чека об оплате:", [
         [cb("« Отмена", f"client_pay:{student_id}:{period_month}")],
+    ]
+
+
+def pay_all_screen(student_id: str, student_name: str, periods: list, total: int,
+                   cash: bool = True, bank: bool = True) -> tuple:
+    """«Оплатить всё»: месяцы с остатком и способы — наличные или реквизиты (СБП онлайн — по месяцам)."""
+    lines = [f"<b>💳 Оплатить всё — {student_name}</b>"]
+    lines += [f"  • {period_label(ym)} — {amount} руб." for ym, amount in periods]
+    lines.append(f"Итого: <b>{total} руб.</b>\n\nВыберите способ. СБП онлайн оплачивается по месяцам — в счёте каждого месяца.")
+    rows = []
+    if cash:
+        rows.append([cb("💵 Наличные", f"payall:cash:{student_id}")])
+    if bank:
+        rows.append([cb("🏦 По реквизитам", f"payall:bank:{student_id}")])
+    rows.append([cb("« Назад", f"cl_bills_stu:{student_id}")])
+    return "\n".join(lines), rows
+
+
+def pay_all_bank_screen(student_id: str, student_name: str, periods: list, total: int, bank_details: str) -> tuple:
+    from bot.utils.bill_format import payment_purpose
+    from bot.utils.dates import display_period
+    purpose = f"Оплата занятий, {student_name.strip()}, " + ", ".join(display_period(ym) for ym, _ in periods)
+    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b> за {len(periods)} мес.", ""]
+    if bank_details:
+        lines += [bank_details.replace("\\n", "\n"), ""]
+    lines += ["Назначение платежа (скопируйте):", f"<code>{purpose}</code>", "",
+              "После перевода прикрепите один чек — он будет отправлен за все месяцы."]
+    _ = payment_purpose
+    return "\n".join(lines), [[cb("📎 Прикрепить чек", f"receipt_upload_all:{student_id}")],
+                              [cb("« Назад", f"client_payall:{student_id}")]]
+
+
+def unlink_pick_screen(students: list) -> tuple:
+    rows = [[cb(s.name, f"client_unlink:{s.student_id}")] for s in students]
+    rows.append([cb("« Меню", HOME)])
+    return "От кого отвязаться?", rows
+
+
+def unlink_confirm_screen(student) -> tuple:
+    return (f"Отвязаться от ученика <b>{student.name}</b>?\n\nВы перестанете видеть его счета и занятия. "
+            "Если привязались по ошибке — после этого откройте ссылку своей группы ещё раз и выберите правильного "
+            "ребёнка. Администратор получит сообщение."), [
+        [cb("↩️ Да, это не мой ребёнок", f"client_unlink_do:{student.student_id}")],
+        [cb("« Меню", HOME)],
     ]
 
 
