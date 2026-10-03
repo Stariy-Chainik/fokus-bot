@@ -185,13 +185,15 @@ def test_salaries_show_parent_collection_per_teacher(api):
     s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]
     me = next(t for t in s["teachers"] if t["id"] == "TCH-0001")
     assert me["collection"]["accrued"] == 5600 + 3000 and me["collection"]["paid"] == 5000
-    assert me["collection"]["percent"] == 58 and me["collection"]["unpaidStudents"] == 2
+    # Иванов: 2000 закрыли первое индивидуальное, не оплачены второе инд. и групповое; Петрова — групповое
+    assert me["collection"]["unpaidStudents"] == 2 and me["collection"]["unpaidLessons"] == 3 and me["collection"]["unpaidSubs"] == 0
     assert s["collection"]["accrued"] == 8600 and s["collection"]["paid"] == 5000   # итог — сбор месяца без дублей
-    assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["collection"]["percent"] == 58
+    assert s["collection"]["unpaidLessons"] == 3
+    assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["collection"]["unpaidLessons"] == 3
 
     status, d = _call(app, "GET", f"/api/admin/salaries/TCH-0001/collection?ym={YM}")
-    assert status == 200 and d["percent"] == 58 and d["rest"] == 3600
-    assert [(x["name"], x["accrued"], x["paid"], x["status"]) for x in d["students"]] == [
-        ("Иванов Иван", 4800, 2000, "partial"), ("Петрова Анна", 3800, 3000, "partial"),   # групповое 1600 — пополам
+    assert status == 200 and d["unpaidLessons"] == 3 and d["rest"] == 3600
+    assert [(x["name"], x["accrued"], x["paid"], x["unpaidLessons"], x["status"]) for x in d["students"]] == [
+        ("Иванов Иван", 4800, 2000, 2, "partial"), ("Петрова Анна", 3800, 3000, 1, "partial"),   # групповое 1600 — пополам
     ]
     assert _call(app, "GET", f"/api/admin/salaries/TCH-0404/collection?ym={YM}")[0] == 404
