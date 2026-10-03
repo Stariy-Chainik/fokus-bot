@@ -134,6 +134,9 @@ def debtors_summary(ledger: dict[tuple[str, str, str], tuple[int, int]], current
 _PAY_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 
 
+_missing_teachers_warned: set[str] = set()     # compute_ledger_map: о ком уже предупредили
+
+
 def payment_lock(student_id: str, period_month: str) -> asyncio.Lock:
     """Один замок на ученика и месяц для всех, кто отмечает оплату (админ, педагог, очередь, бот):
     проверка остатка и зачёт идут под ним, поэтому одновременная отметка админом и педагогом
@@ -634,13 +637,19 @@ class PaymentService:
 
         accrued: dict[tuple[str, str, str], int] = {}  # (student, teacher, period) → ₽
         all_rows: list = []
+        missing: dict[str, int] = {}                    # удалённый педагог → сколько его занятий пропущено
         for ls in lessons:
             teacher = teachers.get(ls.teacher_id)
             if teacher is None:
-                logger.warning("compute_ledger_map: педагог %s не найден (занятие %s)",
-                               ls.teacher_id, ls.lesson_id)
+                missing[ls.teacher_id] = missing.get(ls.teacher_id, 0) + 1
                 continue
             all_rows += build_billing_rows(ls, teacher)
+        # одно предупреждение на педагога за процесс: удалённые педагоги (Пахомова, Криворчук) оставляют
+        # десятки занятий в истории, и каждый расчёт сводки засорял лог сотнями строк
+        for tid, n in missing.items():
+            if tid not in _missing_teachers_warned:
+                _missing_teachers_warned.add(tid)
+                logger.warning("compute_ledger_map: педагог %s удалён, его занятия (%d) в начисления не идут", tid, n)
         for b in round_month(all_rows):
             key = (b.student_id, b.teacher_id, b.period_month)
             accrued[key] = accrued.get(key, 0) + b.amount
