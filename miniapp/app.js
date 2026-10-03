@@ -598,15 +598,30 @@ SCREENS['a.salaries'] = async ({ ym }) => {
   // статус выплаты у каждого педагога: 🟢 выплачено · 🟡 частично · 🔴 ничего; без начислений — без значка
   const icon = { paid: '🟢', partial: '🟡', none: '🔴' };
   const payNote = t => !t.accrued ? '' : t.isOwner ? ' · 👑 в прибыли' : t.status === 'paid' ? ' · ✓ выплачено' : t.paid ? ` · выплачено ${fmt(t.paid)}, остаток ${fmt(t.accrued - t.paid)}` : ' · не выплачено';
-  return { title: 'Зарплаты', html: `${monthChips('a.salaries', ym, {})}${list(s.teachers.map(t => cell({ lead: t.accrued ? icon[t.status] : initials(t.name), plain: !!t.accrued, t: esc(t.name), s: (t.directPay ? 'прямая оплата: инд. — 0, группы — как обычно' : plural(t.lessons, ['занятие', 'занятия', 'занятий'])) + payNote(t), r: `<b>${fmt(t.accrued)}</b>`, go: 'a.salary.t', p: { tid: t.id, ym } })))}<div class="card" style="margin-top:10px"><div class="pad money" style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between"><span>Начислено за ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}</span><b>${fmt(s.total)}</b></div><div style="display:flex;justify-content:space-between"><span>Выплачено</span><b style="color:var(--ok)">${fmt(s.paid)}</b></div></div><div class="total"><span>Осталось выплатить</span><span class="big ${s.total - s.paid > 0 ? 'bad' : 'ok'}">${fmt(Math.max(s.total - s.paid, 0))}</span></div></div>` };
+  // сбор с родителей за занятия этого педагога: процент цветом по порогу 90 / 60
+  const colNote = t => { const c = t.collection; return c && c.accrued ? `<div style="color:var(--${colCls(c.percent)})">собрано ${c.percent} % · ${c.paid.toLocaleString('ru-RU')} из ${c.accrued.toLocaleString('ru-RU')}</div>` : ''; };
+  const c = s.collection || {};
+  return { title: 'Зарплаты', html: `${monthChips('a.salaries', ym, {})}${list(s.teachers.map(t => cell({ lead: t.accrued ? icon[t.status] : initials(t.name), plain: !!t.accrued, t: esc(t.name), s: (t.directPay ? 'прямая оплата: инд. — 0, группы — как обычно' : plural(t.lessons, ['занятие', 'занятия', 'занятий'])) + payNote(t) + colNote(t), r: `<b>${fmt(t.accrued)}</b>`, go: 'a.salary.t', p: { tid: t.id, ym } })))}<div class="card" style="margin-top:10px"><div class="pad money" style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between"><span>Начислено за ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}</span><b>${fmt(s.total)}</b></div><div style="display:flex;justify-content:space-between"><span>Выплачено</span><b style="color:var(--ok)">${fmt(s.paid)}</b></div>${c.accrued ? `<div style="display:flex;justify-content:space-between"><span>Собрано с родителей</span><b style="color:var(--${colCls(c.percent)})">${c.percent} % · ${fmt(c.paid)} из ${fmt(c.accrued)}</b></div>` : ''}</div><div class="total"><span>Осталось выплатить</span><span class="big ${s.total - s.paid > 0 ? 'bad' : 'ok'}">${fmt(Math.max(s.total - s.paid, 0))}</span></div></div>` };
 };
+const colCls = pct => pct >= 90 ? 'ok' : pct >= 60 ? 'warn' : 'bad';
 SCREENS['a.salary.t'] = async ({ tid, ym }) => {
   const t = await api(`/salaries/${tid}?ym=${ym}`);
   const rest = Math.max(t.total - (t.paid || 0), 0);
+  const c = t.collection || {};
   return { title: `${t.name} · ${MON_NOM[+ym.slice(5) - 1]}`, html: `
     <div class="kpis">${kpi(fmt(t.total), 'начислено')}${kpi(fmt(t.paid || 0), t.isOwner ? '👑 остаётся в прибыли' : rest ? `выплачено · остаток ${fmt(rest)}` : 'выплачено полностью', rest ? 'warn' : 'ok')}</div>
+    ${c.accrued ? `<div class="kpis" style="margin-top:8px">${kpi(`${c.percent} %`, `собрано с родителей · ${fmt(c.paid)} из ${fmt(c.accrued)}`, colCls(c.percent), 'a.salary.col', { tid, ym })}${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : 'все оплатили', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}</div>` : ''}
     <div style="margin:10px 0">${goBtn(rest ? `💸 Выплатить остаток ${fmt(rest)}` : '💸 Выплаты и аванс', 'a.payout', { tid, ym }, rest ? '' : 'ghost')}</div>
     ${t.lines.length ? list(t.lines.map(salaryLineCell)) : '<div class="empty">Начислений нет</div>'}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
+};
+/* Сбор с родителей по педагогу: кто из его учеников не оплатил месяц. Тап — счёт ученика. */
+SCREENS['a.salary.col'] = async ({ tid, ym }) => {
+  const d = await api(`/salaries/${tid}/collection?ym=${ym}`);
+  const st = s => s.status === 'paid' ? '✅' : s.status === 'partial' ? '🟡' : '⬜';
+  return { title: `Сбор · ${MON_NOM[+ym.slice(5) - 1]}`, html: `
+    <div class="kpis">${kpi(`${d.percent} %`, `собрано · ${fmt(d.paid)} из ${fmt(d.accrued)}`, colCls(d.percent))}${kpi(d.rest ? fmt(d.rest) : '✓', d.rest ? 'не оплатили' : 'все оплатили', d.rest ? 'bad' : 'ok')}</div>
+    <p class="hint" style="margin:8px 0">Занятия педагога и абонементы групп, где он вёл занятия в этом месяце. Прямая оплата педагогу не учитывается.</p>
+    ${d.students.length ? list(d.students.map(s => cell({ lead: st(s), plain: true, t: esc(s.name), s: s.status === 'partial' ? `оплачено ${fmt(s.paid)} из ${fmt(s.accrued)}` : s.status === 'paid' ? `оплачено ${fmt(s.accrued)}` : `начислено ${fmt(s.accrued)}`, r: s.rest ? `<b class="money bad">${fmt(s.rest)}</b>` : pill('✓', 'ok'), go: 'a.pay.student', p: { sid: s.id, ym } }))) : '<div class="empty">Начислений родителям нет</div>'}` };
 };
 SCREENS['a.payouts'] = async ({ ym }) => {
   ym = ym || lastPeriods(1)[0];

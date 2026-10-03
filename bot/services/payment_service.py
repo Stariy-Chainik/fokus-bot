@@ -121,6 +121,25 @@ def period_collection(ledger: dict[tuple[str, str, str], tuple[int, int]], perio
     return PeriodCollection(accrued, paid)
 
 
+def teacher_collection(
+    ledger: dict[tuple[str, str, str], tuple[int, int]], period: str, teacher_id: str, sub_groups: set[str],
+) -> dict[str, tuple[int, int]]:
+    """Сбор оплат с родителей за месяц по одному педагогу: ученик → (начислено, зачтено).
+
+    Считаются его занятия (ключ teacher_id) и абонементы групп `sub_groups` (ключи `SUB:{gid}`) —
+    групп, где он вёл занятия в этом месяце. Переплата сверх начисления не считается,
+    как в `period_collection`, поэтому проценты сходятся с плиткой сводки.
+    """
+    out: dict[str, tuple[int, int]] = {}
+    keys = {teacher_id} | {f"{SUBSCRIPTION_KEY_PREFIX}{g}" for g in sub_groups}
+    for (sid, key, ym), (amount, paid_amount) in ledger.items():
+        if ym != period or key not in keys or amount <= 0:
+            continue
+        a, p = out.get(sid, (0, 0))
+        out[sid] = (a + amount, p + min(paid_amount, amount))
+    return out
+
+
 def debtors_summary(ledger: dict[tuple[str, str, str], tuple[int, int]], current_period: str) -> tuple[int, int]:
     """Должники за закрытые месяцы (< current_period): (сколько учеников, сумма долга)."""
     per_student: dict[str, int] = {}

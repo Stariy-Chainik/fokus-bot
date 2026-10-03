@@ -10,7 +10,7 @@ from datetime import date
 from aiohttp import web
 
 from bot.models.enums import LessonType, PaymentStatus
-from bot.services.payment_service import build_debtor_rows
+from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
 from bot.utils.attendees import parse_attendees
 from bot.utils.dates import current_period, display_period
@@ -73,6 +73,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
     profit_service = dp["profit_service"]
     salary_service = dp["salary_service"]
     payment_service = dp["payment_service"]
+    teacher_group_repo = dp["teacher_group_repo"]
 
     async def _debtor_rows():
         debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
@@ -225,23 +226,73 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         поэтому в «Зарплатах» и «Выплатах» он всегда «выплачено» (решение владельца 03.10.2026)."""
         return max(accrued, paid) if tid in settings.owner_teacher_id_set else paid
 
+    async def _sub_groups_by_teacher(period: str) -> dict[str, set[str]]:
+        """Абонементы каких групп относить к педагогу: группы, где он вёл занятия в месяце;
+        без занятий — его группы из teacher_groups."""
+        by_lessons: dict[str, set[str]] = {}
+        for ls in await lesson_repo.get_all():
+            if ls.group_id and ls.date.startswith(period):
+                by_lessons.setdefault(ls.teacher_id, set()).add(ls.group_id)
+        by_link: dict[str, set[str]] = {}
+        for tg in await teacher_group_repo.get_all():
+            by_link.setdefault(tg.teacher_id, set()).add(tg.group_id)
+        return {tid: by_lessons.get(tid) or by_link.get(tid, set()) for tid in set(by_lessons) | set(by_link)}
+
+    async def _collection(period: str, tid: str, ledger=None, sub_groups=None) -> dict[str, tuple[int, int]]:
+        if ledger is None:
+            ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
+        if sub_groups is None:
+            sub_groups = (await _sub_groups_by_teacher(period)).get(tid, set())
+        return teacher_collection(ledger, period, tid, sub_groups)
+
+    def _collection_totals(col: dict[str, tuple[int, int]]) -> dict:
+        accrued = sum(a for a, _p in col.values())
+        paid = sum(p for _a, p in col.values())
+        return {"accrued": accrued, "paid": paid, "rest": accrued - paid,
+                "percent": round(paid * 100 / accrued) if accrued else 0,
+                "unpaidStudents": sum(1 for a, p in col.values() if a > p)}
+
     async def salaries(request: web.Request, user) -> web.Response:
         """Все педагоги за месяц: начислено и сколько уже выплачено (решение владельца 03.10.2026 —
-        статус выплаты виден прямо в списке, а не только на экране «Выплатить зарплату»)."""
+        статус выплаты виден прямо в списке, а не только на экране «Выплатить зарплату»),
+        рядом — сбор с родителей за занятия этого педагога (`collection`, решение владельца 03.10.2026)."""
         period = request.query.get("ym") or current_period()
         paid_by = await _paid_by_teacher(period)
+        ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
+        sub_groups = await _sub_groups_by_teacher(period)
         out = []
         for t in sorted(await teacher_repo.get_all(), key=lambda x: x.name.lower()):
             lines = await salary_service.lines_for(t, period)
             accrued = sum(ln.amount for ln in lines)
             paid = _owner_paid(t.teacher_id, accrued, paid_by.get(t.teacher_id, 0))
+            col = teacher_collection(ledger, period, t.teacher_id, sub_groups.get(t.teacher_id, set()))
             out.append({"id": t.teacher_id, "name": t.name, "accrued": accrued, "paid": paid,
                         "status": "paid" if accrued and paid >= accrued else ("partial" if paid > 0 else "none"),
                         "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift")),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set,
-                        "directPay": t.teacher_id in settings.direct_pay_teacher_id_set})
+                        "directPay": t.teacher_id in settings.direct_pay_teacher_id_set,
+                        "collection": _collection_totals(col)})
+        # итог — сбор месяца целиком (как плитка сводки): абонемент группы, которую вели двое,
+        # у каждого педагога виден, но здесь считается один раз
+        pc = period_collection(ledger, period)
         return _json({"period": period, "teachers": out, "total": sum(x["accrued"] for x in out),
-                      "paid": sum(x["paid"] for x in out)})
+                      "paid": sum(x["paid"] for x in out),
+                      "collection": {"accrued": pc.accrued, "paid": pc.paid, "rest": pc.rest, "percent": pc.percent}})
+
+    async def salary_collection(request: web.Request, user) -> web.Response:
+        """Кто из учеников педагога не оплатил месяц: ученик → начислено / зачтено / остаток."""
+        tid = request.match_info["tid"]
+        period = request.query.get("ym") or current_period()
+        t = await teacher_repo.get_by_id(tid)
+        if t is None:
+            return _json({"error": "not_found"}, status=404)
+        col = await _collection(period, tid)
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = [{"id": sid, "name": names.get(sid, sid), "accrued": a, "paid": p, "rest": a - p,
+                     "status": "paid" if a <= p else "partial" if p else "unpaid"} for sid, (a, p) in col.items()]
+        students.sort(key=lambda x: (-x["rest"], x["name"]))
+        return _json({"teacherId": tid, "name": t.name, "period": period, "students": students,
+                      **_collection_totals(col)})
 
     async def _described_lines(t, period: str) -> list[dict]:
         """Строки зарплаты с подписью: у занятия — группа (и сколько пришло) или ученики.
@@ -279,7 +330,8 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         total = sum(ln["amount"] for ln in lines)
         paid = _owner_paid(tid, total, (await _paid_by_teacher(period)).get(tid, 0))
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
-                      "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set})
+                      "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set,
+                      "collection": _collection_totals(await _collection(period, tid))})
 
     async def payouts(request: web.Request, user) -> web.Response:
         period = request.query.get("ym") or current_period()
@@ -394,6 +446,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         ("GET", "/profit/subscription/{gid}", profit_subscription), ("GET", "/profit/breakdown", profit_breakdown),
         ("POST", "/finance", finance_add), ("DELETE", "/finance/{eid}", finance_delete),
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
+        ("GET", "/salaries/{tid}/collection", salary_collection),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),
         ("POST", "/salary-overrides", override_add), ("DELETE", "/salary-overrides/{oid}", override_delete),
         ("GET", "/payhist", payhist_search), ("GET", "/payhist/{sid}", payhist_months), ("GET", "/payhist/{sid}/{ym}", payhist_month),

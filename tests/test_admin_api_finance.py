@@ -169,3 +169,29 @@ def test_salaries_list_shows_payout_status(api):
     me = next(t for t in s["teachers"] if t["id"] == "TCH-0001")
     assert me["paid"] == 1000 and me["status"] == "partial" and s["paid"] == 1000
     assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["paid"] == 1000
+
+
+def test_salaries_show_parent_collection_per_teacher(api):
+    """«Зарплаты»: у педагога — сбор с родителей за его занятия и абонементы его групп,
+    экран «кто не оплатил» (решение владельца 03.10.2026)."""
+    app, dp = api
+    teacher = asyncio.run(dp["teacher_repo"].get_by_id("TCH-0001"))
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Азбука", billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=3000))
+    asyncio.run(dp["student_group_repo"].add("STU-0002", "GRP-0002"))
+    dp["lesson_repo"].items.append(mk_lesson("LES-9", teacher, f"{YM}-05", duration=60, lesson_type=LessonType.GROUP, group_id="GRP-0002"))
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0002", YM, "SUB:GRP-0002", 3000, status=PaymentStatus.PAID))
+    dp["payment_repo"].rows.append(mk_payment("PAY-2", "STU-0001", YM, "TCH-0001", 2000, status=PaymentStatus.PAID))
+
+    s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]
+    me = next(t for t in s["teachers"] if t["id"] == "TCH-0001")
+    assert me["collection"]["accrued"] == 5600 + 3000 and me["collection"]["paid"] == 5000
+    assert me["collection"]["percent"] == 58 and me["collection"]["unpaidStudents"] == 2
+    assert s["collection"]["accrued"] == 8600 and s["collection"]["paid"] == 5000   # итог — сбор месяца без дублей
+    assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["collection"]["percent"] == 58
+
+    status, d = _call(app, "GET", f"/api/admin/salaries/TCH-0001/collection?ym={YM}")
+    assert status == 200 and d["percent"] == 58 and d["rest"] == 3600
+    assert [(x["name"], x["accrued"], x["paid"], x["status"]) for x in d["students"]] == [
+        ("Иванов Иван", 4800, 2000, "partial"), ("Петрова Анна", 3800, 3000, "partial"),   # групповое 1600 — пополам
+    ]
+    assert _call(app, "GET", f"/api/admin/salaries/TCH-0404/collection?ym={YM}")[0] == 404
