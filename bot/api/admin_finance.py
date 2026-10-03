@@ -214,16 +214,29 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         return _json({"ok": ok}, status=200 if ok else 404)
 
     # ── зарплаты и выплаты ───────────────────────────────────────────────
+    async def _paid_by_teacher(period: str) -> dict[str, int]:
+        paid: dict[str, int] = {}
+        for p in await payout_repo.get_by_period(period):
+            paid[p.teacher_id] = paid.get(p.teacher_id, 0) + p.amount
+        return paid
+
     async def salaries(request: web.Request, user) -> web.Response:
+        """Все педагоги за месяц: начислено и сколько уже выплачено (решение владельца 03.10.2026 —
+        статус выплаты виден прямо в списке, а не только на экране «Выплатить зарплату»)."""
         period = request.query.get("ym") or current_period()
+        paid_by = await _paid_by_teacher(period)
         out = []
         for t in sorted(await teacher_repo.get_all(), key=lambda x: x.name.lower()):
             lines = await salary_service.lines_for(t, period)
-            out.append({"id": t.teacher_id, "name": t.name, "accrued": sum(ln.amount for ln in lines),
+            accrued = sum(ln.amount for ln in lines)
+            paid = paid_by.get(t.teacher_id, 0)
+            out.append({"id": t.teacher_id, "name": t.name, "accrued": accrued, "paid": paid,
+                        "status": "paid" if accrued and paid >= accrued else ("partial" if paid > 0 else "none"),
                         "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift")),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set,
                         "directPay": t.teacher_id in settings.direct_pay_teacher_id_set})
-        return _json({"period": period, "teachers": out, "total": sum(x["accrued"] for x in out)})
+        return _json({"period": period, "teachers": out, "total": sum(x["accrued"] for x in out),
+                      "paid": sum(x["paid"] for x in out)})
 
     async def _described_lines(t, period: str) -> list[dict]:
         """Строки зарплаты с подписью: у занятия — группа (и сколько пришло) или ученики.
@@ -258,14 +271,13 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         if t is None:
             return _json({"error": "not_found"}, status=404)
         lines = await _described_lines(t, period)
-        return _json({"teacherId": tid, "name": t.name, "period": period,
+        paid = (await _paid_by_teacher(period)).get(tid, 0)
+        return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
                       "lines": lines, "total": sum(ln["amount"] for ln in lines)})
 
     async def payouts(request: web.Request, user) -> web.Response:
         period = request.query.get("ym") or current_period()
-        paid_by_teacher: dict[str, int] = {}
-        for p in await payout_repo.get_by_period(period):
-            paid_by_teacher[p.teacher_id] = paid_by_teacher.get(p.teacher_id, 0) + p.amount
+        paid_by_teacher = await _paid_by_teacher(period)
         out = []
         for t in sorted(await teacher_repo.get_all(), key=lambda x: x.name.lower()):
             acc = await salary_service.total_for(t, period)

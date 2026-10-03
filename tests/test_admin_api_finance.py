@@ -156,3 +156,16 @@ def test_profit_breakdown_explains_income_and_profit_by_days(api):
     assert sum(d["income"] for d in b["days"]) == b["totals"]["lessonIncome"] == 5600
     assert sum(d["profit"] for d in b["days"]) == b["totals"]["profit"] == 1267
     assert [r["name"] for r in b["rows"]] == ["Река Станислав"] and b["subscriptions"] == [] and b["finance"] == []
+
+
+def test_salaries_list_shows_payout_status(api):
+    """«Зарплаты»: у каждого педагога — выплачено и статус 🟢/🟡/🔴, внизу итог выплат."""
+    app, dp = api
+    s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]
+    me = next(t for t in s["teachers"] if t["id"] == "TCH-0001")
+    assert me["accrued"] > 0 and me["paid"] == 0 and me["status"] == "none" and s["paid"] == 0
+    _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0001", "periodMonth": YM, "amount": 1000, "comment": "аванс"})
+    s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]
+    me = next(t for t in s["teachers"] if t["id"] == "TCH-0001")
+    assert me["paid"] == 1000 and me["status"] == "partial" and s["paid"] == 1000
+    assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["paid"] == 1000
