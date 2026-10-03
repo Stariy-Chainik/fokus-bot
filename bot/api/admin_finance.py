@@ -220,6 +220,11 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             paid[p.teacher_id] = paid.get(p.teacher_id, 0) + p.amount
         return paid
 
+    def _owner_paid(tid: str, accrued: int, paid: int) -> int:
+        """Руководитель (OWNER_TEACHER_IDS) зарплату себе не выплачивает — она остаётся в прибыли,
+        поэтому в «Зарплатах» и «Выплатах» он всегда «выплачено» (решение владельца 03.10.2026)."""
+        return max(accrued, paid) if tid in settings.owner_teacher_id_set else paid
+
     async def salaries(request: web.Request, user) -> web.Response:
         """Все педагоги за месяц: начислено и сколько уже выплачено (решение владельца 03.10.2026 —
         статус выплаты виден прямо в списке, а не только на экране «Выплатить зарплату»)."""
@@ -229,7 +234,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         for t in sorted(await teacher_repo.get_all(), key=lambda x: x.name.lower()):
             lines = await salary_service.lines_for(t, period)
             accrued = sum(ln.amount for ln in lines)
-            paid = paid_by.get(t.teacher_id, 0)
+            paid = _owner_paid(t.teacher_id, accrued, paid_by.get(t.teacher_id, 0))
             out.append({"id": t.teacher_id, "name": t.name, "accrued": accrued, "paid": paid,
                         "status": "paid" if accrued and paid >= accrued else ("partial" if paid > 0 else "none"),
                         "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift")),
@@ -271,9 +276,10 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         if t is None:
             return _json({"error": "not_found"}, status=404)
         lines = await _described_lines(t, period)
-        paid = (await _paid_by_teacher(period)).get(tid, 0)
+        total = sum(ln["amount"] for ln in lines)
+        paid = _owner_paid(tid, total, (await _paid_by_teacher(period)).get(tid, 0))
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
-                      "lines": lines, "total": sum(ln["amount"] for ln in lines)})
+                      "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set})
 
     async def payouts(request: web.Request, user) -> web.Response:
         period = request.query.get("ym") or current_period()
@@ -283,7 +289,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             acc = await salary_service.total_for(t, period)
             if acc == 0 and t.teacher_id not in paid_by_teacher:
                 continue
-            paid = paid_by_teacher.get(t.teacher_id, 0)
+            paid = _owner_paid(t.teacher_id, acc, paid_by_teacher.get(t.teacher_id, 0))
             out.append({"id": t.teacher_id, "name": t.name, "accrued": acc, "paid": paid,
                         "status": "paid" if paid >= acc else ("partial" if paid > 0 else "none"),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set})
@@ -300,7 +306,8 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         overrides = await override_repo.get_for_teacher_period(tid, period)
         return _json({
             "teacherId": tid, "name": t.name, "period": period,
-            "accrued": sum(ln["amount"] for ln in lines), "paid": sum(p.amount for p in rows),
+            "accrued": sum(ln["amount"] for ln in lines),
+            "paid": _owner_paid(tid, sum(ln["amount"] for ln in lines), sum(p.amount for p in rows)),
             "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment} for p in rows],
             "lines": lines,
             "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment} for o in overrides],
