@@ -786,9 +786,12 @@ class PaymentService:
         customer_email: str = "",
         teacher_ids: list | None = None,
         lesson_ids: list | None = None,
+        periods: list | None = None,
     ) -> tuple:
         """Создаёт платёж в ЮКасса, возвращает (confirmation_url, payment_id).
 
+        periods — «Оплатить всё»: один платёж за несколько месяцев; в metadata уходит их список,
+        а зачёт делает record_payment_periods (с самого раннего месяца).
         sbp=True — сразу метод СБП (без выбора на странице ЮКассы).
         Магазин с фискализацией требует чек: контакт берём из телефона клиента,
         иначе — YOOKASSA_RECEIPT_EMAIL.
@@ -809,7 +812,7 @@ class PaymentService:
             extra["receipt"] = {
                 "customer": customer,
                 "items": [{
-                    "description": f"Занятия — {student_name}, {period_month}"[:128],
+                    "description": f"Занятия — {student_name}, {', '.join(periods) if periods else period_month}"[:128],
                     "quantity": "1.00",
                     "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
                     "vat_code": 1,  # без НДС
@@ -825,10 +828,11 @@ class PaymentService:
                 "return_url": settings.yookassa_return_url,
             },
             "capture": True,
-            "description": f"{student_name} — {period_month}",
+            "description": f"{student_name} — {', '.join(periods) if periods else period_month}",
             "metadata": {
                 "student_id": student_id,
                 "period_month": period_month,
+                **({"periods": ",".join(periods)} if periods else {}),
                 # выборочная оплата: подтверждаем только этих педагогов
                 **({"teacher_ids": ",".join(teacher_ids)} if teacher_ids else {}),
                 # и только эти занятия, если родитель выбрал их на экране
@@ -836,6 +840,28 @@ class PaymentService:
             },
         }, idempotency_key)
         return payment.confirmation.confirmation_url, payment.id
+
+    async def record_payment_periods(
+        self, student_id: str, student_name: str, periods: list, amount: int,
+        confirmed_by_tg_id: int, comment: str | None = None, payment_method: str = "",
+    ) -> tuple[int, int]:
+        """Одна сумма за несколько месяцев («Оплатить всё» через ЮКассу): закрываем остатки месяцев
+        с самого раннего; что осталось сверх всех остатков — переплата на последний месяц.
+        Возвращает (зачтено ₽, строк)."""
+        student = Student(student_id=student_id, name=student_name)
+        left, credited, rows = int(amount), 0, 0
+        ordered = sorted(set(periods))
+        for i, ym in enumerate(ordered):
+            if left <= 0:
+                break
+            rest = sum(v.remainder for v in (await self.ledger_for(student, ym)).values())
+            pay = left if i == len(ordered) - 1 else min(left, rest)      # последний месяц забирает остаток суммы
+            if pay <= 0:
+                continue
+            c, n = await self.record_payment(student_id, student_name, ym, pay, confirmed_by_tg_id, None,
+                                             comment, payment_method)
+            credited, rows, left = credited + c, rows + n, left - pay
+        return credited, rows
 
     async def confirm_teachers(
         self,

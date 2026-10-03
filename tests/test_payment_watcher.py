@@ -77,3 +77,27 @@ def test_watch_survives_fetch_errors():
     asyncio.run(_watch("p1", "STU-1", "Пупкин Вася", "2026-09",
                        svc, bot, _Users(), None, interval=0, max_checks=10, fetch=fetch))
     assert svc.confirmed == [("STU-1", "2026-09")]
+
+
+def test_watch_spreads_a_multi_month_payment_by_months():
+    """«Оплатить всё» через ЮКассу: сумма разносится по месяцам с самого раннего."""
+    class _Svc(_Service):
+        async def ledger_for(self, student, ym):
+            rest = {"2026-09": 5000, "2026-10": 6000}[ym]
+            return {"SUB": SimpleNamespace(remainder=rest)}
+
+        async def record_payment_periods(self, student_id, student_name, periods, amount, by, comment=None, payment_method=""):
+            from bot.services.payment_service import PaymentService
+            return await PaymentService.record_payment_periods(self, student_id, student_name, periods, amount, by, comment, payment_method)
+
+    async def fetch(pid):
+        p = _payment("succeeded")
+        p.amount = SimpleNamespace(value="11000.00")
+        return p
+
+    svc, bot = _Svc(), _Bot()
+    asyncio.run(_watch("p2", "STU-1", "Пупкин Вася", "2026-09", svc, bot, _Users(), parent_addr=("tg", 42),
+                       interval=0, max_checks=3, fetch=fetch, periods=["2026-10", "2026-09"]))
+    assert svc.confirmed == [("STU-1", "2026-09"), ("STU-1", "2026-10")]
+    assert [a for a, _t, _m in svc.amounts] == [5000, 6000]
+    assert any("2026-09, 2026-10" in text for _c, text in bot.sent)

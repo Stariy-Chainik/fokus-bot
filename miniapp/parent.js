@@ -256,8 +256,9 @@ ACT.pPayAllAsk = ({ periods, rest }) => {
   const rows = [];
   if (m.cash && child.cashAllowed !== false) rows.push(btn('💵 Наличные', 'pPayDo', { periods, ym: periods[0], method: 'cash' }));
   if (m.bank) rows.push(btn('🏦 По реквизитам', 'pPayDo', { periods, ym: periods[0], method: 'bank' }, 'ghost'));
+  if (m.yookassa) rows.push(btn('📱 СБП онлайн', 'pPayDo', { periods, ym: periods[0], method: 'ysbp' }, 'ghost'));
   sheet(`<h3>Оплатить всё ${fmt(rest)}</h3><div class="hint">${esc(kidName(kid()))} · ${periods.map(p => MON_NOM[+p.slice(5) - 1]).join(' и ')}</div>
-    <p class="hint" style="margin-top:10px">Сумма — остаток по каждому месяцу. Наличные: передайте администратору или педагогу. По реквизитам — переведите всю сумму и прикрепите один чек. СБП онлайн — оплачивайте каждый месяц в его счёте.</p>
+    <p class="hint" style="margin-top:10px">Сумма — остаток по каждому месяцу. Наличные: передайте администратору или педагогу. По реквизитам — переведите всю сумму и прикрепите один чек. СБП онлайн — один платёж на всю сумму, зачтётся сам по месяцам.</p>
     <div style="margin-top:12px">${rows.join('') || '<div class="hint">Способы оплаты не настроены — напишите администратору.</div>'}
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };

@@ -86,10 +86,17 @@ async def process_yookassa_event(
         amount_int = int(round(float(str(amount))))
     except (TypeError, ValueError):
         amount_int = 0
-    _, count = await payment_service.record_payment(
-        student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
-        yookassa_method(payment), lesson_ids=lesson_ids or None,
-    )
+    periods = [x for x in (meta.get("periods") or "").split(",") if x]
+    if len(periods) >= 2:                                 # «Оплатить всё»: сумма разносится по месяцам
+        _, count = await payment_service.record_payment_periods(
+            student_id, student_name, periods, amount_int, 0, "ЮКасса", yookassa_method(payment),
+        )
+        period_month = ", ".join(sorted(periods))
+    else:
+        _, count = await payment_service.record_payment(
+            student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
+            yookassa_method(payment), lesson_ids=lesson_ids or None,
+        )
     if count > 0:
         msg = (
             f"💰 Оплата через ЮКасса\n\n"

@@ -41,7 +41,7 @@ async def _watch(
     payment_id: str, student_id: str, student_name: str, period_month: str,
     payment_service, bot, user_repo, parent_addr=None,
     interval: int = _INTERVAL_SEC, max_checks: int = _MAX_CHECKS, fetch=_fetch,
-    teacher_ids: list | None = None, notifier=None,
+    teacher_ids: list | None = None, notifier=None, periods: list | None = None,
 ) -> None:
     for _ in range(max_checks):
         await asyncio.sleep(interval)
@@ -58,10 +58,16 @@ async def _watch(
             continue
 
         amount = getattr(getattr(payment, "amount", None), "value", "?")
-        credited, count = await payment_service.record_payment(
-            student_id, student_name, period_month, _to_int(amount), 0,
-            teacher_ids or None, "ЮКасса", yookassa_method(payment),
-        )
+        if periods and len(periods) >= 2:                 # «Оплатить всё»: сумма разносится по месяцам
+            credited, count = await payment_service.record_payment_periods(
+                student_id, student_name, periods, _to_int(amount), 0, "ЮКасса", yookassa_method(payment),
+            )
+            period_month = ", ".join(sorted(periods))
+        else:
+            credited, count = await payment_service.record_payment(
+                student_id, student_name, period_month, _to_int(amount), 0,
+                teacher_ids or None, "ЮКасса", yookassa_method(payment),
+            )
         logger.info(
             "Платёж %s succeeded (опрос): student=%s period=%s подтверждено счетов=%d",
             payment_id, student_id, period_month, count,
@@ -91,12 +97,12 @@ def start_payment_watch(
     payment_id: str, student_id: str, student_name: str, period_month: str,
     payment_service, bot, user_repo, parent_addr=None,
     interval: int = _INTERVAL_SEC, max_checks: int = _MAX_CHECKS, fetch=_fetch,
-    teacher_ids: list | None = None, notifier=None,
+    teacher_ids: list | None = None, notifier=None, periods: list | None = None,
 ) -> asyncio.Task:
     """Запускает фоновый опрос платежа; задача живёт в текущем event loop.
     parent_addr — ("tg", id) | ("max", id) плательщика (см. parent_notifier)."""
     return asyncio.create_task(_watch(
         payment_id, student_id, student_name, period_month,
         payment_service, bot, user_repo, parent_addr, interval, max_checks, fetch,
-        teacher_ids, notifier,
+        teacher_ids, notifier, periods,
     ))

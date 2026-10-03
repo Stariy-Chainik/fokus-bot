@@ -304,6 +304,24 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if not due:
             return _json({"error": "nothing_to_pay"}, status=409)
         total = sum(a for a, _ in due.values())
+        if method in ("yookassa", "ysbp"):                # один платёж ЮКассы за все месяцы
+            if not (settings.yookassa_shop_id and settings.yookassa_secret_key):
+                return _json({"error": "payments_disabled"}, status=503)
+            phone, email = await client_contact(student, client_repo)
+            try:
+                url, payment_id = await payment_service.create_yookassa_payment(
+                    student.student_id, student.name, sorted(due)[0], total, sbp=(method == "ysbp"),
+                    customer_phone=phone, customer_email=email, periods=sorted(due),
+                )
+            except Exception as exc:
+                logger.error("Кабинет родителя: ошибка платежа ЮКасса за %d мес.: %s", len(due), exc)
+                return _json({"error": "payment_failed"}, status=502)
+            if bot is not None:
+                from bot.services.payment_watcher import start_payment_watch
+                start_payment_watch(payment_id, student.student_id, student.name, sorted(due)[0],
+                                    payment_service, bot, user_repo, parent_addr=("tg", tg_id), periods=sorted(due))
+            logger.info("Кабинет родителя: платёж ЮКасса %s ₽ за %d мес. — %s", total, len(due), student.student_id)
+            return _json({"url": url, "amount": total, "months": len(due)})
         if method == "cash":
             if bot is None:
                 return _json({"error": "bot_unavailable"}, status=503)
@@ -354,7 +372,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if student is None:
             return _json({"error": "not_found"}, status=404)
         periods = [x for x in ((body or {}).get("periods") or []) if isinstance(x, str) and not _hidden(x)]
-        if len(periods) >= 2 and method in ("cash", "bank", "sbp"):
+        if len(periods) >= 2 and method in ("cash", "bank", "sbp", "ysbp", "yookassa"):
             return await pay_months(student, periods, method, tg_id)
 
         ledgers = await payment_service.ledger_for(student, period)

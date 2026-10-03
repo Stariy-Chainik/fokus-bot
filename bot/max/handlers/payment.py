@@ -220,17 +220,32 @@ async def on_pay_all(event: MessageCallback, max_uid, student_repo, payment_serv
     if student is None:
         return
     await edit_screen(event, *pay_all_screen(student.student_id, student.name, due, sum(a for _ym, a in due),
-                                             cash=settings.payment_cash_enabled, bank=bool(settings.payment_bank_details)))
+                                             cash=settings.payment_cash_enabled, bank=bool(settings.payment_bank_details),
+                                             yookassa=_yookassa_on()))
 
 
 @router.message_callback(F.callback.payload.startswith("payall:"))
 async def on_pay_all_method(event: MessageCallback, context, max_uid, student_repo, payment_service, user_repo, tg_bot,
-                            pending_repo=None):
+                            pending_repo=None, client_repo=None, notifier=None):
     _, method, student_id = event.callback.payload.split(":", 2)
     student, due = await _student_due(event, max_uid, student_repo, payment_service, student_id)
     if student is None:
         return
     total = sum(a for _ym, a in due)
+    periods = [ym for ym, _a in due]
+    if method == "ysbp":                                 # один платёж ЮКассы за все месяцы
+        try:
+            phone, email = await client_contact(student, client_repo) if client_repo is not None else ("", "")
+            url, payment_id = await payment_service.create_yookassa_payment(
+                student_id, student.name, periods[0], total, sbp=True, customer_phone=phone, customer_email=email,
+                periods=periods)
+            start_payment_watch(payment_id, student_id, student.name, periods[0], payment_service, tg_bot, user_repo,
+                                parent_addr=max_addr(max_uid), notifier=notifier, periods=periods)
+            await edit_screen(event, *online_pay_screen("ysbp", total, url, student_id, periods[0]))
+        except Exception as exc:
+            logger.error("MAX: ошибка платежа ЮКасса за %d мес.: %s", len(periods), exc)
+            await alert(event, "Ошибка при создании платежа. Попробуйте другой способ.")
+        return
     if method == "bank":
         await edit_screen(event, *pay_all_bank_screen(student_id, student.name, due, total, settings.payment_bank_details))
         return

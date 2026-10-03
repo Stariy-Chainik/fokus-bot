@@ -308,16 +308,18 @@ def receipt_prompt_screen(student_id: str, period_month: str) -> tuple:
 
 
 def pay_all_screen(student_id: str, student_name: str, periods: list, total: int,
-                   cash: bool = True, bank: bool = True) -> tuple:
+                   cash: bool = True, bank: bool = True, yookassa: bool = False) -> tuple:
     """«Оплатить всё»: месяцы с остатком и способы — наличные или реквизиты (СБП онлайн — по месяцам)."""
     lines = [f"<b>💳 Оплатить всё — {student_name}</b>"]
     lines += [f"  • {period_label(ym)} — {amount} руб." for ym, amount in periods]
-    lines.append(f"Итого: <b>{total} руб.</b>\n\nВыберите способ. СБП онлайн оплачивается по месяцам — в счёте каждого месяца.")
+    lines.append(f"Итого: <b>{total} руб.</b>\n\nВыберите способ оплаты:")
     rows = []
     if cash:
         rows.append([cb("💵 Наличные", f"payall:cash:{student_id}")])
     if bank:
         rows.append([cb("🏦 По реквизитам", f"payall:bank:{student_id}")])
+    if yookassa:
+        rows.append([cb("📱 СБП онлайн", f"payall:ysbp:{student_id}")])
     rows.append([cb("« Назад", f"cl_bills_stu:{student_id}")])
     return "\n".join(lines), rows
 
