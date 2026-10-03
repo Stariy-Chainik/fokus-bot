@@ -202,6 +202,21 @@ class Settings(BaseSettings):
                 out[(parts[0], parts[1])] = (int(parts[2]), since)
         return out
 
+    # Постоянная скидка ученика на всё, что ему начисляет школа: посещения, индивидуальные, абонемент.
+    # Формат: STU-0191:10:2026-10 — 10 % с октября 2026 (месяц необязателен — за всё время).
+    # Зарплату педагога не меняет. Явная цена ученика (переопределение абонемента, STUDENT_LESSON_RATES) — без скидки.
+    student_discounts: str = Field(default="", alias="STUDENT_DISCOUNTS")
+
+    @property
+    def student_discount_map(self) -> dict:
+        """{student_id: (процент, «с какого месяца» или "")}"""
+        out: dict = {}
+        for chunk in self.student_discounts.replace("|", ",").split(","):
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) >= 2 and parts[0] and parts[1].isdigit() and 0 < int(parts[1]) < 100:
+                out[parts[0]] = (int(parts[1]), parts[2] if len(parts) > 2 else "")
+        return out
+
     # Своя ставка педагога за занятия конкретной группы (₽ за 45 мин, как rate_group).
     # Формат: GRP-0019:1500 — «БП Джаз»: 60 мин = 2000 ₽.
     group_salary_rates: str = Field(default="", alias="GROUP_SALARY_RATES")

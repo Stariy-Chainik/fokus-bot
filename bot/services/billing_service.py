@@ -70,7 +70,33 @@ def student_rate(teacher_id: str, student_id: str, date: str, default: int) -> i
     return rate
 
 
+def student_discount(student_id: str, date_or_period: str) -> int:
+    """Процент постоянной скидки ученика (STUDENT_DISCOUNTS) на дату/месяц; 0 — скидки нет."""
+    from config.settings import settings
+    row = settings.student_discount_map.get(student_id)
+    if row is None:
+        return 0
+    pct, since = row
+    return 0 if since and date_or_period[:7] < since else pct
+
+
+def discounted(amount: int, student_id: str, date_or_period: str) -> int:
+    pct = student_discount(student_id, date_or_period)
+    return round(amount * (100 - pct) / 100) if pct else amount
+
+
 def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
+    """Начисления ученикам за занятие; поверх расчёта — постоянная скидка ученика (STUDENT_DISCOUNTS)."""
+    rows = _build_billing_rows(lesson, teacher, include_direct)
+    for row in rows:
+        pct = student_discount(row.student_id, row.date)
+        if pct:
+            row.amount = round(row.amount * (100 - pct) / 100)
+            row.exact = row.exact * (100 - pct) / 100 if row.exact else 0.0
+    return rows
+
+
+def _build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
     """
     Строит виртуальные billing-строки.
     Не пишет ничего в БД. billing_id пустой — это computed view.

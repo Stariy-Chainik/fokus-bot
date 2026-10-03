@@ -279,3 +279,21 @@ def test_round_month_individual_month_sums_exactly(monkeypatch):
     assert [r.amount for r in round_month(rows("2026-08"))] == [2667, 2667, 2667]
     pair = round_month(rows("2026-09", (("STU-1", "А"), ("STU-2", "Б"))))
     assert [r.amount for r in pair] == [1334, 1333] * 3
+
+
+def test_student_discount_applies_to_visits_individuals_and_subscription(monkeypatch):
+    """STUDENT_DISCOUNTS: 10 % с указанного месяца на посещения и индивидуальные; раньше месяца — без скидки."""
+    from config.settings import settings
+    from bot.services.billing_service import build_billing_rows, discounted
+    from tests.fakes import mk_lesson, mk_teacher
+    monkeypatch.setattr(settings, "student_discounts", "STU-1:10:2026-10")
+    teacher = mk_teacher("TCH-1", "Педагог", rate_group=1000, rate_for_teacher=1500, rate_for_student=2000)
+    visit = mk_lesson("LES-1", teacher, "2026-10-02", duration=60, lesson_type=LessonType.GROUP,
+                      attendees="STU-1:60:850,STU-2:60:850", group_id="GRP-1")
+    assert {r.student_id: r.amount for r in build_billing_rows(visit, teacher)} == {"STU-1": 765, "STU-2": 850}
+    before = mk_lesson("LES-0", teacher, "2026-09-30", duration=60, lesson_type=LessonType.GROUP,
+                       attendees="STU-1:60:850", group_id="GRP-1")
+    assert build_billing_rows(before, teacher)[0].amount == 850                    # до месяца начала — полная цена
+    solo = mk_lesson("LES-2", teacher, "2026-10-05", students=[("STU-1", "Ученик")])  # 2000 за 45 мин
+    assert build_billing_rows(solo, teacher)[0].amount == 1800
+    assert discounted(6000, "STU-1", "2026-10") == 5400 and discounted(6000, "STU-1", "2026-09") == 6000

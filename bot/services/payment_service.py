@@ -12,7 +12,7 @@ from bot.utils.dates import last_periods
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
-from .billing_service import build_billing_rows, round_month
+from .billing_service import build_billing_rows, discounted, round_month
 from .payment_ledger import (
     BillAggregate, StudentMonthLessons, TeacherLedger, direct_pay_rows, lesson_marks,
     mark_student_lessons, paid_lesson_ids,
@@ -322,9 +322,8 @@ class PaymentService:
             if not since or period >= since:
                 return overrides[key_student_permanent]
         key_group = (group_id, period, "")
-        if key_group in overrides:
-            return overrides[key_group]
-        return default
+        base = overrides[key_group] if key_group in overrides else default
+        return discounted(base, student_id, period)      # постоянная скидка ученика (STUDENT_DISCOUNTS)
 
     async def _subscription_bills_for_student(
         self, student_id: str, period_month: str,
