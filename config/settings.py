@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     def cash_disabled_group_id_set(self) -> set:
         return {g.strip() for g in self.cash_disabled_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Абонементные / бесплатные группы, где педагог отмечает присутствующих (решение владельца
+    # 04.10.2026, Современные танцы Фоминой): мастер показывает состав, attendees пишутся старым
+    # CSV из id (сумма 0 — на абонемент и счета не влияет), родитель видит занятие в «Занятиях».
+    attendance_group_ids: str = Field(default="", alias="ATTENDANCE_GROUPS")
+
+    @property
+    def attendance_group_id_set(self) -> set:
+        return {g.strip() for g in self.attendance_group_ids.replace("|", ",").split(",") if g.strip()}
+
     # Педагоги, чьи ИНДИВИДУАЛЬНЫЕ занятия родители оплачивают напрямую педагогу
     # (мимо школы): не попадают в счета/долги/прибыль, зарплата школы = 0.
     direct_pay_teacher_ids: str = Field(default="", alias="DIRECT_PAY_TEACHER_IDS")

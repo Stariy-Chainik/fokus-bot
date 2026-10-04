@@ -54,6 +54,7 @@ async def record_options(dp, teacher_id: str) -> dict:
         groups.append({
             "id": g.group_id, "name": g.name, "branchId": g.branch_id, "branchName": branches.get(g.branch_id, ""),
             "mode": g.billing_mode.value, "priceFull": g.price_full, "priceShort": g.price_short,
+            "attendance": g.billing_mode == GroupBillingMode.PER_VISIT or g.group_id in settings.attendance_group_id_set,
             "durationFull": g.duration_full, "durationShort": g.duration_short,
             "roster": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value, "partnerId": s.partner_id} for s in roster],
         })
