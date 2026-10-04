@@ -90,7 +90,10 @@ SCREENS['t.lessons'] = async ({ key }) => {
   const [d0, d1] = [today.toISOString().slice(0, 10), yest.toISOString().slice(0, 10)];
   const ym = k.slice(0, 7);
   const d = await api(`/lessons?${k.length === 10 ? 'date' : 'ym'}=${k}`);
-  const chips = [[d0, 'Сегодня'], [d1, 'Вчера'], [ym, MON_NOM[+ym.slice(5) - 1]]];
+  // чипы: сегодня, вчера, текущий и прошлый месяц — занятия задним числом видны без календаря
+  const cur = d0.slice(0, 7), prevD = new Date(today.getFullYear(), today.getMonth() - 1, 1), prev = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}`;
+  const chips = [[d0, 'Сегодня'], [d1, 'Вчера'], [cur, MON_NOM[+cur.slice(5) - 1]], [prev, MON_NOM[+prev.slice(5) - 1]]];
+  if (![cur, prev, d0, d1].includes(k)) chips.push([ym, MON_NOM[+ym.slice(5) - 1]]);
   const type = state.ui.tLesType || '';
   const n = t => d.lessons.filter(l => l.type === t).length;
   const shown = type ? d.lessons.filter(l => l.type === type) : d.lessons;
