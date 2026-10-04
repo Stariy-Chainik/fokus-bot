@@ -1197,9 +1197,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 rest = min(rest, sum(m["amount"] for m in visible[1] if not m["paid"]))
             if amount > rest and not bool((body or {}).get("force")):
                 return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
+            rec = _teacher_receipts.get((body or {}).get("receiptId") or "")
             credited, rows = await payment_service.record_payment(
                 sid, s.name, period, amount, user.tg_id, [key],
                 f"отметил педагог {teacher.name} · чек", method, lesson_ids=lessons,
+                receipt_file_id=rec[3] if rec else "",
             )
         logger.info("Mini App: педагог %s отметил оплату %d ₽ — %s %s %s",
                     teacher.teacher_id, credited, sid, period, key)

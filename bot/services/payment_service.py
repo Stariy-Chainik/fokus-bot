@@ -540,9 +540,12 @@ class PaymentService:
     async def record_payment(
         self, student_id: str, student_name: str, period_month: str, amount: int,
         confirmed_by_tg_id: int, teacher_ids: list | None = None, comment: str | None = None,
-        payment_method: str = "", lesson_ids: list | None = None,
+        payment_method: str = "", lesson_ids: list | None = None, receipt_file_id: str = "",
     ) -> tuple[int, int]:
         """Зачесть оплату на сумму amount по остаткам педагогов месяца.
+
+        receipt_file_id — Telegram file_id чека (перевод, отмеченный педагогом из кабинета):
+        попадает в ref события ленты (`STU-… file:<id>`), чтобы администратор открыл чек из «Событий».
 
         teacher_ids — какие остатки закрывать и в каком порядке (None — все, по имени).
         lesson_ids — занятия, за которые платят (плательщик выбрал их на экране): они
@@ -602,7 +605,8 @@ class PaymentService:
         logger.info("Оплата зачтена: student=%s period=%s сумма=%d строк=%d", student_id, period_month, credited, rows)
         if credited > 0:
             await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
-                                  + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id, ref=student_id)
+                                  + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id,
+                                  ref=f"{student_id} file:{receipt_file_id}" if receipt_file_id else student_id)
             payment_events.payment_received(student_id, period_month, credited, payment_method,
                                             confirmed_by_tg_id, student_name)
         return credited, rows

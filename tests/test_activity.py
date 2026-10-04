@@ -67,3 +67,23 @@ def test_feed_is_optional_and_never_breaks_writes(monkeypatch):
         asyncio.run(activity.record("lesson", "x"))
     finally:
         activity.setup(None)
+
+
+def test_feed_events_link_to_screens_and_carry_receipt(feed, monkeypatch):
+    """Тап по событию ведёт на экран (оплата — счёт ученика за месяц), чек педагога виден в ленте
+    (решение владельца 04.10.2026)."""
+    app, dp = make_api(monkeypatch)
+    dp["activity_repo"] = feed
+    asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 2000, 826576855, ["TCH-0001"],
+                                                     "отметил педагог · чек", "receipt_bank", receipt_file_id="AgACfile1"))
+    asyncio.run(activity.record(activity.GROUP, "Группа GRP-0001 переименована", actor=826576855, ref="GRP-0001"))
+    status, d = _call(app, "GET", "/api/admin/activity?days=1")
+    assert status == 200
+    pay = next(e for e in d["events"] if e["kind"] == "payment")
+    group = next(e for e in d["events"] if e["kind"] == "group")
+    assert (pay["studentId"], pay["ym"], pay["hasFile"]) == ("STU-0001", YM, True)
+    assert pay["ref"] == "STU-0001 file:AgACfile1" and "AgACfile1" not in pay["text"]
+    assert (group["groupId"], group["hasFile"]) == ("GRP-0001", False) and "studentId" not in group
+    # файл: чужой ts/ref — 404; настоящий без бота — 503 (бот отдаёт его через getFile)
+    assert _call(app, "GET", "/api/admin/activity/file?ts=x&ref=STU-0001%20file:AgACfile1")[0] == 404
+    assert _call(app, "GET", f"/api/admin/activity/file?ts={pay['ts'].replace(' ', '%20')}&ref=STU-0001%20file:AgACfile1")[0] == 503

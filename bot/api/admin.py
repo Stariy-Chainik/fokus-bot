@@ -220,8 +220,44 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         pretty = lambda text: _ID_RE.sub(lambda m: names.get(m.group(0), m.group(0)), text)  # noqa: E731
         out = [{"ts": e.ts, "kind": e.kind, "text": pretty(e.text),
                 "who": labels.get(e.actor, "") or ("ЮКасса" if e.kind == "payment" and not e.actor else ""),
-                "ref": e.ref} for e in events]
+                "ref": e.ref, **_activity_link(e)} for e in events]
         return _json({"days": days, "since": since, "events": out, "latest": events[0].ts if events else ""})
+
+    _YM_RE = re.compile(r"\b(20\d{2}-\d{2})\b")
+
+    def _activity_link(e) -> dict:
+        """Куда ведёт тап по событию: ученик (оплата — его счёт за месяц из текста), группа, педагог;
+        `hasFile` — к событию приложен чек (ref `STU-… file:<file_id>`)."""
+        ref = (e.ref or "").split(" file:")[0]
+        out: dict = {"hasFile": " file:" in (e.ref or "")}
+        ym = _YM_RE.search(e.text or "")
+        if ref.startswith("STU-"):
+            out.update({"studentId": ref, "ym": ym.group(1) if ym and e.kind == "payment" else ""})
+        elif ref.startswith("GRP-"):
+            out["groupId"] = ref
+        elif ref.startswith("TCH-"):
+            out["teacherId"] = ref
+        return out
+
+    async def activity_file(request: web.Request, user) -> web.Response:
+        """Чек, приложенный к событию (ts + ref из ленты): скачивается через Bot API, file_id наружу не уходит."""
+        repo = _dp_get(dp, "activity_repo")
+        ts, ref = request.query.get("ts") or "", request.query.get("ref") or ""
+        if repo is None or " file:" not in ref:
+            return _json({"error": "not_found"}, status=404)
+        if not any(e.ts == ts and e.ref == ref for e in await repo.get_all()):
+            return _json({"error": "not_found"}, status=404)
+        if bot is None:
+            return _json({"error": "bot_unavailable"}, status=503)
+        try:
+            file = await bot.get_file(ref.split(" file:", 1)[1])
+            buf = await bot.download_file(file.file_path)
+        except Exception as exc:
+            logger.warning("Чек события %s не скачан: %s", ts, exc)
+            return _json({"error": "file_unavailable"}, status=502)
+        import mimetypes
+        ctype = mimetypes.guess_type(file.file_path or "")[0] or "application/octet-stream"
+        return web.Response(body=buf.read() if hasattr(buf, "read") else buf, content_type=ctype)
 
     async def _today_by_teacher(lessons_today: list) -> list[dict]:
         """Раскрывающийся список на сводке: педагог → его занятия за сегодня и прибыль школы.
@@ -587,6 +623,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     routes = [
         ("GET", "/me", me), ("GET", "/home", home), ("GET", "/activity", activity),
         ("GET", "/pay/breakdown", pay_breakdown),
+        ("GET", "/activity/file", activity_file),
         ("GET", "/students", students), ("GET", "/students/{sid}", student_card),
         ("GET", "/students/{sid}/lessons", student_lessons), ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/teachers", teachers), ("GET", "/teachers/{tid}", teacher_card),

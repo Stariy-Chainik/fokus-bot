@@ -249,7 +249,11 @@ SCREENS['a.activity'] = async ({ days, kind }) => {
   const byDay = {}; d.events.forEach(e => (byDay[e.ts.slice(0, 10)] = byDay[e.ts.slice(0, 10)] || []).push(e));
   const chips = `<div class="chips">${[[1, 'Сегодня'], [7, '7 дней'], [30, '30 дней']].map(([v, l]) => `<button class="chip" aria-pressed="${v === n}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: v, kind: k }))}' data-replace="1">${l}</button>`).join('')}</div>
     <div class="chips scroll">${[['', 'Все'], ...Object.entries(ACT_KIND).map(([v, [ic, l]]) => [v, `${ic} ${l}`])].map(([v, l]) => `<button class="chip" aria-pressed="${v === k}" data-go="a.activity" data-p='${esc(JSON.stringify({ days: n, kind: v }))}' data-replace="1">${l}</button>`).join('')}</div>`;
-  const row = e => cell({ lead: (ACT_KIND[e.kind] || ['•'])[0], plain: true, cls: 'wrap', t: esc(e.text), s: `${e.ts.slice(11, 16)}${e.who ? ` · ${esc(e.who)}` : ''}` });
+  // тап по событию: оплата → счёт ученика за месяц, остальное → карточка ученика / группы / педагога;
+  // событие с чеком (перевод, отмеченный педагогом) — чек открывается прямо в ленте
+  const target = e => e.studentId ? (e.ym ? ['a.pay.student', { sid: e.studentId, ym: e.ym }] : ['a.student', { id: e.studentId }]) : e.groupId ? ['a.group', { id: e.groupId }] : e.teacherId ? ['a.teacher', { id: e.teacherId }] : null;
+  const row = e => { const tg = target(e); const c = cell({ lead: (ACT_KIND[e.kind] || ['•'])[0], plain: true, cls: 'wrap', t: esc(e.text), s: `${e.ts.slice(11, 16)}${e.who ? ` · ${esc(e.who)}` : ''}${e.hasFile ? ' · 🧾 чек' : ''}`, go: tg ? tg[0] : undefined, p: tg ? tg[1] : undefined });
+    return e.hasFile ? `${c}<div style="padding:0 12px 10px"><img data-file="/activity/file?ts=${encodeURIComponent(e.ts)}&ref=${encodeURIComponent(e.ref)}" alt="Чек" style="display:block;width:100%;max-height:320px;object-fit:contain;border-radius:10px;background:var(--bg)"></div>` : c; };
   if (d.latest && d.latest > actSeen()) try { localStorage.setItem('actSeen', d.latest); } catch (_) { /* приватный режим */ }
   return { title: 'События', html: `${stickyFilters(chips)}${d.events.length
     ? Object.keys(byDay).sort((a, b) => (a < b ? 1 : -1)).map(dd => `<div class="eyebrow">${fdate(dd)}<span style="margin-left:auto;font-weight:600">${plural(byDay[dd].length, ['событие', 'события', 'событий'])}</span></div>${list(byDay[dd].map(row))}`).join('')
