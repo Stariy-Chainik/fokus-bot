@@ -550,7 +550,7 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 > `fokus-sync-yakovleva.timer`) **удалена 19.09.2026 по решению владельца**: занятия и составы ХГ ведутся вручную в боте,
 > как у остальных педагогов. Внешняя таблица — только справочно, автоматически ничего не переносится.
 
-Production: **Hetzner VPS (Nuremberg)**, systemd unit `fokus-bot.service`, deployed by `./scripts/deploy.sh`. Logs via `journalctl -u fokus-bot`. The Railway-related `WEBHOOK_URL` / `Procfile` are present but unused — current production runs in polling mode under systemd.
+Production: **Hetzner VPS (Nuremberg)**, systemd unit `fokus-bot.service` (в юните `Environment=TZ=Europe/Moscow` с 04.10.2026 — все `datetime.now()`/`date.today()`, время заявок, событий и «сегодня» идут по Москве; сервер сам в UTC, записи до этой даты в листах — UTC, на 3 ч раньше), deployed by `./scripts/deploy.sh`. Logs via `journalctl -u fokus-bot`. The Railway-related `WEBHOOK_URL` / `Procfile` are present but unused — current production runs in polling mode under systemd.
 
 ---
 
