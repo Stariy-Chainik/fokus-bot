@@ -1,0 +1,28 @@
+- [Deployment](deployment.md) — fokus-bot is deployed via direct SSH, not Railway (despite docs)
+- [Lesson names are denormalized](lesson_names_denormalized.md) — lessons.*_name are snapshots; renames don't rewrite history, by design
+- [teacher_students removed](teacher_students_removal.md) — done 2026-04-20; visibility derived from teacher_groups + student.group_id via TeacherVisibilityService
+- [Write in Russian](feedback_language.md) — пользователь просит отвечать по-русски
+- [Client role TZ — deferred questions](client_role_tz_open_questions.md) — 9 вопросов по ТЗ клиента, вернёмся после биллинга
+- [Group abonement billing](group_abonement_future.md) — РЕАЛИЗОВАНО 2026-07: SUBSCRIPTION = фикс price_full ₽/мес (занятия не влияют), ключ SUB:{gid}; «Выручка» — follow-up
+- [Client vs Student split](client_vs_student_split.md) — ученик занимается, клиент платит; разные сущности, модель и 4 вопроса
+- [Bill UI — no duplicated status](feedback_bills_format.md) — на экранах счёта не дублировать «период сдан/не сдан»; родителю — без статусов, платит школе
+- [Monthly billing close](billing_monthly_close.md) — PER_VISIT счета финализируются в конце месяца; середина месяца = промежуточное состояние
+- [SHORT/FULL split scope](group_duration_split.md) — деление на 35/60 мин применяется только в детсадовских группах ЮБ/БП; остальные — одна цена
+- [Name format — surname first](student_name_surname_first.md) — в Student.name фамилия всегда первая; matching по первому слову, не по полному совпадению
+- [External source sheets are read-only](external_attendance_file_readonly.md) — внешние файлы-источники (посещения, расписания педагогов) — только чтение
+- [Group ↔ teacher many-to-many](group_many_teachers.md) — одну группу могут вести несколько педагогов; занятие принадлежит `lesson.teacher_id`
+- [Client bills vs lessons screens](client_bills_vs_lessons.md) — «Занятия» = история (что было), «Счета» = финансовый документ (сколько должен); платёжная кнопка только в «Счета»
+- [PER_VISIT groups](per_visit_groups.md) — 6 групп с тарификацией по занятиям: GRP-0007, GRP-0008, GRP-0010, GRP-0015, GRP-0017, GRP-0018; остальные NONE (абонемент)
+- [amount=0 в attendees](attendee_amount_zero.md) — подпись нуля зависит от режима группы: пробное / абонемент / без оплаты (free_attendee_label)
+- [Инвариант оплат](payment_invariant.md) — оплачено клиентом ≥ отмечено педагогом (инд. и групп.); гарантия — сдача периода; в оплаченный период правки не вносить
+- [Payments roadmap](payments_roadmap.md) — чеки отложены; план: ЮКасса+СБП в ЛК родителя (Mini App)
+- [Mini App only](miniapp_only.md) — ЛК только как Telegram Mini App, сайт и phone OTP исключены; код в fokus-bot/web
+- [Пиши коротко](feedback_brevity.md) — отвечать кратко и понятно, без длинных отчётов
+- [Яковлева: синхронизация отменена](yakovleva_sheet_source_of_truth.md) — с 18.09.2026 занятия ХГ только вручную в боте; таймер выключен, скрипт не запускать
+- [Athlete cabinet](athlete_cabinet.md) — кабинет спортсмена: самопривязка по фамилии, очки = минуты × оценка, транскрибация отложена
+- [Зотов платит через MAX](zotov_pays_via_max.md) — STU-0030: оплата и чеки в мессенджере MAX, отмечать вручную
+- [MAX: кабинет родителя](max_parent_front.md) — второй фронт только для родителей; занятия есть с 30.09, дневник в MAX не нужен
+- [Зарплатные схемы: исключения](salary_scheme_exclusions.md) — Никишина и Власова не переводить на зарплату от числа человек
+- [Клецова: ставки групп](klecova_jazz_rate.md) — «БП Джаз» 2000 ₽/60 мин, «БП БТ Первый год» 1000 ₽ за занятие; через GROUP_SALARY_RATES (+SALARY_DURATION_GROUPS)
+- [Повышение цены в середине месяца](rate_change_mid_month.md) — граница ставок может быть днём (YYYY-MM-DD); Контарева — с 4.09.2026
+- [Родителю — история с сентября 2026](parent_history_since_september.md) — раньше ничего не показываем; апрель–август закрыты оптом 09.09.2026

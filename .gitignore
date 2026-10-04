@@ -17,3 +17,5 @@ db_export/
 # артефакты передачи
 *.zip
 .venv*/
+.env.prod
+.env.*
