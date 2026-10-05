@@ -90,7 +90,7 @@ async def month_breakdown(dp, period: str) -> dict:
     # долг ученика по всем группам месяца: в карточке группы видна только её часть, а в счёте — весь,
     # поэтому у строки ученика подпись «всего N» (решение владельца 05.10.2026, случай Ким Алины)
     total_rest: dict[str, int] = {}
-    for gid, studs_in in cells.items():
+    for studs_in in cells.values():
         for sid, c in studs_in.items():
             total_rest[sid] = total_rest.get(sid, 0) + max(c["accrued"] - c["paid"], 0)
 
