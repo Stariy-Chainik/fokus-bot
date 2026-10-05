@@ -173,7 +173,7 @@ const unpaidGroup = (g, ym, billScreen = 'a.bill') => `<details class="acc">
     ${g.students.map(st => `<button class="lesson-line pick" data-go="${billScreen}" data-p='${esc(JSON.stringify({ ym, sid: st.id }))}'>
       <span style="width:22px;text-align:center">${payStatus(st)}</span>
       <span>${esc(st.name)}<div class="d">${[st.sub ? `абонемент ${fmt(st.sub)}` : '', st.group ? `групповые ${fmt(st.group)}` : '', st.ind ? `индивидуальные ${fmt(st.ind)}` : ''].filter(Boolean).join(' · ')}${st.status === 'partial' ? ` · оплачено ${fmt(st.paid)}` : ''}</div></span>
-      <span class="amt ${st.rest ? 'money bad' : 'hint'}">${st.rest ? fmt(st.rest) : 'оплачено'}</span></button>`).join('')}
+      <span class="amt ${st.rest ? 'money bad' : 'hint'}">${st.rest ? fmt(st.rest) : 'оплачено'}${st.totalRest > st.rest ? `<div class="hint" style="font-weight:400">всего ${fmt(st.totalRest)}</div>` : ''}</span></button>`).join('')}
   </div></details>`;
 SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {
   const d = await api(`/pay/breakdown?ym=${ym}`);

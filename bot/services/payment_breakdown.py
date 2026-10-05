@@ -87,12 +87,20 @@ async def month_breakdown(dp, period: str) -> dict:
                 diff = accrued - placed
                 add(home_group(sid, tid), sid, "ind", diff, max(0, min(paid - got_total, diff)))
 
+    # долг ученика по всем группам месяца: в карточке группы видна только её часть, а в счёте — весь,
+    # поэтому у строки ученика подпись «всего N» (решение владельца 05.10.2026, случай Ким Алины)
+    total_rest: dict[str, int] = {}
+    for gid, studs_in in cells.items():
+        for sid, c in studs_in.items():
+            total_rest[sid] = total_rest.get(sid, 0) + max(c["accrued"] - c["paid"], 0)
+
     def group_row(gid: str) -> dict:
         studs = []
         for sid, c in cells[gid].items():
             rest = max(c["accrued"] - c["paid"], 0)
             studs.append({"id": sid, "name": names.get(sid, sid), "accrued": c["accrued"], "paid": c["paid"],
-                          "rest": rest, "status": "paid" if not rest else "partial" if c["paid"] else "unpaid",
+                          "rest": rest, "totalRest": total_rest.get(sid, rest),
+                          "status": "paid" if not rest else "partial" if c["paid"] else "unpaid",
                           **{p: c[p] for p in PARTS}})
         studs.sort(key=lambda x: (-x["rest"], x["name"]))
         name = groups[gid].name if gid in groups else "Без группы"

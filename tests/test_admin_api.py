@@ -418,6 +418,7 @@ def test_pay_breakdown_branches_groups_students_match_collection(api):
     assert grp["name"] == "БП Джаз" and (grp["accrued"], grp["paid"], grp["rest"]) == (5600, 3000, 2600)
     ivanov = next(s for s in grp["students"] if s["id"] == "STU-0001")
     assert (ivanov["accrued"], ivanov["paid"], ivanov["rest"], ivanov["status"]) == (4800, 3000, 1800, "partial")
+    assert ivanov["totalRest"] == 1800            # одна группа — весь долг здесь; в других группах показывалось бы «всего N»
     assert (ivanov["group"], ivanov["ind"], ivanov["sub"]) == (800, 4000, 0)
 
 

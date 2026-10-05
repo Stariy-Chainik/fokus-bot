@@ -955,6 +955,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                         continue
                     sub_ = sum(r["total"] for r in rows if r["subscription"])
                     st = {**st, "accrued": summary["total"], "paid": summary["paid"], "rest": summary["rest"],
+                          "totalRest": summary["rest"],          # чужие направления педагогу не показываем
                           "sub": sub_, "group": 0, "ind": summary["total"] - sub_,
                           "status": "paid" if not summary["rest"] else "partial" if summary["paid"] else "unpaid"}
                 students.append(st)
