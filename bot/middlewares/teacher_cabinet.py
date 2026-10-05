@@ -14,7 +14,7 @@ from aiogram.types import CallbackQuery, TelegramObject
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_CALLBACKS = ("pact:", "pnay:", "go:home", "mode:", "noop", "glink", "client_reg", "client_add")
+ALLOWED_CALLBACKS = ("pact:", "pnay:", "nchild_", "go:home", "mode:", "noop", "glink", "client_reg", "client_add")
 HINT = "Работа теперь в кабинете. Нажмите «📱 Войти в кабинет»."
 
 

@@ -11,6 +11,8 @@ class GroupLinkStates(StatesGroup):
     waiting_contact = State()
     # Затем — необязательный email для фискальных чеков
     waiting_email = State()
+    # «Моего ребёнка нет в списке» → фамилия и имя ребёнка для заявки педагогу/администратору
+    waiting_child_name = State()
 
 
 class ClientEmailStates(StatesGroup):

@@ -18,6 +18,7 @@ from ..render import send_screen, edit_screen, alert
 from ..states import MaxParentStates
 from . import router
 from ._common import parent_students, show_menu
+from bot.services.new_child import normalize_name, request_new_child
 from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
 
 logger = logging.getLogger(__name__)
@@ -118,15 +119,39 @@ async def on_group_pick(event: MessageCallback, max_uid, student_repo, group_rep
 
 
 @router.message_callback(F.callback.payload.startswith("glink_none:"))
-async def on_group_none(event: MessageCallback, max_uid, group_repo, user_repo, tg_bot):
+async def on_group_none(event: MessageCallback, context, group_repo):
+    """Ребёнка нет в составе → фамилия и имя → заявка педагогу/администратору (решение владельца 05.10.2026)."""
     group_id = event.callback.payload.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
-    sender = event.callback.user
-    name = f"{sender.first_name} {sender.last_name or ''}".strip()
-    await notify(tg_bot, [u.tg_id for u in await user_repo.get_admins()],
-                 f"❓ Родитель {name} (MAX <code>{max_uid}</code>) не нашёл своего ребёнка "
-                 f"в группе «{group.name if group else group_id}».")
-    await edit_screen(event, "Сообщили администратору — с вами свяжутся.", [])
+    await context.set_state(MaxParentStates.new_child_name)
+    await context.update_data(nchild_group_id=group_id)
+    await edit_screen(event, f"Группа «{group.name if group else group_id}».\n\n"
+                      "Напишите фамилию и имя ребёнка — педагог или администратор добавит его в группу, "
+                      "и вам придёт сообщение.", [])
+
+
+@router.message_created(MaxParentStates.new_child_name)
+async def on_new_child_name(event: MessageCreated, context, max_uid, group_repo, user_repo, tg_bot,
+                            teacher_repo=None, teacher_group_repo=None, pending_repo=None):
+    name = normalize_name(event.message.body.text or "")
+    if name is None:
+        await event.message.answer("Напишите фамилию и имя ребёнка, например: Иванова Мария")
+        return
+    data = await context.get_data()
+    group = await group_repo.get_by_id((data or {}).get("nchild_group_id") or "")
+    await context.clear()
+    if group is None:
+        await event.message.answer("Ссылка группы устарела — откройте её заново из чата группы.")
+        return
+    sender = event.message.sender
+    who = f"{sender.first_name} {sender.last_name or ''}".strip()
+    action = await request_new_child(pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo,
+                                     group, name, max_addr(max_uid), who)
+    if action is None:
+        await event.message.answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    await event.message.answer(f"⏳ Заявка отправлена: {name}, группа «{group.name}». "
+                               "Как только ребёнка добавят, вам придёт сообщение и откроется кабинет.")
 
 
 # ─── Регистрация по фамилии (первый ребёнок) ─────────────────────────────────

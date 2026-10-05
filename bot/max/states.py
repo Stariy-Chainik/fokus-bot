@@ -5,3 +5,4 @@ class MaxParentStates(StatesGroup):
     waiting_receipt = State()   # ждём фото/файл чека
     adding_child = State()      # фамилия второго ребёнка
     choosing_bill = State()     # чек прислан без шага «Прикрепить чек»
+    new_child_name = State()    # «моего ребёнка нет в списке» → фамилия и имя для заявки

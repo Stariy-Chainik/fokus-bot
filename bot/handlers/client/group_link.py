@@ -37,6 +37,7 @@ from bot.utils.group_links import parse_start_payload
 from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.services.parent_notifier import tg_addr
 from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
+from bot.services.new_child import normalize_name, request_new_child
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_group_link")
@@ -217,36 +218,49 @@ async def cb_group_link_pick(
 
 
 @router.callback_query(F.data.startswith("glink_none:"))
-async def cb_group_link_none(
-    callback: CallbackQuery,
-    group_repo: GroupRepository,
-    user_repo: UserRepository,
-) -> None:
+async def cb_group_link_none(callback: CallbackQuery, state: FSMContext, group_repo: GroupRepository) -> None:
+    """Ребёнка нет в составе → родитель вводит фамилию и имя, карточку заводит педагог или администратор
+    (решение владельца 05.10.2026; раньше админам уходило только «не нашёл ребёнка»)."""
     group_id = callback.data.split(":", 1)[1]
     group = await group_repo.get_by_id(group_id)
-    group_name = group.name if group else group_id
-    sender = callback.from_user
-    username = f" @{sender.username}" if sender.username else ""
-    admins = [u for u in await user_repo.get_all() if u.is_admin]
-    for admin in admins:
-        try:
-            await callback.bot.send_message(
-                admin.tg_id,
-                f"❓ Родитель {sender.full_name}{username} (<code>{sender.id}</code>) "
-                f"не нашёл своего ребёнка в группе «{group_name}».\n"
-                f"Возможно, состав группы в таблице неполный.",
-            )
-        except TelegramAPIError:
-            pass
+    await state.set_state(GroupLinkStates.waiting_child_name)
+    await state.update_data(nchild_group_id=group_id)
     await callback.message.edit_text(
-        "Сообщили администратору — с вами свяжутся.\n\n"
-        "Если ребёнок занимается в другой группе, откройте ссылку этой группы "
-        "из её родительского чата.",
+        f"Группа «{group.name if group else group_id}».\n\n"
+        "Напишите <b>фамилию и имя ребёнка</b> — педагог или администратор добавит его в группу, "
+        "и вам придёт сообщение.",
     )
     await callback.answer()
 
 
-# ─── Отмена привязки ─────────────────────────────────────────────────────────
+@router.message(GroupLinkStates.waiting_child_name, F.text)
+async def msg_group_link_child_name(
+    message: Message, state: FSMContext, group_repo: GroupRepository, user_repo: UserRepository,
+    teacher_repo=None, teacher_group_repo=None, pending_repo=None,
+) -> None:
+    name = normalize_name(message.text or "")
+    if name is None:
+        await message.answer("Напишите фамилию и имя ребёнка, например: <b>Иванова Мария</b>")
+        return
+    data = await state.get_data()
+    group = await group_repo.get_by_id(data.get("nchild_group_id") or "")
+    await state.clear()
+    if group is None:
+        await message.answer("Ссылка группы устарела — откройте её заново из чата группы.")
+        return
+    sender = message.from_user
+    username = getattr(sender, "username", None)
+    who = f"{sender.full_name}{' @' + username if username else ''}"
+    action = await request_new_child(pending_repo, message.bot, user_repo, teacher_repo, teacher_group_repo,
+                                     group, name, tg_addr(sender.id), who)
+    if action is None:
+        await message.answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    await message.answer(
+        f"⏳ Заявка отправлена: <b>{name}</b>, группа «{group.name}».\n\n"
+        "Как только педагог или администратор добавит ребёнка, вам придёт сообщение и откроется кабинет.",
+    )
+
 
 @router.callback_query(F.data.startswith("glink_self_undo:"))
 async def cb_group_link_self_undo(

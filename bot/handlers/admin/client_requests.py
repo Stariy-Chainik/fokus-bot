@@ -11,7 +11,8 @@ from bot.screens.parent_menu import menu_rows
 from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.services.pending_queue import DONE, KIND_CHILD, REJECTED, close_actions
 from bot.keyboards.admin import kb_back
-from bot.handlers.filters import AdminOnly
+from bot.handlers.filters import AdminOnly, TeacherOrAdmin
+from bot.services.new_child import KIND_NEWCHILD, approve_new_child, may_decide, reject_new_child
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_client_requests")
@@ -77,4 +78,48 @@ async def cb_admin_child_no(
         f"❌ Отклонено\n\nУченик: {student_name}\nРодитель: {parent_raw}",
         reply_markup=kb_back("admin:menu"),
     )
+    await callback.answer()
+
+
+# ─── «Моего ребёнка нет в группе»: карточку заводит администратор или педагог группы ──────────
+
+@router.callback_query(F.data.startswith("nchild_ok:"), TeacherOrAdmin())
+async def cb_new_child_ok(
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
+    student_group_repo=None, teacher_group_repo=None, pending_repo=None,
+) -> None:
+    action = await pending_repo.get_by_id(callback.data.split(":", 1)[1]) if pending_repo else None
+    if action is None or action.kind != KIND_NEWCHILD:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if not await may_decide(user, action, teacher_group_repo):
+        await callback.answer("Это заявка не вашей группы", show_alert=True)
+        return
+    student = await approve_new_child(pending_repo, student_repo, student_group_repo,
+                                      resolve_notifier(callback.bot), action, callback.from_user.id)
+    if student is None:
+        await callback.answer("Заявку уже решили", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"✅ Заведён ученик <b>{student.name}</b> ({student.student_id}), родитель привязан.\n"
+        f"Группа: {action.comment.split(' · ')[0]}",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("nchild_no:"), TeacherOrAdmin())
+async def cb_new_child_no(
+    callback: CallbackQuery, user: User, teacher_group_repo=None, pending_repo=None,
+) -> None:
+    action = await pending_repo.get_by_id(callback.data.split(":", 1)[1]) if pending_repo else None
+    if action is None or action.kind != KIND_NEWCHILD:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if not await may_decide(user, action, teacher_group_repo):
+        await callback.answer("Это заявка не вашей группы", show_alert=True)
+        return
+    if not await reject_new_child(pending_repo, resolve_notifier(callback.bot), action, callback.from_user.id):
+        await callback.answer("Заявку уже решили", show_alert=True)
+        return
+    await callback.message.edit_text(f"❌ Отклонено: <b>{action.student_name}</b> · {action.comment}")
     await callback.answer()

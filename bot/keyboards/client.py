@@ -38,6 +38,14 @@ def kb_admin_approve_child(parent_tg_id, student_id: str) -> InlineKeyboardMarku
     ]])
 
 
+def kb_new_child_decide(action_id: str) -> InlineKeyboardMarkup:
+    """Заявка «моего ребёнка нет в группе»: решают администратор и педагоги группы."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Завести и привязать", callback_data=f"nchild_ok:{action_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"nchild_no:{action_id}"),
+    ]])
+
+
 def kb_client_student_select(students: list, section: str) -> InlineKeyboardMarkup:
     """Выбор ученика. section = 'lessons' | 'bills'"""
     prefix = "cl_stu" if section == "lessons" else "cl_bills_stu"

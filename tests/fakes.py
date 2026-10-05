@@ -47,6 +47,7 @@ class FakeMessage:
         self.message_id = message_id
         self.from_user = FakeUser(user_id)
         self.chat = SimpleNamespace(id=user_id)
+        self.bot = FakeBot()
         self.screens: list[tuple[str, object]] = []
         self.photos: list[tuple[str | None, object]] = []
         self.markup_edits: list = []

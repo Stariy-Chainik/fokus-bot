@@ -18,6 +18,7 @@ from aiohttp import web
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
+from bot.services.new_child import KIND_NEWCHILD, approve_new_child, reject_new_child
 from bot.services.parent_notifier import notify_payment_confirmed, parse_addr
 from bot.services.pending_queue import rest_for_keys
 from bot.services.payment_service import payment_lock
@@ -30,6 +31,7 @@ KIND_LABEL = {
     KIND_CASH: "Оплата наличными",
     KIND_RECEIPT: "Чек об оплате",
     KIND_CHILD: "Заявка на привязку ребёнка",
+    KIND_NEWCHILD: "Ребёнка нет в группе — завести",
 }
 
 
@@ -66,6 +68,8 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                 reject = "❌ Отклонить"
         elif a.kind == KIND_CASH and teacher_view:
             approve, reject = "✋ Деньги у меня", "❌ Денег не было"
+        elif a.kind == KIND_NEWCHILD:
+            approve, reject = "✅ Завести и привязать", "❌ Отклонить"
         return {
             "id": a.action_id, "kind": a.kind, "title": title,
             "heldBy": held or "", "approveLabel": approve, "rejectLabel": reject, "note": note,
@@ -150,11 +154,22 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             body = {}
         approve = bool(body.get("approve"))
         force = bool(body.get("force"))            # согласие зачесть сумму больше остатка
+        if action.status != OPEN:
+            return _json({"error": "already_decided", "status": action.status}, status=409)
+        if action.kind == KIND_NEWCHILD:          # карточки ещё нет — заводим по заявке родителя
+            notifier = (getattr(dp, "workflow_data", dp)).get("notifier")
+            if approve:
+                student = await approve_new_child(pending_repo, student_repo, dp["student_group_repo"],
+                                                  notifier, action, user.tg_id)
+                if student is None:
+                    return _json({"error": "already_decided"}, status=409)
+                return _json({"ok": True, "status": DONE, "studentId": student.student_id})
+            if not await reject_new_child(pending_repo, notifier, action, user.tg_id):
+                return _json({"error": "already_decided"}, status=409)
+            return _json({"ok": True, "status": REJECTED})
         student = await student_repo.get_by_id(action.student_id)
         if student is None:
             return _json({"error": "not_found"}, status=404)
-        if action.status != OPEN:
-            return _json({"error": "already_decided", "status": action.status}, status=409)
 
         if scope is not None and action.kind == KIND_CASH:
             # педагог наличные не зачитывает: «деньги у меня» → заявка ждёт администратора

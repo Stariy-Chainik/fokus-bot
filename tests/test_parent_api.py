@@ -80,7 +80,8 @@ def test_home_attention_lessons_and_month_blocks(api):
     c = h["children"][0]
     assert h["today"] == today and c["unpaid"] == [{"ym": YM, "accrued": 4800, "paid": 0, "rest": 4800}]
     assert c["pending"] == [{"kind": "cash", "amount": 4800, "ym": YM, "method": "cash"}]
-    fresh_grade = next(g for g in c["grades"] if g["date"] == today)     # оценки «на 7-е» 1-го числа ещё впереди
+    # на «сегодня» может попасть и старая запись фикстуры (5-го числа) — ищем именно свежую оценку
+    fresh_grade = next(g for g in c["grades"] if g["date"] == today and g["comment"] == "Молодец")
     assert fresh_grade == {"date": today, "grade": 5, "topics": ["Самба"], "teacher": "Река Станислав", "comment": "Молодец"}
     lessons = c["lessons"]
     assert (lessons["month"], lessons["minutes"], lessons["last"]) == (3, 150, f"{YM}-12")
