@@ -899,6 +899,7 @@ async def cb_action_confirm(
         credited, count = await payment_service.record_payment(
             action.student_id, student.name, action.period_month, claimed,
             callback.from_user.id, action.keys or None, "из уведомления", action.method or method,
+            key_caps=action.key_amounts or None,
         )
     else:                                       # остатка нет — заявку закрываем без зачёта
         credited, count = 0, 0

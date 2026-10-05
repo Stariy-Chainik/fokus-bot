@@ -16,8 +16,29 @@ from bot.services import activity, payment_events
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["KIND_CASH", "KIND_CHILD", "KIND_RECEIPT", "OPEN", "DONE", "REJECTED",
+__all__ = ["KIND_CASH", "KIND_CHILD", "KIND_RECEIPT", "OPEN", "DONE", "REJECTED", "setup",
            "queue_action", "open_receipt", "close_actions", "claim_action", "settle_actions", "rest_for_keys"]
+
+
+_ledger_source = None     # PaymentService: снимок остатков при постановке заявки (setup() из __main__)
+
+
+def setup(payment_service) -> None:
+    global _ledger_source
+    _ledger_source = payment_service
+
+
+async def _snapshot(student, period_month: str, keys: list | None) -> list[str]:
+    """`ключ=остаток` по начислениям на момент заявки (только с остатком > 0). Без источника — просто ключи."""
+    if _ledger_source is None or student is None or not period_month:
+        return list(keys or [])
+    try:
+        ledgers = await _ledger_source.ledger_for(student, period_month, sync=False)
+    except Exception as exc:                      # снимок — защита от сдвига, не повод ронять заявку
+        logger.warning("Очередь решений: снимок остатков %s %s не снят: %s", student.student_id, period_month, exc)
+        return list(keys or [])
+    chosen = keys or sorted(ledgers, key=lambda k: ledgers[k].name)
+    return [f"{k}={ledgers[k].remainder}" for k in chosen if k in ledgers and ledgers[k].remainder > 0] or list(keys or [])
 
 
 async def queue_action(
@@ -35,10 +56,12 @@ async def queue_action(
         return None
     sid = student.student_id if student is not None else student_id
     name = student.name if student is not None else student_name
+    chunks = (await _snapshot(student, period_month, teacher_keys) if kind in (KIND_CASH, KIND_RECEIPT)
+              else list(teacher_keys or []))
     try:
         action = await pending_repo.add(
             kind, sid, name, period_month, amount, method, parent_addr,
-            file_id, file_type, comment, "|".join(teacher_keys or []), held_by,
+            file_id, file_type, comment, "|".join(chunks), held_by,
         )
         await activity.record(activity.QUEUE, f"Заявка от родителя ({kind}): {sid} · {period_month}"
                               + (f" · {amount} ₽ · {method}" if amount else ""), ref=action.action_id)

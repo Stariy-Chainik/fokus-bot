@@ -220,6 +220,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                 credited, rows = await payment_service.record_payment(
                     action.student_id, student.name, action.period_month, amount,
                     user.tg_id, action.keys or None, "из очереди решений", action.method or "",
+                    key_caps=action.key_amounts or None,
                 )
         else:                                   # оплату уже отметили вручную — заявку просто закрываем
             credited, rows = 0, 0

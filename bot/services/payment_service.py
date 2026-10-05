@@ -541,8 +541,13 @@ class PaymentService:
         self, student_id: str, student_name: str, period_month: str, amount: int,
         confirmed_by_tg_id: int, teacher_ids: list | None = None, comment: str | None = None,
         payment_method: str = "", lesson_ids: list | None = None, receipt_file_id: str = "",
+        key_caps: dict | None = None,
     ) -> tuple[int, int]:
         """Зачесть оплату на сумму amount по остаткам педагогов месяца.
+
+        key_caps — снимок остатков из заявки родителя ({ключ: ₽}): по каждому начислению зачитывается
+        не больше, чем было в заявке; что осталось — вторым проходом на новые начисления, затем переплата.
+        Так занятие, отмеченное после заявки, не забирает деньги у более раннего.
 
         receipt_file_id — Telegram file_id чека (перевод, отмеченный педагогом из кабинета):
         попадает в ref события ленты (`STU-… file:<id>`), чтобы администратор открыл чек из «Событий».
@@ -566,13 +571,16 @@ class PaymentService:
         else:
             order = sorted(ledgers, key=lambda t: ledgers[t].name)
         left, credited, rows = int(amount), 0, 0
-        for tid in order:
-            if left <= 0:
-                break
-            pending = ledgers[tid].pending
+        caps = dict(key_caps or {})
+
+        async def allocate(tid: str, cap: int | None) -> int:
+            """Закрыть остаток tid на min(left, остаток, cap); вернуть зачтённое."""
+            pending = ledgers[tid].pending if tid in ledgers else None
             if pending is None or pending.total_amount <= 0:
-                continue
-            pay = min(left, pending.total_amount)
+                return 0
+            pay = min(left, pending.total_amount, cap if cap is not None else pending.total_amount)
+            if pay <= 0:
+                return 0
             # Занятия оплаты: явно переданные с экрана или намерение, которое
             # оставил плательщик на строке-остатке (родитель выбрал занятия).
             row_ids = linked or (getattr(pending, "lesson_ids", "") or "")
@@ -591,9 +599,23 @@ class PaymentService:
                                                        student_id=student_id)
                 if not linked and row_ids:  # намерение израсходовано
                     await self._payment_repo.set_lesson_ids(pending.payment_id, "", student_id=student_id)
-            left -= pay
-            credited += pay
-            rows += 1
+            return pay
+
+        for tid in order:
+            if left <= 0:
+                break
+            pay = await allocate(tid, caps.get(tid, 0) if caps else None)
+            if pay:
+                left, credited, rows = left - pay, credited + pay, rows + 1
+        if caps and left > 0:
+            # деньги сверх снимка заявки — на начисления, появившиеся после неё (второй проход без лимитов)
+            ledgers = await self.ledger_for(student, period_month)
+            for tid in sorted(ledgers, key=lambda t: ledgers[t].name):
+                if left <= 0:
+                    break
+                pay = await allocate(tid, None)
+                if pay:
+                    left, credited, rows = left - pay, credited + pay, rows + 1
         if left > 0 and order:  # переплата — фиксируем на первого педагога из списка
             tid = order[0]
             await self._add_paid_row(

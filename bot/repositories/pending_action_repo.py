@@ -53,12 +53,26 @@ class PendingAction:
     status: str = OPEN
     decided_at: str = ""
     decided_by_tg_id: int = 0
-    teacher_keys: str = ""    # за кого платили: ключи начислений через «|» (пусто — за всё по порядку имён)
+    teacher_keys: str = ""    # за кого платили: ключи начислений через «|» (пусто — за всё по порядку имён);
+                              # с 05.10.2026 — снимок остатков на момент заявки: `TCH-0013=2600|SUB:GRP-0019=800`
     held_by: str = ""         # наличные у педагога (teacher_id): зачтёт администратор, когда получит деньги
 
     @property
     def keys(self) -> list[str]:
-        return [k for k in self.teacher_keys.split("|") if k]
+        return [k.split("=", 1)[0] for k in self.teacher_keys.split("|") if k]
+
+    @property
+    def key_amounts(self) -> dict[str, int]:
+        """Сколько остатка было по каждому начислению, когда родитель подавал заявку (пусто — не записано).
+        Подтверждение зачитывает ровно их: занятия, отмеченные после заявки, остаются неоплаченными
+        под своим именем, а не «съедают» деньги за более ранние (случай Ким Алины 25.09.2026)."""
+        out: dict[str, int] = {}
+        for chunk in self.teacher_keys.split("|"):
+            if "=" in chunk:
+                k, v = chunk.rsplit("=", 1)
+                if v.isdigit():
+                    out[k] = int(v)
+        return out
 
 
 def _row_to_action(row: dict) -> PendingAction:

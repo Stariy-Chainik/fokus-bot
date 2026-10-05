@@ -19,7 +19,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from bot.services import activity
+from bot.services import activity, pending_queue
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
@@ -109,6 +109,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         group_repo=group_repo, student_group_repo=student_group_repo,
         subscription_override_repo=subscription_override_repo,
     )
+    pending_queue.setup(payment_service)   # заявки родителей: снимок остатков на момент подачи
     profit_service = ProfitService(
         teacher_repo, lesson_repo, payment_service, finance_entry_repo,
         salary_service=salary_service,

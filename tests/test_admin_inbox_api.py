@@ -225,3 +225,29 @@ def test_approval_credits_the_teacher_the_parent_paid_for(api):
                                                  str(PARENT_TG), teacher_keys="TCH-0002"))
     status, r = _call(app, "POST", f"/api/admin/inbox/{action2.action_id}/decide", json={"approve": True})
     assert status == 409 and r["rest"] == 0
+
+
+def test_request_snapshot_keeps_money_on_lessons_known_at_request_time(api, monkeypatch):
+    """Случай Ким Алины 25.09.2026: родитель заявил наличные за остаток, педагог после этого отметил
+    ещё занятие — подтверждение зачитывает ровно то, что было в заявке; новое занятие остаётся долгом."""
+    from bot.services import pending_queue
+    from tests.fakes import mk_lesson, mk_teacher
+    app, dp = api
+    pending_queue.setup(dp["payment_service"])
+    other = mk_teacher("TCH-0002", "Никишин Влад", rate_group=1000, rate_for_teacher=1500, rate_for_student=1600)
+    dp["teacher_repo"].items.append(other)
+    s = asyncio.run(dp["student_repo"].get_by_id("STU-0001"))
+    # остаток Иванова у Реки: 4800 (4000 инд. + 800 группа) — родитель заявляет ровно его
+    action = asyncio.run(queue_action(dp["pending_repo"], KIND_CASH, s, YM, amount=4800, method="cash",
+                                      parent_addr=str(PARENT_TG)))
+    assert action.teacher_keys == "TCH-0001=4800" and action.key_amounts == {"TCH-0001": 4800}
+    # после заявки отмечено занятие другого педагога на 1600
+    dp["lesson_repo"].items.append(mk_lesson("LES-NEW", other, f"{YM}-27", students=[("STU-0001", "Иванов Иван")]))
+    status, r = _call(app, "POST", f"/api/admin/inbox/{action.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["credited"] == 4800
+    ledgers = asyncio.run(dp["payment_service"].ledger_for(s, YM))
+    assert ledgers["TCH-0001"].remainder == 0 and ledgers["TCH-0002"].remainder == 1600   # долг — на новом занятии
+    # снимок снят и для заявки по выбранным педагогам: ключи без сумм по-прежнему читаются
+    a2 = asyncio.run(queue_action(dp["pending_repo"], KIND_CASH, s, YM, amount=1600, method="cash",
+                                  parent_addr=str(PARENT_TG), teacher_keys=["TCH-0002"]))
+    assert a2.keys == ["TCH-0002"] and a2.key_amounts == {"TCH-0002": 1600}
