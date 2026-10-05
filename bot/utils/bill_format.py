@@ -48,3 +48,35 @@ def build_bill_text(
     else:
         lines.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
     return "\n".join(lines), grand_total
+
+
+_DIRECTIONS = (
+    (("современ",), "современные танцы"),
+    (("хг", "гимнаст"), "художественная гимнастика"),
+    (("хореограф",), "хореография"),
+    (("джаз",), "джаз"),
+    (("офп",), "ОФП"),
+    (("бт", "бальн"), "бальные танцы"),
+)
+
+
+def direction_of(group_name: str) -> str:
+    """Направление по названию группы: «ВБ ХГ Старшая» → художественная гимнастика, «БП БТ …» →
+    бальные танцы, «ВБ Современные …» → современные танцы. Пусто — не распознано."""
+    words = {"".join(ch for ch in w if ch.isalnum()).lower() for w in group_name.split()}
+    low = group_name.lower()
+    for needles, label in _DIRECTIONS:
+        if any(n in words or (len(n) > 2 and n in low) for n in needles):
+            return label
+    return ""
+
+
+def online_purpose(student_name: str, periods: list[str], subscription_dirs: list[str], lesson_dirs: list[str]) -> str:
+    """Назначение платежа ЮКассы (решение владельца 05.10.2026): «Абонемент — художественная гимнастика,
+    сентябрь 2026 — Авалян Жанна». Абонемент и занятия вместе → «Абонемент и занятия»."""
+    from bot.utils.dates import period_label
+    dirs = [d for d in dict.fromkeys(subscription_dirs + lesson_dirs) if d]
+    what = "Абонемент" if subscription_dirs and not lesson_dirs else "Занятия" if not subscription_dirs else "Абонемент и занятия"
+    head = f"{what} — {', '.join(dirs)}" if dirs else what
+    months = ", ".join(period_label(p).lower() for p in periods)
+    return f"{head}, {months} — {student_name}"

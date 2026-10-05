@@ -364,5 +364,15 @@ def receipt_duplicate_screen(student_id: str, period_month: str) -> tuple:
             "Если это другой платёж, напишите администратору."), bill_back_rows(student_id, period_month)
 
 
+def receipt_online_screen(student_id: str, period_month: str, method: str, online_row) -> tuple:
+    """Чек пришёл сразу после платежа ЮКассы — скорее всего это его чек, он уже зачтён (05.10.2026)."""
+    from bot.utils.dates import period_label
+    text = (f"✅ Ваш платёж {online_row.total_amount} ₽ за {period_label(online_row.period_month).lower()} через "
+            "СБП онлайн уже зачтён автоматически — чек на него присылать не нужно.\n\n"
+            "Если это другой перевод (по реквизитам), нажмите кнопку и пришлите чек ещё раз.")
+    rows = [[cb("📎 Это другой перевод", f"receipt_force:{method}:{student_id}:{period_month}")]]
+    return text, rows + bill_back_rows(student_id, period_month)
+
+
 def cash_sent_screen(student_id: str, period_month: str) -> tuple:
     return "✅ Администратор уведомлён. Ожидайте подтверждения.", bill_back_rows(student_id, period_month)

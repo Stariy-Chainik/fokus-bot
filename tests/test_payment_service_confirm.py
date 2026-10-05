@@ -98,13 +98,13 @@ def test_create_yookassa_payment_card_with_school_email_receipt(monkeypatch):
     assert len(key) == 36
     assert payload["amount"] == {"value": "2500.00", "currency": "RUB"}
     assert payload["confirmation"] == {"type": "redirect", "return_url": "https://t.me/fokus_bot"}
-    assert payload["capture"] is True and payload["description"] == "Иванов Иван — 2026-09"
+    assert payload["capture"] is True and payload["description"] == "Занятия, сентябрь 2026 — Иванов Иван"
     assert payload["metadata"] == {"student_id": "STU-1", "period_month": "2026-09"}
     assert "payment_method_data" not in payload
     assert payload["receipt"] == {
         "customer": {"email": "school@example.com"},
         "items": [{
-            "description": "Занятия — Иванов Иван, 2026-09", "quantity": "1.00",
+            "description": "Занятия, сентябрь 2026 — Иванов Иван", "quantity": "1.00",
             "amount": {"value": "2500.00", "currency": "RUB"}, "vat_code": 1,
             "payment_subject": "service", "payment_mode": "full_payment",
         }],

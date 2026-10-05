@@ -234,7 +234,7 @@ ACT.pPayAsk = ({ ym, rest, sel }) => {
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
 /* Чек из кабинета: файл уходит администраторам в Telegram и в очередь решений — как чек из бота. */
-ACT.pReceipt = async ({ ym, method, amount, periods }) => {
+ACT.pReceipt = async ({ ym, method, amount, periods, force }) => {
   const input = document.getElementById('rc-file');
   const file = input && input.files && input.files[0];
   if (!file) { toast('Выберите фото чека или PDF'); return; }
@@ -245,8 +245,14 @@ ACT.pReceipt = async ({ ym, method, amount, periods }) => {
   form.append('studentId', kid()); form.append('ym', ym); form.append('method', method); form.append('amount', String(amount || 0));
   form.append('file', file, file.name);
   if (periods && periods.length > 1) form.append('periods', periods.join(','));
+  if (force) form.append('force', '1');
   try { const r = await apiForm('/receipt', form); closeSheet(); render(); toast(r.duplicate ? 'Этот чек уже у нас и ждёт подтверждения — второй раз отправлять не нужно' : r.notified ? 'Чек получен — администратор подтвердит оплату, вам придёт сообщение' : 'Чек принят, администраторы пока не получили уведомление'); }
-  catch (e) { if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; } toast(errText(e)); }
+  catch (e) {
+    if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; }
+    // чек сразу после СБП онлайн — скорее всего чек ЮКассы, платёж уже зачтён; настоящий перевод — повтор с force
+    if (e.code === 'online_recent') { state.ui.paying = false; if (confirm(`Ваш платёж ${fmt(e.data.amount)} за ${e.data.periodLabel.toLowerCase()} через СБП онлайн уже зачтён автоматически — чек на него не нужен.\n\nЭто другой перевод по реквизитам?`)) { ACT.pReceipt({ ym, method, amount, periods, force: true }); } return; }
+    toast(errText(e));
+  }
   finally { state.ui.paying = false; }
 };
 /* «Оплатить всё»: наличные или реквизиты сразу за все месяцы с остатком (СБП онлайн — по месяцам, ссылка одна на месяц). */

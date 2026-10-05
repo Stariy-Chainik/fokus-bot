@@ -21,12 +21,12 @@ from bot.services.parent_views import (
     breakdown_lines, admin_confirm_rows, receipt_caption, cash_notice,
 )
 from bot.services import activity
-from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, open_receipt, queue_action
+from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT, open_receipt, queue_action, recent_online_payment
 from bot.screens.adapters import to_aiogram_markup
 from bot.screens.parent_bills import (
     teacher_select_screen, methods_screen, cash_screen, bank_screen, sbp_screen, receipt_duplicate_screen,
     online_pay_screen, receipt_prompt_screen, receipt_sent_screen, cash_sent_screen,
-    pay_all_screen, pay_all_bank_screen, unlink_pick_screen, unlink_confirm_screen,
+    pay_all_screen, pay_all_bank_screen, unlink_pick_screen, unlink_confirm_screen, receipt_online_screen,
 )
 from ..render import edit_screen, send_screen, alert
 from ..states import MaxParentStates
@@ -329,6 +329,19 @@ async def on_unlink_do(event: MessageCallback, context, max_uid, student_repo, u
                                  "из родительского чата.", [])
 
 
+@router.message_callback(F.callback.payload.startswith("receipt_force:"))
+async def on_receipt_force(event: MessageCallback, context, max_uid, student_repo):
+    """«Это другой перевод»: чек после СБП онлайн всё же нужен — ждём файл без проверки на дубль."""
+    _, method, student_id, period_month = event.callback.payload.split(":", 3)
+    if not any(s.student_id == student_id for s in await student_repo.get_by_parent_max_id(max_uid)):
+        await alert(event, "Нет доступа")
+        return
+    await context.set_state(MaxParentStates.waiting_receipt)
+    await context.update_data(receipt_method=method, receipt_student_id=student_id, receipt_period_month=period_month,
+                              receipt_force=True)
+    await edit_screen(event, *receipt_prompt_screen(student_id, period_month))
+
+
 @router.message_callback(F.callback.payload.startswith("receipt_upload:"))
 async def on_receipt_upload(event: MessageCallback, context, max_uid, student_repo):
     _, method, student_id, period_month = event.callback.payload.split(":", 3)
@@ -365,6 +378,11 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     student = next((s for s in students if s.student_id == student_id), None)
     student_name = student.name if student else student_id
     periods = data.get("receipt_periods") or []
+    online = None if data.get("receipt_force") else await recent_online_payment(payment_service._payment_repo, student_id)
+    if online is not None:                                                  # чек ЮКассы после СБП онлайн — уже зачтено
+        await send_screen(event.bot, max_uid, *receipt_online_screen(student_id, periods[0] if periods else period_month,
+                                                                     method, online))
+        return
     if len(periods) >= 2 and student is not None:                         # «Оплатить всё»: один чек за все месяцы
         kind, url, filename = att
         try:
@@ -499,6 +517,10 @@ async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_re
         student, period_month, total = bills[0]
         if await open_receipt(pending_repo, student.student_id, period_month):
             await send_screen(event.bot, max_uid, *receipt_duplicate_screen(student.student_id, period_month))
+            return
+        online = await recent_online_payment(payment_service._payment_repo, student.student_id)
+        if online is not None:                                              # чек ЮКассы после СБП онлайн — уже зачтено
+            await send_screen(event.bot, max_uid, *receipt_online_screen(student.student_id, period_month, "bank", online))
             return
         ok = await _forward_unbound(event.bot, tg_bot, user_repo, payment_service, student, period_month, total,
                                     kind, url, filename, max_uid, pending_repo)

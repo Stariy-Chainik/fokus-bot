@@ -298,6 +298,17 @@ def test_receipt_upload_from_the_cabinet(api, monkeypatch):
         finally:
             await client.close()
 
+    # чек сразу после СБП онлайн — это чек ЮКассы, платёж уже зачтён: заявки и уведомлений нет (05.10.2026)
+    from datetime import datetime
+    from tests.fakes import mk_payment
+    online = mk_payment("PAY-YK", "STU-0001", YM, "TCH-0001", 4800, status=PaymentStatus.PAID, method="yookassa_sbp",
+                        paid_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    dp["payment_repo"].rows.append(online)
+    status, r = asyncio.run(run())
+    assert status == 409 and r["error"] == "online_recent" and r["amount"] == 4800 and not bot.photos
+    assert not dp["pending_repo"].items
+    dp["payment_repo"].rows.remove(online)
+
     status, r = asyncio.run(run())
     assert status == 200 and r["ok"] and r["amount"] == 4800 and r["notified"] == 1
     a = dp["pending_repo"].items[0]

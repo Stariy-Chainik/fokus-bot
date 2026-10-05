@@ -31,8 +31,8 @@ from bot.services.parent_views import (
 )
 from bot.services.payment_methods import CASH
 from bot.repositories.pending_action_repo import KIND_RECEIPT
-from bot.services.pending_queue import KIND_CASH, open_receipt, queue_action
-from bot.utils.dates import current_period, display_period
+from bot.services.pending_queue import KIND_CASH, open_receipt, queue_action, recent_online_payment
+from bot.utils.dates import current_period, display_period, period_label
 from bot.utils.notify import notify
 from config.settings import settings
 
@@ -494,6 +494,11 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         except ValueError:
             amount = 0
         filename = upload.filename or ("receipt.jpg" if is_image else "receipt.pdf")
+        if not str(form.get("force") or ""):
+            online = await recent_online_payment(payment_repo, student.student_id)
+            if online is not None:                      # чек ЮКассы после СБП онлайн — платёж уже зачтён
+                return _json({"error": "online_recent", "amount": online.total_amount, "ym": online.period_month,
+                              "periodLabel": period_label(online.period_month)}, status=409)
         admins = [u.tg_id for u in await user_repo.get_admins()]
 
         async def submit(period: str, amount: int) -> dict:

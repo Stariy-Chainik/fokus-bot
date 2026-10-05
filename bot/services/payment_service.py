@@ -798,6 +798,29 @@ class PaymentService:
                                             payment_method, confirmed_by_tg_id)
         return ok
 
+    async def online_purpose(self, student_id: str, student_name: str, periods: list, keys: list | None) -> str:
+        """Назначение онлайн-платежа: что оплачивают (абонемент / занятия), направление по названиям
+        групп, месяцы словами и ученик. keys — выбранные начисления; пусто — все остатки месяцев."""
+        from bot.utils.bill_format import direction_of, online_purpose
+        if self._lesson_repo is None or self._teacher_repo is None:        # усечённый сервис (тесты ЮКассы)
+            return online_purpose(student_name, list(periods), [], [])
+        groups = {g.group_id: g for g in await self._group_repo.get_all(include_archived=True)} if self._group_repo else {}
+        chosen = list(keys or [])
+        if not chosen:
+            student = Student(student_id=student_id, name=student_name)
+            for ym in periods:
+                for key, led in (await self.ledger_for(student, ym, sync=False)).items():
+                    if led.remainder > 0:
+                        chosen.append(key)
+        sub_dirs = [direction_of(groups[k[len(SUBSCRIPTION_KEY_PREFIX):]].name) for k in chosen
+                    if k.startswith(SUBSCRIPTION_KEY_PREFIX) and k[len(SUBSCRIPTION_KEY_PREFIX):] in groups]
+        lesson_keys = [k for k in chosen if not k.startswith(SUBSCRIPTION_KEY_PREFIX)]
+        lesson_dirs: list[str] = []
+        if lesson_keys and self._student_group_repo is not None:
+            mine = await self._student_group_repo.get_groups_for_student(student_id)
+            lesson_dirs = [direction_of(groups[g].name) for g in mine if g in groups]
+        return online_purpose(student_name, list(periods), sub_dirs, lesson_dirs)
+
     async def create_yookassa_payment(
         self,
         student_id: str,
@@ -823,6 +846,7 @@ class PaymentService:
         from config.settings import settings
         Configuration.configure(settings.yookassa_shop_id, settings.yookassa_secret_key)
         idempotency_key = str(uuid.uuid4())
+        purpose = await self.online_purpose(student_id, student_name, periods or [period_month], teacher_ids)
         extra: dict[str, Any] = {"payment_method_data": {"type": "sbp"}} if sbp else {}
         # Чек — только на почту: email клиента, иначе служебный email школы.
         # Телефон не используем (СМС от ОФД платные) — решение 2026-09-08.
@@ -835,7 +859,7 @@ class PaymentService:
             extra["receipt"] = {
                 "customer": customer,
                 "items": [{
-                    "description": f"Занятия — {student_name}, {', '.join(periods) if periods else period_month}"[:128],
+                    "description": purpose[:128],
                     "quantity": "1.00",
                     "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
                     "vat_code": 1,  # без НДС
@@ -851,7 +875,7 @@ class PaymentService:
                 "return_url": settings.yookassa_return_url,
             },
             "capture": True,
-            "description": f"{student_name} — {', '.join(periods) if periods else period_month}",
+            "description": purpose[:128],
             "metadata": {
                 "student_id": student_id,
                 "period_month": period_month,

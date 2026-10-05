@@ -24,7 +24,8 @@ from bot.services.payment_methods import (
 from bot.services.payment_watcher import start_payment_watch
 from bot.services.parent_notifier import notify_payment_confirmed, resolve_notifier, parse_addr, tg_addr
 from bot.services.pending_queue import (
-    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, open_receipt, queue_action, rest_for_keys,
+    DONE, KIND_CASH, KIND_RECEIPT, OPEN, REJECTED, claim_action, close_actions, open_receipt, queue_action,
+    recent_online_payment, rest_for_keys,
 )
 from bot.services.parent_views import (
     period_label as _period_label, unpaid_for, selected_from, selection_fsm_data,
@@ -36,6 +37,7 @@ from bot.screens import cb as cb_btn
 from bot.screens.parent_bills import (
     bill_back_rows, teacher_select_screen, methods_screen, cash_screen, bank_screen, lesson_select_screen,
     sbp_screen, online_pay_screen, receipt_prompt_screen, receipt_sent_screen, receipt_duplicate_screen, cash_sent_screen,
+    receipt_online_screen,
 )
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
@@ -390,6 +392,20 @@ async def cb_receipt_upload(
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("receipt_force:"))
+async def cb_receipt_force(callback: CallbackQuery, state: FSMContext, student_repo: StudentRepository) -> None:
+    """«Это другой перевод»: чек после СБП онлайн всё же нужен — ждём файл без проверки на дубль."""
+    _, method, student_id, period_month = callback.data.split(":", 3)
+    if not any(s.student_id == student_id for s in await student_repo.get_by_parent_tg_id(callback.from_user.id)):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.set_state(ReceiptStates.waiting_for_receipt)
+    await state.update_data(receipt_method=method, receipt_student_id=student_id, receipt_period_month=period_month,
+                            receipt_force=True)
+    await _edit(callback, receipt_prompt_screen(student_id, period_month))
+    await callback.answer()
+
+
 @router.message(ReceiptStates.waiting_for_receipt, F.photo | F.document)
 async def on_receipt_photo(
     message: Message, state: FSMContext,
@@ -407,6 +423,11 @@ async def on_receipt_photo(
     student_name = student.name if student else student_id
     if await open_receipt(pending_repo, student_id, period_month):          # чек за этот счёт уже ждёт решения
         text, rows = receipt_duplicate_screen(student_id, period_month)
+        await message.answer(text, reply_markup=to_aiogram_markup(rows))
+        return
+    online = None if data.get("receipt_force") else await recent_online_payment(payment_service._payment_repo, student_id)
+    if online is not None:                                                  # чек ЮКассы после СБП онлайн — уже зачтено
+        text, rows = receipt_online_screen(student_id, period_month, method, online)
         await message.answer(text, reply_markup=to_aiogram_markup(rows))
         return
 

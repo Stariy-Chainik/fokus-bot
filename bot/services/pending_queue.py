@@ -11,6 +11,7 @@ import logging
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
+from bot.models.enums import PaymentStatus
 from bot.services import activity, payment_events
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,26 @@ async def queue_action(
     except Exception as exc:                      # очередь — вспомогательная, платёж важнее
         logger.error("Очередь решений: не записали %s для %s: %s", kind, sid, exc)
         return None
+
+
+ONLINE_RECEIPT_WINDOW_MIN = 180
+
+
+async def recent_online_payment(payment_repo, student_id: str, minutes: int = ONLINE_RECEIPT_WINDOW_MIN):
+    """Свежий платёж ЮКассы ученика (succeeded за последние `minutes`) или None.
+
+    Родители после СБП онлайн присылают чек ЮКассы как подтверждение «по реквизитам» — бот создавал
+    заявку на следующий месяц, администратор её подтверждал, и оплата зачитывалась дважды
+    (Авалян, 05.10.2026). Онлайн-платёж зачтён автоматически, чек на него не нужен.
+    """
+    from datetime import datetime, timedelta
+    if payment_repo is None:
+        return None
+    since = (datetime.now() - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [p for p in await payment_repo.get_all()
+            if p.student_id == student_id and p.status == PaymentStatus.PAID
+            and (p.payment_method or "").startswith("yookassa") and (p.paid_at or "") >= since]
+    return max(rows, key=lambda p: p.paid_at or "") if rows else None
 
 
 async def open_receipt(pending_repo, student_id: str, period_month: str):
