@@ -67,6 +67,12 @@ SCREENS['p.home'] = async () => {
     <div class="eyebrow">${mon(h.period)}</div>
     <div class="list">${monthRows.join('')}</div>
     <p class="hint" style="margin-top:12px">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>
+    <div class="eyebrow">Доступ к кабинету</div>
+    ${list([cell({
+      lead: '👥', plain: true, t: `Кто привязан к ${many ? 'детям' : 'ребёнку'}`,
+      s: many ? h.children.map(c => `${esc(firstName(c.name))}: ${c.parents}`).join(' · ') : (h.children[0].parents > 1 ? plural(h.children[0].parents, ['родитель', 'родителя', 'родителей']) + ' · лишних можно отвязать' : 'только вы'),
+      go: 'p.family', p: {},
+    })])}
     <div style="margin-top:14px">${h.children.map(c => btn(`↩️ ${many ? esc(firstName(c.name)) + ' — ' : ''}это не мой ребёнок`, 'pUnlinkAsk', { id: c.id, name: c.name }, 'ghost')).join('')}</div>` };
 };
 /* Ошибочная привязка: родитель снимает её сам, администратору уходит сообщение. */
@@ -81,6 +87,38 @@ ACT.pUnlinkDo = async ({ id }) => {
   } catch (e) { closeSheet(); toast(errText(e)); }
 };
 ACT.pOpen = ({ id, screen, p }) => { state.ui.kid = id; go(screen, p || {}); };
+
+/* ── Кто привязан к ребёнку ──────────────────────────────────────────── */
+/* Все, кто видит счета и занятия ребёнка. Лишнего отвязывает администратор по заявке родителя
+   (решение владельца 06.10.2026); себя родитель отвязывает сам — «это не мой ребёнок» на сводке. */
+const pParentCell = (c, x) => {
+  const title = x.me ? 'Вы' + (x.name ? ` · ${esc(x.name)}` : '') : esc(x.name || `Родитель в ${x.platform === 'max' ? 'MAX' : 'Telegram'}`);
+  const sub = [x.username ? '@' + esc(x.username) : '', x.platform === 'max' ? 'MAX' : 'Telegram', x.since ? `привязан ${fdate(x.since)}` : ''].filter(Boolean).join(' · ');
+  const right = x.me ? pill('это вы', 'ok') : x.pending ? pill('⏳ у администратора', 'warn')
+    : `<button class="chip" style="padding:4px 10px" data-act="pFamUnlinkAsk" data-p='${esc(JSON.stringify({ sid: c.id, key: x.key, child: c.name, who: x.name || (x.platform === 'max' ? 'родителя в MAX' : 'родителя в Telegram') }))}'>Отвязать</button>`;
+  return `<div class="cell static"><span class="lead${x.me ? ' plain' : ''}">${x.me ? '🙂' : x.name ? esc(initials(plainName(x.name)) || '👤') : '👤'}</span><span><div class="t">${title}</div><div class="s">${sub}</div></span><span class="r">${right}</span></div>`;
+};
+SCREENS['p.family'] = async () => {
+  const d = await api('/family');
+  const many = d.children.length > 1;
+  return { title: 'Кто привязан', html: `
+    <p class="hint" style="margin:0 0 10px">Эти люди видят счета и занятия ребёнка и получают уведомления школы.</p>
+    ${d.children.map(c => `${many ? `<div class="eyebrow">${esc(c.name)}</div>` : `<div class="h2">${esc(c.name)}</div>`}${list(c.parents.map(x => pParentCell(c, x)))}`).join('')}
+    <p class="hint" style="margin-top:12px">Лишнего отвязывает администратор школы: нажмите «Отвязать», заявка уйдёт ему на проверку. Если вы привязались к ребёнку по ошибке — кнопка «это не мой ребёнок» внизу главного экрана.</p>` };
+};
+ACT.pFamUnlinkAsk = ({ sid, key, child, who }) => sheet(`<h3>Отвязать ${esc(who)}?</h3><div class="hint">Ребёнок: ${esc(child)}. Заявка уйдёт администратору школы. После его подтверждения этот человек перестанет видеть счета и занятия ребёнка и получать уведомления.</div>
+  ${field('fam-r', 'Причина (необязательно)', '', 'placeholder="не знаю этого человека, привязали по ошибке…" maxlength="300"')}
+  <div style="margin-top:12px">${btn('📨 Отправить заявку администратору', 'pFamUnlinkDo', { sid, key }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.pFamUnlinkDo = async ({ sid, key }) => {
+  try {
+    await api(`/children/${sid}/unlink-request`, { method: 'POST', body: { key, reason: val('fam-r').trim() } });
+    closeSheet(); render(); toast('Заявка отправлена администратору');
+  } catch (e) {
+    closeSheet();
+    if (e.code === 'already') { render(); toast('Заявка уже у администратора'); return; }
+    toast(errText(e));
+  }
+};
 
 /* ── Счета ───────────────────────────────────────────────────────────── */
 SCREENS['p.bills'] = async () => {

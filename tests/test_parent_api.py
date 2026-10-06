@@ -393,3 +393,73 @@ def test_parent_unlinks_a_wrong_child(api):
     assert asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_addrs == []
     assert bot.sent and "отвязался от ученика" in bot.sent[0][1] and "Иванов Иван" in bot.sent[0][1]
     assert _call(app, "GET", "/api/parent/me")[0] == 403                         # детей больше нет — кабинет закрыт
+
+
+class _NamedBot(FakeBot):
+    """FakeBot с getChat: имена родителей в Telegram."""
+    NAMES = {PARENT_TG: ("Мария", "Иванова", "maria"), 700002: ("Олег", None, None)}
+
+    async def get_chat(self, chat_id):
+        from types import SimpleNamespace
+        if chat_id not in self.NAMES:
+            raise RuntimeError("chat not found")
+        first, last, username = self.NAMES[chat_id]
+        return SimpleNamespace(first_name=first, last_name=last, username=username)
+
+
+def _family_world(dp):
+    from bot.services import parent_unlink
+    from tests.fakes import ActivityRepoFake
+    from tests.test_admin_inbox_api import PendingRepoFake
+    from bot.repositories.activity_log_repo import ActivityEvent
+    parent_unlink._names.clear()
+    stu = dp["student_repo"].items[0]
+    stu.parent_tg_ids, stu.parent_max_ids = [PARENT_TG, 700002], [900003]
+    dp["pending_repo"] = PendingRepoFake()
+    dp["activity_repo"] = ActivityRepoFake()
+    dp["activity_repo"].items.append(ActivityEvent("2026-09-12 10:00:00", "student", 0,
+                                                   "Родитель привязан: STU-0001 · Telegram 700002", "STU-0001"))
+
+
+def test_family_lists_who_is_linked_without_raw_ids(api):
+    """«Кто привязан»: вы первым, имена и @ник из Telegram, MAX без имени, дата привязки из ленты;
+    чужие tg_id в ответ не попадают — строку адресует key."""
+    app, dp = api
+    _family_world(dp)
+    status, d = _call(app, "GET", "/api/parent/family", bot=_NamedBot())
+    assert status == 200 and [c["id"] for c in d["children"]] == ["STU-0001"]
+    ps = d["children"][0]["parents"]
+    assert [(p["me"], p["platform"], p["name"], p["username"], p["since"], p["pending"]) for p in ps] == [
+        (True, "tg", "Мария Иванова", "maria", "", False),
+        (False, "tg", "Олег", "", "2026-09-12", False),
+        (False, "max", "", "", "", False),
+    ]
+    assert "700002" not in str(d) and "900003" not in str(d) and len({p["key"] for p in ps}) == 3
+    assert _call(app, "GET", "/api/parent/home", bot=_NamedBot())[1]["children"][0]["parents"] == 3
+
+
+def test_parent_asks_admin_to_unlink_another_parent(api):
+    """Заявка на отвязку: администраторам — сообщение с кнопками, строка в очереди; повтор — 409,
+    себя — 400 (для этого «это не мой ребёнок»), чужой ребёнок или ключ — 404. Сам родитель никого не отвязывает."""
+    app, dp = api
+    _family_world(dp)
+    bot = _NamedBot()
+    ps = _call(app, "GET", "/api/parent/family", bot=bot)[1]["children"][0]["parents"]
+    me, oleg = ps[0]["key"], ps[1]["key"]
+    url = "/api/parent/children/STU-0001/unlink-request"
+    status, r = _call(app, "POST", url, json={"key": oleg, "reason": "не знаю его"}, bot=bot)
+    assert status == 200 and r["id"] == "ACT-000001"
+    a = dp["pending_repo"].items[0]
+    assert (a.kind, a.student_id, a.parent_addr, a.teacher_keys) == ("unlink", "STU-0001", str(PARENT_TG), "700002")
+    assert "Олег (Telegram)" in a.comment and "Мария Иванова (@maria, Telegram)" in a.comment and "не знаю его" in a.comment
+    chat, text, kb = bot.sent[-1]
+    assert chat == ADMIN_TG and "отвязать другого родителя" in text and "привязан 2026-09-12" in text
+    assert [b.callback_data for b in kb.inline_keyboard[0]] == ["unlink_ok:ACT-000001", "unlink_no:ACT-000001"]
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_tg_ids == [PARENT_TG, 700002]  # ещё привязан
+
+    assert _call(app, "POST", url, json={"key": oleg}, bot=bot) == (409, {"error": "already", "id": "ACT-000001"})
+    pending = _call(app, "GET", "/api/parent/family", bot=bot)[1]["children"][0]["parents"]
+    assert [p["pending"] for p in pending] == [False, True, False]
+    assert _call(app, "POST", url, json={"key": me}, bot=bot)[0] == 400
+    assert _call(app, "POST", url, json={"key": "nope"}, bot=bot)[0] == 404
+    assert _call(app, "POST", "/api/parent/children/STU-0002/unlink-request", json={"key": oleg}, bot=bot)[0] == 404

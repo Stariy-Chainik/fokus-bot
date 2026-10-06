@@ -46,6 +46,14 @@ def kb_new_child_decide(action_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def kb_unlink_decide(action_id: str) -> InlineKeyboardMarkup:
+    """Родитель просит отвязать другого родителя от ребёнка: решает администратор."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Отвязать", callback_data=f"unlink_ok:{action_id}"),
+        InlineKeyboardButton(text="❌ Оставить", callback_data=f"unlink_no:{action_id}"),
+    ]])
+
+
 def kb_client_student_select(students: list, section: str) -> InlineKeyboardMarkup:
     """Выбор ученика. section = 'lessons' | 'bills'"""
     prefix = "cl_stu" if section == "lessons" else "cl_bills_stu"

@@ -803,12 +803,37 @@ class StudentRepoWritable(StudentRepoFake):
             s.parent_max_ids = [*s.parent_max_ids, int(ident)]
         return True
 
+    async def remove_parent(self, sid, addr):
+        s = self._find(sid)
+        if s is None or addr not in s.parent_addrs:
+            return False
+        kind, ident = addr
+        if kind == "tg":
+            s.parent_tg_ids = [i for i in s.parent_tg_ids if i != int(ident)]
+        else:
+            s.parent_max_ids = [i for i in s.parent_max_ids if i != int(ident)]
+        return True
+
 
 class ClientRepoWritable(ClientRepoFake):
     async def create(self, name, created_by_tg_id, phone="", tg_id=None, max_id=None):
         c = Client(client_id=f"CLT-{len(self.items) + 1:04d}", name=name, tg_id=tg_id, phone=phone or None, max_id=max_id)
         self.items.append(c)
         return replace(c)
+
+    async def clear_tg_id(self, client_id):
+        c = next((x for x in self.items if x.client_id == client_id), None)
+        if c is None:
+            return False
+        c.tg_id = None
+        return True
+
+    async def set_max_id(self, client_id, max_id):
+        c = next((x for x in self.items if x.client_id == client_id), None)
+        if c is None:
+            return False
+        c.max_id = max_id
+        return True
 
 
 class StudentGroupRepoWritable(StudentGroupRepoFake):

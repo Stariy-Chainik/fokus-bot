@@ -251,3 +251,60 @@ def test_request_snapshot_keeps_money_on_lessons_known_at_request_time(api, monk
     a2 = asyncio.run(queue_action(dp["pending_repo"], KIND_CASH, s, YM, amount=1600, method="cash",
                                   parent_addr=str(PARENT_TG), teacher_keys=["TCH-0002"]))
     assert a2.keys == ["TCH-0002"] and a2.key_amounts == {"TCH-0002": 1600}
+
+
+def _unlink_action(dp, target="700002"):
+    s = dp["student_repo"].items[0]
+    s.parent_tg_ids = [PARENT_TG, 700002]
+    return asyncio.run(dp["pending_repo"].add("unlink", "STU-0001", "Иванов Иван", parent_addr=str(PARENT_TG),
+                                              comment="отвязать: Олег (Telegram) · просит: Мария",
+                                              teacher_keys=target))
+
+
+def test_unlink_request_approved_in_cabinet(api):
+    """Заявка родителя «отвязать другого родителя»: в очереди с кнопками «Отвязать / Оставить»;
+    одобрение снимает привязку, обоим родителям — сообщение."""
+    from tests.test_admin_api import NotifierFake
+
+    class Notifier(NotifierFake):
+        async def send(self, addr, text, rows=None):
+            self.sent.append(([addr], text))
+            return True
+    app, dp = api
+    dp["notifier"] = Notifier()
+    action = _unlink_action(dp)
+    item = _call(app, "GET", "/api/admin/inbox")[1]["items"][0]
+    assert (item["kind"], item["approveLabel"], item["rejectLabel"]) == ("unlink", "✅ Отвязать", "❌ Оставить")
+    status, r = _call(app, "POST", f"/api/admin/inbox/{action.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["status"] == DONE
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_tg_ids == [PARENT_TG]
+    assert [(to, "одобрил" in t or "закрыл вам доступ" in t) for to, t in dp["notifier"].sent] == [
+        ([("tg", PARENT_TG)], True), ([("tg", 700002)], True)]
+    assert _call(app, "POST", f"/api/admin/inbox/{action.action_id}/decide", json={"approve": True})[0] == 409
+
+
+def test_unlink_request_rejected_keeps_parent(api):
+    app, dp = api
+    action = _unlink_action(dp)
+    status, r = _call(app, "POST", f"/api/admin/inbox/{action.action_id}/decide", json={"approve": False})
+    assert status == 200 and r["status"] == REJECTED
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_tg_ids == [PARENT_TG, 700002]
+
+
+def test_unlink_drops_client_address_unless_sibling_keeps_it():
+    """Уведомления идут и на адрес карточки клиента: после отвязки он снимается с карточки,
+    если этот родитель не остался у другого ребёнка той же семьи."""
+    from bot.services.parent_unlink import approve_unlink
+    from tests.fakes import ClientRepoWritable, StudentRepoWritable, mk_client, mk_student
+    for sibling_linked, expected in ((False, None), (True, 700002)):
+        students = StudentRepoWritable([
+            mk_student("STU-0001", "Иванов Иван", parent_tg_ids=[PARENT_TG, 700002], client_id="CLT-0001"),
+            mk_student("STU-0003", "Иванова Ева", parent_tg_ids=[700002] if sibling_linked else [], client_id="CLT-0001"),
+        ])
+        clients = ClientRepoWritable([mk_client("CLT-0001", tg_id=700002)])
+        pending = PendingRepoFake()
+        action = asyncio.run(pending.add("unlink", "STU-0001", "Иванов Иван", parent_addr=str(PARENT_TG),
+                                         teacher_keys="700002"))
+        assert asyncio.run(approve_unlink(pending, students, clients, None, action, ADMIN_TG)) is not None
+        assert asyncio.run(clients.get_by_id("CLT-0001")).tg_id == expected
+        assert asyncio.run(students.get_by_id("STU-0001")).parent_tg_ids == [PARENT_TG]

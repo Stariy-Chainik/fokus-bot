@@ -13,6 +13,7 @@ from bot.services.pending_queue import DONE, KIND_CHILD, REJECTED, close_actions
 from bot.keyboards.admin import kb_back
 from bot.handlers.filters import AdminOnly, TeacherOrAdmin
 from bot.services.new_child import KIND_NEWCHILD, approve_new_child, may_decide, reject_new_child
+from bot.services.parent_unlink import KIND_UNLINK, approve_unlink, reject_unlink
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_client_requests")
@@ -122,4 +123,37 @@ async def cb_new_child_no(
         await callback.answer("Заявку уже решили", show_alert=True)
         return
     await callback.message.edit_text(f"❌ Отклонено: <b>{action.student_name}</b> · {action.comment}")
+    await callback.answer()
+
+
+# ─── Родитель просит отвязать другого родителя: решает администратор ─────────────────────────
+
+@router.callback_query(F.data.startswith("unlink_ok:"), AdminOnly())
+async def cb_unlink_ok(
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
+    client_repo=None, pending_repo=None,
+) -> None:
+    action = await pending_repo.get_by_id(callback.data.split(":", 1)[1]) if pending_repo else None
+    if action is None or action.kind != KIND_UNLINK:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    student = await approve_unlink(pending_repo, student_repo, client_repo, resolve_notifier(callback.bot),
+                                   action, callback.from_user.id)
+    if student is None:
+        await callback.answer("Заявку уже решили", show_alert=True)
+        return
+    await callback.message.edit_text(f"✅ Отвязано\n\nУченик: {student.name}\n{action.comment}")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("unlink_no:"), AdminOnly())
+async def cb_unlink_no(callback: CallbackQuery, user: User, pending_repo=None) -> None:
+    action = await pending_repo.get_by_id(callback.data.split(":", 1)[1]) if pending_repo else None
+    if action is None or action.kind != KIND_UNLINK:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if not await reject_unlink(pending_repo, resolve_notifier(callback.bot), action, callback.from_user.id):
+        await callback.answer("Заявку уже решили", show_alert=True)
+        return
+    await callback.message.edit_text(f"❌ Привязка оставлена\n\nУченик: {action.student_name}\n{action.comment}")
     await callback.answer()
