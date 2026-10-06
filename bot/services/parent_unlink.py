@@ -1,7 +1,8 @@
 """Кто привязан к ребёнку и заявка «отвязать другого родителя» (решение владельца 06.10.2026).
 
-Родитель в кабинете видит всех, кто привязан к его ребёнку (имя и @ник из Telegram, мессенджер,
-когда привязан), и может попросить отвязать лишнего. Сам он никого не отвязывает: заявка ложится
+Родитель в кабинете Telegram и в боте MAX видит всех, кто привязан к его ребёнку (имя и @ник из
+Telegram, мессенджер, когда привязан), и может попросить отвязать лишнего. Список и заявку оба фронта
+берут отсюда: `family_view`, `submit_unlink`. Сам родитель никого не отвязывает: заявка ложится
 в `pending_actions` (KIND_UNLINK: `parent_addr` — кто просит, `teacher_keys` — кого отвязать) и
 уходит администраторам в Telegram с кнопками `unlink_ok:` / `unlink_no:`; то же решение есть в
 кабинете администратора («Ждут решения»). Одобрение снимает адрес у ученика (и у карточки клиента,
@@ -16,6 +17,7 @@ import hmac
 import logging
 import time
 
+from bot.repositories.pending_action_repo import PendingAction
 from bot.services import activity
 from bot.services.parent_notifier import MAX, fmt_addr, parse_addr
 from bot.services.pending_queue import DONE, REJECTED, queue_action
@@ -105,6 +107,68 @@ async def open_requests(pending_repo, student_id: str) -> list:
     if pending_repo is None:
         return []
     return [a for a in await pending_repo.get_open() if a.kind == KIND_UNLINK and a.student_id == student_id]
+
+
+async def client_names(client_repo, students) -> dict:
+    """addr → имя из карточки клиента школы (если адрес родителя записан в карточке)."""
+    out: dict = {}
+    if client_repo is None:
+        return out
+    for s in students:
+        c = await client_repo.get_by_id(s.client_id) if s.client_id else None
+        if c and c.name:
+            if c.tg_id:
+                out[("tg", c.tg_id)] = c.name
+            if c.max_id:
+                out[(MAX, c.max_id)] = c.name
+    return out
+
+
+async def family_view(students, me, tg_bot, client_repo, pending_repo, activity_repo, secret: str) -> list[dict]:
+    """По каждому ребёнку — кто привязан: «вы» первым, имя/@ник, мессенджер, дата привязки, ждёт ли
+    заявка на отвязку (себе не показываем). Чужие id наружу не отдаём — строку адресует `key`."""
+    infos = await parent_infos(tg_bot, sorted({a for s in students for a in s.parent_addrs}),
+                               await client_names(client_repo, students))
+    out = []
+    for s in students:
+        since = await linked_since(activity_repo, s.student_id)
+        waiting = {target_of(a) for a in await open_requests(pending_repo, s.student_id)}
+        out.append({"id": s.student_id, "name": s.name, "parents": [{
+            "key": parent_key(s.student_id, a, secret), "me": a == me,
+            "platform": "max" if a[0] == MAX else "tg",
+            "name": infos.get(a, {}).get("name", ""), "username": infos.get(a, {}).get("username", ""),
+            "since": since.get(a, ""), "pending": a != me and a in waiting,
+        } for a in sorted(s.parent_addrs, key=lambda x: x != me)]})
+    return out
+
+
+def find_target(student, key: str, secret: str):
+    return next((a for a in student.parent_addrs if parent_key(student.student_id, a, secret) == key), None)
+
+
+async def submit_unlink(
+    student, me, key: str, reason: str, *, tg_bot, user_repo, client_repo, pending_repo, activity_repo,
+    secret: str, requester_info: dict | None = None,
+) -> tuple[str, PendingAction | None]:
+    """Заявка «отвязать другого родителя» от любого фронта. Статус: ok | already | self | not_found | unavailable.
+    requester_info — имя просящего, если фронт его знает (MAX: из события); иначе — карточка клиента / Telegram."""
+    target = find_target(student, key, secret)
+    if target is None:
+        return "not_found", None
+    if target == me:                              # себя — «это не мой ребёнок», без администратора
+        return "self", None
+    if pending_repo is None or tg_bot is None:
+        return "unavailable", None
+    reason = " ".join((reason or "").split())[:300]
+    infos = await parent_infos(tg_bot, [me, target], await client_names(client_repo, [student]))
+    if requester_info and requester_info.get("name") and not infos.get(me, {}).get("name"):
+        infos[me] = requester_info
+    since = (await linked_since(activity_repo, student.student_id)).get(target, "")
+    action, created = await request_unlink(pending_repo, tg_bot, user_repo, student, me, target,
+                                           infos.get(me, {}), infos.get(target, {}), reason, since)
+    if action is None:
+        return "unavailable", None
+    return ("ok" if created else "already"), action
 
 
 async def request_unlink(

@@ -6,3 +6,4 @@ class MaxParentStates(StatesGroup):
     adding_child = State()      # фамилия второго ребёнка
     choosing_bill = State()     # чек прислан без шага «Прикрепить чек»
     new_child_name = State()    # «моего ребёнка нет в списке» → фамилия и имя для заявки
+    unlink_reason = State()     # «Кто привязан» → причина заявки на отвязку другого родителя

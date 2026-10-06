@@ -25,7 +25,7 @@ from bot.utils.bill_format import payment_purpose
 from bot.services import activity, payment_ledger
 from bot.services.diary_service import place_icon
 from bot.services import parent_unlink
-from bot.services.parent_notifier import MAX, TG
+from bot.services.parent_notifier import TG
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.parent_views import (
     breakdown_lines, receipt_caption, unpaid_for,
@@ -571,41 +571,13 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": result["error"]}, status=503)
         return _json(result)
 
-    # ── кто привязан к ребёнку и заявка на отвязку лишних ───────────────
-    async def _client_names(students) -> dict:
-        """addr → имя из карточки клиента школы (если адрес родителя записан в карточке)."""
-        out: dict = {}
-        for s in students:
-            if not s.client_id:
-                continue
-            c = await client_repo.get_by_id(s.client_id)
-            if c and c.name:
-                if c.tg_id:
-                    out[(TG, c.tg_id)] = c.name
-                if c.max_id:
-                    out[(MAX, c.max_id)] = c.name
-        return out
-
+    # ── кто привязан к ребёнку и заявка на отвязку лишних (общая логика с MAX — parent_unlink) ──
     async def family(request: web.Request, tg_id, children) -> web.Response:
         """Кто привязан к каждому ребёнку: имя и @ник (Telegram), мессенджер, когда привязан,
         ждёт ли заявка на отвязку. Чужие tg_id наружу не отдаём — строку адресует `key`."""
-        me = (TG, tg_id)
-        pending_repo = _dp_get(dp, "pending_repo")
-        activity_repo = _dp_get(dp, "activity_repo")
-        names = await _client_names(children)
-        infos = await parent_unlink.parent_infos(bot, sorted({a for s in children for a in s.parent_addrs}), names)
-        kids = []
-        for s in children:
-            since = await parent_unlink.linked_since(activity_repo, s.student_id)
-            waiting = {parent_unlink.target_of(a) for a in await parent_unlink.open_requests(pending_repo, s.student_id)}
-            kids.append({"id": s.student_id, "name": s.name, "parents": [{
-                "key": parent_unlink.parent_key(s.student_id, a, settings.bot_token),
-                "me": a == me, "platform": "max" if a[0] == MAX else "tg",
-                "name": infos.get(a, {}).get("name", ""), "username": infos.get(a, {}).get("username", ""),
-                "since": since.get(a, ""),
-                "pending": a != me and a in waiting,           # себе не показываем, что кто-то просит отвязать
-            } for a in sorted(s.parent_addrs, key=lambda x: x != me)]})
-        return _json({"children": kids})
+        return _json({"children": await parent_unlink.family_view(
+            children, (TG, tg_id), bot, client_repo, _dp_get(dp, "pending_repo"), _dp_get(dp, "activity_repo"),
+            settings.bot_token)})
 
     async def unlink_request(request: web.Request, tg_id, children) -> web.Response:
         """Попросить отвязать другого родителя: решает администратор (решение владельца 06.10.2026)."""
@@ -616,27 +588,15 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             body = await request.json()
         except Exception:
             body = {}
-        key = str(body.get("key") or "")
-        reason = " ".join(str(body.get("reason") or "").split())[:300]
-        me = (TG, tg_id)
-        target = next((a for a in student.parent_addrs
-                       if parent_unlink.parent_key(student.student_id, a, settings.bot_token) == key), None)
-        if target is None:
-            return _json({"error": "not_found"}, status=404)
-        if target == me:                          # себя — кнопкой «это не мой ребёнок», без администратора
-            return _json({"error": "self"}, status=400)
-        pending_repo = _dp_get(dp, "pending_repo")
-        if pending_repo is None or bot is None:
-            return _json({"error": "unavailable"}, status=503)
-        infos = await parent_unlink.parent_infos(bot, [me, target], await _client_names([student]))
-        since = (await parent_unlink.linked_since(_dp_get(dp, "activity_repo"), student.student_id)).get(target, "")
-        action, created = await parent_unlink.request_unlink(
-            pending_repo, bot, user_repo, student, me, target, infos.get(me, {}), infos.get(target, {}), reason, since)
-        if action is None:
-            return _json({"error": "unavailable"}, status=503)
-        if not created:
+        status, action = await parent_unlink.submit_unlink(
+            student, (TG, tg_id), str(body.get("key") or ""), str(body.get("reason") or ""),
+            tg_bot=bot, user_repo=user_repo, client_repo=client_repo, pending_repo=_dp_get(dp, "pending_repo"),
+            activity_repo=_dp_get(dp, "activity_repo"), secret=settings.bot_token)
+        if status == "ok":
+            return _json({"ok": True, "id": action.action_id})
+        if status == "already":
             return _json({"error": "already", "id": action.action_id}, status=409)
-        return _json({"ok": True, "id": action.action_id})
+        return _json({"error": status}, status={"self": 400, "not_found": 404}.get(status, 503))
 
     async def unlink(request: web.Request, tg_id, children) -> web.Response:
         """«Это не мой ребёнок»: родитель сам снимает ошибочную привязку (решение владельца 03.10.2026).

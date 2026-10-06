@@ -22,7 +22,7 @@ def test_menu_rows_by_platform():
     tg = [b.value for row in menu_rows(can_switch_athlete=True) for b in row]
     assert tg == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "client:email", "mode:athlete"]
     mx = [b.value for row in menu_rows(platform="max") for b in row]
-    assert mx == ["client:lessons", "client:my_bills", "client:add_child", "client:unlink"]
+    assert mx == ["client:lessons", "client:my_bills", "client:add_child", "client:family", "client:unlink"]
     # PARENT_RECEIPT_EMAIL=false: кнопки «Email для чеков» нет, остальное на месте
     off = [b.value for row in menu_rows(can_switch_athlete=True, receipt_email=False) for b in row]
     assert off == ["client:lessons", "client:my_bills", "client:diary", "client:add_child", "mode:athlete"]
