@@ -7,9 +7,9 @@ from datetime import date
 from aiohttp import web
 
 from bot.models.enums import LessonType
-from bot.services.billing_service import calc_earned
+from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.api.record import RecordError, record_create, record_options
-from bot.services.profit_service import lesson_rent
+from bot.services.profit_service import is_owner, lesson_rent
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from config.settings import settings
 
@@ -27,6 +27,40 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
     student_repo = dp["student_repo"]
     submission_repo = dp["submission_repo"]
     lesson_service = dp["lesson_service"]
+    payment_service = dp["payment_service"]
+    salary_service = dp["salary_service"]
+
+    async def _economy(ls, t, g) -> dict:
+        """Что школа заработала с занятия (решение владельца 06.10.2026): выручка с учеников
+        (абонемент — доля месяца: сбор группы ÷ число занятий), зарплата педагога (смена — доля дня),
+        аренда у прямой оплаты, прибыль. Пояснения — в `note`."""
+        income = sum(r.amount for r in build_billing_rows(ls, t)) if t else 0
+        note, kind = "", "lessons"
+        ym = ls.date[:7]
+        if g is not None and g.billing_mode.value == "subscription":
+            ledger = await payment_service.compute_ledger_map(since_period=ym, until_period=ym)
+            month = sum(a for (_s, key, m), (a, _p) in ledger.items() if m == ym and key == f"SUB:{g.group_id}")
+            n = sum(1 for x in await lesson_repo.get_all() if x.group_id == g.group_id and x.date.startswith(ym))
+            income = round(month / n) if n else 0
+            kind, note = "subscription", f"абонементы группы за месяц {month} ₽ ÷ {n} зан."
+        rent = lesson_rent(ls)
+        if rent and not income:
+            kind, note = "rent", "родители платят педагогу напрямую, школе — аренда зала"
+            income = rent
+        salary = 0
+        if t:
+            line = next((x for x in await salary_service.lines_for(t, ym) if x.lesson_id == ls.lesson_id), None)
+            if line is not None and line.kind == "in_shift":
+                day = sum(x.amount for x in await salary_service.lines_for(t, ym) if x.kind == "shift" and x.date == ls.date)
+                groups_day = len({x.group_id for x in await lesson_repo.get_all()
+                                  if x.teacher_id == t.teacher_id and x.date == ls.date and x.group_id})
+                salary = round(day / groups_day) if groups_day else 0
+                note = (note + " · " if note else "") + f"смена {day} ₽ за день ÷ {groups_day} групп"
+            else:
+                salary = line.amount if line is not None else 0
+        owner = bool(t) and is_owner(t.teacher_id)
+        return {"kind": kind, "income": income, "salary": 0 if owner else salary, "ownerIncome": salary if owner else 0,
+                "rent": rent, "profit": income - (0 if owner else salary), "note": note}
 
     async def _locked(lesson) -> bool:
         if not settings.teacher_period_submit_enabled:      # сдача периода выключена — замков нет
@@ -90,6 +124,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             "attendees": attendees, "recordedAt": ls.recorded_at,
             "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
             "locked": await _locked(ls),
+            "economy": await _economy(ls, t, g),
         })
 
     async def lesson_delete(request: web.Request, user) -> web.Response:
