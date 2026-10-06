@@ -607,6 +607,19 @@ SCREENS['a.profit.teacher'] = async ({ period, tid }) => {
   return { title: t.name, html: `${t.owner ? '<div class="card pad" style="background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата не вычитается, остаётся в прибыли</div><div style="height:10px"></div>' : ''}${t.lessons.length ? `<div class="list">${t.lessons.map(profitLessonLine).join('')}</div><div class="card" style="margin-top:10px"><div class="total"><span>Выручка ${fmt(t.income)} · зарплата ${fmt(t.salary)}</span><span class="big">${fmt(t.profit)}</span></div></div>` : '<div class="empty">Нет тарифицируемых занятий</div>'}` };
 };
 /* Строка зарплаты: занятие — с кем / какая группа, тап открывает карточку занятия. */
+/* Строки зарплаты: у педагога с прямой оплатой (Клецова) индивидуальные идут нулями — 60 строк из 70,
+   и групповые занятия в них терялись (решение владельца 06.10.2026). Нули сворачиваем в одну строку
+   «прямая оплата», как в кабинете самого педагога; остальное — как есть. */
+const salaryLines = (lines, tid, ym) => {
+  const direct = lines.filter(x => x.kind === 'lesson' && x.type === 'individual' && !x.amount);
+  const rest = direct.length ? lines.filter(x => !direct.includes(x)) : lines;
+  if (!lines.length) return '<div class="empty">Начислений нет</div>';
+  return list([...rest.map(salaryLineCell), ...(direct.length ? [cell({
+    lead: '🤝', plain: true, t: 'Индивидуальные — прямая оплата',
+    s: `${plural(direct.length, ['занятие', 'занятия', 'занятий'])} · родители платят педагогу, школа не начисляет`,
+    r: '<b>0 ₽</b>', go: 'a.lessons.day', p: { ym, tid },
+  })] : [])]);
+};
 const salaryLineCell = x => cell({
   lead: x.kind === 'shift' ? '🕒' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' ? '↳' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
   t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
@@ -634,7 +647,7 @@ SCREENS['a.salary.t'] = async ({ tid, ym }) => {
     <div class="kpis">${kpi(fmt(t.total), 'начислено')}${kpi(fmt(t.paid || 0), t.isOwner ? '👑 остаётся в прибыли' : rest ? `выплачено · остаток ${fmt(rest)}` : 'выплачено полностью', rest ? 'warn' : 'ok')}</div>
     ${c.accrued ? `<div class="kpis" style="margin-top:8px">${kpi(c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons || 0}${c.unpaidSubs ? ` + ${c.unpaidSubs} аб.` : ''}` : '✓', c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons ? plural(c.unpaidLessons, ['занятие', 'занятия', 'занятий']) : ''}${c.unpaidLessons && c.unpaidSubs ? ' и ' : ''}${c.unpaidSubs ? plural(c.unpaidSubs, ['абонемент', 'абонемента', 'абонементов']) : ''} не оплачено` : 'родители всё оплатили', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `долг · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : 'долга нет', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}</div>` : ''}
     <div style="margin:10px 0">${goBtn(rest ? `💸 Выплатить остаток ${fmt(rest)}` : '💸 Выплаты и аванс', 'a.payout', { tid, ym }, rest ? '' : 'ghost')}</div>
-    ${t.lines.length ? list(t.lines.map(salaryLineCell)) : '<div class="empty">Начислений нет</div>'}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
+    ${salaryLines(t.lines, tid, ym)}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
 };
 /* Сбор с родителей по педагогу: кто из его учеников не оплатил месяц. Тап — счёт ученика. */
 SCREENS['a.salary.col'] = async ({ tid, ym }) => {
@@ -659,7 +672,7 @@ SCREENS['a.payout'] = async ({ tid, ym }) => {
     <div style="margin-top:12px">${btn(`✅ Выплатить остаток ${fmt(rest)}`, 'payoutRest', { tid, ym, amount: rest, name: t.name }, rest ? '' : 'sec')}${btn('Произвольная сумма (аванс)', 'payoutForm', { tid, ym, name: t.name }, 'ghost')}${btn('🕒 Нестандартный день', 'ovForm', { tid, ym, name: t.name }, 'ghost')}</div>
     ${t.payouts.length ? `<div class="eyebrow">Выплаты</div>${list(t.payouts.map(p => cell({ lead: '💸', plain: true, t: fmt(p.amount), s: `${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}` })))}` : ''}
     ${t.overrides.length ? `<div class="eyebrow">Нестандартные дни</div>${list(t.overrides.map(o => `<div class="cell static"><span class="lead plain">✍️</span><span><div class="t">${fdate(o.date)} · ${o.minutes} мин</div>${o.comment ? `<div class="s">${esc(o.comment)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="delOverride" data-p='${esc(JSON.stringify({ id: o.id }))}' aria-label="Удалить">🗑</button></span></div>`))}` : ''}
-    <div class="eyebrow">Строки начисления</div>${t.lines.length ? list(t.lines.map(salaryLineCell)) : '<div class="empty">Начислений нет</div>'}` };
+    <div class="eyebrow">Строки начисления</div>${salaryLines(t.lines, tid, ym)}` };
 };
 SCREENS['a.payhist.search'] = async () => {
   const q = state.ui.q2 || '';
