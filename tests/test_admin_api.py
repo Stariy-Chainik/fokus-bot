@@ -14,6 +14,7 @@ from bot.services import LessonService, PaymentService, ProfitService, StudentSe
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
+    BonusRepoFake,
     BranchRepoFake, ClientRepoWritable, GroupRepoFake, LessonRepoFake, PaymentRepoFake, StudentGroupRepoWritable,
     StudentRepoWritable, SubOverrideRepoFake, SubmissionRepoFake, TeacherGroupRepoWritable, TeacherRepoFake, UserRepoWritable,
     mk_branch, mk_group, mk_lesson, mk_payment, mk_student, mk_submission, mk_teacher, mk_user,
@@ -64,6 +65,11 @@ class PayoutRepoFake:
                           amount=amount, paid_at="2026-09-18 10:00:00", paid_by_tg_id=paid_by_tg_id, comment=comment)
         self.items.append(p)
         return p
+
+    async def delete(self, payout_id):
+        before = len(self.items)
+        self.items = [p for p in self.items if p.payout_id != payout_id]
+        return len(self.items) < before
 
 
 class SalaryOverrideRepoFake:
@@ -121,13 +127,15 @@ def _dp():
     sub_override_repo = SubOverrideRepoFake()
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, group_repo=group_repo,
                                      student_group_repo=sg_repo, subscription_override_repo=sub_override_repo)
-    salary_service = SalaryService(lesson_repo)
+    bonus_repo = BonusRepoFake()
+    salary_service = SalaryService(lesson_repo, None, bonus_repo)
     finance_repo = FinanceRepoFake()
     submission_repo = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])
     visibility = TeacherVisibilityService(student_repo, tg_repo, sg_repo)
     return {
         "lesson_service": LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service),
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
+        "bonus_repo": bonus_repo,
         "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
         "notifier": NotifierFake(),
         "user_repo": UserRepoWritable([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),

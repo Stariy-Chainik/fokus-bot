@@ -91,6 +91,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     payout_repo = TeacherPayoutRepository(sheets_client, settings.sheet_teacher_payouts)
     from bot.repositories.salary_override_repo import SalaryOverrideRepository
     salary_override_repo = SalaryOverrideRepository(sheets_client, settings.sheet_salary_overrides)
+    from bot.repositories.teacher_bonus_repo import TeacherBonusRepository
+    bonus_repo = TeacherBonusRepository(sheets_client, settings.sheet_teacher_bonuses)
     training_entry_repo = TrainingEntryRepository(sheets_client, settings.sheet_training_entries)
     athlete_task_repo = AthleteTaskRepository(sheets_client, settings.sheet_athlete_tasks)
     pending_repo = PendingActionRepository(sheets_client, settings.sheet_pending_actions)
@@ -102,7 +104,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
-    salary_service = SalaryService(lesson_repo, salary_override_repo)
+    salary_service = SalaryService(lesson_repo, salary_override_repo, bonus_repo)
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service)
     payment_service = PaymentService(
         payment_repo, lesson_repo, teacher_repo,
@@ -155,6 +157,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["rate_history_repo"] = rate_history_repo
     dp["payout_repo"] = payout_repo
     dp["salary_override_repo"] = salary_override_repo
+    dp["bonus_repo"] = bonus_repo
     dp["salary_service"] = salary_service
     dp["lesson_service"] = lesson_service
     dp["payment_service"] = payment_service
@@ -219,7 +222,7 @@ _WARM_REPOS = (
     "lesson_repo", "payment_repo", "student_repo", "teacher_repo", "group_repo",
     "student_group_repo", "teacher_group_repo", "branch_repo", "user_repo",
     "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
-    "finance_entry_repo", "payout_repo", "salary_override_repo", "pending_repo",
+    "finance_entry_repo", "payout_repo", "salary_override_repo", "bonus_repo", "pending_repo",
     "training_entry_repo", "athlete_task_repo", "activity_repo", "group_schedule_repo",
 )
 

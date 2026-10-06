@@ -10,6 +10,7 @@ from datetime import date
 from aiohttp import web
 
 from bot.models.enums import LessonType, PaymentStatus
+from bot.services.bonuses import grant_bonus, revoke_bonus
 from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
@@ -72,6 +73,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
     finance_repo = dp["finance_entry_repo"]
     payout_repo = dp["payout_repo"]
     override_repo = dp["salary_override_repo"]
+    bonus_repo = dp["bonus_repo"]
     profit_service = dp["profit_service"]
     salary_service = dp["salary_service"]
     payment_service = dp["payment_service"]
@@ -350,6 +352,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             out.append({"id": t.teacher_id, "name": t.name, "accrued": accrued, "paid": paid,
                         "status": "paid" if accrued and paid >= accrued else ("partial" if paid > 0 else "none"),
                         "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift")),
+                        "bonus": sum(ln.amount for ln in lines if ln.kind == "bonus"),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set,
                         "directPay": t.teacher_id in settings.direct_pay_teacher_id_set,
                         "collection": _collection_totals(col, unpaid, sg, ledger, period)})
@@ -422,6 +425,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         unpaid = await _unpaid_lessons(period, tid, col, {})
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
                       "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set,
+                      "bonus": sum(ln["amount"] for ln in lines if ln["kind"] == "bonus"),
                       "collection": _collection_totals(col, unpaid, sg, ledger, period)})
 
     async def payouts(request: web.Request, user) -> web.Response:
@@ -452,6 +456,9 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             "accrued": sum(ln["amount"] for ln in lines),
             "paid": _owner_paid(tid, sum(ln["amount"] for ln in lines), sum(p.amount for p in rows)),
             "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment} for p in rows],
+            # премии месяца — отдельным списком с отменой; в accrued, paid и lines они уже учтены
+            "bonuses": [{"id": b.bonus_id, "amount": b.amount, "date": b.created_at[:10], "comment": b.comment}
+                        for b in await bonus_repo.get_for_teacher_period(tid, period)],
             "lines": lines,
             "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment} for o in overrides],
             "isOwner": tid in settings.owner_teacher_id_set,
@@ -470,6 +477,27 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         p = await payout_repo.add(tid, period, amount, user.tg_id, comment=comment)
         logger.info("Mini App: выплата %s %s %d руб. (%s) — админ %s", tid, period, amount, comment, user.tg_id)
         return _json({"id": p.payout_id})
+
+    async def bonus_add(request: web.Request, user) -> web.Response:
+        """🎁 Премия: начисление сверх зарплаты месяца и сразу парная выплата (bot/services/bonuses.py)."""
+        body = await _read_json(request)
+        if body is None:
+            return _json({"error": "bad_request"}, status=400)
+        tid, period, amount = body.get("teacherId"), body.get("periodMonth"), body.get("amount")
+        comment = (body.get("comment") or "").strip()
+        if not isinstance(tid, str) or not isinstance(period, str) or len(period) != 7 or not isinstance(amount, int) or amount <= 0:
+            return _json({"error": "bad_request"}, status=400)
+        if await teacher_repo.get_by_id(tid) is None:
+            return _json({"error": "not_found"}, status=404)
+        b = await grant_bonus(bonus_repo, payout_repo, tid, period, amount, comment, user.tg_id)
+        logger.info("Mini App: премия %s %s %d руб. (%s) — админ %s", tid, period, amount, comment, user.tg_id)
+        return _json({"id": b.bonus_id, "payoutId": b.payout_id})
+
+    async def bonus_delete(request: web.Request, user) -> web.Response:
+        b = await revoke_bonus(bonus_repo, payout_repo, request.match_info["bid"], user.tg_id)
+        if b is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json({"ok": True, "amount": b.amount})
 
     async def override_add(request: web.Request, user) -> web.Response:
         body = await _read_json(request)
@@ -540,6 +568,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
         ("GET", "/salaries/{tid}/collection", salary_collection),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),
+        ("POST", "/bonuses", bonus_add), ("DELETE", "/bonuses/{bid}", bonus_delete),
         ("POST", "/salary-overrides", override_add), ("DELETE", "/salary-overrides/{oid}", override_delete),
         ("GET", "/payhist", payhist_search), ("GET", "/payhist/{sid}", payhist_months), ("GET", "/payhist/{sid}/{ym}", payhist_month),
     ]

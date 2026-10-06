@@ -215,3 +215,28 @@ def test_profit_units_group_and_individual_with_detail(api):
     assert status == 200 and u["profit"] == 1000 and len(u["lessons"]) == 2
     assert all(x["lessonType"] == "individual" and x["students"] == ["Иванов Иван"] for x in u["lessons"])
     assert _call(app, "GET", f"/api/admin/profit/unit?key=g:GRP-0404&ym={YM}")[0] == 404
+
+
+def test_bonus_accrues_and_pays_at_once(api):
+    """🎁 Премия: начисление сверх зарплаты месяца + парная выплата — остаток не меняется,
+    педагог видит строку «Премия», прибыль считает её зарплатой; отмена убирает обе строки."""
+    app, dp = api
+    body = {"teacherId": "TCH-0001", "periodMonth": YM, "amount": 5000, "comment": "турнир"}
+    status, r = _call(app, "POST", "/api/admin/bonuses", json=body)
+    assert status == 200 and r == {"id": "BN-000001", "payoutId": "PO-000001"}
+    t = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]
+    assert t["accrued"] == 4333 + 5000 and t["paid"] == 5000
+    assert t["payouts"] == [{"id": "PO-000001", "amount": 5000, "date": "2026-09-18", "comment": "премия: турнир"}]
+    assert t["bonuses"] == [{"id": "BN-000001", "amount": 5000, "date": f"{YM}-18", "comment": "турнир"}]
+    assert (t["lines"][-1]["kind"], t["lines"][-1]["label"], t["lines"][-1]["amount"]) == ("bonus", "Премия: турнир", 5000)
+    s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]
+    me = s["teachers"][0]
+    assert (me["accrued"], me["paid"], me["bonus"], me["status"], me["lessons"]) == (9333, 5000, 5000, "partial", 3)
+    assert _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]["bonus"] == 5000
+    assert _call(app, "GET", f"/api/admin/profit?ym={YM}")[1]["totals"]["salary"] == 4333 + 5000
+    assert _call(app, "POST", "/api/admin/bonuses", json={**body, "amount": 0})[0] == 400
+    assert _call(app, "POST", "/api/admin/bonuses", json={**body, "teacherId": "TCH-0404"})[0] == 404
+    assert _call(app, "DELETE", "/api/admin/bonuses/BN-000001")[0] == 200
+    t = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]
+    assert t["accrued"] == 4333 and t["paid"] == 0 and t["payouts"] == [] and t["bonuses"] == []
+    assert _call(app, "DELETE", "/api/admin/bonuses/BN-000001")[0] == 404

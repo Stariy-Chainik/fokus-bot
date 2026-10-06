@@ -171,6 +171,8 @@ class Settings(BaseSettings):
     shift_groups: str = Field(default="", alias="SHIFT_GROUPS")
     shift_label: str = Field(default="Смена", alias="SHIFT_LABEL")
     sheet_salary_overrides: str = Field(default="salary_day_overrides", alias="SHEET_SALARY_OVERRIDES")
+    # Премии педагогам сверх зарплаты месяца (scripts/setup_teacher_bonuses.py)
+    sheet_teacher_bonuses: str = Field(default="teacher_bonuses", alias="SHEET_TEACHER_BONUSES")
 
     @property
     def shift_group_map(self) -> dict:

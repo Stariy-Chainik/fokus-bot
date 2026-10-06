@@ -87,3 +87,6 @@ class PayoutStates(StatesGroup):
     waiting_ovr_date = State()
     waiting_ovr_minutes = State()
     waiting_ovr_comment = State()
+    # Премия: сумма → за что (начисляется и выплачивается сразу)
+    waiting_bonus_amount = State()
+    waiting_bonus_comment = State()

@@ -115,7 +115,9 @@ async def cb_salary_show(
         return
 
     lessons = await lesson_repo.get_by_teacher_and_period(teacher_id, period_month)
-    total_earned = await salary_service.total_for(teacher, period_month)
+    salary_lines = await salary_service.lines_for(teacher, period_month)
+    total_earned = sum(ln.amount for ln in salary_lines)
+    bonus = sum(ln.amount for ln in salary_lines if ln.kind == "bonus")
     group, ind, gline, iline = format_lesson_breakdown(lessons)
     total = group + ind
 
@@ -129,7 +131,7 @@ async def cb_salary_show(
         f"Всего занятий: {total}",
         f"👥 Групповые ({group}): {gline}",
         f"👤 Индивидуальные ({ind}): {iline}",
-        f"Начислено: {total_earned} руб.",
+        f"Начислено: {total_earned} руб." + (f" (в т.ч. 🎁 премии {bonus} руб.)" if bonus else ""),
     ]
     if settings.teacher_period_submit_enabled:          # сдача выключена — статуса периода нет
         lines += ["", f"Период: {period_status}"]

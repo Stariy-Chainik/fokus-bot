@@ -59,3 +59,12 @@ class TeacherPayoutRepository(BaseRepository):
         await activity.record(activity.PAYOUT, f"Выплата зарплаты {amount} ₽: {teacher_id} · {period_month}"
                               + (f" · {comment}" if comment else ""), actor=paid_by_tg_id, ref=payout.payout_id)
         return payout
+
+    async def delete(self, payout_id: str) -> bool:
+        """Удалить строку выплаты — отмена премии (bot/services/bonuses.py)."""
+        async with self._locked_row(payout_id=payout_id) as idx:
+            if idx is None:
+                return False
+            await self._delete_row(idx)
+            logger.info("Выплата %s удалена", payout_id)
+            return True

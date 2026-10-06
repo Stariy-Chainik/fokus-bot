@@ -4,6 +4,8 @@
 с историей ставок); выплачено — сумма строк листа teacher_payouts.
 Поддерживаются частичные выплаты (аванс + остаток) и «нестандартные дни»
 (лист salary_day_overrides): админ задаёт минуты смены за дату.
+«🎁 Премия» — сумма сверх зарплаты месяца, начисляется и выплачивается сразу
+(bot/services/bonuses.py: строка teacher_bonuses + парная выплата).
 """
 from __future__ import annotations
 import logging
@@ -19,6 +21,8 @@ from bot.models.enums import LessonType
 from bot.repositories import TeacherRepository, LessonRepository, GroupRepository, BranchRepository
 from bot.repositories.teacher_payout_repo import TeacherPayoutRepository
 from bot.repositories.salary_override_repo import SalaryOverrideRepository
+from bot.repositories.teacher_bonus_repo import TeacherBonusRepository
+from bot.services.bonuses import grant_bonus, revoke_bonus
 from bot.services.salary_service import SalaryService
 from bot.states.admin_states import PayoutStates
 from bot.utils.dates import display_period, last_periods
@@ -90,6 +94,7 @@ async def _render_teacher(
     target, teacher_id: str, period: str,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository | None = None,
 ) -> None:
     teacher = await teacher_repo.get_by_id(teacher_id)
     if not teacher:
@@ -110,8 +115,17 @@ async def _render_teacher(
         for p in payouts:
             note = f" — {p.comment}" if p.comment else ""
             lines.append(f"  • {p.paid_at[:10]}: {p.amount} ₽{note}")
-    overrides = await override_repo.get_for_teacher_period(teacher_id, period)
     rows = []
+    bonuses = await bonus_repo.get_for_teacher_period(teacher_id, period) if bonus_repo else []
+    if bonuses:
+        lines.append("\n<b>🎁 Премии</b> (уже в начислении и в выплатах):")
+        for b in bonuses:
+            lines.append(f"  • {b.created_at[:10]}: {b.amount} ₽{(' — ' + b.comment) if b.comment else ''}")
+            rows.append([InlineKeyboardButton(
+                text=f"🗑 Отменить премию {b.amount} ₽",
+                callback_data=f"payout_bon_del:{b.bonus_id}:{teacher_id}:{period}",
+            )])
+    overrides = await override_repo.get_for_teacher_period(teacher_id, period)
     if overrides:
         lines.append("\n<b>Нестандартные дни:</b>")
         for o in sorted(overrides, key=lambda x: x.date):
@@ -125,6 +139,8 @@ async def _render_teacher(
                                           callback_data=f"payout_all:{teacher_id}:{period}")])
     rows.append([InlineKeyboardButton(text="✏️ Другая сумма (аванс/часть)",
                                       callback_data=f"payout_custom:{teacher_id}:{period}")])
+    rows.append([InlineKeyboardButton(text="🎁 Премия",
+                                      callback_data=f"payout_bonus:{teacher_id}:{period}")])
     rows.append([InlineKeyboardButton(text="📋 Расшифровка начисления",
                                       callback_data=f"payout_detail:{teacher_id}:{period}:0")])
     rows.append([InlineKeyboardButton(text="🕒 Нестандартный день",
@@ -138,10 +154,11 @@ async def cb_payout_teacher(
     callback: CallbackQuery, user: User, state: FSMContext,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
 ) -> None:
     await state.clear()
     _, teacher_id, period = callback.data.split(":", 2)
-    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
+    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
     await callback.answer()
 
 
@@ -150,6 +167,7 @@ async def cb_payout_all(
     callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
 ) -> None:
     _, teacher_id, period = callback.data.split(":", 2)
     teacher = await teacher_repo.get_by_id(teacher_id)
@@ -163,7 +181,7 @@ async def cb_payout_all(
         await callback.answer("Остатка нет — всё выплачено", show_alert=True)
         return
     await payout_repo.add(teacher_id, period, rest, callback.from_user.id, comment="остаток")
-    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
+    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
     await callback.answer(f"Выплата {rest} ₽ записана")
 
 
@@ -184,6 +202,7 @@ async def on_payout_amount(
     message: Message, user: User | None, state: FSMContext,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
 ) -> None:
     if not _is_admin(user):
         return
@@ -199,7 +218,7 @@ async def on_payout_amount(
         return
     await payout_repo.add(teacher_id, period, int(raw), message.from_user.id)
     sent = await message.answer("✅ Выплата записана.")
-    await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
+    await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
 
 
 # ─── Нестандартный день (корректировка минут смены) ─────────────────────────
@@ -261,6 +280,7 @@ async def on_override_comment(
     message: Message, user: User | None, state: FSMContext,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
 ) -> None:
     if not _is_admin(user):
         return
@@ -275,7 +295,7 @@ async def on_override_comment(
     await salary_override_repo.add(teacher_id, d, int(minutes), comment, message.from_user.id)
     logger.info("Корректировка дня: %s %s %d мин (%s)", teacher_id, d, minutes, comment)
     sent = await message.answer(f"✅ Записано: {d[8:10]}.{d[5:7]} — {minutes} мин.")
-    await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
+    await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
 
 
 @router.callback_query(F.data.startswith("payout_ovr_del:"), AdminOnly())
@@ -283,11 +303,76 @@ async def cb_override_delete(
     callback: CallbackQuery, user: User,
     teacher_repo: TeacherRepository, salary_service: SalaryService,
     payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
 ) -> None:
     _, override_id, teacher_id, period = callback.data.split(":", 3)
     await salary_override_repo.delete(override_id)
-    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo)
+    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
     await callback.answer("Корректировка удалена")
+
+
+# ─── Премия: начисляется сверх зарплаты и выплачивается сразу ───────────────
+
+@router.callback_query(F.data.startswith("payout_bonus:"), AdminOnly())
+async def cb_bonus_start(callback: CallbackQuery, user: User, state: FSMContext) -> None:
+    _, teacher_id, period = callback.data.split(":", 2)
+    await state.set_state(PayoutStates.waiting_bonus_amount)
+    await state.update_data(bonus_teacher_id=teacher_id, bonus_period=period)
+    await callback.message.edit_text(
+        f"🎁 <b>Премия</b> — {display_period(period)}\n\n"
+        "Введите сумму премии в рублях (целое число).\n"
+        "Она добавится к начислению месяца и сразу запишется как выплаченная — "
+        "педагог увидит её строкой «Премия» в зарплате.",
+        reply_markup=_kb([[InlineKeyboardButton(text="« Отмена", callback_data=f"payout_t:{teacher_id}:{period}")]]),
+    )
+    await callback.answer()
+
+
+@router.message(PayoutStates.waiting_bonus_amount, F.text)
+async def on_bonus_amount(message: Message, user: User | None, state: FSMContext) -> None:
+    if not _is_admin(user):
+        return
+    raw = (message.text or "").replace(" ", "")
+    if not raw.isdigit() or int(raw) <= 0:
+        await message.answer("Нужно целое положительное число, например 5000.")
+        return
+    await state.update_data(bonus_amount=int(raw))
+    await state.set_state(PayoutStates.waiting_bonus_comment)
+    await message.answer("За что премия? Комментарий увидит педагог — или «-», чтобы пропустить:")
+
+
+@router.message(PayoutStates.waiting_bonus_comment, F.text)
+async def on_bonus_comment(
+    message: Message, user: User | None, state: FSMContext,
+    teacher_repo: TeacherRepository, salary_service: SalaryService,
+    payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
+) -> None:
+    if not _is_admin(user):
+        return
+    data = await state.get_data()
+    await state.clear()
+    teacher_id, period, amount = data.get("bonus_teacher_id"), data.get("bonus_period"), data.get("bonus_amount")
+    if not (teacher_id and period and amount):
+        await message.answer("Сессия устарела, откройте выплаты заново.")
+        return
+    comment = "" if (message.text or "").strip() == "-" else (message.text or "").strip()
+    await grant_bonus(bonus_repo, payout_repo, teacher_id, period, int(amount), comment, message.from_user.id)
+    sent = await message.answer(f"✅ Премия {amount} ₽ начислена и выплачена.")
+    await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
+
+
+@router.callback_query(F.data.startswith("payout_bon_del:"), AdminOnly())
+async def cb_bonus_delete(
+    callback: CallbackQuery, user: User,
+    teacher_repo: TeacherRepository, salary_service: SalaryService,
+    payout_repo: TeacherPayoutRepository, salary_override_repo: SalaryOverrideRepository,
+    bonus_repo: TeacherBonusRepository,
+) -> None:
+    _, bonus_id, teacher_id, period = callback.data.split(":", 3)
+    bonus = await revoke_bonus(bonus_repo, payout_repo, bonus_id, callback.from_user.id)
+    await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
+    await callback.answer(f"Премия {bonus.amount} ₽ отменена" if bonus else "Премия уже отменена")
 
 
 # ─── Расшифровка начисления ──────────────────────────────────────────────────
@@ -304,10 +389,14 @@ async def _detail_lines(
     by_branch: dict[str, dict[str, list[tuple[str, int, bool]]]] = {}
     individual: list[tuple[str, int]] = []
     day_lines: list[tuple[str, str, int]] = []
+    bonus_lines: list[tuple[str, str, int]] = []
     for ln in lines_all:
         dd = f"{ln.date[8:10]}.{ln.date[5:7]}"
         if ln.kind in ("shift", "override"):
             day_lines.append((dd, ln.label, ln.amount))
+            continue
+        if ln.kind == "bonus":
+            bonus_lines.append((dd, ln.label, ln.amount))
             continue
         ls = lessons.get(ln.lesson_id or "")
         if ls is None:
@@ -338,6 +427,9 @@ async def _detail_lines(
         isum = sum(a for _, a in individual)
         out.append(f"👤 <b>Индивидуальные</b> — {len(individual)} зан., {isum} ₽")
         out.extend(f"  • {t} — {a} ₽" for t, a in individual)
+    if bonus_lines:
+        out.append("🎁 <b>Премии</b>")
+        out.extend(f"  • {dd} {label} — {a} ₽" for dd, label, a in bonus_lines)
     if not out:
         out.append("Занятий нет.")
     out.append(f"\n<b>Итого начислено: {sum(ln.amount for ln in lines_all)} ₽</b>")

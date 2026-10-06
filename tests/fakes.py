@@ -22,6 +22,7 @@ from bot.models import (
     TrainingEntry, AthleteTask,
 )
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus, StudentGroupTier
+from bot.repositories.teacher_bonus_repo import TeacherBonus
 from bot.utils.attendees import attendee_ids
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
@@ -974,3 +975,33 @@ class ActivityRepoFake:
         e = ActivityEvent(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), kind, int(actor or 0), text, ref)
         self.items.append(e)
         return e
+
+
+class BonusRepoFake:
+    """Лист teacher_bonuses в памяти: премии педагогам (bot/services/bonuses.py)."""
+
+    def __init__(self, items: list[TeacherBonus] | None = None) -> None:
+        self.items: list[TeacherBonus] = list(items or [])
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_id(self, bonus_id):
+        return next((b for b in self.items if b.bonus_id == bonus_id), None)
+
+    async def get_by_period(self, period):
+        return [b for b in self.items if b.period_month == period]
+
+    async def get_for_teacher_period(self, teacher_id, period):
+        return [b for b in self.items if b.teacher_id == teacher_id and b.period_month == period]
+
+    async def add(self, teacher_id, period, amount, comment, created_by, payout_id=""):
+        b = TeacherBonus(f"BN-{len(self.items) + 1:06d}", teacher_id, period, amount, comment,
+                         f"{period}-18 10:00:00", created_by, payout_id)
+        self.items.append(b)
+        return b
+
+    async def delete(self, bonus_id):
+        before = len(self.items)
+        self.items = [b for b in self.items if b.bonus_id != bonus_id]
+        return len(self.items) < before

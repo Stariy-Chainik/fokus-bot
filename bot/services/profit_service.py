@@ -226,7 +226,7 @@ def calculate_teacher_profit(
     lessons: list[Lesson],
     extra_salary: int = 0,
 ) -> TeacherProfitRow | None:
-    """extra_salary — зарплата вне занятий: смены и корректировки дней (salary_service)."""
+    """extra_salary — зарплата вне занятий: смены, корректировки дней и премии (salary_service)."""
     billed_lessons = [
         row for lesson in lessons
         if (row := calculate_profit_lesson(lesson, teacher)) is not None
@@ -295,7 +295,7 @@ class ProfitService:
             if self._salary_service is not None:
                 extra = sum(
                     line.amount for line in await self._salary_service.lines_for(teacher, period)
-                    if line.kind in ("shift", "override")
+                    if line.kind in ("shift", "override", "bonus")
                 )
             row = calculate_teacher_profit(teacher, lessons, extra_salary=extra)
             if row is not None:

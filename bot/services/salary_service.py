@@ -8,6 +8,9 @@
 
 Корректировка дня (лист salary_day_overrides): нестандартный случай — админ
 задаёт минуты смены за конкретную дату; они заменяют расчёт по группам.
+
+Премия (лист teacher_bonuses): сумма сверх зарплаты месяца — строка «Премия: …»
+после занятий; в итог дня не входит (bot/services/bonuses.py).
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ from bot.utils.constants import MINUTES_PER_UNIT
 @dataclass(frozen=True)
 class SalaryLine:
     date: str
-    kind: str          # lesson | in_shift | shift | override
+    kind: str          # lesson | in_shift | shift | override | bonus
     label: str
     minutes: int
     amount: int
@@ -110,9 +113,10 @@ def salary_total(lines: list[SalaryLine]) -> int:
 class SalaryService:
     """Зарплата педагога с учётом смен и корректировок (данные из репозиториев)."""
 
-    def __init__(self, lesson_repo, override_repo=None) -> None:
+    def __init__(self, lesson_repo, override_repo=None, bonus_repo=None) -> None:
         self._lesson_repo = lesson_repo
         self._override_repo = override_repo
+        self._bonus_repo = bonus_repo
 
     async def overrides_for(self, teacher_id: str, period: str) -> dict[str, tuple[int, str]]:
         if self._override_repo is None:
@@ -122,8 +126,18 @@ class SalaryService:
             for o in await self._override_repo.get_for_teacher_period(teacher_id, period)
         }
 
+    async def bonus_lines(self, teacher_id: str, month: str) -> list[SalaryLine]:
+        """Премии месяца (лист teacher_bonuses) — строками начисления после занятий."""
+        if self._bonus_repo is None:
+            return []
+        return [
+            SalaryLine(date=b.created_at[:10] or f"{month}-01", kind="bonus",
+                       label=f"Премия: {b.comment}" if b.comment else "Премия", minutes=0, amount=b.amount)
+            for b in await self._bonus_repo.get_for_teacher_period(teacher_id, month)
+        ]
+
     async def lines_for(self, teacher, period: str) -> list[SalaryLine]:
-        """period: YYYY-MM (месяц) или YYYY-MM-DD (день — строки только этой даты)."""
+        """period: YYYY-MM (месяц) или YYYY-MM-DD (день — строки только этой даты, без премий)."""
         month = period[:7]
         lessons = await self._lesson_repo.get_by_teacher_and_period(teacher.teacher_id, month)
         from config.settings import settings
@@ -132,8 +146,8 @@ class SalaryService:
             shift_label=settings.shift_label,
         )
         if len(period) == 10:
-            lines = [line for line in lines if line.date == period]
-        return lines
+            return [line for line in lines if line.date == period]
+        return lines + await self.bonus_lines(teacher.teacher_id, month)
 
     async def total_for(self, teacher, period: str) -> int:
         return salary_total(await self.lines_for(teacher, period))
