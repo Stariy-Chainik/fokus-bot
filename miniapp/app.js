@@ -611,13 +611,30 @@ const profitLessonLine = x => `<button class="lesson-line pick" data-go="a.lesso
 SCREENS['a.profit.unit'] = async ({ key, ym }) => {
   const u = await api(`/profit/unit?key=${encodeURIComponent(key)}&ym=${ym}`);
   const row = (l, v, cls = '') => `<div style="display:flex;justify-content:space-between"><span>${l}</span><b class="money ${cls}">${v}</b></div>`;
+  const pcls = v => v > 0 ? 'ok' : v < 0 ? 'bad' : '';
+  const prof = x => x.income - x.salary;
+  // строка занятия: только прибыль с урока; как она сложилась — в карточке занятия (блок «Экономика»)
+  const line = (x, label) => `<button class="lesson-line pick" data-go="a.lesson" data-p='${esc(JSON.stringify({ id: x.lessonId }))}'><span>${x.lessonType === 'group' ? '👥' : '👤'}</span><span>${fdate(x.date)} · ${x.durationMin} мин${x.rent ? ' · 🏟 аренда' : ''}${label ? `<div class="d">${label}</div>` : ''}</span><span class="amt money ${pcls(prof(x))}">${fmt(prof(x))}</span></button>`;
+  let body;
+  if (u.kind === 'group') {
+    body = `<div class="eyebrow">Занятия</div><div class="list">${u.lessons.map(x => line(x, x.students.length ? plural(x.students.length, ['ученик', 'ученика', 'учеников']) : '')).join('')}</div>`;
+  } else {
+    // индивидуальные: по ученикам (решение владельца 06.10.2026) — у кого сколько занятий и прибыли, занятия внутри
+    const byStu = {};
+    u.lessons.forEach(x => { const k = x.students.join(' + ') || '—'; (byStu[k] = byStu[k] || []).push(x); });
+    const groups = Object.entries(byStu).map(([name, ls]) => ({ name, ls, profit: ls.reduce((a, x) => a + prof(x), 0) })).sort((a, b) => b.profit - a.profit);
+    body = `<div class="eyebrow">По ученикам</div>${groups.map(g => `<details class="acc">
+      <summary><span><span class="chev">›</span>${esc(g.name)} <span class="hint">· ${plural(g.ls.length, ['занятие', 'занятия', 'занятий'])}</span></span><span class="r money ${pcls(g.profit)}">${fmt(g.profit)}</span></summary>
+      <div class="accbody">${g.ls.map(x => line(x, '')).join('')}</div></details>`).join('')}`;
+  }
   return { title: u.title, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(u.title)}</div><div class="hint">${fmon(ym)} · ${plural(u.count, ['занятие', 'занятия', 'занятий'])}${u.sub ? ` · ${esc(u.sub)}` : ''}</div></div>
     <div class="card" style="margin-top:10px"><div class="pad money" style="display:grid;gap:6px">
       ${row(u.rent && u.rent === u.income ? 'Аренда зала школе' : 'Выручка с учеников', fmt(u.income))}${u.rent && u.rent !== u.income ? row('в т.ч. аренда зала', fmt(u.rent), 'hint') : ''}
       ${u.ownerIncome ? row('Руководитель · остаётся в прибыли', fmt(u.ownerIncome)) : row('Зарплата педагога', `− ${fmt(u.salary)}`)}
-    </div><div class="total"><span>Прибыль школы</span><span class="big ${u.profit > 0 ? 'ok' : u.profit < 0 ? 'bad' : ''}">${fmt(u.profit)}</span></div></div>
-    <div class="eyebrow">Занятия</div><div class="list">${u.lessons.map(profitLessonLine).join('')}</div>` };
+    </div><div class="total"><span>Прибыль школы</span><span class="big ${pcls(u.profit)}">${fmt(u.profit)}</span></div></div>
+    ${body}
+    <p class="hint" style="margin-top:8px">Справа — прибыль школы с занятия. Тап по занятию — из чего она сложилась.</p>` };
 };
 SCREENS['a.profit.teacher'] = async ({ period, tid }) => {
   const t = await api(`/profit/teacher/${tid}?period=${period}`);
