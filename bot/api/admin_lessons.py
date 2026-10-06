@@ -27,7 +27,6 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
     student_repo = dp["student_repo"]
     submission_repo = dp["submission_repo"]
     lesson_service = dp["lesson_service"]
-    payment_service = dp["payment_service"]
     salary_service = dp["salary_service"]
 
     async def _economy(ls, t, g) -> dict | None:
