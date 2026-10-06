@@ -197,3 +197,21 @@ def test_salaries_show_parent_collection_per_teacher(api):
         ("Иванов Иван", 4800, 2000, 2, "partial"), ("Петрова Анна", 3800, 3000, 1, "partial"),   # групповое 1600 — пополам
     ]
     assert _call(app, "GET", f"/api/admin/salaries/TCH-0404/collection?ym={YM}")[0] == 404
+
+
+def test_profit_units_group_and_individual_with_detail(api):
+    """«Прибыль» по единицам (решение владельца 06.10.2026): группа по посещению и индивидуальные педагога —
+    сразу прибыль; детальный экран показывает выручку, зарплату и занятия."""
+    app, _ = api
+    status, d = _call(app, "GET", f"/api/admin/profit/units?ym={YM}")
+    assert status == 200
+    by_key = {u["key"]: u for u in d["units"]}
+    grp, ind = by_key["g:GRP-0001"], by_key["t:TCH-0001"]
+    assert (grp["kind"], grp["title"], grp["count"], grp["income"], grp["salary"]) == ("group", "БП Джаз", 1, 1600, 1333)
+    assert grp["profit"] == 1600 - 1333 and "lessons" not in grp
+    assert (ind["kind"], ind["count"], ind["income"], ind["salary"], ind["profit"]) == ("individual", 2, 4000, 3000, 1000)
+    assert [u["kind"] for u in d["units"]] == ["group", "individual"]       # группы впереди
+    status, u = _call(app, "GET", f"/api/admin/profit/unit?key=t:TCH-0001&ym={YM}")
+    assert status == 200 and u["profit"] == 1000 and len(u["lessons"]) == 2
+    assert all(x["lessonType"] == "individual" and x["students"] == ["Иванов Иван"] for x in u["lessons"])
+    assert _call(app, "GET", f"/api/admin/profit/unit?key=g:GRP-0404&ym={YM}")[0] == 404

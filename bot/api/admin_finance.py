@@ -13,6 +13,7 @@ from bot.models.enums import LessonType, PaymentStatus
 from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
+from bot.services.profit_service import calculate_profit_lesson
 from bot.utils.attendees import parse_attendees
 from bot.utils.dates import current_period, display_period
 from bot.utils.locks import InProgressGuard
@@ -148,6 +149,68 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             return _json({"error": "bad_request"}, status=400)
         s = await profit_service.get_lesson_summary(day)
         return _json({"date": day, "rows": _profit_rows(s), "totals": _profit_totals(s)})
+
+    async def _profit_units(period: str) -> list[dict]:
+        """Прибыль по единицам (решение владельца 06.10.2026): группа по посещению — одна строка,
+        индивидуальные педагога — одна строка; сразу прибыль, тап — как сложилась. Абонементные группы
+        считаются месяцем и здесь не участвуют (их блок — «Абонементы»)."""
+        teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        units: dict[str, dict] = {}
+        for ls in await lesson_repo.get_all():
+            if not ls.date.startswith(period):
+                continue
+            t = teachers.get(ls.teacher_id)
+            if t is None:
+                continue
+            row = calculate_profit_lesson(ls, t)
+            if row is None:
+                continue
+            service = ls.group_id in settings.revenue_share_group_map        # техгруппа «Индивидуальные — …»
+            if ls.type == LessonType.GROUP and ls.group_id and not service:
+                key, kind = f"g:{ls.group_id}", "group"
+                title = groups[ls.group_id].name if ls.group_id in groups else "Группа"
+                sub = t.name
+            else:
+                key, kind = f"t:{ls.teacher_id}", "individual"
+                title, sub = f"Индивидуальные — {t.name}", ""
+            u = units.setdefault(key, {"key": key, "kind": kind, "title": title, "sub": sub,
+                                       "groupId": ls.group_id if kind == "group" else "", "teacherId": ls.teacher_id,
+                                       "income": 0, "salary": 0, "rent": 0, "ownerIncome": 0, "lessons": [], "owner": row.owner_income > 0})
+            u["income"] += row.income
+            u["salary"] += row.salary
+            u["rent"] += row.rent
+            u["ownerIncome"] += row.owner_income
+            who = ([names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
+                   if ls.type == LessonType.GROUP else
+                   [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n])
+            u["lessons"].append({"lessonId": ls.lesson_id, "date": ls.date, "lessonType": ls.type.value,
+                                 "durationMin": ls.duration_min, "income": row.income, "salary": row.salary,
+                                 "rent": row.rent, "ownerIncome": row.owner_income, "students": who,
+                                 "groupId": ls.group_id or "", "groupName": groups[ls.group_id].name if ls.group_id in groups else "",
+                                 "teacher": t.name})
+        out = []
+        for u in units.values():
+            u["lessons"].sort(key=lambda x: (x["date"], x["lessonId"]))
+            u["count"] = len(u["lessons"])
+            u["profit"] = u["income"] - u["salary"]
+            out.append(u)
+        out.sort(key=lambda u: (u["kind"] != "group", -u["profit"]))
+        return out
+
+    async def profit_units(request: web.Request, user) -> web.Response:
+        period = request.query.get("ym") or current_period()
+        units = await _profit_units(period)
+        return _json({"period": period, "units": [{k: v for k, v in u.items() if k != "lessons"} for u in units]})
+
+    async def profit_unit(request: web.Request, user) -> web.Response:
+        period = request.query.get("ym") or current_period()
+        key = request.query.get("key") or ""
+        unit = next((u for u in await _profit_units(period) if u["key"] == key), None)
+        if unit is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json({"period": period, **unit})
 
     async def profit_subscription(request: web.Request, user) -> web.Response:
         """Состав абонементной группы за месяц: начислено / оплачено по каждому ученику."""
@@ -472,6 +535,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         ("POST", "/debtors/remind", debtors_remind),
         ("GET", "/profit", profit), ("GET", "/profit/day", profit_day), ("GET", "/profit/teacher/{tid}", profit_teacher),
         ("GET", "/profit/subscription/{gid}", profit_subscription), ("GET", "/profit/breakdown", profit_breakdown),
+        ("GET", "/profit/units", profit_units), ("GET", "/profit/unit", profit_unit),
         ("POST", "/finance", finance_add), ("DELETE", "/finance/{eid}", finance_delete),
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
         ("GET", "/salaries/{tid}/collection", salary_collection),
