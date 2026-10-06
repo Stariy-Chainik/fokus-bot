@@ -805,9 +805,48 @@ SCREENS['a.lesson'] = async ({ id }) => {
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(l.type === 'group' ? l.groupName || 'Группа' : l.attendees.map(a => a.name).join(' + '))}</div><div class="hint">${fdate(l.date)} · ${l.durationMin} мин · ${esc(l.teacherName)}${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>${l.locked ? '<div style="margin-top:8px">' + pill('🔒 период сдан', 'mute') + '</div>' : ''}</div>
     ${l.attendees.length ? `<div class="eyebrow">${l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({ lead: initials(a.name), t: esc(a.name), r: a.amount === null ? '' : a.amount ? `<b>${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'), go: 'a.student', p: { id: a.studentId } })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
     ${l.economy ? lessonEconomy(l.economy) : `<div class="card" style="margin-top:10px"><div class="total"><span>Зарплата педагога</span><span class="big">${fmt(l.earned)}</span></div></div>`}
-    <div style="margin-top:12px">${btn(l.locked ? '🗑 Удалить (период сдан)' : '🗑 Удалить занятие', 'delLesson', { id, locked: l.locked }, 'danger')}</div>
-    <p class="hint" style="margin-top:8px">Правка полей не поддерживается — как в боте: удалить и отметить заново.</p>` };
+    <div style="margin-top:12px">${l.canEditAttendance ? btn(l.attendees.length ? '✏️ Изменить, кто был' : '✏️ Отметить, кто был', 'attOpen', { id }, 'sec') : ''}${btn(l.locked ? '🗑 Удалить (период сдан)' : '🗑 Удалить занятие', 'delLesson', { id, locked: l.locked }, 'danger')}</div>
+    <p class="hint" style="margin-top:8px">${l.canEditAttendance ? 'Дату и длительность не правят: удалите и отметьте заново.' : 'Правка полей не поддерживается — как в боте: удалить и отметить заново.'}</p>` };
 };
+/* «Кто был» в сохранённом занятии — общий экран кабинетов администратора и педагога (решение владельца
+   07.10.2026). Журнальные группы (ATTENDANCE_GROUPS): отметку можно добавить и снять, денег она не меняет.
+   «По посещению»: новым начисляется цена группы, уже начисленного снять нельзя (fixed). */
+SCREENS['lesson.att'] = async ({ id }) => {
+  let a = state.ui.att;
+  if (!a || a.id !== id) {
+    const d = await api(`/lessons/${id}/attendance`);
+    a = state.ui.att = { id, d, ids: d.students.filter(s => s.checked).map(s => s.id) };
+  }
+  const d = a.d, on = new Set(a.ids);
+  const added = d.students.filter(s => on.has(s.id) && !s.checked), removed = d.students.filter(s => !on.has(s.id) && s.checked);
+  const row = s => s.fixed
+    ? `<div class="cell static"><span class="mark on">✓</span><span><div class="t">${esc(s.name)}</div><div class="s">начислено ${fmt(s.amount)} — снять нельзя</div></span><span></span></div>`
+    : pick(s.id, on.has(s.id), s.name, s.member ? (d.perVisit && on.has(s.id) && !s.checked ? `начислится ${fmt(d.price)}` : '') : 'не в составе группы в этом месяце', 'attToggle', { v: s.id });
+  return { title: 'Кто был', html: `
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.groupName)}</div><div class="hint">${fdate(d.date)} · ${d.durationMin} мин · отмечено ${on.size}${d.max ? ` из ${d.max}` : ''}</div></div>
+    ${d.students.length ? list(d.students.map(row)) : empty('В группе никого нет', '<p class="hint" style="margin:0">Добавьте учеников в состав группы</p>')}
+    <p class="hint" style="margin-top:8px">${d.perVisit ? `Новым отмеченным начислится цена группы (${fmt(d.price)}); тем, кому уже начислено, отметку не снять — это правится оплатой.` : 'Отметка не меняет абонемент и счета: родители отмеченных увидят занятие в «Занятиях».'}</p>
+    <div style="margin-top:12px">${btn(added.length || removed.length ? `💾 Сохранить${added.length ? ` · +${added.length}` : ''}${removed.length ? ` · −${removed.length}` : ''}` : 'Без изменений', 'attSave', { id }, added.length || removed.length ? '' : 'sec')}</div>` };
+};
+Object.assign(ACT, {
+  attOpen: ({ id }) => { state.ui.att = null; go('lesson.att', { id }); },
+  attToggle: ({ v }) => {
+    const a = state.ui.att; if (!a) return;
+    if (a.ids.includes(v)) { a.ids = a.ids.filter(x => x !== v); render(); return; }
+    if (a.d.max && a.ids.length >= a.d.max) { toast(`Не больше ${a.d.max}`); return; }
+    a.ids = [...a.ids, v]; render();
+  },
+  attSave: async ({ id }) => {
+    const a = state.ui.att; if (!a) return;
+    const changed = a.d.students.some(s => s.checked !== a.ids.includes(s.id));
+    if (!changed) { back(); return; }
+    try {
+      const r = await api(`/lessons/${id}/attendance`, { method: 'PUT', body: { studentIds: a.ids } });
+      state.ui.att = null; back();
+      toast(`Сохранено${r.added ? ` · отмечено ${r.added}` : ''}${r.removed ? ` · снято ${r.removed}` : ''}`);
+    } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  },
+});
 ACT.delLesson = ({ id, locked }) => sheet(`<h3>Удалить занятие?</h3><div class="hint">Начисления родителям и зарплата педагога по нему исчезнут.${locked ? ' Период сдан — вы удаляете как администратор.' : ''}</div><div style="margin-top:12px">${btn('🗑 Удалить', 'doDelLesson', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 ACT.doDelLesson = async ({ id }) => { try { await api(`/lessons/${id}`, { method: 'DELETE' }); closeSheet(); back(); toast('Занятие удалено'); } catch (e) { toast(errText(e)); } };
 

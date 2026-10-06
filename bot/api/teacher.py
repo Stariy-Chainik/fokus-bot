@@ -22,7 +22,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from bot.api.admin import auth_tg_id
-from bot.api.record import RecordError, record_create, record_options
+from bot.api.record import (
+    RecordError, attendance_options, attendance_save, can_edit_attendance, record_create, record_options,
+)
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
@@ -361,8 +363,37 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
             "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
             "rent": lesson_rent(ls),
-            "locked": ls.date[:7] in await _submitted(teacher.teacher_id),
+            "locked": (locked := ls.date[:7] in await _submitted(teacher.teacher_id)),
+            "canEditAttendance": can_edit_attendance(ls, g) and not locked,
         })
+
+    async def _own_lesson(request, teacher):
+        ls = await lesson_repo.get_by_id(request.match_info["lid"])
+        return ls if ls is not None and ls.teacher_id == teacher.teacher_id else None
+
+    async def lesson_attendance(request: web.Request, user, teacher) -> web.Response:
+        ls = await _own_lesson(request, teacher)
+        if ls is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            return _json(await attendance_options(dp, ls))
+        except RecordError as exc:
+            return _json({"error": exc.code, "message": str(exc)}, status=exc.status)
+
+    async def lesson_attendance_save(request: web.Request, user, teacher) -> web.Response:
+        ls = await _own_lesson(request, teacher)
+        if ls is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        try:
+            result = await attendance_save(dp, ls, body, bypass_period_lock=False)
+        except RecordError as exc:
+            return _json({"error": exc.code, "message": str(exc)}, status=exc.status)
+        logger.info("Mini App: педагог %s изменил состав занятия %s: %s", teacher.teacher_id, ls.lesson_id, result)
+        return _json(result)
 
     async def lesson_delete(request: web.Request, user, teacher) -> web.Response:
         lid = request.match_info["lid"]
@@ -1315,6 +1346,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
+        ("GET", "/lessons/{lid}/attendance", lesson_attendance), ("PUT", "/lessons/{lid}/attendance", lesson_attendance_save),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id

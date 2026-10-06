@@ -11,7 +11,7 @@ import logging
 from datetime import date
 
 from bot.models.enums import GroupBillingMode, LessonType
-from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv
+from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv, parse_attendees, tracks_attendance
 from bot.utils.groups import hide_service_groups
 from config.settings import settings
 
@@ -54,7 +54,7 @@ async def record_options(dp, teacher_id: str) -> dict:
         groups.append({
             "id": g.group_id, "name": g.name, "branchId": g.branch_id, "branchName": branches.get(g.branch_id, ""),
             "mode": g.billing_mode.value, "priceFull": g.price_full, "priceShort": g.price_short,
-            "attendance": g.billing_mode == GroupBillingMode.PER_VISIT or g.group_id in settings.attendance_group_id_set,
+            "attendance": tracks_attendance(g),
             "durationFull": g.duration_full, "durationShort": g.duration_short,
             "roster": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value, "partnerId": s.partner_id} for s in roster],
         })
@@ -146,3 +146,52 @@ async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> di
         raise RecordError("period_locked", str(exc), status=409) from exc
     except ValueError as exc:
         raise RecordError("conflict", str(exc), status=409) from exc
+
+
+# ── состав сохранённого занятия: дописать пришедших (решение владельца 07.10.2026) ──────────────
+
+def can_edit_attendance(lesson, group) -> bool:
+    return lesson.type == LessonType.GROUP and tracks_attendance(group)
+
+
+async def attendance_options(dp, lesson) -> dict:
+    """Кого можно отметить: ученики группы в месяце занятия (членство `covers`) и те, кто уже отмечен.
+    `fixed` — начислен (сумма > 0): снять нельзя, деньги правятся оплатами."""
+    group = await dp["group_repo"].get_by_id(lesson.group_id) if lesson.group_id else None
+    if not can_edit_attendance(lesson, group):
+        raise RecordError("not_tracked", "В этой группе посещение не отмечается")
+    students = {s.student_id: s for s in await dp["student_repo"].get_all()}
+    period = lesson.date[:7]
+    pool = {group.group_id}
+    if group.group_id in settings.revenue_share_group_map:   # техгруппа «Индивидуальные — …» без своего состава:
+        pool = set(await dp["teacher_group_repo"].get_groups_for_teacher(lesson.teacher_id)) - {group.group_id}
+    members = {sid for (sid, gid), m in (await dp["student_group_repo"].get_membership_map()).items()
+               if gid in pool and m.covers(period)}             # участниц берут из его групп, как в мастере
+    existing = {e.student_id: e for e in parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)}
+    ids = [sid for sid in dict.fromkeys([*existing, *members]) if sid in students or sid in existing]
+    rows = [{"id": sid, "name": students[sid].name if sid in students else sid,
+             "checked": sid in existing, "amount": existing[sid].amount if sid in existing else 0,
+             "fixed": sid in existing and existing[sid].amount > 0, "member": sid in members}
+            for sid in ids]
+    rows.sort(key=lambda r: (not r["checked"], r["name"].lower()))      # уже отмеченные — сверху
+    return {"lessonId": lesson.lesson_id, "date": lesson.date, "durationMin": lesson.duration_min,
+            "groupId": group.group_id, "groupName": group.name, "mode": group.billing_mode.value,
+            "perVisit": group.billing_mode == GroupBillingMode.PER_VISIT, "price": group.price_full,
+            "max": 3 if group.group_id in settings.revenue_share_group_map else None, "students": rows}
+
+
+async def attendance_save(dp, lesson, body: dict, bypass_period_lock: bool) -> dict:
+    ids = body.get("studentIds") if isinstance(body, dict) else None
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        raise RecordError("bad_request", "Не передан список учеников")
+    group = await dp["group_repo"].get_by_id(lesson.group_id) if lesson.group_id else None
+    students = {s.student_id: s for s in await dp["student_repo"].get_all()}
+    try:
+        result = await dp["lesson_service"].set_attendance(lesson, group, ids, students, bypass_period_lock)
+    except PermissionError as exc:
+        raise RecordError("period_locked", str(exc), status=409) from None
+    except ValueError as exc:
+        code = str(exc)
+        raise RecordError(code, {"not_tracked": "В этой группе посещение не отмечается",
+                                 "too_many": "Не больше трёх участниц"}.get(code, code)) from None
+    return {"ok": True, "added": len(result["added"]), "removed": len(result["removed"]), "kept": len(result["kept"])}
