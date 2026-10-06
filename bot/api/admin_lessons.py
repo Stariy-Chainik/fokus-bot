@@ -30,7 +30,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
     payment_service = dp["payment_service"]
     salary_service = dp["salary_service"]
 
-    async def _economy(ls, t, g) -> dict:
+    async def _economy(ls, t, g) -> dict | None:
         """Что школа заработала с занятия (решение владельца 06.10.2026): выручка с учеников
         (абонемент — доля месяца: сбор группы ÷ число занятий), зарплата педагога (смена — доля дня),
         аренда у прямой оплаты, прибыль. Пояснения — в `note`."""
@@ -38,11 +38,9 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         note, kind = "", "lessons"
         ym = ls.date[:7]
         if g is not None and g.billing_mode.value == "subscription":
-            ledger = await payment_service.compute_ledger_map(since_period=ym, until_period=ym)
-            month = sum(a for (_s, key, m), (a, _p) in ledger.items() if m == ym and key == f"SUB:{g.group_id}")
-            n = sum(1 for x in await lesson_repo.get_all() if x.group_id == g.group_id and x.date.startswith(ym))
-            income = round(month / n) if n else 0
-            kind, note = "subscription", f"абонементы группы за месяц {month} ₽ ÷ {n} зан."
+            # абонемент начисляется за месяц, а не за занятие — делить его по урокам владелец
+            # не хочет (06.10.2026): экономика у таких занятий не показывается, только зарплата
+            return None
         rent = lesson_rent(ls)
         if rent and not income:
             kind, note = "rent", "родители платят педагогу напрямую, школе — аренда зала"
