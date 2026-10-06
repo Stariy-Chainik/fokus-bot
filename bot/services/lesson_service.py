@@ -8,7 +8,6 @@ from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
 from bot.utils import AttendeeEntry, generate_lesson_id, now_str, parse_attendees, period_month_from_date, serialize_attendees
-from bot.utils.attendees import build_group_attendees_csv, tracks_attendance
 from config.settings import settings
 
 from . import activity
@@ -199,51 +198,6 @@ class LessonService:
         await activity.record(activity.LESSON, f"Гость в занятии: {student_id} · {lesson.teacher_id} · {lesson.date}"
                               f" · {lesson.group_id}{' · пробное' if trial else ''}", ref=lesson.lesson_id)
         return new_attendees
-
-    async def set_attendance(
-        self, lesson: Lesson, group: Group | None, student_ids: list[str], students: dict,
-        bypass_period_lock: bool = False,
-    ) -> dict:
-        """Состав сохранённого группового занятия (решение владельца 07.10.2026): дописать пришедших
-        и снять ошибочно отмеченных — только там, где отмечают посещение (`tracks_attendance`).
-
-        Уже начисленного ученика (сумма в снимке > 0) не снимаем: по нему могли заплатить, а деньги
-        правятся оплатами, не составом. Новым — цена группы на сейчас, как при записи занятия
-        (тариф ученика, `build_group_attendees_csv`); в журнальных группах — 0, без начислений.
-        Возвращает {"added", "removed", "kept", "attendees"}; ошибки — ValueError(код) / PermissionError.
-        """
-        if lesson.type != LessonType.GROUP or not tracks_attendance(group):
-            raise ValueError("not_tracked")
-        assert group is not None
-        if not bypass_period_lock:
-            await self._ensure_not_submitted(lesson.teacher_id, period_month_from_date(lesson.date))
-        wanted = list(dict.fromkeys(sid for sid in student_ids if sid in students))
-        existing = parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)
-        kept = [e for e in existing if e.student_id in wanted or e.amount > 0]
-        removed = [e.student_id for e in existing if e not in kept]
-        have = {e.student_id for e in kept}
-        new_ids = [sid for sid in wanted if sid not in have]
-        tiers = {sid: students[sid].group_tier.value for sid in new_ids}
-        added = parse_attendees(build_group_attendees_csv(group, new_ids, tiers) or "",
-                                default_duration=lesson.duration_min)
-        entries = kept + added
-        if group.group_id in settings.revenue_share_group_map and len(entries) > 3:
-            raise ValueError("too_many")
-        extended = group.billing_mode == GroupBillingMode.PER_VISIT or any(e.amount > 0 for e in entries)
-        csv = serialize_attendees(entries) if extended else ",".join(e.student_id for e in entries)
-        result = {"added": [e.student_id for e in added], "removed": removed,
-                  "kept": [e.student_id for e in existing if e.student_id not in wanted and e.amount > 0],
-                  "attendees": csv}
-        if not added and not removed:
-            return result
-        await self._lesson_repo.update_attendees(lesson.lesson_id, csv)
-        await activity.record(activity.LESSON, (
-            f"Посещаемость изменена: {lesson.teacher_id} · {lesson.date} · {lesson.group_id}"
-            + (f" · + {', '.join(result['added'])}" if added else "")
-            + (f" · − {', '.join(removed)}" if removed else "")
-            + (" · администратором" if bypass_period_lock else "")), ref=lesson.lesson_id)
-        logger.info("Состав занятия %s: +%s −%s", lesson.lesson_id, result["added"], removed)
-        return result
 
     # ─── Удаление ─────────────────────────────────────────────────────────
 

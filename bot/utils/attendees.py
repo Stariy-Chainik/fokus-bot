@@ -96,14 +96,6 @@ def attendee_ids(raw: str | None) -> list[str]:
     return [e.student_id for e in parse_attendees(raw)]
 
 
-def tracks_attendance(group: "Group | None") -> bool:
-    """Отмечают ли в группе, кто пришёл: «по посещению» (за это платят) и ATTENDANCE_GROUPS
-    (абонемент или без оплаты, журнал без начислений)."""
-    from config.settings import settings
-    return group is not None and (group.billing_mode == GroupBillingMode.PER_VISIT
-                                  or group.group_id in settings.attendance_group_id_set)
-
-
 def build_group_attendees_csv(
     group: "Group | None", attendee_ids: list[str], tiers: dict[str, str],
 ) -> str | None:

@@ -139,9 +139,8 @@ SCREENS['t.lesson'] = async ({ id }) => {
       : `<div class="total"><span>Мне начислено</span><span class="big">${fmt(l.earned)}</span></div>`}</div>
     <div style="margin-top:12px">${l.locked
       ? `<div class="card pad hint">Период сдан — занятие меняет только администратор.</div>`
-      : (l.canEditAttendance ? btn(l.roster || !l.attendees.length ? '✏️ Отметить, кто был' : '✏️ Изменить, кто был', 'attOpen', { id }, 'sec') : '')
-        + btn('🗑 Удалить занятие', 'tDelLesson', { id }, 'danger')}</div>
-    <p class="hint" style="margin-top:10px">${l.canEditAttendance ? 'Дату и длительность не правят: удалите и отметьте заново.' : 'Правка полей не поддерживается — как в боте: удалить и отметить заново.'}</p>` };
+      : btn('🗑 Удалить занятие', 'tDelLesson', { id }, 'danger')}</div>
+    <p class="hint" style="margin-top:10px">Правка полей не поддерживается — как в боте: удалить и отметить заново.</p>` };
 };
 
 /* ── Группы, ученики ─────────────────────────────────────────────────── */

@@ -8,9 +8,7 @@ from aiohttp import web
 
 from bot.models.enums import LessonType
 from bot.services.billing_service import build_billing_rows, calc_earned
-from bot.api.record import (
-    RecordError, attendance_options, attendance_save, can_edit_attendance, record_create, record_options,
-)
+from bot.api.record import RecordError, record_create, record_options
 from bot.services.profit_service import is_owner, lesson_rent
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from config.settings import settings
@@ -123,33 +121,8 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             "attendees": attendees, "recordedAt": ls.recorded_at,
             "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
             "locked": await _locked(ls),
-            "canEditAttendance": can_edit_attendance(ls, g),    # администратор правит и в сданном периоде
             "economy": await _economy(ls, t, g),
         })
-
-    async def lesson_attendance(request: web.Request, user) -> web.Response:
-        ls = await lesson_repo.get_by_id(request.match_info["lid"])
-        if ls is None:
-            return _json({"error": "not_found"}, status=404)
-        try:
-            return _json(await attendance_options(dp, ls))
-        except RecordError as exc:
-            return _json({"error": exc.code, "message": str(exc)}, status=exc.status)
-
-    async def lesson_attendance_save(request: web.Request, user) -> web.Response:
-        ls = await lesson_repo.get_by_id(request.match_info["lid"])
-        if ls is None:
-            return _json({"error": "not_found"}, status=404)
-        try:
-            body = await request.json()
-        except Exception:
-            body = None
-        try:
-            result = await attendance_save(dp, ls, body, bypass_period_lock=True)
-        except RecordError as exc:
-            return _json({"error": exc.code, "message": str(exc)}, status=exc.status)
-        logger.info("Mini App: админ %s изменил состав занятия %s: %s", user.tg_id, ls.lesson_id, result)
-        return _json(result)
 
     async def lesson_delete(request: web.Request, user) -> web.Response:
         lid = request.match_info["lid"]
@@ -183,8 +156,6 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         return _json(result)
 
     routes = [("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
-              ("GET", "/lessons/{lid}/attendance", lesson_attendance),
-              ("PUT", "/lessons/{lid}/attendance", lesson_attendance_save),
               ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view)]
     for method, path, handler in routes:
         app.router.add_route(method, prefix + path, guard(handler))
