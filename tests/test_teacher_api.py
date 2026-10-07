@@ -12,7 +12,7 @@ from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import (
     AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake,
-    mk_entry, mk_lesson, mk_payment, mk_submission, mk_user,
+    mk_entry, mk_lesson, mk_payment, mk_student, mk_submission, mk_user,
 )
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, make_api
 from tests.test_telegram_auth import make_init_data
@@ -842,3 +842,25 @@ def test_payment_notify_teacher_gets_notice_without_full_bill(api, monkeypatch):
     monkeypatch.setattr(settings, "payment_notify_teacher_ids", "")
     asyncio.run(pay_and_wait())
     assert sent == []                                               # без настройки — как раньше, тишина
+
+
+def test_teacher_renames_student_of_own_group(api):
+    """«✏️ Имя» в карточке ученика: только ученик своих групп; пусто/мусор — 400, точный дубль другого
+    ученика — 409 до подтверждения; администраторам — «было / стало»."""
+    app, dp = api
+    dp["student_repo"].items.append(mk_student("STU-0009", "Чужой Ученик"))
+    url = "/api/teacher/students/STU-0002"
+    assert _call(app, "PATCH", "/api/teacher/students/STU-0009", json={"name": "Новое Имя"})[0] == 404   # не в его группах
+    assert _call(app, "PATCH", url, json={"name": "  "})[0] == 400
+    assert _call(app, "PATCH", url, json={"name": "123"})[0] == 400
+    status, r = _call(app, "PATCH", url, json={"name": "Иванов  Иван"})
+    assert status == 409 and r["error"] == "duplicate" and r["students"] == [{"id": "STU-0001", "name": "Иванов Иван"}]
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0002")).name == "Петрова Анна"
+    bot = FakeBot()
+    status, r = _call(app, "PATCH", url, json={"name": "  Петрова   Ания "}, bot=bot)
+    assert status == 200 and r == {"ok": True, "name": "Петрова Ания"}
+    assert asyncio.run(dp["student_repo"].get_by_id("STU-0002")).name == "Петрова Ания"
+    assert bot.sent[0][0] == ADMIN_TG and "Было: Петрова Анна" in bot.sent[0][1] and "Стало: Петрова Ания" in bot.sent[0][1]
+    assert _call(app, "PATCH", url, json={"name": "Петрова Ания"})[1]["unchanged"] is True
+    status, r = _call(app, "PATCH", url, json={"name": "Иванов Иван", "force": True})
+    assert status == 200 and r["name"] == "Иванов Иван"

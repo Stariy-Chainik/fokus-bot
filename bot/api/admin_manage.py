@@ -340,7 +340,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         name = (body.get("name") or "").strip()
         if not name:
             return _json({"error": "bad_request"}, status=400)
-        ok = await student_repo.update_name(request.match_info["sid"], name)
+        ok = await student_repo.update_name(request.match_info["sid"], name, actor=user.tg_id)
         return _json({"ok": ok}, status=200 if ok else 404)
 
     async def student_delete(request: web.Request, user) -> web.Response:

@@ -741,7 +741,7 @@ class StudentRepoWritable(StudentRepoFake):
         self.items.append(s)
         return replace(s)
 
-    async def update_name(self, sid, name):
+    async def update_name(self, sid, name, actor=0):
         s = self._find(sid)
         if s: s.name = name  # noqa: E701
         return s is not None

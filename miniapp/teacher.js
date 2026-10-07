@@ -184,6 +184,21 @@ ACT.tAddDo = async ({ gid, studentId, name, force }) => {
   try { const r = await api(`/groups/${gid}/members`, { method: 'POST', body: studentId ? { studentId } : { name, force: !!force } }); closeSheet(); render(); toast(r.created ? `Добавлен новый ученик: ${r.name}` : `${r.name} — в группе`); }
   catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
+/* Исправить фамилию и имя ученика своих групп (решение владельца 07.10.2026). */
+ACT.tRenameAsk = ({ sid, name }) => sheet(`<h3>Изменить имя ученика</h3>${field('t-rn', 'Фамилия и имя', name, 'maxlength="60" autocomplete="off"')}
+  <p class="hint">Сначала фамилия, потом имя. В уже записанных индивидуальных занятиях останется старое написание. Администратор получит сообщение.</p>
+  <div style="margin-top:12px">${btn('💾 Сохранить', 'tRenameDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tRenameDo = async ({ sid, force }) => {
+  const name = val('t-rn').trim().replace(/\s+/g, ' ');
+  if (name.length < 3) { toast('Введите фамилию и имя'); return; }
+  try {
+    const r = await api(`/students/${sid}`, { method: 'PATCH', body: { name, force: !!force } });
+    closeSheet(); render(); toast(r.unchanged ? 'Имя не изменилось' : 'Имя исправлено');
+  } catch (e) {
+    if (e.code === 'duplicate' && confirm(`Ученик «${e.data.students.map(x => x.name).join('», «')}» уже есть в базе. Всё равно сохранить такое имя?`)) { ACT.tRenameDo({ sid, force: true }); return; }
+    if (e.code !== 'duplicate') toast(e.data && e.data.message ? e.data.message : errText(e));
+  }
+};
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
@@ -235,8 +250,9 @@ async function tGroupPay(g, id, ym) {
 SCREENS['t.student'] = async ({ id, ym }) => {
   const s = await api(`/students/${id}${ym ? `?ym=${ym}` : ''}`);
   return { title: s.name, html: `
-    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(s.name)}</div>
+    <div class="card pad"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><div style="font-weight:800;font-size:16px">${esc(s.name)}</div>
       <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div></div>
+      <button class="chip" style="padding:4px 10px;white-space:nowrap" data-act="tRenameAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name }))}'>✏️ Имя</button></div></div>
     ${(s.tariffs || []).length ? `<div class="eyebrow">Абонемент</div>${list(s.tariffs.map(g => `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)} в месяц${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>`))}` : ''}
     <div style="margin-top:10px">${list([cell({ lead: '📅', plain: true, t: 'Все занятия ученика', s: state.me.canBill ? 'по месяцам: кто вёл, группа, сумма, оплата' : 'по месяцам: кто вёл, группа', go: 'a.student.lessons', p: { id, name: s.name } })])}</div>

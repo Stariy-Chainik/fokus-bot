@@ -83,13 +83,13 @@ class StudentRepository(BaseRepository):
         await activity.record(activity.STUDENT, f"Новый ученик: {student_id} {name}", ref=student_id)
         return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])
 
-    async def update_name(self, student_id: str, name: str) -> bool:
+    async def update_name(self, student_id: str, name: str, actor: int = 0) -> bool:
         async with self._locked_row(student_id=student_id) as row_idx:
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, 2, name)
         from bot.services import activity
-        await activity.record(activity.STUDENT, f"Переименован ученик {student_id}: {name}", ref=student_id)
+        await activity.record(activity.STUDENT, f"Переименован ученик {student_id}: {name}", actor=actor, ref=student_id)
         return True
 
     async def update_tier(self, student_id: str, tier: StudentGroupTier) -> bool:

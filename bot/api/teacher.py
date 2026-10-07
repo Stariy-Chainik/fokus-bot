@@ -495,6 +495,37 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                     "новый" if created else "существующий")
         return _json({"ok": True, "studentId": s.student_id, "name": s.name, "created": created})
 
+    async def student_rename(request: web.Request, user, teacher) -> web.Response:
+        """Исправить фамилию/имя ученика своих групп (решение владельца 07.10.2026; раньше — «✏️ Изменить имя»
+        в боте). Точный дубль имени другого ученика — 409 `duplicate`, повтор с `force`. Администраторам — сообщение."""
+        sid = request.match_info["sid"]
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        name = " ".join(str((body or {}).get("name") or "").split())
+        if not 3 <= len(name) <= 60 or not any(ch.isalpha() for ch in name):
+            return _json({"error": "bad_request", "message": "Введите фамилию и имя"}, status=400)
+        if name == s.name:
+            return _json({"ok": True, "name": name, "unchanged": True})
+        same = [x for x in await student_repo.get_all()
+                if x.student_id != sid and _norm_name(x.name) == _norm_name(name)]
+        if same and not bool((body or {}).get("force")):
+            return _json({"error": "duplicate", "message": "Ученик с таким именем уже есть в базе",
+                          "students": [{"id": x.student_id, "name": x.name} for x in same]}, status=409)
+        if not await student_repo.update_name(sid, name, actor=user.tg_id):
+            return _json({"error": "not_found"}, status=404)
+        if bot is not None:
+            await notify(bot, [u.tg_id for u in await user_repo.get_admins()],
+                         f"✏️ Педагог {teacher.name} исправил имя ученика\nБыло: {s.name}\nСтало: {name}")
+        logger.info("Mini App: педагог %s переименовал %s: %s → %s", teacher.teacher_id, sid, s.name, name)
+        return _json({"ok": True, "name": name})
+
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
         он остаётся за учеником и пишется в сообщение администраторам. Абонементная группа — пометка
@@ -1318,7 +1349,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
-        ("GET", "/students/{sid}", student),
+        ("GET", "/students/{sid}", student), ("PATCH", "/students/{sid}", student_rename),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
