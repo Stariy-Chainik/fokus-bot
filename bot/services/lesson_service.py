@@ -7,7 +7,7 @@ from bot.models.enums import GroupBillingMode, LessonType
 from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
-from bot.utils import AttendeeEntry, generate_lesson_id, now_str, parse_attendees, period_month_from_date, serialize_attendees
+from bot.utils import AttendeeEntry, now_str, parse_attendees, period_month_from_date, serialize_attendees
 from config.settings import settings
 
 from . import activity
@@ -68,11 +68,8 @@ class LessonService:
             await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
 
         now = now_str()
-        existing_ids = await self._lesson_repo.get_existing_ids()
-        lesson_id = generate_lesson_id(existing_ids)
-
         lesson = Lesson(
-            lesson_id=lesson_id,
+            lesson_id="",                     # номер выдаёт add_new под замком листа
             teacher_id=teacher.teacher_id,
             teacher_name=teacher.name,
             type=lesson_type,
@@ -93,7 +90,8 @@ class LessonService:
             student_4_name=student_4_name,
         )
 
-        await self._lesson_repo.add(lesson)
+        lesson = await self._lesson_repo.add_new(lesson)
+        lesson_id = lesson.lesson_id
         logger.info("Создано занятие %s teacher=%s date=%s",
                     lesson_id, teacher.teacher_id, lesson_date)
         await activity.record(activity.LESSON, (

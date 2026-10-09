@@ -34,6 +34,12 @@ class _FakeLessonRepo:
     async def add(self, lesson):
         self.added.append(lesson)
 
+    async def add_new(self, lesson):
+        from bot.utils import generate_lesson_id
+        lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
+        await self.add(lesson)
+        return lesson
+
 
 class _FakeSubmissionRepo:
     def __init__(self, submitted_periods=()):

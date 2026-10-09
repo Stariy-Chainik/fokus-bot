@@ -79,6 +79,16 @@ class LessonRepository(BaseRepository):
                 return True
         return False
 
+    async def add_new(self, lesson: Lesson) -> Lesson:
+        """Записать занятие со свежим номером. Номер выдаётся под замком листа: два одинаковых запроса
+        «Сохранить» с разницей в секунду (двойное касание на iPhone, 10.10.2026) читали один максимум
+        и оба записали LES-002440 — у пары занятие задвоилось под одним номером."""
+        from bot.utils import generate_lesson_id
+        async with self._sheet_lock():
+            lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
+            await self.add(lesson)
+        return lesson
+
     async def add(self, lesson: Lesson) -> Lesson:
         await self._append_row([
             lesson.lesson_id,

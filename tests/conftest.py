@@ -19,6 +19,7 @@ _RESET = {
     "hall_rent_since_period": "",
     "parent_receipt_email": True,
     "athlete_group_ids": "GRP-0001",
+    "subscription_edit_groups": "",
 }
 
 
@@ -31,6 +32,8 @@ def _neutral_settings(monkeypatch):
     rate_history.load([])
     activity.setup(None)      # лента изменений: тест DI включает её на живой лист — сбрасываем до и после
     pending_queue.setup(None)
+    from bot.api import record
+    record._recent.clear()    # память о недавних «Сохранить» общая для процесса — между тестами не переносим
     yield
     rate_history.load([])
     activity.setup(None)

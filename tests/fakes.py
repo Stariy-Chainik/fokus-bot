@@ -233,6 +233,12 @@ class LessonRepoFake:
     async def get_existing_ids(self):
         return [x.lesson_id for x in self.items]
 
+    async def add_new(self, lesson):
+        """Как LessonRepository.add_new: свежий номер и запись."""
+        from bot.utils import generate_lesson_id
+        lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
+        return await self.add(lesson)
+
     async def individual_lesson_exists(self, teacher_id, student_id, lesson_date):
         for ls in self.items:
             if ls.teacher_id != teacher_id or ls.date != lesson_date:

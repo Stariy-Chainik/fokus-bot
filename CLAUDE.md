@@ -319,6 +319,7 @@ Module-level `InProgressGuard` lockers (unified in P2, see [bot/utils/locks.py](
 - `_sending_in_progress`, `_confirming_in_progress`, `_group_sending` in `admin/bills/_base.py`
 - `_reminding` in `admin/debtors.py`
 - `_seen` in `DedupUpdateMiddleware` (raw set + TTL GC)
+- **Двойное «Сохранить» в мастере занятий** (случай 10.10.2026: две пары записаны дважды под одними номерами LES-002440/2441): номер занятия выдаёт `LessonRepository.add_new` под замком листа (как `PaymentRepository.add_new`); `bot/api/record.py::record_create` помнит запрос 30 с (`_recent`, ключ — педагог, тип, дата, длительность, группа, ученики, тарифы) — повтор ждёт первый и получает его результат с `repeat: True`, занятия не создаются; кнопка «💾 Сохранить» мастера (`rwSave`) блокируется на время запроса. Тесты — `tests/test_record_double_save.py`.
 
 ### ID format
 

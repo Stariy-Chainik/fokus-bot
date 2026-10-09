@@ -7,7 +7,9 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from datetime import date
 
 from bot.models.enums import GroupBillingMode, LessonType
@@ -78,7 +80,51 @@ async def record_options(dp, teacher_id: str) -> dict:
     }
 
 
+REPEAT_WINDOW_SEC = 30.0
+_recent: dict[tuple, tuple[float, asyncio.Future]] = {}
+
+
+def _request_key(teacher_id: str, body: dict) -> tuple:
+    """Что считается тем же самым сохранением: педагог, тип, дата, длительность, группа, ученики, тарифы."""
+    ids = body.get("studentIds") if isinstance(body.get("studentIds"), list) else []
+    tiers = body.get("tiers") if isinstance(body.get("tiers"), dict) else {}
+    return (teacher_id, body.get("kind"), body.get("date"), body.get("durationMin"), body.get("groupId") or "",
+            tuple(sorted(str(i) for i in ids)), tuple(sorted((str(k), str(v)) for k, v in tiers.items())))
+
+
 async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> dict:
+    """Создать занятие(я) по данным мастера; повтор того же запроса в течение 30 с не создаёт занятия заново.
+
+    Случай 10.10.2026: два одинаковых «Сохранить» с iPhone с разницей в секунду записали обе пары дважды.
+    Второй запрос ждёт первый и получает его результат с `repeat: True`; если первый упал — пробует сам.
+    """
+    key = _request_key(teacher.teacher_id, body)
+    while True:
+        now = time.monotonic()
+        for k in [k for k, (ts, _) in _recent.items() if now - ts > REPEAT_WINDOW_SEC]:
+            _recent.pop(k, None)
+        hit = _recent.get(key)
+        if hit is None:
+            break
+        result = await asyncio.shield(hit[1])
+        if result is not None:
+            logger.info("Запись занятия: повтор запроса %s за %.1f с — новые занятия не создаются",
+                        result.get("lessons"), time.monotonic() - hit[0])
+            return {**result, "repeat": True}
+        # первый запрос не удался (его ключ уже снят) — пробуем записать сами
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
+    _recent[key] = (time.monotonic(), fut)
+    try:
+        result = await _record_create(dp, teacher, body, bypass_period_lock)
+    except BaseException:
+        _recent.pop(key, None)
+        fut.set_result(None)
+        raise
+    fut.set_result(result)
+    return result
+
+
+async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> dict:
     """Создать занятие(я) по данным мастера. Ошибки — RecordError (код + текст для пользователя)."""
     lesson_service, group_repo, student_repo = dp["lesson_service"], dp["group_repo"], dp["student_repo"]
     kind, day, duration = body.get("kind"), body.get("date"), body.get("durationMin")
