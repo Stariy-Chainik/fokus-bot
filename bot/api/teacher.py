@@ -623,11 +623,22 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 info = await frequency_info(dp["subscription_override_repo"], sid, g) if g else {}
                 if info:
                     tariffs.append({"id": gid, "name": g.name, **info})
+        # абонемент месяца в группах, где педагог может поставить сумму (✏️ в карточке, тот же PUT, что в счёте)
+        subscriptions = []
+        editable = await _sub_edit_group_ids(teacher)
+        if editable & set(gids):
+            ledgers = await payment_service.ledger_for(s, ym, sync=False)
+            for gid in gids:
+                led = ledgers.get(f"{SUBSCRIPTION_KEY_PREFIX}{gid}") if gid in editable else None
+                if led is not None:
+                    subscriptions.append({"groupId": gid, "name": groups_map.get(gid, gid),
+                                          "total": led.accrued, "paid": led.paid})
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value,
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
+            "subscriptions": subscriptions,
             "period": ym,
             "lessons": [_lesson_brief(ls, teacher, groups_map, names)
                         for ls in sorted(mine, key=lambda x: x.date)],
@@ -873,6 +884,14 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _own_group_ids(teacher) -> set:
         return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
 
+    async def _sub_edit_group_ids(teacher) -> set:
+        """Где педагог ставит ученику абонемент на месяц: педагог со счетами — во всех своих группах,
+        остальные — только в своих группах из SUBSCRIPTION_EDIT_GROUPS (решение владельца 09.10.2026)."""
+        own = await _own_group_ids(teacher)
+        if teacher.teacher_id in settings.billing_teacher_id_set:
+            return own
+        return own & settings.subscription_edit_group_map.get(teacher.teacher_id, set())
+
     async def _queue_scope(user) -> set:
         """Ученики, чьи заявки об оплате педагог решает сам: все ученики его групп."""
         members: set[str] = set()
@@ -1068,11 +1087,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                        "amount": m["amount"], "paid": m["paid"]} for m in marks],
         })
 
-    @billing_only
     async def bills_sub_amount(request: web.Request, user, teacher) -> web.Response:
         """«Абонемент за этот месяц»: педагог со счетами ставит ученику своей группы сумму абонемента на месяц
         (пришёл не с начала месяца и т. п.). Это переопределение ученик/месяц, как у администратора; ниже уже
-        оплаченного поставить нельзя; администраторам — сообщение (решение владельца 02.10.2026)."""
+        оплаченного поставить нельзя; администраторам — сообщение (решение владельца 02.10.2026).
+        Без счетов — только в группах из SUBSCRIPTION_EDIT_GROUPS (решение владельца 09.10.2026)."""
         sid = request.match_info["sid"]
         try:
             body = await request.json()
@@ -1083,7 +1102,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         reason = str((body or {}).get("reason") or "")[:120]
         if not isinstance(gid, str) or not isinstance(amount, int) or amount < 0:
             return _json({"error": "bad_request", "message": "Нужны группа и сумма"}, status=400)
-        if gid not in await _own_group_ids(teacher) or not await visibility.is_visible(teacher.teacher_id, sid):
+        if gid not in await _sub_edit_group_ids(teacher) or not await visibility.is_visible(teacher.teacher_id, sid):
             return _json({"error": "not_found"}, status=404)
         s = await student_repo.get_by_id(sid)
         group = await group_repo.get_by_id(gid)

@@ -282,6 +282,20 @@ class Settings(BaseSettings):
                 out.setdefault(tid.strip(), set()).add(gid.strip())
         return out
 
+    # Педагог без счетов, которому можно менять абонемент на месяц ученикам отдельных своих групп
+    # (решение владельца 09.10.2026). Формат: TCH-0002:GRP-0025,...
+    subscription_edit_groups: str = Field(default="", alias="SUBSCRIPTION_EDIT_GROUPS")
+
+    @property
+    def subscription_edit_group_map(self) -> dict:
+        """teacher_id → {group_id}: в этих группах педагог ставит ученику сумму абонемента на месяц."""
+        out: dict[str, set] = {}
+        for pair in self.subscription_edit_groups.replace("|", ",").split(","):
+            tid, _, gid = pair.strip().partition(":")
+            if tid.strip() and gid.strip():
+                out.setdefault(tid.strip(), set()).add(gid.strip())
+        return out
+
     @property
     def senior_teacher_id_set(self) -> set:
         return {t.strip() for t in self.senior_teacher_ids.replace("|", ",").split(",") if t.strip()}
