@@ -12,6 +12,7 @@ import logging
 from aiohttp import web
 
 from bot.models.enums import GroupBillingMode, StudentGroupTier
+from bot.services.kindergarten import clean_value, is_kindergarten_group
 from bot.services.membership import leave_group
 from bot.services.student_service import TierToggleError
 from bot.utils.dates import current_period
@@ -128,7 +129,8 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
                 continue
             s = students[sid]
             members.append({"id": sid, "name": s.name, "joined": m.joined_period or "", "left": m.left_period or "",
-                            "tier": getattr(s.group_tier, "value", str(s.group_tier)), "hasParent": bool(s.parent_addrs)})
+                            "tier": getattr(s.group_tier, "value", str(s.group_tier)), "hasParent": bool(s.parent_addrs),
+                            "kgroup": s.kindergarten_group})
         members.sort(key=lambda x: (bool(x["left"]), x["name"].lower()))
         overrides = [{"periodMonth": o.period_month, "studentId": o.student_id,
                       "studentName": students[o.student_id].name if o.student_id in students else None, "amount": o.amount}
@@ -138,7 +140,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
             **_group_dto(g, sum(1 for m in members if not m["left"])), "branchName": branch.name if branch else g.branch_id,
             "teachers": [{"id": t.teacher_id, "name": t.name, "assigned": t.teacher_id in assigned}
                          for t in sorted(await teacher_repo.get_all(), key=lambda t: t.name)],
-            "members": members, "overrides": overrides,
+            "members": members, "overrides": overrides, "kindergarten": is_kindergarten_group(g),
             "schedule": [{"id": x.slot_id, "weekday": x.weekday, "start": x.start, "end": x.end, "teacherId": x.teacher_id}
                          for x in (await schedule_repo.get_for_group(gid) if schedule_repo is not None else [])],
         })
@@ -343,6 +345,16 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         ok = await student_repo.update_name(request.match_info["sid"], name, actor=user.tg_id)
         return _json({"ok": ok}, status=200 if ok else 404)
 
+    async def student_kgroup(request: web.Request, user) -> web.Response:
+        """Группа ребёнка в детском саду: номер или название, пусто — стереть (решение владельца 10.10.2026)."""
+        body = await _body(request) or {}
+        value = clean_value(body.get("value"))
+        if value is None:
+            return _json({"error": "too_long", "message": "Не длиннее 40 символов"}, status=400)
+        ok = await student_repo.update_kindergarten_group(request.match_info["sid"], value, actor=user.tg_id,
+                                                          who="администратор")
+        return _json({"ok": ok, "value": value}, status=200 if ok else 404)
+
     async def student_delete(request: web.Request, user) -> web.Response:
         sid = request.match_info["sid"]
         ok = await student_service.delete_student(sid)
@@ -498,6 +510,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         ("POST", "/groups/{gid}/members", member_add), ("DELETE", "/groups/{gid}/members/{sid}", member_remove),
         ("PUT", "/groups/{gid}/members/{sid}", member_periods),
         ("POST", "/students", student_add), ("PATCH", "/students/{sid}", student_patch), ("DELETE", "/students/{sid}", student_delete),
+        ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("GET", "/students/{sid}/partner-candidates", partner_candidates), ("PUT", "/students/{sid}/partner", partner_put),
         ("PUT", "/students/{sid}/groups", student_groups), ("POST", "/students/{sid}/tier", student_tier),
         ("GET", "/clients", clients), ("PUT", "/students/{sid}/client", student_client),

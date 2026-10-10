@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def build(token: str, deps: dict, tg_bot):
+    from .handlers import _common
+    _common.DEPS.clear()
+    _common.DEPS.update(deps)
     bot = Bot(token, format=ParseMode.HTML)
     dp = Dispatcher(router_id="max")
     dp.register_outer_middleware(DedupMiddleware())

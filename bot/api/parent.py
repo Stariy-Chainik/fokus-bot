@@ -24,6 +24,7 @@ from bot.api.admin import auth_tg_id
 from bot.utils.bill_format import payment_purpose
 from bot.services import activity, payment_ledger
 from bot.services.diary_service import place_icon
+from bot.services.kindergarten import clean_value, kindergarten_group_names
 from bot.services import parent_unlink
 from bot.services.parent_notifier import TG
 from bot.screens.adapters import to_aiogram_markup
@@ -99,8 +100,15 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         return {"accrued": accrued, "paid": paid, "rest": rest}
 
     # ── профиль и сводка ─────────────────────────────────────────────────
+    async def _kg(children) -> dict:
+        """student_id → садовые группы школы, где ребёнок занимается (пусто — не садовый)."""
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        return {s.student_id: await kindergarten_group_names(s.student_id, dp["student_group_repo"], groups)
+                for s in children}
+
     async def me(request: web.Request, tg_id, children) -> web.Response:
         student_group_repo = dp["student_group_repo"]
+        kg = await _kg(children)
         name = ""
         for s in children:                               # имя родителя — из карточки клиента школы
             if s.client_id:
@@ -113,6 +121,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             "historySince": settings.parent_bills_since_period,   # раньше этого месяца экранов нет
             "children": [{
                 "id": s.student_id, "name": s.name,
+                "kindergarten": bool(kg[s.student_id]), "kgroup": s.kindergarten_group,
                 # наличные: где-то приняты и предпочтительны, где-то не принимаются вовсе
                 **dict(zip(("cashAllowed", "cashPreferred"),
                            await cash_options(s.student_id, student_group_repo), strict=False)),
@@ -141,6 +150,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
         kids, rest_total = [], 0
+        kg = await _kg(children)
         for s in children:
             months = []
             for ym in _visible_periods(3):
@@ -167,6 +177,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                             for a in open_actions if a.student_id == s.student_id],
                 "grades": grades,
                 "parents": len(s.parent_addrs),                            # «Кто привязан» — p.family
+                # группа в детском саду: родитель указывает сам (решение владельца 10.10.2026)
+                "kindergarten": bool(kg[s.student_id]), "kgroup": s.kindergarten_group,
                 "lessons": {
                     "month": len(month_lessons),
                     "minutes": sum(ls.duration_min for ls in month_lessons),
@@ -598,6 +610,23 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "already", "id": action.action_id}, status=409)
         return _json({"error": status}, status={"self": 400, "not_found": 404}.get(status, 503))
 
+    async def child_kgroup(request: web.Request, tg_id, children) -> web.Response:
+        """Родитель указывает группу ребёнка в детском саду — номер или название (решение владельца 10.10.2026)."""
+        student = _child(children, request.match_info["sid"])
+        if student is None:
+            return _json({"error": "not_found"}, status=404)
+        if not (await _kg([student]))[student.student_id]:
+            return _json({"error": "not_kindergarten", "message": "Ребёнок не в садовой группе"}, status=400)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        value = clean_value((body or {}).get("value"))
+        if value is None:
+            return _json({"error": "too_long", "message": "Не длиннее 40 символов"}, status=400)
+        await student_repo.update_kindergarten_group(student.student_id, value, actor=tg_id, who="родитель")
+        return _json({"ok": True, "value": value})
+
     async def unlink(request: web.Request, tg_id, children) -> web.Response:
         """«Это не мой ребёнок»: родитель сам снимает ошибочную привязку (решение владельца 03.10.2026).
         Снимается только его адрес; администраторам — сообщение, чтобы заметить и ошибку, и злоупотребление."""
@@ -619,6 +648,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
     routes = [
         ("GET", "/me", me), ("GET", "/home", home), ("DELETE", "/children/{sid}", unlink),
         ("GET", "/family", family), ("POST", "/children/{sid}/unlink-request", unlink_request),
+        ("PUT", "/children/{sid}/kgroup", child_kgroup),
         ("GET", "/bills", bills), ("GET", "/bill/{sid}/{ym}", bill),
         ("GET", "/lessons/{sid}", lessons), ("GET", "/diary/{sid}", diary),
         ("POST", "/pay", pay), ("POST", "/receipt", receipt),

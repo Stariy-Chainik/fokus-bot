@@ -8,11 +8,14 @@ logger = logging.getLogger(__name__)
 
 # Колонки листа `students` (1-based):
 # 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
-# 8 kindergarten_group (устарело) | 9 athlete_tg_id (свой Telegram спортсмена) | 10 parent_max_ids
+# 8 kindergarten_group (группа в детском саду: номер или название) | 9 athlete_tg_id (свой Telegram спортсмена)
+# 10 parent_max_ids
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
 _PARENT_TG_IDS_COL = 7
+_KINDERGARTEN_GROUP_COL = 8
+KINDERGARTEN_GROUP_MAX = 40
 _ATHLETE_TG_ID_COL = 9
 _PARENT_MAX_IDS_COL = 10
 
@@ -61,6 +64,7 @@ def _row_to_student(row: dict) -> Student:
         parent_tg_ids=parent_tg_ids,
         athlete_tg_id=_parse_tg_id(row.get("athlete_tg_id")),
         parent_max_ids=_parse_id_list(row.get("parent_max_ids")),
+        kindergarten_group=str(row.get("kindergarten_group") or "").strip(),
     )
 
 
@@ -90,6 +94,19 @@ class StudentRepository(BaseRepository):
             await self._update_cell(row_idx, 2, name)
         from bot.services import activity
         await activity.record(activity.STUDENT, f"Переименован ученик {student_id}: {name}", actor=actor, ref=student_id)
+        return True
+
+    async def update_kindergarten_group(self, student_id: str, value: str, actor: int = 0, who: str = "") -> bool:
+        """Группа ребёнка в детском саду (решение владельца 10.10.2026): заполняет родитель или педагог.
+        Текст пишется как есть (raw) — иначе таблица превратит «1-2» в дату. Пусто — стереть."""
+        value = " ".join(str(value or "").split())[:KINDERGARTEN_GROUP_MAX]
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cells(row_idx, {_KINDERGARTEN_GROUP_COL: value}, raw=True)
+        from bot.services import activity
+        await activity.record(activity.STUDENT, f"Группа в саду: {student_id} · {value or 'стёрта'}"
+                              + (f" · {who}" if who else ""), actor=actor, ref=student_id)
         return True
 
     async def update_tier(self, student_id: str, tier: StudentGroupTier) -> bool:

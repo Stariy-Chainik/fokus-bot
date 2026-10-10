@@ -163,7 +163,7 @@ SCREENS['t.groups'] = async () => {
 
 /* Строка состава: имя ведёт в карточку, «✖» — «Ушёл из группы» (только без долгов; решение владельца 02.10.2026).
    Это div: кнопка внутри кнопки-cell ломает разметку. */
-const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead">${initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${s.partnerId ? 'в паре' : 'солист'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
+const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead">${initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${g.kindergarten ? (s.kgroup ? `🏫 гр. ${esc(s.kgroup)}` : '🏫 группа в саду не указана') : s.partnerId ? 'в паре' : 'солист'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
 /* «Добавить ученика»: сначала поиск по базе (чтобы не завести дубль), затем существующий или новая карточка. */
 ACT.tAddAsk = ({ gid, group }) => sheet(`<h3>Добавить ученика</h3><div class="hint">${esc(plainName(group))}. Введите фамилию и имя — сначала проверим, нет ли ученика в базе. Администратор получит сообщение.</div>
   ${field('add-n', 'Фамилия и имя', '', 'placeholder="Иванова Мария" autocomplete="off"')}
@@ -183,6 +183,16 @@ ACT.tAddFind = async ({ gid }) => {
 ACT.tAddDo = async ({ gid, studentId, name, force }) => {
   try { const r = await api(`/groups/${gid}/members`, { method: 'POST', body: studentId ? { studentId } : { name, force: !!force } }); closeSheet(); render(); toast(r.created ? `Добавлен новый ученик: ${r.name}` : `${r.name} — в группе`); }
   catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
+/* Группа ребёнка в детском саду — номер или название; заполняет педагог или родитель (решение владельца 10.10.2026). */
+ACT.tKgAsk = ({ sid, name, value }) => sheet(`<h3>Группа в детском саду</h3><div class="hint">${esc(name)}. Номер или название группы в саду. Пусто — стереть.</div>
+  ${field('t-kg', 'Номер или название', value || '', 'maxlength="40" autocomplete="off" placeholder="например, 7 или «Солнышко»"')}
+  <div style="margin-top:12px">${btn('💾 Сохранить', 'tKgDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.tKgDo = async ({ sid }) => {
+  try {
+    const r = await api(`/students/${sid}/kgroup`, { method: 'PUT', body: { value: val('t-kg') } });
+    closeSheet(); render(); toast(r.value ? `Группа в саду: ${r.value}` : 'Группа в саду стёрта');
+  } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 /* Исправить фамилию и имя ученика своих групп (решение владельца 07.10.2026). */
 ACT.tRenameAsk = ({ sid, name }) => sheet(`<h3>Изменить имя ученика</h3>${field('t-rn', 'Фамилия и имя', name, 'maxlength="60" autocomplete="off"')}
@@ -251,7 +261,8 @@ SCREENS['t.student'] = async ({ id, ym }) => {
   const s = await api(`/students/${id}${ym ? `?ym=${ym}` : ''}`);
   return { title: s.name, html: `
     <div class="card pad"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><div style="font-weight:800;font-size:16px">${esc(s.name)}</div>
-      <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div></div>
+      <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div>
+      ${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="tKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}</div>
       <button class="chip" style="padding:4px 10px;white-space:nowrap" data-act="tRenameAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name }))}'>✏️ Имя</button></div></div>
     ${(s.tariffs || []).length ? `<div class="eyebrow">Абонемент</div>${list(s.tariffs.map(g => `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)} в месяц${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>`))}` : ''}

@@ -156,14 +156,15 @@ class BaseRepository:
             )
             raise
 
-    def _sync_update_cells(self, row_index: int, cells: dict[int, Any]) -> None:
+    def _sync_update_cells(self, row_index: int, cells: dict[int, Any], raw: bool = False) -> None:
         """Несколько ячеек строки — одним запросом (batch_update): каждое update_cell — ~0,25 с,
-        подтверждение оплаты писало 10–15 ячеек подряд и отвечало 4–13 с."""
+        подтверждение оплаты писало 10–15 ячеек подряд и отвечало 4–13 с.
+        raw=True — текст как есть: иначе таблица превращает «2026-09» или «1-2» в дату."""
         from gspread.utils import rowcol_to_a1
         t0 = time.monotonic()
         data = [{"range": rowcol_to_a1(row_index, col), "values": [[value]]} for col, value in cells.items()]
         try:
-            _with_retry(self._ws.batch_update, data, raw=False)     # USER_ENTERED — как update_cell
+            _with_retry(self._ws.batch_update, data, raw=raw)       # по умолчанию USER_ENTERED — как update_cell
             logger.info("SHEETS update_cells %s row=%d cols=%s in %.0f ms", self._sheet_name, row_index,
                         ",".join(str(c) for c in cells), (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -350,10 +351,10 @@ class BaseRepository:
         await asyncio.to_thread(self._sync_update_cell, row_index, col, value)
         self._patch_cache(row_index, cell=(col, value))
 
-    async def _update_cells(self, row_index: int, cells: dict[int, Any]) -> None:
+    async def _update_cells(self, row_index: int, cells: dict[int, Any], raw: bool = False) -> None:
         """Записать несколько ячеек строки одним запросом к Google ({колонка: значение})."""
         if not cells:
             return
-        await asyncio.to_thread(self._sync_update_cells, row_index, cells)
+        await asyncio.to_thread(self._sync_update_cells, row_index, cells, raw)
         for col, value in cells.items():
             self._patch_cache(row_index, cell=(col, value))

@@ -12,12 +12,13 @@ def welcome_text(students: list) -> str:
 
 
 def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
-              receipt_email: bool = True, cabinet_url: str = "") -> list:
+              receipt_email: bool = True, cabinet_url: str = "", kindergarten: bool = False) -> list:
     if platform == "max":
         # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже
         return [
             [cb("📅 Занятия", "client:lessons")],
             [cb("💳 Оплата занятий", "client:my_bills")],
+            *([[cb("🏫 Группа в саду", "client:kgroup")]] if kindergarten else []),   # дети садовых групп
             [cb("➕ Добавить ребёнка", "client:add_child")],
             [cb("👥 Кто привязан", "client:family")],
             [cb("↩️ Это не мой ребёнок", "client:unlink")],

@@ -43,6 +43,7 @@ class Student:
     parent_tg_ids: list[int] = field(default_factory=list)
     athlete_tg_id: Optional[int] = None  # свой Telegram спортсмена (колонка 9)
     parent_max_ids: list[int] = field(default_factory=list)  # родители в MAX (колонка 10)
+    kindergarten_group: str = ""  # группа в детском саду — номер или название (колонка 8)
 
     @property
     def parent_addrs(self) -> list:

@@ -30,6 +30,7 @@ from bot.services import LessonService, activity, payment_ledger
 from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
+from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
 from bot.services.pending_queue import rest_for_keys, settle_actions
@@ -429,8 +430,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return _json({
             "id": g.group_id, "name": g.name, "mode": g.billing_mode.value,
             "priceFull": g.price_full, "priceShort": g.price_short,
+            "kindergarten": is_kindergarten_group(g),            # у садовой группы в составе — группа в саду
             "students": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value,
-                          "partnerId": s.partner_id or ""} for s in members],
+                          "partnerId": s.partner_id or "", "kgroup": s.kindergarten_group} for s in members],
             # «Ушёл из группы»: с какого месяца не начислять абонемент (решение владельца 02.10.2026)
             "leaveOptions": [{"ym": ym, "label": label} for ym, label in leave_options()],
             "pairs": pairs, "soloists": [{"id": s.student_id, "name": s.name} for s in solo],
@@ -525,6 +527,24 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                          f"✏️ Педагог {teacher.name} исправил имя ученика\nБыло: {s.name}\nСтало: {name}")
         logger.info("Mini App: педагог %s переименовал %s: %s → %s", teacher.teacher_id, sid, s.name, name)
         return _json({"ok": True, "name": name})
+
+    async def student_kgroup(request: web.Request, user, teacher) -> web.Response:
+        """Группа в детском саду у ученика своей садовой группы (решение владельца 10.10.2026)."""
+        sid = request.match_info["sid"]
+        if not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        if not await kindergarten_group_names(sid, student_group_repo, groups):
+            return _json({"error": "not_kindergarten", "message": "Ученик не в садовой группе"}, status=400)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        value = clean_value((body or {}).get("value"))
+        if value is None:
+            return _json({"error": "too_long", "message": "Не длиннее 40 символов"}, status=400)
+        ok = await student_repo.update_kindergarten_group(sid, value, actor=user.tg_id, who=f"педагог {teacher.name}")
+        return _json({"ok": ok, "value": value}, status=200 if ok else 404)
 
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
@@ -633,8 +653,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 if led is not None:
                     subscriptions.append({"groupId": gid, "name": groups_map.get(gid, gid),
                                           "total": led.accrued, "paid": led.paid})
+        all_groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value,
+            "kindergarten": any(is_kindergarten_group(all_groups.get(g)) for g in gids), "kgroup": s.kindergarten_group,
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
@@ -1369,6 +1391,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
         ("GET", "/students/{sid}", student), ("PATCH", "/students/{sid}", student_rename),
+        ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),

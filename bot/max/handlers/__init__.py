@@ -2,6 +2,6 @@ from maxapi import Router
 
 router = Router(router_id="max_parent")
 
-from . import start, bills, payment, lessons, family  # noqa: E402,F401
+from . import start, bills, payment, lessons, family, kindergarten  # noqa: E402,F401
 
 __all__ = ["router"]

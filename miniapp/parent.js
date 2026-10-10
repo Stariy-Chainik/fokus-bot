@@ -36,6 +36,10 @@ SCREENS['p.home'] = async () => {
       s: `${a.kind === 'cash' ? 'наличные' : 'чек'} · ${fmt(a.amount)}${a.ym ? ` за ${mon(a.ym).toLowerCase()}` : ''}`,
       r: pill('на проверке', 'warn'),
     })));
+    if (c.kindergarten && !c.kgroup) attention.push(cell({
+      lead: '🏫', plain: true, t: `Укажите группу в детском саду${who(c)}`,
+      s: 'номер или название — педагог забирает детей по группам', act: 'pKgAsk', p: { id: c.id, name: c.name, value: '' },
+    }));
     c.grades.forEach(g => attention.push(cell({
       lead: '⭐', plain: true, cls: 'wrap', t: `Новая оценка${who(c)}`,
       s: `${fdate(g.date)}${g.topics.length ? ` · ${esc(g.topics.join(', '))}` : ''}${g.teacher ? ` · ${esc(g.teacher)}` : ''}${g.comment ? `<br>📝 ${esc(g.comment)}` : ''}`,
@@ -67,6 +71,10 @@ SCREENS['p.home'] = async () => {
     <div class="eyebrow">${mon(h.period)}</div>
     <div class="list">${monthRows.join('')}</div>
     <p class="hint" style="margin-top:12px">Суммы считает школа по отмеченным занятиям. Вопросы по счёту — администратору в чате бота.</p>
+    ${h.children.some(c => c.kindergarten) ? `<div class="eyebrow">Детский сад</div>${list(h.children.filter(c => c.kindergarten).map(c => cell({
+      lead: '🏫', plain: true, t: `Группа в саду${who(c)}`, s: c.kgroup ? esc(c.kgroup) : 'не указана',
+      r: '✏️', act: 'pKgAsk', p: { id: c.id, name: c.name, value: c.kgroup || '' },
+    })))}` : ''}
     <div class="eyebrow">Доступ к кабинету</div>
     ${list([cell({
       lead: '👥', plain: true, t: `Кто привязан к ${many ? 'детям' : 'ребёнку'}`,
@@ -87,6 +95,17 @@ ACT.pUnlinkDo = async ({ id }) => {
   } catch (e) { closeSheet(); toast(errText(e)); }
 };
 ACT.pOpen = ({ id, screen, p }) => { state.ui.kid = id; go(screen, p || {}); };
+
+/* Группа ребёнка в детском саду — номер или название (решение владельца 10.10.2026). */
+ACT.pKgAsk = ({ id, name, value }) => sheet(`<h3>Группа в детском саду</h3><div class="hint">${esc(name)}. Номер или название группы в саду — по нему педагог забирает детей на занятие.</div>
+  ${field('kg-v', 'Номер или название', value || '', 'maxlength="40" autocomplete="off" placeholder="например, 7 или «Солнышко»"')}
+  <div style="margin-top:12px">${btn('💾 Сохранить', 'pKgDo', { id })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.pKgDo = async ({ id }) => {
+  try {
+    const r = await api(`/children/${id}/kgroup`, { method: 'PUT', body: { value: val('kg-v') } });
+    closeSheet(); render(); toast(r.value ? `Группа в саду: ${r.value}` : 'Группа в саду стёрта');
+  } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 
 /* ── Кто привязан к ребёнку ──────────────────────────────────────────── */
 /* Все, кто видит счета и занятия ребёнка. Лишнего отвязывает администратор по заявке родителя

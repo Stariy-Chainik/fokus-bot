@@ -19,6 +19,7 @@ from aiohttp import web
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models.enums import LessonType
 from bot.services import payment_ledger
+from bot.services.kindergarten import is_kindergarten_group
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import debtors_summary, payment_lock, period_collection
 from bot.services.pending_queue import rest_for_keys, settle_actions
@@ -358,6 +359,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "client": {"id": card.client.client_id, "name": card.client.name, "phone": card.client.phone} if card.client else None,
             "parents": [{"platform": a[0], "id": a[1]} for a in s.parent_addrs],
             "isAthlete": bool(s.athlete_tg_id),
+            # группа в детском саду — у детей садовых групп школы (решение владельца 10.10.2026)
+            "kindergarten": any(g.group is not None and is_kindergarten_group(g.group) for g in card.groups),
+            "kgroup": s.kindergarten_group,
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
                         "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,

@@ -8,7 +8,6 @@ from maxapi.types import BotStarted, MessageCreated, MessageCallback, CommandSta
 from config.settings import settings
 from bot.screens import cb
 from bot.screens.adapters import to_aiogram_markup
-from bot.screens.parent_menu import menu_rows
 from bot.services.rosters import BY_NAME_CI, group_members
 from bot.services.parent_notifier import resolve_notifier, fmt_addr, max_addr
 from bot.utils.group_links import parse_start_payload
@@ -60,7 +59,8 @@ async def _entry(bot, uid: int, payload: str, context, student_repo, student_gro
     students = await parent_students(student_repo, uid)
     if students:
         from bot.screens.parent_menu import welcome_text
-        await send_screen(bot, uid, welcome_text(students), menu_rows(platform="max"))
+        from ._common import max_menu_rows
+        await send_screen(bot, uid, welcome_text(students), await max_menu_rows(students))
         return
     await send_screen(bot, uid, "Добро пожаловать!\n\nВведите фамилию ученика для регистрации:")
 
