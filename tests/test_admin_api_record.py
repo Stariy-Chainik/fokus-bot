@@ -66,8 +66,10 @@ def test_record_pair_shared_soloist_and_errors(api):
     body = {"teacherId": "TCH-0001", "kind": "soloist", "date": TODAY, "durationMin": 45, "studentIds": ["STU-0003", "STU-0002"]}
     status, r = _call(app, "POST", "/api/admin/record", json=body)
     assert status == 200 and r["created"] == 2
-    status, r = _call(app, "POST", "/api/admin/record", json={**body, "studentIds": ["STU-0003"]})   # дубль соло в тот же день
-    assert status == 409 and r["error"] == "conflict"
+    status, r = _call(app, "POST", "/api/admin/record", json={**body, "studentIds": ["STU-0003"]})   # второе соло в тот же день
+    assert status == 409 and r["error"] == "same_day" and "Записать ещё одно?" in r["message"]
+    status, r = _call(app, "POST", "/api/admin/record", json={**body, "studentIds": ["STU-0003"], "confirmSameDay": True})
+    assert status == 200 and r["created"] == 1                                         # после подтверждения — записано
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     assert _call(app, "POST", "/api/admin/record", json={**body, "date": tomorrow})[1]["error"] == "future_date"

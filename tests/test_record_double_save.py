@@ -81,3 +81,67 @@ def test_same_record_request_twice_creates_lessons_once(monkeypatch):
     assert [(x.duration_min, x.student_1_id, x.student_2_id) for x in new] == [(60, "STU-0001", "STU-0002"),
                                                                                (45, "STU-0001", "STU-0002")]
     assert len({x.lesson_id for x in new}) == 2
+
+
+def _api_with_teacher(monkeypatch):
+    dp, _ = make_api(monkeypatch)
+    asyncio.run(dp["user_repo"].add(TEACHER_TG, teacher_id="TCH-0001"))
+    return dp
+
+
+def _post_all(dp, bodies, concurrent=False):
+    async def run():
+        app = web.Application()
+        register_teacher_api(app, dp, None)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        h = {"Authorization": f"tma {make_init_data(user_id=TEACHER_TG)}"}
+        try:
+            async def post(b):
+                r = await client.post("/api/teacher/record", headers=h, json=b)
+                return r.status, await r.json()
+            if concurrent:
+                return list(await asyncio.gather(*(post(b) for b in bodies)))
+            return [await post(b) for b in bodies]
+        finally:
+            await client.close()
+    return asyncio.run(run())
+
+
+def test_second_solo_same_day_needs_confirmation(monkeypatch):
+    """Три урока с одной ученицей в один день (случай Хуснутдинова и Бущук 10.10.2026): второй и третий —
+    после подтверждения; каждое нажатие — свой requestId, поэтому повтором не считается."""
+    dp = _api_with_teacher(monkeypatch)
+    before = len(dp["lesson_repo"].items)
+    solo = {"kind": "soloist", "date": f"{YM}-06", "durationMin": 45, "studentIds": ["STU-0002"]}
+    r1, r2, r3, r4 = _post_all(dp, [{**solo, "requestId": "press-0001"}, {**solo, "requestId": "press-0002"},
+                                    {**solo, "requestId": "press-0003", "confirmSameDay": True},
+                                    {**solo, "requestId": "press-0004", "confirmSameDay": True}])
+    assert r1[0] == 200 and r1[1]["created"] == 1
+    assert r2[0] == 409 and r2[1]["error"] == "same_day" and "Петрова Анна" in r2[1]["message"]
+    assert r3[0] == 200 and r4[0] == 200 and not r3[1].get("repeat") and not r4[1].get("repeat")
+    new = dp["lesson_repo"].items[before:]
+    assert [(x.date, x.student_1_id) for x in new] == [(f"{YM}-06", "STU-0002")] * 3 and len({x.lesson_id for x in new}) == 3
+
+
+def test_same_press_sent_twice_is_saved_once(monkeypatch):
+    """Сетевой повтор того же нажатия (тот же requestId) — один результат, даже для подтверждённого соло."""
+    dp = _api_with_teacher(monkeypatch)
+    before = len(dp["lesson_repo"].items)
+    body = {"kind": "soloist", "date": f"{YM}-07", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0100"}
+    first, second = _post_all(dp, [body, body], concurrent=True)
+    assert first[0] == second[0] == 200 and sorted([bool(first[1].get("repeat")), bool(second[1].get("repeat"))]) == [False, True]
+    assert len(dp["lesson_repo"].items) == before + 1
+
+
+def test_soloist_batch_is_not_saved_partially(monkeypatch):
+    """Несколько солистов разом: если у одного уже есть соло в этот день — ничего не записывается до подтверждения."""
+    dp = _api_with_teacher(monkeypatch)
+    _post_all(dp, [{"kind": "soloist", "date": f"{YM}-08", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0200"}])
+    before = len(dp["lesson_repo"].items)
+    batch = {"kind": "soloist", "date": f"{YM}-08", "durationMin": 45, "studentIds": ["STU-0001", "STU-0002"]}
+    (status, r), = _post_all(dp, [{**batch, "requestId": "press-0201"}])
+    assert status == 409 and r["error"] == "same_day" and "Петрова Анна" in r["message"] and "Иванов" not in r["message"]
+    assert len(dp["lesson_repo"].items) == before
+    (status, r), = _post_all(dp, [{**batch, "requestId": "press-0202", "confirmSameDay": True}])
+    assert status == 200 and r["created"] == 2

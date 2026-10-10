@@ -14,6 +14,18 @@ from . import activity
 logger = logging.getLogger(__name__)
 
 
+class SameDaySoloError(ValueError):
+    """Второе индивидуальное занятие с тем же учеником у того же педагога в тот же день.
+
+    Раньше запрещалось совсем; с 10.10.2026 (решение владельца, случай Хуснутдинова — три урока Бущук в один
+    день) — записывается после подтверждения (`allow_same_day=True`). От двойного «Сохранить» защищает
+    отдельная проверка повтора запроса (bot/api/record.py)."""
+
+    def __init__(self, names: list[str]) -> None:
+        self.names = names
+        super().__init__(f"В этот день уже есть индивидуальное занятие с {', '.join(names)}. Записать ещё одно?")
+
+
 class LessonService:
     def __init__(
         self,
@@ -53,16 +65,17 @@ class LessonService:
         attendees: str | None = None,
         group_id: str = "",
         bypass_period_lock: bool = False,
+        allow_same_day: bool = False,
     ) -> Lesson:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
 
         # Гард дублей — только «соло против соло»: пара/микрогруппа и соло с тем же
-        # учеником в один день допустимы в любом порядке.
+        # учеником в один день допустимы в любом порядке. Второе соло в день — после подтверждения.
         participants = [sid for sid in (student_1_id, student_2_id, student_3_id, student_4_id) if sid]
-        if lesson_type == LessonType.INDIVIDUAL and len(participants) == 1:
+        if lesson_type == LessonType.INDIVIDUAL and len(participants) == 1 and not allow_same_day:
             if await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, participants[0], lesson_date):
-                raise ValueError("Соло-занятие с этим учеником на выбранную дату уже записано")
+                raise SameDaySoloError([student_1_name or participants[0]])
 
         if not bypass_period_lock:
             await self._ensure_not_submitted(teacher.teacher_id, period_month_from_date(lesson_date))
@@ -158,7 +171,14 @@ class LessonService:
         duration_min: int,
         students: list[tuple[str, str]],
         bypass_period_lock: bool = False,
+        allow_same_day: bool = False,
     ) -> list[Lesson]:
+        if not allow_same_day:
+            # проверка до записи: иначе часть солистов сохранилась бы, а на занятом ученике — ошибка
+            busy = [sname for sid, sname in students
+                    if await self._lesson_repo.individual_lesson_exists(teacher.teacher_id, sid, lesson_date)]
+            if busy:
+                raise SameDaySoloError(busy)
         created: list[Lesson] = []
         for sid, sname in students:
             lesson = await self.create(
@@ -169,6 +189,7 @@ class LessonService:
                 student_1_id=sid,
                 student_1_name=sname,
                 bypass_period_lock=bypass_period_lock,
+                allow_same_day=allow_same_day,
             )
             created.append(lesson)
         return created

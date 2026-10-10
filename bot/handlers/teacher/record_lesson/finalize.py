@@ -13,6 +13,7 @@ from bot.repositories import (
     GroupRepository,
 )
 from bot.services import LessonService
+from bot.services.lesson_service import SameDaySoloError
 from bot.states import RecordLessonStates
 from bot.keyboards.teacher import (
     kb_lesson_type_after_save,
@@ -243,6 +244,13 @@ async def _finalize(
         await callback.message.edit_text(
             f"🔒 {exc}\nОбратитесь к администратору.", reply_markup=_menu_kb(user, data),
         )
+    except SameDaySoloError as exc:
+        # подтверждение второго соло в день — только в кабинете (решение владельца 10.10.2026)
+        await state.clear()
+        await callback.message.edit_text(
+            f"В этот день уже есть индивидуальное занятие с {', '.join(exc.names)}.\n"
+            "Второе занятие в тот же день записывается в кабинете — там бот попросит подтверждение.",
+            reply_markup=_menu_kb(user, data))
     except ValueError as exc:
         await state.clear()
         await callback.message.edit_text(f"Ошибка: {exc}", reply_markup=_menu_kb(user, data))

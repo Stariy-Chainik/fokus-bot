@@ -14,6 +14,7 @@ from datetime import date
 
 from bot.models.enums import GroupBillingMode, LessonType
 from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv
+from bot.services.lesson_service import SameDaySoloError
 from bot.utils.groups import hide_service_groups
 from config.settings import settings
 
@@ -85,7 +86,13 @@ _recent: dict[tuple, tuple[float, asyncio.Future]] = {}
 
 
 def _request_key(teacher_id: str, body: dict) -> tuple:
-    """Что считается тем же самым сохранением: педагог, тип, дата, длительность, группа, ученики, тарифы."""
+    """Что считается тем же самым сохранением. Кабинет шлёт номер нажатия `requestId` (каждое «Сохранить» — свой):
+    повтор того же номера — сетевой дубль, а новое нажатие — новое занятие, даже если оно такое же (второе соло
+    в тот же день, 10.10.2026). Без номера (старая версия кабинета) — педагог, тип, дата, длительность, группа,
+    ученики, тарифы."""
+    rid = body.get("requestId")
+    if isinstance(rid, str) and 8 <= len(rid) <= 64:
+        return (teacher_id, "rid", rid)
     ids = body.get("studentIds") if isinstance(body.get("studentIds"), list) else []
     tiers = body.get("tiers") if isinstance(body.get("tiers"), dict) else {}
     return (teacher_id, body.get("kind"), body.get("date"), body.get("durationMin"), body.get("groupId") or "",
@@ -185,10 +192,14 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
         lessons = await lesson_service.create_soloist_batch(
             teacher=teacher, lesson_date=day, duration_min=duration,
             students=[(i, students[i].name) for i in ids], bypass_period_lock=bypass_period_lock,
+            allow_same_day=bool(body.get("confirmSameDay")),
         )
         return {"created": len(lessons), "lessons": [ls.lesson_id for ls in lessons],
                 "label": ", ".join(students[i].name for i in ids)}
     except PermissionError as exc:
         raise RecordError("period_locked", str(exc), status=409) from exc
+    except SameDaySoloError as exc:
+        # второе соло в тот же день — кабинет спросит и повторит с confirmSameDay
+        raise RecordError("same_day", str(exc), status=409) from exc
     except ValueError as exc:
         raise RecordError("conflict", str(exc), status=409) from exc
