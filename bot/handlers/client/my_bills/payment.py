@@ -871,20 +871,23 @@ async def cb_action_confirm(
     ledgers = await payment_service.ledger_for(student, action.period_month)
     rest = rest_for_keys(ledgers, action.keys)      # остаток по педагогам, за которых платили
 
-    # Заявлено больше, чем осталось: переплата — только осознанно, отдельной кнопкой
-    if claimed > rest and not force:
+    # Заявлено больше, чем осталось: переплата — только осознанно, отдельной кнопкой и только у администратора;
+    # педагог зачитывает не больше остатка (решение владельца 10.10.2026)
+    if claimed > rest and (not force or not user.is_admin):
         code = callback_code(method)
         rows = [
             [cb_btn(f"✅ Зачесть остаток {rest} руб.", f"pact:{action_id}:{rest}:{code}:f") if rest
              else cb_btn("✅ Закрыть заявку — оплата уже отмечена", f"pact:{action_id}:0:{code}:f")],
-            [cb_btn(f"💸 Всё равно зачесть {claimed} руб. (переплата)", f"pact:{action_id}:{claimed}:{code}:f")],
+            *([[cb_btn(f"💸 Всё равно зачесть {claimed} руб. (переплата)", f"pact:{action_id}:{claimed}:{code}:f")]]
+              if user.is_admin else []),
             [cb_btn("❌ Не подтверждать", f"pnay:{action_id}")],
         ]
         await _edit_admin_msg(
             callback,
             f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб."
             + ("\nСкорее всего, оплату уже отметили вручную." if not rest else "")
-            + "\nВыберите, что зачесть — переплата останется на счёте ученика.",
+            + ("\nВыберите, что зачесть — переплата останется на счёте ученика." if user.is_admin
+               else "\nЗачесть можно не больше остатка. Если родитель заплатил больше, сообщите администратору."),
             keep_rows=rows,
         )
         await callback.answer("Сумма больше остатка", show_alert=True)

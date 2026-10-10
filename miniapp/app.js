@@ -327,11 +327,11 @@ SCREENS['a.pay.sub'] = async ({ ym, sid, key, name, pendingId, amount }) => ({ t
 /* Сумма больше остатка: экран устарел или родитель заявил больше, чем должен. Один диалог на все пути подтверждения. */
 function overpaySheet(d, act, base) {
   const settled = !d.rest;
-  sheet(`<h3>Сумма больше остатка</h3><div class="hint">${settled ? `К оплате ничего не осталось — скорее всего, оплату уже отметили. Заявлено ${fmt(d.amount)}.` : `Заявлено ${fmt(d.amount)}, к оплате осталось ${fmt(d.rest)}. Переплата останется на счёте ученика.`}</div>
+  sheet(`<h3>Сумма больше остатка</h3><div class="hint">${settled ? `К оплате ничего не осталось — скорее всего, оплату уже отметили. Заявлено ${fmt(d.amount)}.` : `Заявлено ${fmt(d.amount)}, к оплате осталось ${fmt(d.rest)}. ${d.allowOverpay === false ? 'Зачесть можно не больше остатка. Если родитель заплатил больше, сообщите администратору.' : 'Переплата останется на счёте ученика.'}`}</div>
     <div style="margin-top:12px">${settled
       ? (act === 'inboxDecide' ? btn('✅ Закрыть заявку — оплата уже отмечена', act, { ...base, amount: 0, force: true }) : btn('🔄 Обновить экран', 'refreshPay', {}, 'sec'))
       : btn(`✅ Зачесть остаток ${fmt(d.rest)}`, act, { ...base, amount: d.rest, force: true })}
-    ${btn(`💸 Зачесть ${fmt(d.amount)} с переплатой`, act, { ...base, amount: d.amount, force: true }, settled ? 'ghost' : 'sec')}
+    ${d.allowOverpay === false ? '' : btn(`💸 Зачесть ${fmt(d.amount)} с переплатой`, act, { ...base, amount: d.amount, force: true }, settled ? 'ghost' : 'sec')}
     ${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 }
 

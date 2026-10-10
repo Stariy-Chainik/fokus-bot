@@ -317,8 +317,14 @@ def test_billing_teacher_cannot_overpay_silently(api, monkeypatch):
     body = {"ym": YM, "key": "TCH-0001", "amount": 9000, "method": "receipt_bank", "receiptId": "RC"}
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json=body)
     assert status == 409 and r["needsConfirm"] and r["rest"] == 4800
+    # переплату педагог не зачитывает даже с подтверждением (решение владельца 10.10.2026) — только остаток
     status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "force": True})
-    assert status == 200 and r["credited"] == 9000 and r["overpaid"] == 4200
+    assert status == 409 and r["allowOverpay"] is False and r["rest"] == 4800
+    assert not [p for p in _dp["payment_repo"].rows if p.status == PaymentStatus.PAID]
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "amount": 4800})
+    assert status == 200 and r["credited"] == 4800 and r["overpaid"] == 0
+    status, r = _call(app, "POST", "/api/teacher/bills/student/STU-0001/pay", json={**body, "amount": 100, "force": True})
+    assert status == 409 and r["rest"] == 0                                        # уже оплачено — второй раз нельзя
 
 
 def test_direct_pay_lessons_show_parent_amount_not_zero(api, monkeypatch):
@@ -864,3 +870,53 @@ def test_teacher_renames_student_of_own_group(api):
     assert _call(app, "PATCH", url, json={"name": "Петрова Ания"})[1]["unchanged"] is True
     status, r = _call(app, "PATCH", url, json={"name": "Иванов Иван", "force": True})
     assert status == 200 and r["name"] == "Иванов Иван"
+
+
+def _receipt_world(api, monkeypatch):
+    from bot.repositories.pending_action_repo import KIND_RECEIPT
+    from bot.services import payment_events
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    monkeypatch.setattr(settings, "full_bill_teacher_ids", "TCH-0001")
+    payment_events.setup(None, dp["user_repo"], dp["teacher_group_repo"], dp["student_group_repo"], dp["student_repo"])
+    dp["pending_repo"] = PendingRepoFake()
+    action = asyncio.run(dp["pending_repo"].add(KIND_RECEIPT, "STU-0001", "Иванов Иван", YM, 9000, "receipt_bank",
+                                                str(PARENT_TG)))
+    return app, dp, action
+
+
+def test_teacher_inbox_credits_no_more_than_rest(api, monkeypatch):
+    """«Ждут решения» у педагога: чек на 9000 при остатке 4800 — зачесть можно только остаток, переплату — нет."""
+    app, dp, action = _receipt_world(api, monkeypatch)
+    url = f"/api/teacher/inbox/{action.action_id}/decide"
+    status, r = _call(app, "POST", url, json={"approve": True, "force": True})
+    assert status == 409 and r["allowOverpay"] is False and r["rest"] == 4800
+    status, r = _call(app, "POST", url, json={"approve": True, "amount": 4800, "force": True})
+    assert status == 200 and r["credited"] == 4800 and r["overpaid"] == 0
+
+
+def test_teacher_telegram_buttons_have_no_overpay(api, monkeypatch):
+    """Кнопки заявки в Telegram: у педагога нет «Всё равно зачесть (переплата)», и старая кнопка ничего не зачтёт;
+    у администратора выбор остаётся."""
+    from bot.handlers.client.my_bills import payment as pay_mod
+    from bot.repositories.pending_action_repo import OPEN
+    from tests.fakes import FakeCallbackQuery, FakeMessage
+    app, dp, action = _receipt_world(api, monkeypatch)
+
+    def press(user, data):
+        msg = FakeMessage("Чек")
+        msg.caption = None
+        cb = FakeCallbackQuery(data, user_id=user.tg_id, message=msg)
+        asyncio.run(pay_mod.cb_action_confirm(cb, user, dp["payment_service"], dp["student_repo"], dp["client_repo"],
+                                              None, dp["pending_repo"]))
+        text, kb = msg.screens[-1]
+        return text, [b.text for row in kb.inline_keyboard for b in row]
+    teacher = asyncio.run(dp["user_repo"].get_by_tg_id(TEACHER_TG))
+    text, buttons = press(teacher, f"pact:{action.action_id}:9000:b:f")         # старая кнопка «переплата»
+    assert "не больше остатка" in text and not any("переплата" in b for b in buttons)
+    assert any("Зачесть остаток 4800" in b for b in buttons)
+    assert dp["pending_repo"].items[0].status == OPEN
+    assert not [p for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID]
+    admin = asyncio.run(dp["user_repo"].get_by_tg_id(ADMIN_TG))
+    _, buttons = press(admin, f"pact:{action.action_id}:9000:b")
+    assert any("переплата" in b for b in buttons)

@@ -1268,8 +1268,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             rest = rest_for_keys(await payment_service.ledger_for(s, period), [key])
             if foreign:
                 rest = min(rest, sum(m["amount"] for m in visible[1] if not m["paid"]))
-            if amount > rest and not bool((body or {}).get("force")):
-                return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest}, status=409)
+            if amount > rest:
+                # переплату педагог не зачитывает (решение владельца 10.10.2026, случай Бескоровайного:
+                # абонемент уже был оплачен, «Зачесть с переплатой» записало второй раз 6000) — только остаток;
+                # если родитель заплатил больше, проводит администратор
+                return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest,
+                              "allowOverpay": False}, status=409)
             rec = _teacher_receipts.get((body or {}).get("receiptId") or "")
             credited, rows = await payment_service.record_payment(
                 sid, s.name, period, amount, user.tg_id, [key],

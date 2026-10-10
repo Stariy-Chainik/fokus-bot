@@ -223,9 +223,10 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         amount = action.amount if raw_amount is None else int(raw_amount)   # 0 — «закрыть без зачёта»
         if amount < 0:
             return _json({"error": "bad_request"}, status=400)
-        if amount > rest and not force:
-            return _json({"error": "overpay", "needsConfirm": True,
-                          "amount": amount, "rest": rest}, status=409)
+        if amount > rest and (not force or scope is not None):
+            # педагог зачитывает не больше остатка — переплату проводит администратор (решение владельца 10.10.2026)
+            return _json({"error": "overpay", "needsConfirm": True, "amount": amount, "rest": rest,
+                          "allowOverpay": scope is None}, status=409)
 
         if not await pending_repo.claim(action.action_id, DONE, user.tg_id):
             return _json({"error": "already_decided"}, status=409)
