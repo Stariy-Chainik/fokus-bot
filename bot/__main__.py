@@ -113,6 +113,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         student_repo=student_repo,              # долг удалённого ученика нигде не считается
     )
     pending_queue.setup(payment_service)   # заявки родителей: снимок остатков на момент подачи
+    # зарплата «процент от абонементов группы» (SUBSCRIPTION_SHARE_GROUPS) — начисления берёт из PaymentService
+    salary_service.subscription_revenue = payment_service.subscription_revenue_rows
     profit_service = ProfitService(
         teacher_repo, lesson_repo, payment_service, finance_entry_repo,
         salary_service=salary_service,

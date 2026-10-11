@@ -295,7 +295,7 @@ class ProfitService:
             if self._salary_service is not None:
                 extra = sum(
                     line.amount for line in await self._salary_service.lines_for(teacher, period)
-                    if line.kind in ("shift", "override", "bonus")
+                    if line.kind in ("shift", "override", "bonus", "share")
                 )
             row = calculate_teacher_profit(teacher, lessons, extra_salary=extra)
             if row is not None:

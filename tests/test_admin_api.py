@@ -129,7 +129,7 @@ def _dp():
                                      student_group_repo=sg_repo, subscription_override_repo=sub_override_repo,
                                      student_repo=student_repo)
     bonus_repo = BonusRepoFake()
-    salary_service = SalaryService(lesson_repo, None, bonus_repo)
+    salary_service = SalaryService(lesson_repo, None, bonus_repo, payment_service.subscription_revenue_rows)
     finance_repo = FinanceRepoFake()
     submission_repo = SubmissionRepoFake([mk_submission("TCH-0001", "2026-08")])
     visibility = TeacherVisibilityService(student_repo, tg_repo, sg_repo)

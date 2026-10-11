@@ -48,7 +48,10 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         salary = 0
         if t:
             line = next((x for x in await salary_service.lines_for(t, ym) if x.lesson_id == ls.lesson_id), None)
-            if line is not None and line.kind == "in_shift":
+            if line is not None and line.kind == "in_share":
+                percent = settings.subscription_share(ls.group_id, ls.date)
+                note = (note + " · " if note else "") + f"зарплата — {percent} % от абонементов группы за месяц"
+            elif line is not None and line.kind == "in_shift":
                 day = sum(x.amount for x in await salary_service.lines_for(t, ym) if x.kind == "shift" and x.date == ls.date)
                 groups_day = len({x.group_id for x in await lesson_repo.get_all()
                                   if x.teacher_id == t.teacher_id and x.date == ls.date and x.group_id})

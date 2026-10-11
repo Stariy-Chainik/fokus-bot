@@ -128,6 +128,28 @@ class Settings(BaseSettings):
     def attendance_group_id_set(self) -> set:
         return {g.strip() for g in self.attendance_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Зарплата педагога — процент от начисленных абонементов группы за месяц (решение владельца 11.10.2026:
+    # Яковлева в Боброво, ВБ ХГ — 30 % с октября 2026): `GRP-XXXX:процент:с месяца,...`. С этого месяца
+    # занятия группы в зарплату не идут (ни по ставке, ни сменой) — SalaryService добавляет строку «share».
+    subscription_share_groups: str = Field(default="", alias="SUBSCRIPTION_SHARE_GROUPS")
+
+    @property
+    def subscription_share_map(self) -> dict:
+        """group_id → (процент, с какого месяца YYYY-MM; пусто — всегда)."""
+        out: dict[str, tuple[int, str]] = {}
+        for chunk in self.subscription_share_groups.replace("|", ",").split(","):
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) >= 2 and parts[0] and parts[1].isdigit():
+                out[parts[0]] = (int(parts[1]), parts[2] if len(parts) > 2 else "")
+        return out
+
+    def subscription_share(self, group_id: str, period: str) -> int | None:
+        """Процент от абонементов группы для месяца/даты `period` или None — обычный расчёт зарплаты."""
+        hit = self.subscription_share_map.get(group_id) if group_id else None
+        if hit is None or (hit[1] and period[:7] < hit[1]):
+            return None
+        return hit[0]
+
     # Группы, которые педагог может объединить в одно занятие (решение владельца 11.10.2026, садовые
     # группы Яковлевой в Южной Битце): `GRP-A+GRP-B,GRP-C+GRP-D`. Одно занятие — одна зарплата, каждый
     # ребёнок платит по цене своей группы, занятие засчитывается обеим группам (lessons.merged_groups).

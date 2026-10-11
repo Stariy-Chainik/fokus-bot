@@ -352,7 +352,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             unpaid = await _unpaid_lessons(period, t.teacher_id, col, marks_cache)
             out.append({"id": t.teacher_id, "name": t.name, "accrued": accrued, "paid": paid,
                         "status": "paid" if accrued and paid >= accrued else ("partial" if paid > 0 else "none"),
-                        "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift")),
+                        "lessons": sum(1 for ln in lines if ln.kind in ("lesson", "in_shift", "in_share")),
                         "bonus": sum(ln.amount for ln in lines if ln.kind == "bonus"),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set,
                         "directPay": t.teacher_id in settings.direct_pay_teacher_id_set,

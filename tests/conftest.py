@@ -21,6 +21,7 @@ _RESET = {
     "athlete_group_ids": "GRP-0001",
     "subscription_edit_groups": "",
     "mergeable_groups": "",
+    "subscription_share_groups": "",
 }
 
 

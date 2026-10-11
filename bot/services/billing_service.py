@@ -34,6 +34,9 @@ def calc_earned(
             e.amount for e in parse_attendees(attendees or "", default_duration=duration_min)
         )
         return round(revenue * share / 100)
+    # Процент от абонементов группы (SUBSCRIPTION_SHARE_GROUPS): зарплата за месяц целиком (salary_service).
+    if group_id and lesson_type == LessonType.GROUP and period and settings.subscription_share(group_id, period) is not None:
+        return 0
     # Группы смены (SHIFT_GROUPS): зарплата считается за день целиком (salary_service).
     if group_id and lesson_type == LessonType.GROUP and group_id in settings.shift_group_map:
         return 0

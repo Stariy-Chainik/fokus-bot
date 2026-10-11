@@ -679,9 +679,10 @@ const salaryLines = (lines, tid, ym) => {
   })] : [])]);
 };
 const salaryLineCell = x => cell({
-  lead: x.kind === 'bonus' ? '🎁' : x.kind === 'shift' ? '🕒' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' ? '↳' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
+  lead: x.kind === 'bonus' ? '🎁' : x.kind === 'shift' ? '🕒' : x.kind === 'share' ? '💯' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' || x.kind === 'in_share' ? '↳' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
   t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
   s: x.kind === 'bonus' ? 'премия · выплачена сразу' : x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается'
+    : x.kind === 'in_share' ? 'входит в % от абонементов — отдельно не оплачивается' : x.kind === 'share' ? 'за месяц · от начисленных абонементов группы'
     : `${x.minutes ? `${x.minutes} мин` : ''}${x.type === 'group' && x.students && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}`,
   r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 'a.lesson', p: { id: x.lessonId } } : {}),
 });

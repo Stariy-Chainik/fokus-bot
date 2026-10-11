@@ -386,14 +386,18 @@ async def _detail_lines(
     groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
     branches = {b.branch_id: b.name for b in await branch_repo.get_all()}
 
-    by_branch: dict[str, dict[str, list[tuple[str, int, bool]]]] = {}
+    by_branch: dict[str, dict[str, list[tuple[str, int, str]]]] = {}
     individual: list[tuple[str, int]] = []
     day_lines: list[tuple[str, str, int]] = []
     bonus_lines: list[tuple[str, str, int]] = []
+    share_lines: list[tuple[str, int]] = []
     for ln in lines_all:
         dd = f"{ln.date[8:10]}.{ln.date[5:7]}"
         if ln.kind in ("shift", "override"):
             day_lines.append((dd, ln.label, ln.amount))
+            continue
+        if ln.kind == "share":
+            share_lines.append((ln.label, ln.amount))
             continue
         if ln.kind == "bonus":
             bonus_lines.append((dd, ln.label, ln.amount))
@@ -406,7 +410,7 @@ async def _detail_lines(
             bname = branches.get(g.branch_id, "—") if g else "—"
             gname = g.name if g else (ls.group_id or "без группы")
             by_branch.setdefault(bname, {}).setdefault(gname, []).append(
-                (f"{dd} {ls.duration_min}м", ln.amount, ln.kind == "in_shift"))
+                (f"{dd} {ls.duration_min}м", ln.amount, {"in_shift": "в смене", "in_share": "% от абонементов"}.get(ln.kind, "")))
         else:
             who = " + ".join(n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n)
             individual.append((f"{dd} {ls.duration_min}м {who}", ln.amount))
@@ -418,11 +422,14 @@ async def _detail_lines(
             items = by_branch[bname][gname]
             gsum = sum(a for _, a, _ in items)
             in_shift = all(s for _, _, s in items)
-            out.append(f"  💃 {gname} — {len(items)} зан." + (" (в смене)" if in_shift else f", {gsum} ₽"))
+            out.append(f"  💃 {gname} — {len(items)} зан." + (f" ({items[0][2]})" if in_shift else f", {gsum} ₽"))
             out.extend(f"     • {t}" + ("" if s else f" — {a} ₽") for t, a, s in items)
     if day_lines:
         out.append("🕒 <b>Смены и корректировки</b>")
         out.extend(f"  • {dd} {label} — {a} ₽" for dd, label, a in day_lines)
+    if share_lines:
+        out.append("💯 <b>Процент от абонементов за месяц</b>")
+        out.extend(f"  • {label} → {a} ₽" for label, a in share_lines)
     if individual:
         isum = sum(a for _, a in individual)
         out.append(f"👤 <b>Индивидуальные</b> — {len(individual)} зан., {isum} ₽")
