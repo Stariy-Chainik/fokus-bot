@@ -187,23 +187,26 @@ SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {
     ${done.length ? `<div class="eyebrow">Оплачено полностью</div>${done.map(g => unpaidGroup(g, ym)).join('')}` : ''}
     <p class="hint" style="margin-top:8px">✅ оплачено · 🟡 частично · ⬜ не оплачено. Тап по ученику — его счёт: там же отмечается оплата.</p>` };
 };
-/* Диаграмма «Абонементы: собрано из плана» (решение владельца 11.10.2026): общая полоса всегда видна, по группам —
-   в раскрывающемся блоке, чтобы «Требует внимания» не уезжало вниз. Тап по группе — её вкладка «Оплата» за месяц. */
-const subChart = (s, ym) => {
+/* Диаграммы «собрано из плана» на сводке (решение владельца 11.10.2026): абонементы — по группам, занятия — по педагогам.
+   Общая полоса всегда видна, разбивка — в раскрывающемся блоке, чтобы «Требует внимания» не уезжало вниз.
+   Тап по строке: группа — её вкладка «Оплата» за месяц, педагог — кто не оплатил его занятия. */
+const planChart = (s, ym, kind) => {
   if (!s || !s.plan) return '';
   const pct = (f, p) => p ? Math.round(f * 100 / p) : 0;
   const maxPlan = Math.max(...s.groups.map(g => g.plan), 1);
-  const row = g => `<button class="subrow" data-act="subGroupOpen" data-p='${esc(JSON.stringify({ id: g.id, ym }))}' title="${esc(g.name)}: собрано ${fmt(g.fact)} из ${fmt(g.plan)} (${pct(g.fact, g.plan)}%), оплатили полностью ${g.paidFull} из ${g.students}">
+  const lessons = kind === 'lessons';
+  const tap = g => lessons ? attr('a.salary.col', { tid: g.id, ym, lessons: true }) : `data-act="subGroupOpen" data-p='${esc(JSON.stringify({ id: g.id, ym }))}'`;
+  const row = g => `<button class="subrow" ${tap(g)} title="${esc(g.name)}: собрано ${fmt(g.fact)} из ${fmt(g.plan)} (${pct(g.fact, g.plan)}%), оплатили полностью ${g.paidFull} из ${g.students}">
       <div class="lbl"><span>${esc(g.name)}</span><b>${pct(g.fact, g.plan)}%</b></div>
       <div class="track" style="width:${Math.max(8, g.plan * 100 / maxPlan).toFixed(1)}%"><i style="width:${pct(g.fact, g.plan)}%"></i></div>
       <div class="s">собрано ${fmt(g.fact)} из ${fmt(g.plan)} · оплатили ${g.paidFull} из ${plural(g.students, ['ученика', 'учеников', 'учеников'])}</div></button>`;
   return `<div class="card subchart big" style="margin:10px 0 0">
-      <div class="head2"><span style="font-weight:700">Абонементы · ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}</span><span class="pct">${pct(s.fact, s.plan)}%</span></div>
+      <div class="head2"><span style="font-weight:700">${lessons ? 'Занятия' : 'Абонементы'} · ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}</span><span class="pct">${pct(s.fact, s.plan)}%</span></div>
       <div class="track" role="img" aria-label="Собрано ${fmt(s.fact)} из ${fmt(s.plan)}"><i style="width:${pct(s.fact, s.plan)}%"></i></div>
       <div class="hint">собрано ${fmt(s.fact)} из ${fmt(s.plan)} · осталось ${fmt(s.plan - s.fact)}</div>
       <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>собрано</span><span><span class="sw" style="background:var(--accent-soft)"></span>план</span></div>
     </div>
-    <details class="acc" style="margin-top:-6px;border-top-left-radius:0;border-top-right-radius:0"><summary><span><span class="chev">›</span>По группам <span class="hint">· ${s.groups.length}</span></span><span class="r hint">план / собрано</span></summary>
+    <details class="acc" style="margin-top:-6px;border-top-left-radius:0;border-top-right-radius:0"><summary><span><span class="chev">›</span>${lessons ? 'По педагогам' : 'По группам'} <span class="hint">· ${s.groups.length}</span></span><span class="r hint">план / собрано</span></summary>
       <div>${s.groups.map(row).join('')}</div></details>`;
 };
 /* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
@@ -230,7 +233,8 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
-    ${subChart(h.subscriptions, h.period)}
+    ${planChart(h.subscriptions, h.period, 'subs')}
+    ${planChart(h.lessons, h.period, 'lessons')}
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
@@ -704,12 +708,12 @@ SCREENS['a.salary.t'] = async ({ tid, ym }) => {
     ${salaryLines(t.lines, tid, ym)}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
 };
 /* Сбор с родителей по педагогу: кто из его учеников не оплатил месяц. Тап — счёт ученика. */
-SCREENS['a.salary.col'] = async ({ tid, ym }) => {
-  const d = await api(`/salaries/${tid}/collection?ym=${ym}`);
+SCREENS['a.salary.col'] = async ({ tid, ym, lessons }) => {
+  const d = await api(`/salaries/${tid}/collection?ym=${ym}${lessons ? '&lessons=1' : ''}`);
   const st = s => s.status === 'paid' ? '✅' : s.status === 'partial' ? '🟡' : '⬜';
   return { title: `Сбор · ${MON_NOM[+ym.slice(5) - 1]}`, html: `
     <div class="kpis">${kpi(d.unpaidLessons || d.unpaidSubs ? `${d.unpaidLessons || 0}${d.unpaidSubs ? ` + ${d.unpaidSubs} аб.` : ''}` : '✓', d.unpaidLessons || d.unpaidSubs ? `${d.unpaidLessons ? plural(d.unpaidLessons, ['занятие', 'занятия', 'занятий']).replace(/^\d+ /, '') : ''}${d.unpaidLessons && d.unpaidSubs ? ' и ' : ''}${d.unpaidSubs ? plural(d.unpaidSubs, ['абонемент', 'абонемента', 'абонементов']) : ''} не оплачено` : 'родители всё оплатили', d.rest ? 'bad' : 'ok')}${kpi(d.rest ? fmt(d.rest) : '✓', d.rest ? `долг · оплачено ${fmt(d.paid)} из ${fmt(d.accrued)}` : 'долга нет', d.rest ? 'bad' : 'ok')}</div>
-    <p class="hint" style="margin:8px 0">Занятия педагога и абонементы групп, где он вёл занятия в этом месяце. Прямая оплата педагогу не учитывается.</p>
+    <p class="hint" style="margin:8px 0">${lessons ? 'Только занятия педагога — без абонементов.' : 'Занятия педагога и абонементы групп, где он вёл занятия в этом месяце.'} Прямая оплата педагогу не учитывается.</p>
     ${d.students.length ? list(d.students.map(s => cell({ lead: st(s), plain: true, t: esc(s.name), s: (s.unpaidLessons ? `${plural(s.unpaidLessons, ['занятие', 'занятия', 'занятий'])} не оплачено · ` : '') + (s.status === 'partial' ? `оплачено ${fmt(s.paid)} из ${fmt(s.accrued)}` : s.status === 'paid' ? `оплачено ${fmt(s.accrued)}` : `начислено ${fmt(s.accrued)}`), r: s.rest ? `<b class="money bad">${fmt(s.rest)}</b>` : pill('✓', 'ok'), go: 'a.pay.student', p: { sid: s.id, ym } }))) : '<div class="empty">Начислений родителям нет</div>'}` };
 };
 SCREENS['a.payouts'] = async ({ ym }) => {

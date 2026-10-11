@@ -121,6 +121,24 @@ def period_collection(ledger: dict[tuple[str, str, str], tuple[int, int]], perio
     return PeriodCollection(accrued, paid)
 
 
+def _collection_by(
+    ledger: dict[tuple[str, str, str], tuple[int, int]], period: str, pick,
+) -> dict[str, tuple[int, int, int, int]]:
+    """Сбор месяца с разбивкой: pick(ключ начисления) → id строки диаграммы или None (не учитывать).
+    Значение — (план, собрано, учеников, оплатили полностью); собрано — без переплаты, как `period_collection`."""
+    out: dict[str, list[int]] = {}
+    for (_sid, key, ym), (amount, paid_amount) in ledger.items():
+        rid = pick(key) if ym == period and amount > 0 else None
+        if rid is None:
+            continue
+        row = out.setdefault(rid, [0, 0, 0, 0])
+        row[0] += amount
+        row[1] += min(paid_amount, amount)
+        row[2] += 1
+        row[3] += 1 if paid_amount >= amount else 0
+    return {rid: (r[0], r[1], r[2], r[3]) for rid, r in out.items()}
+
+
 def subscription_collection(
     ledger: dict[tuple[str, str, str], tuple[int, int]], period: str,
 ) -> dict[str, tuple[int, int, int, int]]:
@@ -129,16 +147,17 @@ def subscription_collection(
     План — начислено по `SUB:{gid}`, собрано — зачтено без переплаты (как `period_collection`), поэтому сумма
     по группам совпадает с абонементной частью плитки сводки. Диаграмма «Абонементы» (решение владельца 11.10.2026).
     """
-    out: dict[str, list[int]] = {}
-    for (_sid, key, ym), (amount, paid_amount) in ledger.items():
-        if ym != period or not key.startswith(SUBSCRIPTION_KEY_PREFIX) or amount <= 0:
-            continue
-        row = out.setdefault(key[len(SUBSCRIPTION_KEY_PREFIX):], [0, 0, 0, 0])
-        row[0] += amount
-        row[1] += min(paid_amount, amount)
-        row[2] += 1
-        row[3] += 1 if paid_amount >= amount else 0
-    return {gid: (r[0], r[1], r[2], r[3]) for gid, r in out.items()}
+    return _collection_by(ledger, period, lambda key: key[len(SUBSCRIPTION_KEY_PREFIX):]
+                          if key.startswith(SUBSCRIPTION_KEY_PREFIX) else None)
+
+
+def lesson_collection(
+    ledger: dict[tuple[str, str, str], tuple[int, int]], period: str,
+) -> dict[str, tuple[int, int, int, int]]:
+    """Занятия месяца (групповые по посещению и индивидуальные) по педагогам: teacher_id → (план, собрано,
+    учеников, оплатили полностью). Абонементы не входят; прямая оплата педагогу школой не начисляется.
+    Диаграмма «Занятия» (решение владельца 11.10.2026)."""
+    return _collection_by(ledger, period, lambda key: None if key.startswith(SUBSCRIPTION_KEY_PREFIX) else key)
 
 
 def teacher_collection(
@@ -192,7 +211,10 @@ class PaymentService:
         group_repo=None,
         student_group_repo=None,
         subscription_override_repo=None,
+        student_repo=None,
     ) -> None:
+        # student_repo — чтобы долг удалённого ученика нигде не считался (compute_ledger_map); без него — как раньше
+        self._student_repo = student_repo
         self._payment_repo = payment_repo
         self._lesson_repo = lesson_repo
         self._teacher_repo = teacher_repo
@@ -757,9 +779,15 @@ class PaymentService:
                 key = (p.student_id, p.teacher_id, p.period_month)
                 paid[key] = paid.get(key, 0) + p.total_amount
 
+        # Удалённый ученик: его занятия остаются в журнале, но долг нигде не считается — ни в должниках, ни в
+        # сборе месяца, ни в диаграммах, ни у педагога (решение владельца 11.10.2026)
+        alive = ({s.student_id for s in await self._student_repo.get_all()}
+                 if self._student_repo is not None else None)
         ledger: dict[tuple[str, str, str], tuple[int, int]] = {}
         for key, amount in accrued.items():
             if since_period and key[2] < since_period:
+                continue
+            if alive is not None and key[0] not in alive:
                 continue
             ledger[key] = (amount, paid.get(key, 0))
         return ledger

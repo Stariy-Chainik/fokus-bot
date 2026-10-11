@@ -126,7 +126,8 @@ def _dp():
     lesson_repo, payment_repo, client_repo = LessonRepoFake(lessons), PaymentRepoFake([]), ClientRepoWritable([])
     sub_override_repo = SubOverrideRepoFake()
     payment_service = PaymentService(payment_repo, lesson_repo, teacher_repo, group_repo=group_repo,
-                                     student_group_repo=sg_repo, subscription_override_repo=sub_override_repo)
+                                     student_group_repo=sg_repo, subscription_override_repo=sub_override_repo,
+                                     student_repo=student_repo)
     bonus_repo = BonusRepoFake()
     salary_service = SalaryService(lesson_repo, None, bonus_repo)
     finance_repo = FinanceRepoFake()

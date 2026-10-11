@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 from bot.models import Student, StudentGroupTier
 from bot.utils import generate_student_id
 from .base import BaseRepository
@@ -78,11 +78,46 @@ class StudentRepository(BaseRepository):
                 return s
         return None
 
+    async def _used_student_ids(self) -> list[str]:
+        """Номера учеников из истории: занятия, оплаты, переопределения абонемента, заявки, лента «Новый ученик».
+
+        Удалённого ученика нет в листе, но его номер повторно не выдаём: иначе новый ученик унаследует чужие
+        занятия, оплаты и долг (STU-0283: Андреева Дарья удалена 05.10.2026, номер получила Молярова Анна 06.10).
+        Каждый лист читается из кеша; недоступный лист пропускается — номер всё равно не меньше текущего максимума.
+        """
+        from config.settings import settings
+        from bot.utils.attendees import attendee_ids
+        from .activity_log_repo import ActivityLogRepository
+        from .lesson_repo import LessonRepository
+        from .payment_repo import PaymentRepository
+        from .pending_action_repo import PendingActionRepository
+        from .subscription_override_repo import SubscriptionOverrideRepository
+        readers: list[tuple[Any, str, Any]] = [
+            (LessonRepository, settings.sheet_lessons,
+             lambda ls: [ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id, *attendee_ids(ls.attendees)]),
+            (PaymentRepository, settings.sheet_payments, lambda p: [p.student_id]),
+            (SubscriptionOverrideRepository, settings.sheet_subscription_overrides, lambda o: [o.student_id]),
+            (PendingActionRepository, settings.sheet_pending_actions, lambda a: [a.student_id]),
+            (ActivityLogRepository, settings.sheet_activity_log,
+             lambda e: [e.ref] if e.text.startswith("Новый ученик") else []),
+        ]
+        used: list[str] = []
+        for repo_cls, sheet, pick in readers:
+            try:
+                for item in await repo_cls(self._client, sheet).get_all():
+                    used += [str(x) for x in pick(item) if x and str(x).startswith("STU-")]
+            except Exception as exc:                  # лист недоступен — номер считаем по остальным
+                logger.warning("Номер ученика: лист %s не прочитан: %s", sheet, exc)
+        return used
+
     async def add(self, name: str) -> Student:
-        existing_ids = [s.student_id for s in await self.get_all()]
-        student_id = generate_student_id(existing_ids)
-        # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
-        await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])
+        # номер — под замком листа (два заведения в одну секунду иначе получали один номер) и больше любого
+        # номера из истории, а не только из листа учеников: номер удалённого ученика повторно не выдаётся
+        async with self._sheet_lock():
+            existing_ids = [s.student_id for s in await self.get_all()] + await self._used_student_ids()
+            student_id = generate_student_id(existing_ids)
+            # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
+            await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])
         from bot.services import activity          # локально: репозитории грузятся раньше сервисов
         await activity.record(activity.STUDENT, f"Новый ученик: {student_id} {name}", ref=student_id)
         return Student(student_id=student_id, name=name, partner_id=None, group_ids=[])

@@ -21,7 +21,9 @@ from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
 from bot.services.payment_methods import ADMIN_MANUAL
-from bot.services.payment_service import debtors_summary, payment_lock, period_collection, subscription_collection
+from bot.services.payment_service import (
+    debtors_summary, lesson_collection, payment_lock, period_collection, subscription_collection,
+)
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.profit_service import calculate_profit_lesson
 from bot.services.student_service import has_short_tariff
@@ -141,7 +143,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
         collected = period_collection(ledger, period)
         subs = subscription_collection(ledger, period)
+        lesson_col = lesson_collection(ledger, period)
         group_names = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        teacher_names = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         debtors_count, debtors_total = debtors_summary(ledger, current)
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
@@ -163,6 +167,13 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                 "plan": sum(r[0] for r in subs.values()), "fact": sum(r[1] for r in subs.values()),
                 "groups": sorted(({"id": gid, "name": group_names.get(gid, gid), "plan": p, "fact": f,
                                    "students": n, "paidFull": full} for gid, (p, f, n, full) in subs.items()),
+                                 key=lambda x: (-x["plan"], x["name"])),
+            },
+            # та же диаграмма по занятиям (групповые по посещению и индивидуальные) — по педагогам
+            "lessons": {
+                "plan": sum(r[0] for r in lesson_col.values()), "fact": sum(r[1] for r in lesson_col.values()),
+                "groups": sorted(({"id": tid, "name": teacher_names.get(tid, tid), "plan": p, "fact": f,
+                                   "students": n, "paidFull": full} for tid, (p, f, n, full) in lesson_col.items()),
                                  key=lambda x: (-x["plan"], x["name"])),
             },
             "studentsCount": len(await student_repo.get_all()),

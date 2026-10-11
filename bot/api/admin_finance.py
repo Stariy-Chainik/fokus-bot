@@ -373,7 +373,8 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         if t is None:
             return _json({"error": "not_found"}, status=404)
         ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
-        sg = (await _sub_groups_by_teacher(period)).get(tid, set())
+        lessons_only = request.query.get("lessons") == "1"         # из диаграммы «Занятия» на сводке — без абонементов
+        sg = set() if lessons_only else (await _sub_groups_by_teacher(period)).get(tid, set())
         col = teacher_collection(ledger, period, tid, sg)
         unpaid = await _unpaid_lessons(period, tid, col, {})
         names = {s.student_id: s.name for s in await student_repo.get_all()}

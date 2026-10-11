@@ -110,6 +110,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         payment_repo, lesson_repo, teacher_repo,
         group_repo=group_repo, student_group_repo=student_group_repo,
         subscription_override_repo=subscription_override_repo,
+        student_repo=student_repo,              # долг удалённого ученика нигде не считается
     )
     pending_queue.setup(payment_service)   # заявки родителей: снимок остатков на момент подачи
     profit_service = ProfitService(
