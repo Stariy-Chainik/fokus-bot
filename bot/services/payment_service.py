@@ -121,6 +121,26 @@ def period_collection(ledger: dict[tuple[str, str, str], tuple[int, int]], perio
     return PeriodCollection(accrued, paid)
 
 
+def subscription_collection(
+    ledger: dict[tuple[str, str, str], tuple[int, int]], period: str,
+) -> dict[str, tuple[int, int, int, int]]:
+    """Абонементы месяца по группам: group_id → (план, собрано, учеников, оплатили полностью).
+
+    План — начислено по `SUB:{gid}`, собрано — зачтено без переплаты (как `period_collection`), поэтому сумма
+    по группам совпадает с абонементной частью плитки сводки. Диаграмма «Абонементы» (решение владельца 11.10.2026).
+    """
+    out: dict[str, list[int]] = {}
+    for (_sid, key, ym), (amount, paid_amount) in ledger.items():
+        if ym != period or not key.startswith(SUBSCRIPTION_KEY_PREFIX) or amount <= 0:
+            continue
+        row = out.setdefault(key[len(SUBSCRIPTION_KEY_PREFIX):], [0, 0, 0, 0])
+        row[0] += amount
+        row[1] += min(paid_amount, amount)
+        row[2] += 1
+        row[3] += 1 if paid_amount >= amount else 0
+    return {gid: (r[0], r[1], r[2], r[3]) for gid, r in out.items()}
+
+
 def teacher_collection(
     ledger: dict[tuple[str, str, str], tuple[int, int]], period: str, teacher_id: str, sub_groups: set[str],
 ) -> dict[str, tuple[int, int]]:

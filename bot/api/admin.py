@@ -21,7 +21,7 @@ from bot.models.enums import LessonType
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
 from bot.services.payment_methods import ADMIN_MANUAL
-from bot.services.payment_service import debtors_summary, payment_lock, period_collection
+from bot.services.payment_service import debtors_summary, payment_lock, period_collection, subscription_collection
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.profit_service import calculate_profit_lesson
 from bot.services.student_service import has_short_tariff
@@ -140,6 +140,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         prev = _prev_period(current)
         ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
         collected = period_collection(ledger, period)
+        subs = subscription_collection(ledger, period)
+        group_names = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
         debtors_count, debtors_total = debtors_summary(ledger, current)
         today = date.today().isoformat()
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
@@ -156,6 +158,13 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                           # сколько учеников ещё не оплатили текущий месяц (плитка «К оплате»)
                           "unpaidStudents": len({k[0] for k, (a, pd) in ledger.items() if k[2] == period and a > pd})},
             "incomeMonth": month.total_income, "salaryMonth": month.salary, "profitMonth": month.profit,
+            # диаграмма «Абонементы: собрано из плана» по группам за месяц (решение владельца 11.10.2026)
+            "subscriptions": {
+                "plan": sum(r[0] for r in subs.values()), "fact": sum(r[1] for r in subs.values()),
+                "groups": sorted(({"id": gid, "name": group_names.get(gid, gid), "plan": p, "fact": f,
+                                   "students": n, "paidFull": full} for gid, (p, f, n, full) in subs.items()),
+                                 key=lambda x: (-x["plan"], x["name"])),
+            },
             "studentsCount": len(await student_repo.get_all()),
             "activityToday": await _activity_count(today),
             # колокольчик «События»: новые с последнего просмотра (?seen= — ts последнего просмотренного события)

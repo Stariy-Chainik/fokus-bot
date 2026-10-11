@@ -187,6 +187,25 @@ SCREENS['a.unpaid.branch'] = async ({ ym, bid }) => {
     ${done.length ? `<div class="eyebrow">Оплачено полностью</div>${done.map(g => unpaidGroup(g, ym)).join('')}` : ''}
     <p class="hint" style="margin-top:8px">✅ оплачено · 🟡 частично · ⬜ не оплачено. Тап по ученику — его счёт: там же отмечается оплата.</p>` };
 };
+/* Диаграмма «Абонементы: собрано из плана» (решение владельца 11.10.2026): общая полоса всегда видна, по группам —
+   в раскрывающемся блоке, чтобы «Требует внимания» не уезжало вниз. Тап по группе — её вкладка «Оплата» за месяц. */
+const subChart = (s, ym) => {
+  if (!s || !s.plan) return '';
+  const pct = (f, p) => p ? Math.round(f * 100 / p) : 0;
+  const maxPlan = Math.max(...s.groups.map(g => g.plan), 1);
+  const row = g => `<button class="subrow" data-act="subGroupOpen" data-p='${esc(JSON.stringify({ id: g.id, ym }))}' title="${esc(g.name)}: собрано ${fmt(g.fact)} из ${fmt(g.plan)} (${pct(g.fact, g.plan)}%), оплатили полностью ${g.paidFull} из ${g.students}">
+      <div class="lbl"><span>${esc(g.name)}</span><b>${pct(g.fact, g.plan)}%</b></div>
+      <div class="track" style="width:${Math.max(8, g.plan * 100 / maxPlan).toFixed(1)}%"><i style="width:${pct(g.fact, g.plan)}%"></i></div>
+      <div class="s">собрано ${fmt(g.fact)} из ${fmt(g.plan)} · оплатили ${g.paidFull} из ${plural(g.students, ['ученика', 'учеников', 'учеников'])}</div></button>`;
+  return `<div class="card subchart big" style="margin:10px 0 0">
+      <div class="head2"><span style="font-weight:700">Абонементы · ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}</span><span class="pct">${pct(s.fact, s.plan)}%</span></div>
+      <div class="track" role="img" aria-label="Собрано ${fmt(s.fact)} из ${fmt(s.plan)}"><i style="width:${pct(s.fact, s.plan)}%"></i></div>
+      <div class="hint">собрано ${fmt(s.fact)} из ${fmt(s.plan)} · осталось ${fmt(s.plan - s.fact)}</div>
+      <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>собрано</span><span><span class="sw" style="background:var(--accent-soft)"></span>план</span></div>
+    </div>
+    <details class="acc" style="margin-top:-6px;border-top-left-radius:0;border-top-right-radius:0"><summary><span><span class="chev">›</span>По группам <span class="hint">· ${s.groups.length}</span></span><span class="r hint">план / собрано</span></summary>
+      <div>${s.groups.map(row).join('')}</div></details>`;
+};
 /* Сводка — три блока по приоритету: что ждёт решения → что было сегодня → как идёт месяц.
    Быстрых действий нет: всё это есть во вкладках, а дубли плиток и кнопок только путали. */
 SCREENS['a.home'] = async ({ ym } = {}) => {
@@ -211,6 +230,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
+    ${subChart(h.subscriptions, h.period)}
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
@@ -808,6 +828,10 @@ SCREENS['a.lesson'] = async ({ id }) => {
     <div style="margin-top:12px">${btn(l.locked ? '🗑 Удалить (период сдан)' : '🗑 Удалить занятие', 'delLesson', { id, locked: l.locked }, 'danger')}</div>
     <p class="hint" style="margin-top:8px">Правка полей не поддерживается — как в боте: удалить и отметить заново.</p>` };
 };
+/* Диаграмма абонементов на сводке: тап по группе — её вкладка «Оплата» за месяц. */
+Object.assign(ACT, {
+  subGroupOpen: ({ id, ym }) => { state.ui.aGroupTab = 'pay'; go('a.group', { id, ym }); },
+});
 /* Группа ребёнка в детском саду — номер или название (решение владельца 10.10.2026). */
 Object.assign(ACT, {
   aKgAsk: ({ sid, name, value }) => sheet(`<h3>Группа в детском саду</h3><div class="hint">${esc(name)}. Номер или название группы в саду. Пусто — стереть.</div>${field('a-kg', 'Номер или название', value || '', 'maxlength="40" autocomplete="off" placeholder="например, 7 или «Солнышко»"')}<div style="margin-top:12px">${btn('💾 Сохранить', 'aKgDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
