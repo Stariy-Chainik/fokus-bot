@@ -26,6 +26,7 @@ def _row_to_lesson(row: dict) -> Lesson:
         student_3_name=str(row["student_3_name"]) if row.get("student_3_name") else None,
         student_4_id=str(row["student_4_id"]) if row.get("student_4_id") else None,
         student_4_name=str(row["student_4_name"]) if row.get("student_4_name") else None,
+        merged_groups=str(row.get("merged_groups") or ""),
     )
 
 
@@ -110,6 +111,7 @@ class LessonRepository(BaseRepository):
             lesson.student_3_name or "",
             lesson.student_4_id or "",
             lesson.student_4_name or "",
+            lesson.merged_groups or "",
         ])
         return lesson
 
@@ -151,5 +153,6 @@ class LessonRepository(BaseRepository):
                 lesson.student_3_name or "",
                 lesson.student_4_id or "",
                 lesson.student_4_name or "",
+                lesson.merged_groups or "",
             ])
             return True

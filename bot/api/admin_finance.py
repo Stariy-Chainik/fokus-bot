@@ -9,6 +9,7 @@ from datetime import date
 
 from aiohttp import web
 
+from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services.bonuses import grant_bonus, revoke_bonus
 from bot.services.payment_ledger import StudentMonthLessons
@@ -190,7 +191,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             u["lessons"].append({"lessonId": ls.lesson_id, "date": ls.date, "lessonType": ls.type.value,
                                  "durationMin": ls.duration_min, "income": row.income, "salary": row.salary,
                                  "rent": row.rent, "ownerIncome": row.owner_income, "students": who,
-                                 "groupId": ls.group_id or "", "groupName": groups[ls.group_id].name if ls.group_id in groups else "",
+                                 "groupId": ls.group_id or "", "groupName": lesson_group_title(ls, groups),
                                  "teacher": t.name})
         out = []
         for u in units.values():
@@ -402,7 +403,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             if ls is not None and not ln.label:
                 if ls.type == LessonType.GROUP:
                     who = [names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
-                    d["label"] = groups.get(ls.group_id, "Группа")
+                    d["label"] = lesson_group_title(ls, groups, "Группа")
                     d["type"], d["students"] = "group", who
                 else:
                     who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]

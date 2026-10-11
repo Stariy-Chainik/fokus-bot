@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from aiohttp import web
 
+from bot.utils.groups import lesson_group_title
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models.enums import LessonType
 from bot.services import payment_ledger
@@ -295,7 +296,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             prow = calculate_profit_lesson(ls, t) if t else None
             if ls.type == LessonType.GROUP:
                 who = [students.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
-                title = groups[ls.group_id].name if ls.group_id in groups else "Группа"
+                title = lesson_group_title(ls, groups, "Группа")
             else:
                 who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
                 title = " + ".join(who) or "Занятие"

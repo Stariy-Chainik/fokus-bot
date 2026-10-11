@@ -6,6 +6,7 @@ from datetime import date
 
 from aiohttp import web
 
+from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.api.record import RecordError, record_create, record_options
@@ -89,7 +90,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             out.append({
                 "id": ls.lesson_id, "date": ls.date, "teacherId": ls.teacher_id,
                 "teacherName": t.name if t else ls.teacher_name, "type": ls.type.value,
-                "groupName": groups[ls.group_id].name if ls.group_id in groups else "",
+                "groupName": lesson_group_title(ls, groups),
                 "students": names, "durationMin": ls.duration_min,
                 "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
                 "rent": lesson_rent(ls),        # аренда зала у педагога с прямой оплатой (статистика, не оплата)
@@ -115,7 +116,9 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         return _json({
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
             "teacherId": ls.teacher_id, "teacherName": t.name if t else ls.teacher_name,
-            "groupId": ls.group_id or "", "groupName": g.name if g else "",
+            "groupId": ls.group_id or "",
+            "groupName": (lesson_group_title(ls, {x.group_id: x for x in await group_repo.get_all(include_archived=True)})
+                          if ls.merged_groups else g.name if g else ""),
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,

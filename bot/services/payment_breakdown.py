@@ -4,7 +4,7 @@
 Начисления и оплаты — из `PaymentService.compute_ledger_map` (те же цифры, что плитка на сводке).
 Раскладка по группам:
 - абонемент `SUB:gid` — в свою группу;
-- групповое занятие — в группу, где оно прошло;
+- групповое занятие — в группу, где оно прошло; объединённое — в группу ребёнка;
 - индивидуальное (и служебные revenue-share группы) — в «домашнюю» группу ученика: его группу у того
   же педагога, иначе первую его группу месяца; нет групп — раздел «Без группы».
 Оплата педагогу ложится на занятия так же, как ✓ в счёте (`student_lesson_marks`); неполная оплата
@@ -47,6 +47,12 @@ async def month_breakdown(dp, period: str) -> dict:
         same = [g for g in mine if g in teacher_groups.get(tid, set())]
         return (same or mine or [NO_GROUP])[0]
 
+    def lesson_group(ls, sid: str) -> str:
+        """Объединённое занятие (MERGEABLE_GROUPS) — в группу самого ребёнка, иначе — где прошло."""
+        if ls.merged_groups and (sid, ls.group_id) not in membership:
+            return next((g for g in ls.group_ids if (sid, g) in membership), ls.group_id)
+        return ls.group_id
+
     # группа → ученик → суммы
     cells: dict[str, dict[str, dict]] = {}
 
@@ -76,7 +82,7 @@ async def month_breakdown(dp, period: str) -> dict:
             placed = got_total = 0
             for ls, m in items:
                 in_group = bool(ls.group_id) and ls.group_id not in service
-                gid = ls.group_id if in_group else home_group(sid, tid)
+                gid = (lesson_group(ls, sid) if in_group else home_group(sid, tid))
                 got = m.amount if m.paid else max(0, min(left, m.amount))
                 if not m.paid:
                     left -= got

@@ -21,6 +21,7 @@ from aiohttp import web
 from types import SimpleNamespace
 from typing import Any, cast
 
+from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_tg_id
 from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
@@ -117,7 +118,7 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
         who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
     return {
         "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
-        "groupId": ls.group_id or "", "groupName": group_names.get(ls.group_id, ""),
+        "groupId": ls.group_id or "", "groupName": lesson_group_title(ls, group_names),
         "students": who, "recordedAt": ls.recorded_at,
         "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
         "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
@@ -355,7 +356,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
             "paidCount": sum(1 for a in payable if a["payStatus"] in ("paid", "sub_paid")),
             "payableCount": len(payable), "roster": roster,
-            "groupId": ls.group_id or "", "groupName": g.name if g else "",
+            "groupId": ls.group_id or "", "groupName": lesson_group_title(ls, await _group_names(), g.name if g else ""),
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
@@ -684,7 +685,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             if ls is None:
                 return ""
             if ls.type == LessonType.GROUP:
-                return groups.get(ls.group_id, "Группа")
+                return lesson_group_title(ls, groups, "Группа")
             who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
             return " + ".join(who) or names.get(ls.student_1_id or "", "Занятие")
 

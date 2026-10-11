@@ -20,6 +20,7 @@ from datetime import date
 from aiohttp import web
 from aiogram.types import BufferedInputFile
 
+from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_tg_id
 from bot.utils.bill_format import payment_purpose
 from bot.services import activity, payment_ledger
@@ -185,7 +186,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     "last": max((ls.date for ls in month_lessons), default=None),
                     "today": [{"type": ls.type.value, "durationMin": ls.duration_min,
                                "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
-                               "group": groups.get(ls.group_id, "")}
+                               "group": lesson_group_title(ls, groups)}
                               for ls in month_lessons if ls.date == today],
                 },
             })
@@ -263,7 +264,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
                 "type": ls.type.value, "teacherId": ls.teacher_id,
                 "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
-                "group": groups.get(ls.group_id, ""),
+                "group": lesson_group_title(ls, groups),
             })
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,

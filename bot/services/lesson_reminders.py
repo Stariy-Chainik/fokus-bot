@@ -40,6 +40,10 @@ class Missing:
         return ", ".join(f"{s.start}–{s.end}" for s in self.slots)
 
 
+def _groups_of(ls) -> list[str]:
+    return getattr(ls, "group_ids", None) or [ls.group_id]
+
+
 def missing_for_day(day: date, slots: list, lessons: list, groups: dict, group_teachers: dict) -> list[Missing]:
     """Чистый расчёт: группы, у которых по расписанию на `day` занятий больше, чем отмечено.
 
@@ -55,14 +59,15 @@ def missing_for_day(day: date, slots: list, lessons: list, groups: dict, group_t
             today_slots.setdefault(s.group_id, []).append(s)
     out = []
     for gid, gslots in today_slots.items():
-        recorded = sum(1 for ls in lessons if ls.group_id == gid and ls.date == iso)
+        # объединённое занятие (MERGEABLE_GROUPS) засчитывается всем его группам
+        recorded = sum(1 for ls in lessons if gid in _groups_of(ls) and ls.date == iso)
         if recorded >= len(gslots):
             continue
         teachers = [s.teacher_id for s in gslots if s.teacher_id]
         if not teachers:
             recent: dict[str, int] = {}
             for ls in lessons:
-                if ls.group_id == gid and since <= ls.date < iso:
+                if gid in _groups_of(ls) and since <= ls.date < iso:
                     recent[ls.teacher_id] = recent.get(ls.teacher_id, 0) + 1
             teachers = sorted(recent, key=lambda t: -recent[t]) or list(group_teachers.get(gid, []))
         out.append(Missing(gid, groups[gid].name, sorted(gslots, key=lambda s: s.start), recorded,

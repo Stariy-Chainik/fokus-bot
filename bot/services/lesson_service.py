@@ -66,6 +66,7 @@ class LessonService:
         group_id: str = "",
         bypass_period_lock: bool = False,
         allow_same_day: bool = False,
+        merged_groups: list[str] | None = None,
     ) -> Lesson:
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
@@ -101,6 +102,7 @@ class LessonService:
             student_3_name=student_3_name,
             student_4_id=student_4_id,
             student_4_name=student_4_name,
+            merged_groups="|".join(merged_groups or []),
         )
 
         lesson = await self._lesson_repo.add_new(lesson)
@@ -108,7 +110,7 @@ class LessonService:
         logger.info("Создано занятие %s teacher=%s date=%s",
                     lesson_id, teacher.teacher_id, lesson_date)
         await activity.record(activity.LESSON, (
-            f"Отмечено занятие: {teacher.teacher_id} · {lesson_date} · {group_id or ' + '.join(participants)}"
+            f"Отмечено занятие: {teacher.teacher_id} · {lesson_date} · {' + '.join(lesson.group_ids) or ' + '.join(participants)}"
             f" · {duration_min} мин" + (" · за педагога" if bypass_period_lock else "")), ref=lesson_id)
         return lesson
 

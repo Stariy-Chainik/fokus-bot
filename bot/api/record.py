@@ -15,7 +15,7 @@ from datetime import date
 from bot.models.enums import GroupBillingMode, LessonType
 from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv
 from bot.services.lesson_service import SameDaySoloError
-from bot.utils.groups import hide_service_groups
+from bot.utils.groups import hide_service_groups, merged_title
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -52,12 +52,15 @@ async def record_options(dp, teacher_id: str) -> dict:
     for g in sorted(await group_repo.get_all(), key=lambda g: (branches.get(g.branch_id, ""), g.sort_order, g.name)):
         if g.group_id not in gids:
             continue
+        attendance = g.billing_mode == GroupBillingMode.PER_VISIT or g.group_id in settings.attendance_group_id_set
         roster = sorted((students[sid] for (sid, gid), m in membership.items() if gid == g.group_id and sid in students and m.is_active),
                         key=lambda s: s.name)
         groups.append({
             "id": g.group_id, "name": g.name, "branchId": g.branch_id, "branchName": branches.get(g.branch_id, ""),
             "mode": g.billing_mode.value, "priceFull": g.price_full, "priceShort": g.price_short,
-            "attendance": g.billing_mode == GroupBillingMode.PER_VISIT or g.group_id in settings.attendance_group_id_set,
+            "attendance": attendance,
+            # с какими своими группами можно объединить занятие (MERGEABLE_GROUPS; нужна отметка посещения)
+            "mergeWith": sorted(settings.mergeable_group_map.get(g.group_id, set()) & gids) if attendance else [],
             "durationFull": g.duration_full, "durationShort": g.duration_short,
             "roster": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value, "partnerId": s.partner_id} for s in roster],
         })
@@ -79,6 +82,36 @@ async def record_options(dp, teacher_id: str) -> dict:
         "groups": groups, "pairs": pairs,
         "students": [{"id": s.student_id, "name": s.name, "partnerId": s.partner_id} for s in sorted(mine, key=lambda s: s.name)],
     }
+
+
+async def _merge_groups(dp, teacher_id: str, group, merge_ids, ids: list[str]) -> list[tuple]:
+    """Объединённое занятие: [(группа, {её ученики среди отмеченных})] для групп из `mergeGroupIds`.
+
+    Объединять можно только свои группы из MERGEABLE_GROUPS. Ученик, который есть и в основной группе,
+    платит по её цене — в объединённую он не попадает. Группа без отмеченных детей не объединяется."""
+    if not merge_ids:
+        return []
+    allowed = settings.mergeable_group_map.get(group.group_id, set())
+    own = set(await dp["teacher_group_repo"].get_groups_for_teacher(teacher_id))
+    if not isinstance(merge_ids, list) or any(not isinstance(g, str) or g not in allowed or g not in own
+                                              for g in merge_ids):
+        raise RecordError("bad_request", "Эти группы нельзя объединить")
+    membership = await dp["student_group_repo"].get_membership_map()
+
+    def member(sid: str, gid: str) -> bool:
+        m = membership.get((sid, gid))
+        return m is not None and m.is_active
+
+    taken = {sid for sid in ids if member(sid, group.group_id)}
+    out = []
+    for gid in dict.fromkeys(merge_ids):
+        g = await dp["group_repo"].get_by_id(gid)
+        mine = {sid for sid in ids if sid not in taken and member(sid, gid)}
+        if g is None or not mine:
+            continue
+        taken |= mine
+        out.append((g, mine))
+    return out
 
 
 REPEAT_WINDOW_SEC = 30.0
@@ -158,14 +191,23 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
             if kind == "rshare" and not (1 <= len(ids) <= 3):
                 raise RecordError("bad_request", "Отметьте от 1 до 3 участниц")
             tiers = {sid: t for sid, t in (body.get("tiers") or {}).items() if t in ("short", "full", TRIAL_TIER)}
-            if group.billing_mode == GroupBillingMode.PER_VISIT:
-                tiers = {sid: tiers.get(sid, students[sid].group_tier.value) for sid in ids}
-            csv = build_group_attendees_csv(group, ids, tiers)
+            merged = await _merge_groups(dp, teacher.teacher_id, group, body.get("mergeGroupIds"), ids)
+            parts: list[str] = []
+            for g, gids_ in [(group, [i for i in ids if not any(i in m for _g, m in merged)]),
+                             *[(g, [i for i in ids if i in m]) for g, m in merged]]:
+                if not gids_ and g is not group:
+                    continue
+                g_tiers = ({sid: tiers.get(sid, students[sid].group_tier.value) for sid in gids_}
+                           if g.billing_mode == GroupBillingMode.PER_VISIT else tiers)
+                parts.append(build_group_attendees_csv(g, gids_, g_tiers) or "")
+            csv = ",".join(p for p in parts if p) or None
             lesson = await lesson_service.create(
                 teacher=teacher, lesson_type=LessonType.GROUP, lesson_date=day, duration_min=duration,
                 attendees=csv, group_id=group.group_id, bypass_period_lock=bypass_period_lock,
+                merged_groups=[g.group_id for g, _m in merged],
             )
-            return {"created": 1, "lessons": [lesson.lesson_id], "attendees": len(ids), "label": group.name}
+            label = merged_title([group.name, *(g.name for g, _m in merged)])
+            return {"created": 1, "lessons": [lesson.lesson_id], "attendees": len(ids), "label": label}
         if kind == "pair":
             pairs = []
             for a_id in ids:

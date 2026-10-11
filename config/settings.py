@@ -128,6 +128,21 @@ class Settings(BaseSettings):
     def attendance_group_id_set(self) -> set:
         return {g.strip() for g in self.attendance_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Группы, которые педагог может объединить в одно занятие (решение владельца 11.10.2026, садовые
+    # группы Яковлевой в Южной Битце): `GRP-A+GRP-B,GRP-C+GRP-D`. Одно занятие — одна зарплата, каждый
+    # ребёнок платит по цене своей группы, занятие засчитывается обеим группам (lessons.merged_groups).
+    mergeable_groups: str = Field(default="", alias="MERGEABLE_GROUPS")
+
+    @property
+    def mergeable_group_map(self) -> dict:
+        """group_id → {группы, с которыми её можно объединить}."""
+        out: dict[str, set] = {}
+        for chunk in self.mergeable_groups.replace("|", ",").split(","):
+            gids = {g.strip() for g in chunk.split("+") if g.strip()}
+            for gid in gids:
+                out.setdefault(gid, set()).update(gids - {gid})
+        return {gid: others for gid, others in out.items() if others}
+
     # Педагоги, чьи ИНДИВИДУАЛЬНЫЕ занятия родители оплачивают напрямую педагогу
     # (мимо школы): не попадают в счета/долги/прибыль, зарплата школы = 0.
     direct_pay_teacher_ids: str = Field(default="", alias="DIRECT_PAY_TEACHER_IDS")

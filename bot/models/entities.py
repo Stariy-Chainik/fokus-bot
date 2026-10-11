@@ -154,6 +154,14 @@ class Lesson:
     student_3_name: Optional[str] = None
     student_4_id: Optional[str] = None
     student_4_name: Optional[str] = None
+    # объединённое занятие (MERGEABLE_GROUPS): другие группы, чьи дети были на нём, через «|»
+    merged_groups: str = ""
+
+    @property
+    def group_ids(self) -> list[str]:
+        """Все группы занятия: своя и объединённые с ней."""
+        extra = [g for g in self.merged_groups.split("|") if g and g != self.group_id]
+        return ([self.group_id] if self.group_id else []) + extra
 
 
 @dataclass

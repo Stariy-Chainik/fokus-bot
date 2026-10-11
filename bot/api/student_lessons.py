@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType
 
 
@@ -34,7 +35,7 @@ async def month_lessons(dp, sid: str, period: str, keep: Callable | None = None,
         out.append({
             "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min, "type": ls.type.value,
             "teacherId": ls.teacher_id, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
-            "group": g.name if g else "", "mode": g.billing_mode.value if g else "",
+            "group": lesson_group_title(ls, groups), "mode": g.billing_mode.value if g else "",
             "amount": (mark.amount if mark else 0) if money else 0,
             "paid": bool(mark and mark.paid) if money else False,
             "direct": direct.get(ls.lesson_id) if money else None,   # прямая оплата педагогу: сумма родителя
