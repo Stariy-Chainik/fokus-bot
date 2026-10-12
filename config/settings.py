@@ -266,18 +266,30 @@ class Settings(BaseSettings):
         return out
 
     # Своя ставка педагога за занятия конкретной группы (₽ за 45 мин, как rate_group).
-    # Формат: GRP-0019:1500 — «БП Джаз»: 60 мин = 2000 ₽.
+    # Формат: GRP-0019:1500 — «БП Джаз»: 60 мин = 2000 ₽. С месяца: GRP-0021:1050:2026-10 — ставка действует
+    # с октября 2026, раньше — прежняя (у группы может быть несколько строк). Для групп смены (SHIFT_GROUPS) —
+    # ставка часа смены (решение владельца 12.10.2026: Боброво у Яковлевой 1400 ₽/ч с октября 2026).
     group_salary_rates: str = Field(default="", alias="GROUP_SALARY_RATES")
 
     @property
-    def group_salary_rate_map(self) -> dict:
-        out = {}
+    def group_salary_rate_rows(self) -> dict:
+        """group_id → [(с какого месяца или "", ставка)] по возрастанию месяца."""
+        out: dict[str, list[tuple[str, int]]] = {}
         for chunk in self.group_salary_rates.replace("|", ",").split(","):
-            if ":" in chunk:
-                gid, rate = chunk.split(":", 1)
-                if gid.strip() and rate.strip().isdigit():
-                    out[gid.strip()] = int(rate.strip())
-        return out
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) >= 2 and parts[0] and parts[1].isdigit():
+                out.setdefault(parts[0], []).append((parts[2] if len(parts) > 2 else "", int(parts[1])))
+        return {gid: sorted(rows) for gid, rows in out.items()}
+
+    def group_salary_rate(self, group_id: str, period: str | None = None) -> int | None:
+        """Ставка группы на дату/месяц `period` (последняя строка, чей месяц ≤ period); None — ставка педагога."""
+        rows = self.group_salary_rate_rows.get(group_id) if group_id else None
+        if not rows:
+            return None
+        if period is None:
+            return rows[-1][1]
+        hit = [rate for since, rate in rows if not since or since <= period[:7]]
+        return hit[-1] if hit else None
 
     # Абонемент «2 раза в неделю» (цена ниже, чем за 3): GRP-XXXX:цена,... На проде — ХГ Боброво по сайту:
     # Начальная 5000, Средняя и Спортивная 6000 (цена группы = 3 раза). Переключатель — в карточке ученика.

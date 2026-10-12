@@ -61,3 +61,28 @@ def test_override_replaces_shift(monkeypatch):
     assert ov["2026-09-03"][0] == 2550 and "ушла раньше" in ov["2026-09-03"][1]
     assert ov["2026-09-10"][0] == 1700          # день без занятий, но с корректировкой
     assert not [ln for ln in lines if ln.kind == "shift"]  # расчёт по группам заменён
+
+
+def test_shift_rate_from_group_salary_rates_since_month(monkeypatch):
+    """Боброво у Яковлевой — 1400 ₽/ч с октября 2026 (решение владельца 12.10.2026): ставка часа смены
+    из GROUP_SALARY_RATES с месяцем; сентябрь — прежние 1700 ₽/ч, сад — по ставке педагога."""
+    monkeypatch.setattr(settings, "shift_groups", "GRP-0021:0-60,GRP-0022:0-120,GRP-0023:60-180")
+    monkeypatch.setattr(settings, "group_salary_rates",
+                        "GRP-0019:1500,GRP-0021:1050:2026-10,GRP-0022:1050:2026-10,GRP-0023:1050:2026-10")
+    assert settings.group_salary_rate("GRP-0021", "2026-09-30") is None
+    assert settings.group_salary_rate("GRP-0021", "2026-10-01") == 1050
+    assert settings.group_salary_rate("GRP-0019", "2026-01") == 1500           # без месяца — всегда
+    t = _teacher()
+    day = ["GRP-0021", "GRP-0022", "GRP-0023"]
+    lessons = [_lesson(f"S{i}", "2026-09-07", g) for i, g in enumerate(day)] + \
+              [_lesson(f"O{i}", "2026-10-05", g) for i, g in enumerate(day)] + \
+              [_lesson("O9", "2026-10-06", "GRP-0008", 60, att="STU-1:60:850")]
+    shifts = {ln.date: ln.amount for ln in compute_salary_lines(t, lessons) if ln.kind == "shift"}
+    assert shifts == {"2026-09-07": 5100, "2026-10-05": 4200}                  # 3 ч × 1700 → 3 ч × 1400
+    assert next(ln for ln in compute_salary_lines(t, lessons) if ln.lesson_id == "O9").amount == 1700
+
+
+def test_group_salary_rate_rows_pick_latest_started(monkeypatch):
+    monkeypatch.setattr(settings, "group_salary_rates", "GRP-1:1000,GRP-1:1200:2026-10,GRP-1:1300:2027-01")
+    assert [settings.group_salary_rate("GRP-1", p) for p in ("2026-09", "2026-12-31", "2027-02")] == [1000, 1200, 1300]
+    assert settings.group_salary_rate("GRP-1") == 1300

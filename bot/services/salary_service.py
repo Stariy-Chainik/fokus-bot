@@ -101,6 +101,10 @@ def compute_salary_lines(
 
     for day in sorted(set(present_by_day) | set(overrides)):
         rate_group = effective_rates(teacher, day)[0]
+        # своя ставка часа смены (GROUP_SALARY_RATES у групп смены, напр. Боброво 1400 ₽/ч с 10.2026)
+        own = [r for r in (settings.group_salary_rate(g, day) for g in sorted(present_by_day.get(day, ()))) if r is not None]
+        if own:
+            rate_group = max(own)
         if day in overrides:
             minutes, comment = overrides[day]
             kind, label = "override", f"Корректировка: {comment}" if comment else "Корректировка дня"

@@ -52,7 +52,9 @@ def calc_earned(
     rate = rate_group if lesson_type == LessonType.GROUP else rate_for_teacher
     # Своя ставка группы (GROUP_SALARY_RATES) — вместо ставки из карточки педагога.
     if group_id and lesson_type == LessonType.GROUP:
-        rate = settings.group_salary_rate_map.get(group_id, rate)
+        own = settings.group_salary_rate(group_id, period)
+        if own is not None:
+            rate = own
     return round(rate * duration_min / MINUTES_PER_UNIT)
 
 
