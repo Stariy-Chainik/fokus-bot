@@ -679,6 +679,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
 
         def label_for(ln) -> str:
             """У строк-занятий label пустой (в боте он не нужен) — подставляем, кто занимался."""
+            if ln.kind == "share":
+                # процент от абонементов: педагогу — только группа и его сумма, без начислений группы
+                # (решение владельца 12.10.2026)
+                return groups.get(ln.group_id, "Группа")
             if ln.label:
                 return ln.label
             ls = by_id.get(ln.lesson_id or "")

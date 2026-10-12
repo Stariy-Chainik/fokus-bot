@@ -3,7 +3,7 @@ import pytest
 
 from bot.models.enums import GroupBillingMode, LessonType
 from tests.fakes import mk_lesson
-from tests.test_admin_api import YM, _call, make_api
+from tests.test_admin_api import GROUP_DAY, YM, _call, make_api
 
 
 @pytest.fixture()
@@ -13,7 +13,7 @@ def api(monkeypatch):
 
 def test_lessons_of_day_and_detail(api):
     app, _ = api
-    status, d = _call(app, "GET", f"/api/admin/lessons?date={YM}-12")
+    status, d = _call(app, "GET", f"/api/admin/lessons?date={GROUP_DAY}")
     assert status == 200 and len(d["lessons"]) == 1
     ls = d["lessons"][0]
     assert (ls["teacherName"], ls["type"], ls["groupName"]) == ("Река Станислав", "group", "БП Джаз")

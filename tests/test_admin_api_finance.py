@@ -5,7 +5,7 @@ import pytest
 
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
 from tests.fakes import mk_group, mk_lesson, mk_payment
-from tests.test_admin_api import YM, _call, make_api, _not_today
+from tests.test_admin_api import GROUP_DAY, YM, _call, make_api, _not_today
 
 PARENT_TG = 5037902894
 
@@ -36,7 +36,7 @@ def test_profit_month_and_manual_entries(api):
 
 def test_profit_day_and_teacher_detail(api):
     app, _ = api
-    status, d = _call(app, "GET", f"/api/admin/profit/day?date={YM}-12")
+    status, d = _call(app, "GET", f"/api/admin/profit/day?date={GROUP_DAY}")
     assert status == 200 and d["rows"][0]["income"] == 1600 and d["totals"]["salary"] == 1333
     status, t = _call(app, "GET", f"/api/admin/profit/teacher/TCH-0001?period={YM}")
     assert status == 200 and [x["income"] for x in t["lessons"]] == [2000, 2000, 1600] and t["profit"] == 1267
@@ -151,7 +151,7 @@ def test_profit_breakdown_explains_income_and_profit_by_days(api):
     status, b = _call(app, "GET", f"/api/admin/profit/breakdown?ym={YM}")
     assert status == 200
     assert [(d["date"][8:], d["income"], d["salary"], d["profit"], d["lessons"]) for d in b["days"]] == [
-        (_not_today(3)[8:], 2000, 1500, 500, 1), (_not_today(10)[8:], 2000, 1500, 500, 1), ("12", 1600, 1333, 267, 1),
+        (_not_today(3)[8:], 2000, 1500, 500, 1), (_not_today(10)[8:], 2000, 1500, 500, 1), (GROUP_DAY[8:], 1600, 1333, 267, 1),
     ]
     assert sum(d["income"] for d in b["days"]) == b["totals"]["lessonIncome"] == 5600
     assert sum(d["profit"] for d in b["days"]) == b["totals"]["profit"] == 1267

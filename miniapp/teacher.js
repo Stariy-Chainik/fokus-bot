@@ -296,7 +296,7 @@ SCREENS['t.money'] = async ({ ym }) => {
     ${paid.length || d ? list([
       ...paid.map(x => cell({
         lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
-        s: x.kind === 'bonus' ? 'премия сверх зарплаты' : x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.kind === 'in_share' ? 'входит в % от абонементов — отдельно не оплачивается' : x.kind === 'share' ? 'за месяц · от начисленных абонементов группы' : x.minutes ? `${x.minutes} мин` : '',
+        s: x.kind === 'bonus' ? 'премия сверх зарплаты' : x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.kind === 'in_share' ? 'входит в оплату группы за месяц — отдельно не оплачивается' : x.kind === 'share' ? 'оплата группы за месяц' : x.minutes ? `${x.minutes} мин` : '',
         r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
       })),
       // Занятия прямой оплаты одной строкой: их 59 из 63, нулями список не засыпаем

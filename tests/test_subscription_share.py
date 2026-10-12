@@ -79,3 +79,21 @@ def test_admin_salaries_and_profit_use_share(monkeypatch):
     assert rows["TCH-0001"]["accrued"] == 3600 and rows["TCH-0001"]["lessons"] == 1     # 30 % × 2 × 6000
     profit = _call(app, "GET", f"/api/admin/profit?ym={ym}")[1]["totals"]
     assert profit["salary"] == 3600
+
+
+def test_teacher_sees_only_group_and_own_amount(monkeypatch):
+    """Педагогу не показываем, сколько начислено группе (решение владельца 12.10.2026)."""
+    from tests.test_teacher_api import TEACHER_TG, _call as t_call
+    app, dp = make_api(monkeypatch)
+    asyncio.run(dp["user_repo"].add(TEACHER_TG, teacher_id="TCH-0001"))
+    teacher = dp["teacher_repo"].items[0]
+    dp["group_repo"].items.append(mk_group("GRP-0021", "ВБ ХГ Младшая", billing_mode=GroupBillingMode.SUBSCRIPTION,
+                                           price_full=6000))
+    dp["student_group_repo"].rows.append(StudentGroup("STU-0002", "GRP-0021"))
+    dp["teacher_group_repo"]._t2g[teacher.teacher_id].append("GRP-0021")
+    dp["lesson_repo"].items.append(_grp("LES-50", "2026-12-01", "GRP-0021", teacher))
+    monkeypatch.setattr(settings, "subscription_share_groups", "GRP-0021:30:2026-10")
+    status, st = t_call(app, "GET", "/api/teacher/stats?ym=2026-12")
+    share = [x for x in st["lines"] if x["kind"] == "share"]
+    assert status == 200 and share == [{**share[0], "label": "ВБ ХГ Младшая", "amount": 1800}]
+    assert "6 000" not in str(st) and "6000" not in str(st)

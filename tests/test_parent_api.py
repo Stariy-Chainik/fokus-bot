@@ -10,7 +10,7 @@ from bot.models.enums import GroupBillingMode, PaymentStatus
 from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake, mk_entry, mk_payment
-from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, make_api
+from tests.test_admin_api import ADMIN_TG, GROUP_DAY, PARENT_TG, YM, make_api
 from tests.test_telegram_auth import make_init_data
 
 
@@ -84,7 +84,7 @@ def test_home_attention_lessons_and_month_blocks(api):
     fresh_grade = next(g for g in c["grades"] if g["date"] == today and g["comment"] == "Молодец")
     assert fresh_grade == {"date": today, "grade": 5, "topics": ["Самба"], "teacher": "Река Станислав", "comment": "Молодец"}
     lessons = c["lessons"]
-    assert (lessons["month"], lessons["minutes"], lessons["last"]) == (3, 150, f"{YM}-12")
+    assert (lessons["month"], lessons["minutes"], lessons["last"]) == (3, 150, GROUP_DAY)
     assert all(x["teacher"] == "Река Станислав" and x["durationMin"] in (45, 60) for x in lessons["today"])
 
 
