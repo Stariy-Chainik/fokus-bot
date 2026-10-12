@@ -24,7 +24,7 @@ async def month_lessons(dp, sid: str, period: str, keep: Callable | None = None,
     my_groups = {gid for (s_id, gid), m in membership.items() if s_id == sid and m.covers(period)}
     for ls in await lesson_repo.get_all():
         if (ls.date[:7] == period and ls.lesson_id not in seen and ls.type == LessonType.GROUP
-                and not ls.attendees and ls.group_id in my_groups):
+                and not ls.attendees and any(g in my_groups for g in ls.group_ids)):   # объединённое — обеим группам
             rows.append((ls, None, False))
     direct = {x.lesson_id: x.amount for row in await payment_service.direct_pay_rows(sid, period) for x in row.lessons}
     out = []

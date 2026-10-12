@@ -109,3 +109,27 @@ def test_breakdown_puts_child_into_own_group(api):
     assert status == 200
     by_group = {g["id"]: {s["id"] for s in g["students"]} for b in d["branches"] for g in b["groups"]}
     assert "STU-0003" in by_group["GRP-0002"] and "STU-0003" not in by_group["GRP-0001"]
+
+
+def test_merged_lesson_keeps_subscription_of_second_group(monkeypatch):
+    """Фомина объединяет абонементные группы (решение владельца 12.10.2026): у второй группы в месяце может
+    не быть своих занятий — абонемент всё равно начисляется, а зарплата — за одно занятие."""
+    import asyncio
+    app, dp = make_api(monkeypatch)
+    teacher = dp["teacher_repo"].items[0]
+    for gid, name in (("GRP-0029", "Современные Средняя"), ("GRP-0030", "Современные Старшая")):
+        dp["group_repo"].items.append(mk_group(gid, name, billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=5500))
+    dp["student_repo"].items.append(mk_student("STU-0003", "Сидоров Пётр"))
+    dp["student_group_repo"].rows += [StudentGroup("STU-0002", "GRP-0029"), StudentGroup("STU-0003", "GRP-0030")]
+    ls = mk_lesson("LES-77", teacher, "2026-12-08", duration=60, lesson_type=LessonType.GROUP, group_id="GRP-0029")
+    ls.merged_groups = "GRP-0030"
+    dp["lesson_repo"].items.append(ls)
+    ps = dp["payment_service"]
+    rows = {gid: total for gid, _n, _c, total in asyncio.run(ps.subscription_revenue_rows("2026-12"))}
+    assert rows == {"GRP-0029": 5500, "GRP-0030": 5500}
+    bills = asyncio.run(ps.compute_bills_for_student_period("STU-0003", "2026-12"))
+    assert bills["SUB:GRP-0030"].total == 5500
+    ledger = asyncio.run(ps.compute_ledger_map(since_period="2026-12", until_period="2026-12"))
+    assert ledger[("STU-0003", "SUB:GRP-0030", "2026-12")][0] == 5500
+    lines = [x for x in asyncio.run(dp["salary_service"].lines_for(teacher, "2026-12")) if x.lesson_id == "LES-77"]
+    assert len(lines) == 1 and lines[0].amount == 1333                 # одно занятие 60 мин по ставке 1000/45

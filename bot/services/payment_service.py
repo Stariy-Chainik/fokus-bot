@@ -266,9 +266,8 @@ class PaymentService:
         active: set[str] = set()
         sub_ids = {g.group_id for g in sub_groups}
         for ls in await self._lesson_repo.get_all():
-            if (ls.type == LessonType.GROUP and ls.group_id in sub_ids
-                    and ls.date[:7] == period_month):
-                active.add(ls.group_id)
+            if ls.type == LessonType.GROUP and ls.date[:7] == period_month:
+                active.update(g for g in ls.group_ids if g in sub_ids)   # объединённое — обеим группам
         if not active:
             return []
         overrides = await self._sub_override_map()
@@ -308,7 +307,7 @@ class PaymentService:
         if group is None or group.billing_mode != GroupBillingMode.SUBSCRIPTION:
             return None
         months = {ls.date[:7] for ls in await self._lesson_repo.get_all()
-                  if ls.type == LessonType.GROUP and ls.group_id == group_id}
+                  if ls.type == LessonType.GROUP and group_id in ls.group_ids}
         billable = period_month in subscription_billable_months(months, until=period_month)
         overrides = await self._sub_override_map()
         membership = await self._student_group_repo.get_membership_map()
@@ -342,7 +341,7 @@ class PaymentService:
         lesson_months = {
             ls.date[:7]
             for ls in await self._lesson_repo.get_all()
-            if ls.type == LessonType.GROUP and ls.group_id == group_id
+            if ls.type == LessonType.GROUP and group_id in ls.group_ids
         }
         months = {
             m for m in subscription_billable_months(lesson_months, until=effective_period)
@@ -412,8 +411,10 @@ class PaymentService:
         sub_ids = {g.group_id for g in sub_groups}
         lesson_months: dict[str, set[str]] = {}
         for ls in await self._lesson_repo.get_all():
-            if ls.type == LessonType.GROUP and ls.group_id in sub_ids:
-                lesson_months.setdefault(ls.group_id, set()).add(ls.date[:7])
+            if ls.type == LessonType.GROUP:
+                for gid in ls.group_ids:            # объединённое занятие (MERGEABLE_GROUPS) — всем его группам
+                    if gid in sub_ids:
+                        lesson_months.setdefault(gid, set()).add(ls.date[:7])
         overrides = await self._sub_override_map()
         membership = await self._student_group_repo.get_membership_map()
         result: dict[str, BillAggregate] = {}
@@ -751,8 +752,9 @@ class PaymentService:
                 overrides = await self._sub_override_map()
                 months_by_group: dict[str, set[str]] = {}
                 for ls in lessons:
-                    if ls.type == LessonType.GROUP and ls.group_id:
-                        months_by_group.setdefault(ls.group_id, set()).add(ls.date[:7])
+                    if ls.type == LessonType.GROUP:
+                        for gid in ls.group_ids:    # объединённое занятие — всем его группам
+                            months_by_group.setdefault(gid, set()).add(ls.date[:7])
                 until = until_period or last_periods(1)[0]
                 membership = await self._student_group_repo.get_membership_map()
                 for g in sub_groups:

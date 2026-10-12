@@ -184,10 +184,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if ls.type == LessonType.GROUP:
             ids = [e.student_id for e in parse_attendees(ls.attendees or "")]
             if not ids and g is not None and g.billing_mode == GroupBillingMode.SUBSCRIPTION:
-                key = ("roster", g.group_id)
-                if key not in cache:
-                    cache[key] = [m.student_id for m in await group_members(student_repo, student_group_repo, g.group_id)]
-                return list(cache[key]), True
+                roster: list[str] = []
+                for gid in ls.group_ids:            # объединённое занятие без посещаемости — составы всех групп
+                    key = ("roster", gid)
+                    if key not in cache:
+                        cache[key] = [m.student_id for m in await group_members(student_repo, student_group_repo, gid)]
+                    roster += [sid for sid in cache[key] if sid not in roster]
+                return roster, True
             return ids, False
         return [i for i in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id) if i], False
 
@@ -212,7 +215,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 lkey = ("ledger", sid, period)
                 if lkey not in cache:
                     cache[lkey] = await payment_service.ledger_for(students[sid], period, sync=False)
-                sub = cache[lkey].get(f"{SUBSCRIPTION_KEY_PREFIX}{g.group_id}")
+                # объединённое занятие — абонемент той группы, где ребёнок числится
+                sub = next((cache[lkey][k] for k in (f"{SUBSCRIPTION_KEY_PREFIX}{gid}" for gid in ls.group_ids)
+                            if k in cache[lkey]), None)
                 out.append(None if sub is None or sub.accrued <= 0
                            else ("sub_paid" if sub.remainder <= 0 else "sub_unpaid"))
             else:
@@ -612,7 +617,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         full = await _full_bill(teacher, sid)
 
         def keep(ls) -> bool:
-            return full or (ls.group_id in own if ls.group_id else ls.teacher_id == teacher.teacher_id)
+            return full or (any(g in own for g in ls.group_ids) if ls.group_id else ls.teacher_id == teacher.teacher_id)
         from bot.api.student_lessons import month_lessons
         d = await month_lessons(dp, sid, request.query.get("ym") or current_period(), keep,
                                 money=teacher.teacher_id in settings.billing_teacher_id_set)

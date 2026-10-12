@@ -299,7 +299,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         by_lessons: dict[str, set[str]] = {}
         for ls in await lesson_repo.get_all():
             if ls.group_id and ls.date.startswith(period):
-                by_lessons.setdefault(ls.teacher_id, set()).add(ls.group_id)
+                by_lessons.setdefault(ls.teacher_id, set()).update(ls.group_ids)   # объединённое — обе группы
         by_link: dict[str, set[str]] = {}
         for tg in await teacher_group_repo.get_all():
             by_link.setdefault(tg.teacher_id, set()).add(tg.group_id)
