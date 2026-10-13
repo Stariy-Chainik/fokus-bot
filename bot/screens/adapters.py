@@ -15,7 +15,10 @@ def to_aiogram_markup(rows) -> InlineKeyboardMarkup | None:
                 line.append(InlineKeyboardButton(text=b.label, url=b.value))
             elif b.kind == "webapp":
                 line.append(InlineKeyboardButton(text=b.label, web_app=WebAppInfo(url=b.value)))
+            elif b.kind == "maxapp":                  # мини-приложение MAX — только в MAX
+                continue
             else:
                 line.append(InlineKeyboardButton(text=b.label, callback_data=b.value))
-        out.append(line)
+        if line:
+            out.append(line)
     return InlineKeyboardMarkup(inline_keyboard=out)

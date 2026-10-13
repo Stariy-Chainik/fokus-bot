@@ -34,7 +34,7 @@ async def _render(
     mine = next((r for r in board if r.student_id == student.student_id), None)
     names = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
     lines = [f"📓 <b>Дневник тренировок · {student.name}</b>"]
-    if not student.athlete_tg_id:
+    if not student.is_athlete:
         lines.append("\nРебёнок ещё не завёл кабинет спортсмена: в боте /start → «Я спортсмен».")
     lines.append("")
     lines.append(stats_text(st, period, place=mine.place if mine and st.sessions else None, total=len(board)))

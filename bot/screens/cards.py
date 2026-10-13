@@ -106,6 +106,9 @@ def admin_student_card_view(card: StudentCard) -> AdminStudentCardView:
     if student.athlete_tg_id:
         athlete_text = f"\n🏃 Спортсмен: кабинет привязан (<code>{student.athlete_tg_id}</code>)"
         client_rows.append([("🚫 Отвязать спортсмена", f"athreg:unlink:{student_id}:{student.athlete_tg_id}")])
+    if student.athlete_max_id:
+        athlete_text += f"\n🏃 Спортсмен в MAX: кабинет привязан (<code>m{student.athlete_max_id}</code>)"
+        client_rows.append([("🚫 Отвязать спортсмена в MAX", f"athreg:unlink:{student_id}:m{student.athlete_max_id}")])
 
     text = (
         f"👩‍🎓 <b>{student.name}</b>\n"

@@ -163,7 +163,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             month_lessons = [] if _hidden(period) else (
                 await payment_service.student_lesson_marks(s.student_id, period)).lessons
             grades = []
-            if diary_service is not None and s.athlete_tg_id:      # оценки педагога за последнюю неделю
+            if diary_service is not None and s.is_athlete:      # оценки педагога за последнюю неделю
                 for e in await diary_service.entries_for_student(s.student_id, days=7):
                     if e.grade:
                         grades.append({"date": e.date, "grade": e.grade, "topics": list(e.topics or []),
@@ -280,7 +280,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         period = request.query.get("ym") or current_period()
         if _hidden(period):
             return _json({"student": {"id": student.student_id, "name": student.name}, "period": period,
-                          "athlete": bool(student.athlete_tg_id), "stats": {"sessions": 0, "minutes": 0, "points": 0,
+                          "athlete": student.is_athlete, "stats": {"sessions": 0, "minutes": 0, "points": 0,
                           "avgGrade": None, "byTopic": {}}, "place": None, "placeIcon": "", "entries": [], "openTasks": []})
         entries = await diary_service.entries_for_student(student.student_id, period=period)
         tasks = await diary_service.tasks_map(student.student_id)
@@ -290,7 +290,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
-            "athlete": bool(student.athlete_tg_id),      # кабинет спортсмена заведён — дневник ведётся
+            "athlete": student.is_athlete,      # кабинет спортсмена заведён — дневник ведётся
             "stats": {"sessions": st.sessions, "minutes": st.total_minutes, "points": st.points,
                       "avgGrade": st.avg_grade, "byTopic": st.by_topic},
             "place": row.place if row else None, "placeIcon": place_icon(row.place) if row else "",

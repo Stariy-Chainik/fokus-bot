@@ -44,6 +44,18 @@ class Student:
     athlete_tg_id: Optional[int] = None  # свой Telegram спортсмена (колонка 9)
     parent_max_ids: list[int] = field(default_factory=list)  # родители в MAX (колонка 10)
     kindergarten_group: str = ""  # группа в детском саду — номер или название (колонка 8)
+    athlete_max_id: Optional[int] = None  # свой MAX спортсмена — кабинет в мини-приложении MAX (колонка 11)
+
+    @property
+    def is_athlete(self) -> bool:
+        """Кабинет спортсмена заведён — в Telegram или в MAX."""
+        return bool(self.athlete_tg_id or self.athlete_max_id)
+
+    @property
+    def athlete_addrs(self) -> list:
+        """Куда слать спортсмену задания и оценки: [("tg", id)] и/или [("max", id)]."""
+        return ([("tg", self.athlete_tg_id)] if self.athlete_tg_id else []) + \
+            ([("max", self.athlete_max_id)] if self.athlete_max_id else [])
 
     @property
     def parent_addrs(self) -> list:

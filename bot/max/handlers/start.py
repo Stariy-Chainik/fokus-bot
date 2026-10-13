@@ -7,6 +7,7 @@ from maxapi.types import BotStarted, MessageCreated, MessageCallback, CommandSta
 
 from config.settings import settings
 from bot.screens import cb
+from bot.screens.types import maxapp
 from bot.screens.adapters import to_aiogram_markup
 from bot.services.rosters import BY_NAME_CI, group_members
 from bot.services.parent_notifier import resolve_notifier, fmt_addr, max_addr
@@ -45,8 +46,35 @@ async def _group_screen(group_id: str, student_repo, student_group_repo, group_r
     return f"🩰 Группа «{group.name}»{branch_line}\n\nВыберите вашего ребёнка:", rows
 
 
+ATHLETE_PAYLOAD = "athlete"     # https://max.ru/<бот>?start=athlete — сразу экран спортсмена
+
+
+def athlete_rows() -> list:
+    return [[maxapp("🏃 Открыть дневник спортсмена", ATHLETE_PAYLOAD)]]
+
+
+async def _athlete_entry(bot, uid: int, payload: str, student_repo) -> bool:
+    """Мини-приложение MAX — кабинет спортсмена (MAX_MINIAPP_ENABLED, решение владельца 13.10.2026).
+    True — экран спортсмена показан (привязанный спортсмен или ссылка ?start=athlete)."""
+    if not settings.max_miniapp_enabled:
+        return False
+    athlete = await student_repo.get_by_athlete_max_id(uid)
+    if athlete is None and payload != ATHLETE_PAYLOAD:
+        return False
+    if athlete is not None:
+        text = (f"🏃 <b>Кабинет спортсмена</b> — {athlete.name}\n\nЗаписывайте тренировки, смотрите задания "
+                "педагога, оценки и рейтинг в приложении.")
+    else:
+        text = ("🏃 <b>Кабинет спортсмена</b>\n\nДля учеников спортивной группы: дневник тренировок, задания "
+                "педагога, оценки и рейтинг. Откройте приложение и найдите себя по фамилии.")
+    await send_screen(bot, uid, text, athlete_rows())
+    return True
+
+
 async def _entry(bot, uid: int, payload: str, context, student_repo, student_group_repo, group_repo, branch_repo) -> None:
     await context.clear()
+    if await _athlete_entry(bot, uid, payload, student_repo) and payload == ATHLETE_PAYLOAD:
+        return
     secret = settings.group_link_secret or settings.bot_token
     group_id = parse_start_payload(payload, secret) if payload else None
     if group_id:
@@ -61,6 +89,12 @@ async def _entry(bot, uid: int, payload: str, context, student_repo, student_gro
         from bot.screens.parent_menu import welcome_text
         from ._common import max_menu_rows
         await send_screen(bot, uid, welcome_text(students), await max_menu_rows(students))
+        return
+    if settings.max_miniapp_enabled and await student_repo.get_by_athlete_max_id(uid) is not None:
+        return                                      # спортсмену экран уже показан — регистрация родителя не нужна
+    if settings.max_miniapp_enabled:
+        await send_screen(bot, uid, "Добро пожаловать!\n\nРодитель — введите фамилию ученика для регистрации.\n\n"
+                                    "Спортсмен спортивной группы — откройте дневник кнопкой ниже.", athlete_rows())
         return
     await send_screen(bot, uid, "Добро пожаловать!\n\nВведите фамилию ученика для регистрации:")
 

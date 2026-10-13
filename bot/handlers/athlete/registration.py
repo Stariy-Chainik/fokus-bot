@@ -254,15 +254,19 @@ async def cb_reg_unlink(
     callback: CallbackQuery, user: User, student_repo: StudentRepository,
 ) -> None:
     _, _, student_id, tg_raw = callback.data.split(":", 3)
-    tg_id = int(tg_raw)
+    in_max = tg_raw.startswith("m")                  # спортсмен из мини-приложения MAX: «m<max_id>»
+    ident = int(tg_raw[1:] if in_max else tg_raw)
     student = await student_repo.get_by_id(student_id)
-    if student is None or student.athlete_tg_id != tg_id:
+    if student is None or (student.athlete_max_id if in_max else student.athlete_tg_id) != ident:
         await callback.answer("Привязка уже отменена", show_alert=True)
         return
-    await student_repo.set_athlete_tg_id(student_id, None)
-    logger.info("Админ %s отвязал спортсмена tg_id=%s от %s", callback.from_user.id, tg_id, student_id)
-    await notify(callback.bot, [tg_id],
-                 f"Ваша привязка к спортсмену <b>{student.name}</b> отменена администратором.")
+    if in_max:
+        await student_repo.set_athlete_max_id(student_id, None)
+    else:
+        await student_repo.set_athlete_tg_id(student_id, None)
+    logger.info("Админ %s отвязал спортсмена %s%s от %s", callback.from_user.id, "m" if in_max else "", ident, student_id)
+    await resolve_notifier(callback.bot).send(("max" if in_max else "tg", ident),
+                                              f"Ваша привязка к спортсмену <b>{student.name}</b> отменена администратором.")
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="« К карточке", callback_data=f"student_card:{student_id}"),
     ]])

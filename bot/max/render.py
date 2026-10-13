@@ -2,12 +2,23 @@
 from __future__ import annotations
 import logging
 
-from maxapi.types import CallbackButton, LinkButton
+from maxapi.types import CallbackButton, LinkButton, OpenAppButton
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
 logger = logging.getLogger(__name__)
 
 MAX_TEXT = 3900
+# Профиль бота MAX (`run_max` → get_me): кнопка мини-приложения открывает мини-приложение этого бота
+ME: dict = {}
+
+
+def _button(btn):
+    if btn.kind in ("url", "webapp"):
+        return LinkButton(text=btn.label, url=btn.value)
+    if btn.kind == "maxapp":
+        return OpenAppButton(text=btn.label, contact_id=ME.get("id"), web_app=None if ME.get("id") else ME.get("username"),
+                             payload=btn.value or None)
+    return CallbackButton(text=btn.label, payload=btn.value)
 
 
 def to_max_markup(rows):
@@ -15,11 +26,7 @@ def to_max_markup(rows):
         return None
     b = InlineKeyboardBuilder()
     for row in rows:
-        buttons = [
-            LinkButton(text=btn.label, url=btn.value) if btn.kind in ("url", "webapp")
-            else CallbackButton(text=btn.label, payload=btn.value)
-            for btn in row
-        ]
+        buttons = [_button(btn) for btn in row]
         b.row(*buttons)
     return b.as_markup()
 

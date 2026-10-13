@@ -61,6 +61,32 @@ def auth_tg_id(request: web.Request) -> int | None:
     return None
 
 
+def auth_max_id(request: web.Request) -> int | None:
+    """MAX user id из проверенного initData мини-приложения MAX (`Authorization: max <initData>`).
+
+    Подпись — тем же алгоритмом, что у Telegram, ключ — токен бота MAX (dev.max.ru/docs/webapps/validation).
+    Кабинеты администратора, педагога и родителя этот заголовок не принимают — только спортсмена."""
+    header = request.headers.get("Authorization", "")
+    if header.startswith("max ") and settings.max_bot_token:
+        parsed = verify_init_data(header[4:], settings.max_bot_token)
+        if not parsed or not isinstance(parsed.get("user"), dict):
+            return None
+        max_id = parsed["user"].get("id")
+        return max_id if isinstance(max_id, int) else None
+    if header == "devmax" and settings.miniapp_dev_max_id:
+        return settings.miniapp_dev_max_id
+    return None
+
+
+def max_user_name(request: web.Request) -> str:
+    """Имя пользователя MAX из initData — для сообщения администраторам о новой привязке."""
+    header = request.headers.get("Authorization", "")
+    parsed = verify_init_data(header[4:], settings.max_bot_token) if header.startswith("max ") else None
+    user = (parsed or {}).get("user") or {}
+    name = " ".join(x for x in (user.get("first_name"), user.get("last_name")) if x)
+    return name + (f" @{user['username']}" if user.get("username") else "")
+
+
 def _dp_get(dp, key: str):
     data = getattr(dp, "workflow_data", dp)
     return data.get(key) if hasattr(data, "get") else None
@@ -348,7 +374,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             out.append({
                 "id": s.student_id, "name": s.name,
                 "groups": [groups[g].name for g in gids if g in groups],
-                "hasParent": bool(s.parent_addrs), "isAthlete": bool(s.athlete_tg_id),
+                "hasParent": bool(s.parent_addrs), "isAthlete": s.is_athlete,
             })
         return _json({"students": out, "total": len(await student_repo.get_all())})
 
@@ -379,7 +405,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "partner": {"id": card.partner.student_id, "name": card.partner.name} if card.partner else None,
             "client": {"id": card.client.client_id, "name": card.client.name, "phone": card.client.phone} if card.client else None,
             "parents": [{"platform": a[0], "id": a[1]} for a in s.parent_addrs],
-            "isAthlete": bool(s.athlete_tg_id),
+            "isAthlete": s.is_athlete,
             # группа в детском саду — у детей садовых групп школы (решение владельца 10.10.2026)
             "kindergarten": any(g.group is not None and is_kindergarten_group(g.group) for g in card.groups),
             "kgroup": s.kindergarten_group,

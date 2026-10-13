@@ -30,6 +30,8 @@ async def run_max(bot, dp, *, retry_delay: int = 15, token_retry_delay: int = 12
     while True:
         try:
             me = await bot.get_me()
+            from .render import ME
+            ME.update(id=getattr(me, "user_id", None), username=getattr(me, "username", None))
             logger.info("MAX: запуск polling для @%s", getattr(me, "username", "?"))
             await dp.start_polling(bot, skip_updates=True)
             return

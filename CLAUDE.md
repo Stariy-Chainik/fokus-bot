@@ -131,6 +131,22 @@ http://localhost:8090/app/?dev=1 (данные — живая таблица). �
 `DiaryService`, поэтому очки и места совпадают с ботом; оценки ставит только педагог. Спортсмен определяется по
 `students.athlete_tg_id`. Тесты — `tests/test_athlete_api.py`.
 
+**Кабинет спортсмена в мини-приложении MAX** (решение владельца 13.10.2026): та же страница `/app/` открывается
+внутри MAX. MAX передаёт данные запуска в `#WebAppData` — `index.html` тогда грузит мост `st.max.ru/js/max-web-app.js`,
+`app.js` берёт `MAXAPP.initData` и шлёт `Authorization: max <initData>`; роль — только спортсмен. Подпись проверяет
+`bot/api/admin.py::auth_max_id` тем же `verify_init_data`, что у Telegram, но токеном бота MAX
+(dev.max.ru/docs/webapps/validation); кабинеты администратора, педагога и родителя этот заголовок не принимают (401).
+Аккаунт MAX — `students.athlete_max_id` (кол. 11, `scripts/setup_athlete_max.py`; `Student.is_athlete`,
+`athlete_addrs`). Не привязан → `/me` 403 `canJoin` → экран `s.join` «Найдите себя» (`GET/POST /api/athlete/join`:
+ученики `ATHLETE_GROUP_IDS`, весь список до 40, иначе поиск по фамилии) — без одобрения, как «🏃 Я спортсмен» в
+Telegram; чужой аккаунт MAX на занятом ученике — 409 `taken` и предупреждение админам. Администраторам —
+«🏃 Новый спортсмен в MAX» с «🚫 Отвязать» (`athreg:unlink:{sid}:m{max_id}`), родителям — сообщение. Задания и
+оценки педагога уходят спортсмену и в MAX (`parent_notifier.notify_athlete`). В боте MAX кнопка
+«🏃 Открыть дневник спортсмена» (`Btn` kind `maxapp` → `OpenAppButton(contact_id=бот)`, `bot/max/render.ME` из
+`get_me`) — на приветствии нового пользователя, у привязанного спортсмена и по ссылке `https://max.ru/<бот>?start=athlete`;
+показывается только при `MAX_MINIAPP_ENABLED=true` — после того как страница кабинета подключена к боту в кабинете
+организации MAX. Локально: `MINIAPP_DEV_MAX_ID` + `?dev=max` (заголовок `devmax`). Тесты — `tests/test_athlete_max.py`.
+
 ### MAX front (кабинет родителя в мессенджере MAX)
 
 Второй мессенджер для **родителя** на тех же репозиториях/сервисах: пакет [bot/max/](bot/max/) (библиотека `maxapi`, Python ≥ 3.10). `bot/__main__.py` при непустом `MAX_BOT_TOKEN` собирает `maxapi.Dispatcher` (`bot/max/app.py::build`) и запускает polling отдельной задачей (`run_max`, перезапуск при сбое); пустой токен — MAX выключен, Telegram работает как прежде. Ключевые части:
@@ -620,7 +636,8 @@ Optional — payments:
 - `SENIOR_TEACHER_IDS` — старшие тренеры (на проде `TCH-0011` Яковлева, решение владельца 29.09.2026): в своём кабинете в карточке ученика **своих** групп меняют «2 / 3 раза в неделю» (`PUT /api/teacher/students/{sid}/frequency`).
 
 Optional — MAX (кабинет родителя):
-- `MAX_BOT_TOKEN` — токен бота MAX от @MasterBot; пусто — MAX не запускается. Ссылки групп для MAX используют тот же `GROUP_LINK_SECRET`.
+- `MAX_BOT_TOKEN` — токен бота MAX от @MasterBot; пусто — MAX не запускается.
+- `MAX_MINIAPP_ENABLED` — мини-приложение MAX подключено к боту (кабинет спортсмена): бот MAX показывает кнопку «🏃 Открыть дневник спортсмена». По умолчанию выключено. Ссылки групп для MAX используют тот же `GROUP_LINK_SECRET`.
 
 Optional — Mini App:
 - `MINIAPP_DEV_TG_ID` — tg_id, под которым API кабинета принимает заголовок `Authorization: dev` (только для локальной разработки; на проде пусто).

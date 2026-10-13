@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     miniapp_dev_tg_id: Optional[int] = Field(default=None, alias="MINIAPP_DEV_TG_ID")
     # Публичный HTTPS-адрес Mini App (страница /app/); пусто — кнопки кабинета в боте нет
     miniapp_url: str = Field(default="", alias="MINIAPP_URL")
+    # Мини-приложение MAX (кабинет спортсмена, решение владельца 13.10.2026): включается, когда страница кабинета
+    # подключена к боту на платформе MAX — тогда бот MAX показывает кнопку «🏃 Дневник спортсмена».
+    max_miniapp_enabled: bool = Field(default=False, alias="MAX_MINIAPP_ENABLED")
+    # Локально: MAX-id, под которым принимается заголовок `Authorization: devmax` (на проде пусто)
+    miniapp_dev_max_id: Optional[int] = Field(default=None, alias="MINIAPP_DEV_MAX_ID")
 
     # Педагоги, которым разрешено выставлять счета ученикам своих групп
     # (teacher_id через запятую или |, например: TCH-0009). Пусто — счета только у админов.

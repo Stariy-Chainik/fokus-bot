@@ -193,6 +193,9 @@ class StudentRepoFake(ByIdRepo):
     async def get_by_athlete_tg_id(self, tg_id):
         return next((replace(s) for s in self.items if s.athlete_tg_id == tg_id), None)
 
+    async def get_by_athlete_max_id(self, max_id):
+        return next((replace(s) for s in self.items if s.athlete_max_id == max_id), None)
+
 
 class ClientRepoFake(ByIdRepo):
     def __init__(self, clients) -> None:
@@ -792,6 +795,11 @@ class StudentRepoWritable(StudentRepoFake):
     async def set_athlete_tg_id(self, sid, tg_id):
         s = self._find(sid)
         if s: s.athlete_tg_id = tg_id  # noqa: E701
+        return s is not None
+
+    async def set_athlete_max_id(self, sid, max_id):
+        s = self._find(sid)
+        if s: s.athlete_max_id = max_id  # noqa: E701
         return s is not None
 
     async def add_parent_tg_id(self, sid, tg_id):

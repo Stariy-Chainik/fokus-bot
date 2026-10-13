@@ -13,7 +13,7 @@ from bot.repositories import TeacherRepository
 from bot.services import DiaryService
 from bot.states import AssignTaskStates
 from bot.utils.diary_format import tasks_text
-from bot.utils.notify import notify
+from bot.services.parent_notifier import notify_athlete
 from ._base import router, actor, periods, visible_athlete, render_student_diary
 
 logger = logging.getLogger(__name__)
@@ -176,9 +176,9 @@ async def _save(target, user: User | None, state: FSMContext, diary_service: Dia
     teacher = await teacher_repo.get_by_id(user.teacher_id) if user.teacher_id else None
     who = teacher.name if teacher else "Администратор"
     note = f"\n💬 {comment}" if comment else ""
-    await notify(target.bot, [student.athlete_tg_id],
+    await notify_athlete(student,
                  f"📋 <b>Новое задание от {who}</b>\n\n<b>{task.exercise}</b> — {task.minutes} мин{note}\n\n"
-                 "Отмечайте задание при записи каждой тренировки.")
+                 "Отмечайте задание при записи каждой тренировки.", target.bot)
     logger.info("Задание %s для %s от %s", task.task_id, student_id, teacher_id)
     if isinstance(target, CallbackQuery):
         await target.answer("Задание отправлено спортсмену")
@@ -255,7 +255,6 @@ async def cb_task_close(
         await callback.answer("Задание не найдено", show_alert=True)
         return
     await diary_service.close_task(task.task_id)
-    await notify(callback.bot, [student.athlete_tg_id],
-                 f"✅ Задание <b>{task.exercise}</b> закрыто педагогом. Молодец!")
+    await notify_athlete(student, f"✅ Задание <b>{task.exercise}</b> закрыто педагогом. Молодец!", callback.bot)
     await callback.answer("Задание закрыто")
     await _render_tasks(callback, student, diary_service, teacher_repo)

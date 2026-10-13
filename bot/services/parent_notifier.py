@@ -129,6 +129,12 @@ async def notify_payment_confirmed(notifier, student, period_month: str, credite
         return 0
 
 
+async def notify_athlete(student, text: str, tg_bot=None, notifier=None) -> int:
+    """Спортсмену — задания, оценки: в Telegram и/или в MAX (кабинет в мини-приложении MAX)."""
+    n = notifier or resolve_notifier(tg_bot)
+    return await n.send_many(student.athlete_addrs, text)
+
+
 def resolve_notifier(tg_bot=None) -> ParentNotifier:
     """Общий notifier процесса; если не настроен (тесты, скрипты) — только Telegram-бот вызова."""
     if ParentNotifier.default is not None:

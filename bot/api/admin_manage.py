@@ -436,7 +436,10 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
-        await student_repo.set_athlete_tg_id(sid, None)
+        if s.athlete_tg_id:
+            await student_repo.set_athlete_tg_id(sid, None)
+        if s.athlete_max_id:                        # кабинет в мини-приложении MAX
+            await student_repo.set_athlete_max_id(sid, None)
         return _json({"ok": True})
 
     # ── педагоги ─────────────────────────────────────────────────────────

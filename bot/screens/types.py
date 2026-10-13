@@ -21,6 +21,11 @@ def url(label: str, link: str) -> Btn:
     return Btn(label, "url", link)
 
 
+def maxapp(label: str, payload: str = "") -> Btn:
+    """Кнопка мини-приложения MAX (кабинет спортсмена); в Telegram не показывается."""
+    return Btn(label, "maxapp", payload)
+
+
 def webapp(label: str, link: str) -> Btn:
     """Кнопка Mini App (Telegram открывает кабинет с initData); в MAX — обычная ссылка."""
     return Btn(label, "webapp", link)

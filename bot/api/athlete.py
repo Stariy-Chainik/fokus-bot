@@ -5,10 +5,12 @@
 вместо мастера из пяти шагов; всё остальное считает сервис, поэтому очки и места
 совпадают с ботом.
 
-Спортсмен определяется по `students.athlete_tg_id`, видит только свой дневник;
-оценки ставит педагог, здесь они только показываются.
+Спортсмен определяется по `students.athlete_tg_id` (Telegram) или `students.athlete_max_id` (мини-приложение
+MAX, решение владельца 13.10.2026), видит только свой дневник; оценки ставит педагог, здесь они только показываются.
 
-Авторизация — `Authorization: tma <initData>`; для локальной разработки `dev`.
+Авторизация — `Authorization: tma <initData>` (Telegram) или `max <initData>` (MAX); локально `dev` / `devmax`.
+В MAX спортсмен привязывается прямо в приложении (`/join`): находит себя среди учеников спортивных групп —
+без одобрения, как «🏃 Я спортсмен» в боте Telegram; администраторам — сообщение с «🚫 Отвязать».
 """
 from __future__ import annotations
 
@@ -16,7 +18,10 @@ import logging
 
 from aiohttp import web
 
-from bot.api.admin import auth_tg_id
+from bot.api.admin import auth_max_id, auth_tg_id, max_user_name
+from bot.services.parent_notifier import resolve_notifier
+from bot.utils.notify import notify
+from config.settings import settings
 from bot.services.diary_service import place_icon
 from bot.utils.dates import current_period
 from bot.utils.diary_topics import ALL_TOPICS
@@ -36,24 +41,31 @@ def _dp_get(dp, key: str):
     return data.get(key) if hasattr(data, "get") else None
 
 
-def register_athlete_api(app: web.Application, dp) -> None:
-    """Уведомлений отсюда не шлём: новые записи педагоги видят в своём кабинете."""
+JOIN_LIST_LIMIT = 40          # больше — только поиск по фамилии (как в боте)
+
+
+def register_athlete_api(app: web.Application, dp, bot=None) -> None:
+    """Записи тренировок педагоги видят в своём кабинете; сообщение уходит только о новой привязке в MAX."""
     diary_service = _dp_get(dp, "diary_service")
     teacher_repo = dp["teacher_repo"]
+    student_repo, user_repo = _dp_get(dp, "student_repo"), _dp_get(dp, "user_repo")
 
     def athlete_only(handler):
-        """Спортсмен = tg_id записан в `students.athlete_tg_id`."""
+        """Спортсмен = tg_id в `students.athlete_tg_id` или MAX id в `students.athlete_max_id`."""
         async def wrapped(request: web.Request) -> web.Response:
             if diary_service is None:
                 return _json({"error": "unavailable"}, status=503)
             tg_id = auth_tg_id(request)
-            if tg_id is None:
+            max_id = auth_max_id(request) if tg_id is None else None
+            if tg_id is None and max_id is None:
                 return _json({"error": "unauthorized"}, status=401)
-            student = await diary_service.athlete_by_tg(tg_id)
+            student = await (diary_service.athlete_by_tg(tg_id) if tg_id is not None
+                             else diary_service.athlete_by_max(max_id))
             if student is None:
-                return _json({"error": "forbidden"}, status=403)
+                # в MAX спортсмен привязывается прямо в приложении — экран «Найдите себя»
+                return _json({"error": "forbidden", "canJoin": max_id is not None}, status=403)
             try:
-                return await handler(request, tg_id, student)
+                return await handler(request, tg_id or max_id, student)
             except web.HTTPException:
                 raise
             except Exception as exc:
@@ -169,6 +181,71 @@ def register_athlete_api(app: web.Application, dp) -> None:
         mine = next((r for r in rows if r["me"]), None)
         return _json({"period": period, "topic": topic or "", "topics": ALL_TOPICS,
                       "top": rows[:10], "me": mine, "total": len(rows)})
+
+    # ── привязка в мини-приложении MAX ──────────────────────────────────
+    def max_only(handler):
+        async def wrapped(request: web.Request) -> web.Response:
+            if diary_service is None:
+                return _json({"error": "unavailable"}, status=503)
+            max_id = auth_max_id(request)
+            if max_id is None:
+                return _json({"error": "unauthorized"}, status=401)
+            try:
+                return await handler(request, max_id)
+            except web.HTTPException:
+                raise
+            except Exception as exc:
+                logger.exception("Athlete API %s: %s", request.path, exc)
+                return _json({"error": "internal"}, status=500)
+        return wrapped
+
+    async def _candidates(query: str) -> list:
+        return await diary_service.registration_candidates(query, settings.athlete_group_id_set)
+
+    async def join_list(request: web.Request, max_id: int) -> web.Response:
+        """Ученики спортивных групп: весь список, если он короткий, иначе — поиск по фамилии (от 2 букв)."""
+        q = (request.query.get("q") or "").strip()
+        if len(q) < 2:
+            everyone = await _candidates("")
+            if len(everyone) > JOIN_LIST_LIMIT:
+                return _json({"students": [], "search": True})
+            return _json({"students": [{"id": s.student_id, "name": s.name} for s in everyone], "search": False})
+        return _json({"students": [{"id": s.student_id, "name": s.name} for s in await _candidates(q)], "search": True})
+
+    async def join(request: web.Request, max_id: int) -> web.Response:
+        body = await _body(request)
+        sid = str(body.get("studentId") or "")
+        if await diary_service.athlete_by_max(max_id) is not None:
+            return _json({"error": "already", "message": "Этот аккаунт MAX уже привязан к спортсмену"}, status=409)
+        if sid not in {s.student_id for s in await _candidates("")}:
+            return _json({"error": "not_found", "message": "Ученик не найден в спортивных группах"}, status=404)
+        student = await student_repo.get_by_id(sid)
+        if student is None:
+            return _json({"error": "not_found"}, status=404)
+        who = max_user_name(request) or "Пользователь MAX"
+        admins = [u.tg_id for u in await user_repo.get_admins()] if user_repo is not None else []
+        if student.athlete_max_id and student.athlete_max_id != max_id:
+            if bot is not None:
+                await notify(bot, admins, f"⚠️ {who} (MAX <code>{max_id}</code>) пытался привязаться как спортсмен "
+                                          f"<b>{student.name}</b>, но к ученику уже привязан другой аккаунт MAX.")
+            return _json({"error": "taken", "message": "К этому спортсмену уже привязан другой аккаунт MAX. "
+                                                       "Если это вы — обратитесь к администратору."}, status=409)
+        await student_repo.set_athlete_max_id(sid, max_id)
+        logger.info("Спортсмен привязан в MAX: max_id=%s → %s", max_id, sid)
+        if bot is not None:
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🚫 Отвязать", callback_data=f"athreg:unlink:{sid}:m{max_id}")]])
+            await notify(bot, admins, f"🏃 <b>Новый спортсмен в MAX</b>\n\n{who} (<code>m{max_id}</code>)\n"
+                                      f"Ученик: <b>{student.name}</b>", reply_markup=kb)
+        await resolve_notifier(bot).send_many(
+            student.parent_addrs,
+            f"ℹ️ <b>{student.name}</b> завёл кабинет спортсмена в MAX: теперь он(а) может вести дневник "
+            f"тренировок, а вы — видеть записи и оценки педагога в разделе «📓 Дневник тренировок».")
+        return _json({"ok": True, "name": student.name})
+
+    for jmethod, jpath, jhandler in (("GET", "/join", join_list), ("POST", "/join", join)):
+        app.router.add_route(jmethod, PREFIX + jpath, max_only(jhandler))
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),

@@ -129,3 +129,31 @@ SCREENS['s.rating'] = async ({ ym, topic }) => {
     ${d.me && d.me.place > 10 ? `<div class="eyebrow">Вы</div>${list([row(d.me)])}` : ''}
     <p class="hint" style="margin-top:10px">Очки = минуты × оценка. Запись без оценки считается с коэффициентом 3.</p>` };
 };
+
+/* ── Привязка в MAX (мини-приложение MAX, решение владельца 13.10.2026) ── */
+/* Аккаунт MAX ещё не привязан: спортсмен находит себя среди учеников спортивной группы — как «🏃 Я спортсмен»
+   в боте Telegram, без одобрения; администраторам приходит сообщение с «🚫 Отвязать». */
+SCREENS['s.join'] = async () => {
+  const q = state.ui.q6 || '';
+  const d = await api(`/join?q=${encodeURIComponent(q)}`);
+  const found = d.students.length
+    ? list(d.students.map(s => cell({ lead: '🏃', plain: true, t: esc(s.name), act: 'sJoinAsk', p: { id: s.id, name: s.name } })))
+    : q.trim().length >= 2 ? empty('Не нашли — проверьте написание или спросите педагога') : '';
+  return { title: 'Кабинет спортсмена', html: `
+    ${hero('Дневник тренировок, задания педагога и рейтинг')}
+    <div class="card pad"><div style="font-weight:700">Найдите себя</div>
+      <div class="hint" style="margin-top:4px">Кабинет — для учеников спортивной группы. ${d.search || q ? 'Введите фамилию и выберите себя.' : 'Выберите себя в списке.'}</div></div>
+    ${d.search || q ? `<input class="search" id="q6" placeholder="Фамилия" value="${esc(q)}" autocomplete="off" style="margin-top:10px">` : ''}
+    ${found}` };
+};
+ACT.sJoinAsk = ({ id, name }) => sheet(`<h3>Это вы?</h3><div class="hint">${esc(name)} — дневник тренировок привяжется к вашему аккаунту MAX.</div><div style="margin-top:12px">${btn(`✅ Да, это я`, 'sJoinDo', { id })}${btn('Нет', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.sJoinDo = async ({ id }) => {
+  try {
+    await api('/join', { method: 'POST', body: { studentId: id } });
+    closeSheet();
+    state.joining = false; state.ui = {};
+    state.me = await api('/me');
+    root('s.home');
+    toast('Готово — кабинет привязан');
+  } catch (e) { closeSheet(); toast(e instanceof ApiError && e.data && e.data.message ? e.data.message : errText(e)); }
+};

@@ -47,7 +47,7 @@ from bot.utils.groups import hide_service_groups
 from bot.utils.ids import generate_submission_id
 from bot.utils.locks import InProgressGuard
 from config.settings import settings
-from bot.services.parent_notifier import notify_payment_confirmed
+from bot.services.parent_notifier import notify_athlete, notify_payment_confirmed
 
 logger = logging.getLogger(__name__)
 
@@ -831,10 +831,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         topics = ", ".join(entry.topics) if entry.topics else "—"
         note = f"\n📝 {comment}" if comment else ""
-        if bot is not None:
-            await notify(bot, [s.athlete_tg_id],
-                         f"⭐ <b>{teacher.name}</b> оценил(а) вашу тренировку {format_date_display(entry.date)} "
-                         f"({entry.minutes} мин, {topics}): <b>{grade}/5</b>{note}")
+        if bot is not None or notifier is not None:
+            await notify_athlete(s, f"⭐ <b>{teacher.name}</b> оценил(а) вашу тренировку {format_date_display(entry.date)} "
+                                    f"({entry.minutes} мин, {topics}): <b>{grade}/5</b>{note}", bot, notifier)
         if notifier is not None:
             await notifier.send_many(s.parent_addrs,
                                      f"⭐ <b>{s.name}</b>: тренировка {format_date_display(entry.date)} "
@@ -876,10 +875,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "bad_request", "message": "Нужно упражнение и минуты"}, status=400)
         task = await diary_service.create_task(sid, teacher.teacher_id, exercise, minutes, comment)
         note = f"\n💬 {comment}" if comment else ""
-        if bot is not None:
-            await notify(bot, [athletes[sid].athlete_tg_id],
-                         f"📋 <b>Новое задание от {teacher.name}</b>\n\n<b>{task.exercise}</b> — "
-                         f"{task.minutes} мин{note}\n\nОтмечайте задание при записи каждой тренировки.")
+        if bot is not None or notifier is not None:
+            await notify_athlete(athletes[sid], f"📋 <b>Новое задание от {teacher.name}</b>\n\n<b>{task.exercise}</b> — "
+                                 f"{task.minutes} мин{note}\n\nОтмечайте задание при записи каждой тренировки.", bot, notifier)
         logger.info("Mini App: педагог %s выдал задание %s ученику %s", teacher.teacher_id, task.task_id, sid)
         return _json({"ok": True, "id": task.task_id})
 

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # Колонки листа `students` (1-based):
 # 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
 # 8 kindergarten_group (группа в детском саду: номер или название) | 9 athlete_tg_id (свой Telegram спортсмена)
-# 10 parent_max_ids
+# 10 parent_max_ids | 11 athlete_max_id (свой MAX спортсмена; scripts/setup_athlete_max.py)
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
@@ -18,6 +18,7 @@ _KINDERGARTEN_GROUP_COL = 8
 KINDERGARTEN_GROUP_MAX = 40
 _ATHLETE_TG_ID_COL = 9
 _PARENT_MAX_IDS_COL = 10
+_ATHLETE_MAX_ID_COL = 11
 
 
 def _parse_id_list(raw) -> list[int]:
@@ -65,6 +66,7 @@ def _row_to_student(row: dict) -> Student:
         athlete_tg_id=_parse_tg_id(row.get("athlete_tg_id")),
         parent_max_ids=_parse_id_list(row.get("parent_max_ids")),
         kindergarten_group=str(row.get("kindergarten_group") or "").strip(),
+        athlete_max_id=_parse_tg_id(row.get("athlete_max_id")),
     )
 
 
@@ -297,6 +299,20 @@ class StudentRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._update_cell(row_idx, _ATHLETE_TG_ID_COL, tg_id if tg_id else "")
+            return True
+
+    async def get_by_athlete_max_id(self, max_id: int) -> Optional[Student]:
+        for s in await self.get_all():
+            if s.athlete_max_id == max_id:
+                return s
+        return None
+
+    async def set_athlete_max_id(self, student_id: str, max_id: Optional[int]) -> bool:
+        """Привязывает (или отвязывает при None) MAX спортсмена — мини-приложение MAX (колонка 11)."""
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _ATHLETE_MAX_ID_COL, max_id if max_id else "")
             return True
 
     async def add_parent_tg_id(self, student_id: str, tg_id: int) -> bool:

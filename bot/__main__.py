@@ -215,7 +215,7 @@ def _register_miniapp_api(app, dp: Dispatcher, bot=None) -> None:
     register_admin_api(app, dp, bot)
     register_teacher_api(app, dp, bot)
     register_parent_api(app, dp, bot)
-    register_athlete_api(app, dp)
+    register_athlete_api(app, dp, bot)
     register_miniapp_static(app)
 
 

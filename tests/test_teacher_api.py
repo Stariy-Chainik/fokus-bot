@@ -234,7 +234,8 @@ def test_diary_lists_own_athletes_and_grades_entry(api):
     status, r = _call(app, "POST", "/api/teacher/diary/entries/TE-1/grade", json={"grade": 4, "comment": "Ровнее корпус"}, bot=bot)
     assert status == 200 and r["grade"] == 4
     assert dp["entry_repo"].items[0].grade == 4 and dp["entry_repo"].items[0].graded_by == "TCH-0001"
-    assert bot.sent and str(ATHLETE_TG) in str(bot.sent[0])            # спортсмену ушёл пуш
+    # спортсмену ушёл пуш — через общий notifier: в Telegram и/или в MAX (мини-приложение)
+    assert any(("tg", ATHLETE_TG) in addrs and "оценил" in text for addrs, text in dp["notifier"].sent)
     assert _call(app, "POST", "/api/teacher/diary/entries/TE-1/grade", json={"grade": 9})[0] == 400
     assert _call(app, "POST", "/api/teacher/diary/entries/TE-404/grade", json={"grade": 4})[0] == 404
 
@@ -244,7 +245,8 @@ def test_diary_tasks_flow(api):
     bot = FakeBot()
     status, r = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks",
                       json={"exercise": "Махи у станка", "minutes": 15, "comment": "каждый день"}, bot=bot)
-    assert status == 200 and r["ok"] is True and bot.sent
+    assert status == 200 and r["ok"] is True
+    assert any(("tg", ATHLETE_TG) in addrs and "Новое задание" in text for addrs, text in dp["notifier"].sent)
     status, t = _call(app, "GET", "/api/teacher/diary/STU-0001/tasks")
     assert status == 200 and [(x["exercise"], x["status"]) for x in t["tasks"]] == [("Махи у станка", "open")]
 

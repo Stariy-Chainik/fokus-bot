@@ -151,12 +151,16 @@ class DiaryService:
     async def athlete_by_tg(self, tg_id: int) -> Optional[Student]:
         return await self._students.get_by_athlete_tg_id(tg_id)
 
+    async def athlete_by_max(self, max_id: int) -> Optional[Student]:
+        """Спортсмен в мини-приложении MAX (students.athlete_max_id)."""
+        return await self._students.get_by_athlete_max_id(max_id)
+
     async def linked_athletes(self) -> list[Student]:
-        """Все ученики со своим Telegram (участники рейтинга)."""
+        """Все ученики со своим кабинетом — Telegram или MAX (участники рейтинга)."""
         sg_map = await self._student_groups.get_map_by_student()
         out = []
         for s in await self._students.get_all():
-            if s.athlete_tg_id:
+            if s.is_athlete:
                 s.group_ids = sg_map.get(s.student_id, [])
                 out.append(s)
         out.sort(key=lambda s: s.name.lower())
@@ -165,7 +169,7 @@ class DiaryService:
     async def athletes_for_teacher(self, teacher_id: Optional[str], is_admin: bool) -> list[Student]:
         if is_admin or not teacher_id:
             return await self.linked_athletes() if is_admin else []
-        return [s for s in await self._visibility.students_for_teacher(teacher_id) if s.athlete_tg_id]
+        return [s for s in await self._visibility.students_for_teacher(teacher_id) if s.is_athlete]
 
     async def registration_candidates(self, query: str, athlete_group_ids: set[str]) -> list[Student]:
         """Ученики спортивных групп, чьё имя начинается с запроса (фамилия первая)."""

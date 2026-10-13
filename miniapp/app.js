@@ -5,6 +5,17 @@
 /* ── Telegram ────────────────────────────────────────────────────────── */
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null;
 const DEV = new URLSearchParams(location.search).get('dev') === '1';
+/* MAX: мини-приложение MAX открывает только кабинет спортсмена (решение владельца 13.10.2026). initData — из моста
+   window.WebApp, а если он не загрузился — из #WebAppData; сервер проверяет подпись токеном бота MAX. */
+const MAXAPP = (() => {
+  if (tg && tg.initData) return null;
+  const w = window.WebApp;
+  let data = w && typeof w.initData === 'string' ? w.initData : '';
+  if (!data) { try { data = new URLSearchParams(location.hash.slice(1)).get('WebAppData') || ''; } catch (_) { data = ''; } }
+  return data ? { initData: data, back: (w && w.BackButton) || null } : null;
+})();
+const DEV_MAX = new URLSearchParams(location.search).get('dev') === 'max';   // локально: заголовок devmax
+const authHeader = () => tg && tg.initData ? `tma ${tg.initData}` : MAXAPP ? `max ${MAXAPP.initData}` : DEV_MAX ? 'devmax' : DEV ? 'dev' : '';
 if (tg) { try { tg.ready(); tg.expand(); } catch (_) { /* старый клиент */ } }
 function applyTheme() { document.documentElement.dataset.theme = tg && tg.colorScheme === 'dark' ? 'dark' : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 applyTheme(); if (tg) tg.onEvent('themeChanged', applyTheme);
@@ -19,8 +30,7 @@ const ROLE_HOME = { admin: 'a.home', teacher: 't.home', parent: 'p.home', athlet
 class ApiError extends Error { constructor(status, code, data) { super(code || `HTTP ${status}`); this.status = status; this.code = code; this.data = data; } }
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Accept': 'application/json' };
-  if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
-  else if (DEV) headers.Authorization = 'dev';
+  if (authHeader()) headers.Authorization = authHeader();
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const resp = await fetch(API_BASE[ROLE] + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
@@ -30,14 +40,13 @@ async function api(path, { method = 'GET', body } = {}) {
 /* multipart-запрос (чек об оплате): те же заголовки авторизации, тело — FormData. */
 async function apiForm(path, form) {
   const headers = { 'Accept': 'application/json' };
-  if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
-  else if (DEV) headers.Authorization = 'dev';
+  if (authHeader()) headers.Authorization = authHeader();
   const resp = await fetch(API_BASE[ROLE] + path, { method: 'POST', headers, body: form });
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
   if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);
   return data;
 }
-const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.', receipt_required: 'Прикрепите чек перевода — без него оплату отметить нельзя.' };
+const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram или MAX — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.', receipt_required: 'Прикрепите чек перевода — без него оплату отметить нельзя.' };
 const errText = e => e instanceof ApiError ? (ERR_TEXT[e.code] || `Ошибка сервера (${e.status})`) : 'Нет связи с сервером';
 
 /* ── форматирование ──────────────────────────────────────────────────── */
@@ -1119,10 +1128,11 @@ async function render() {
   const seq = ++renderSeq; const s = cur();
   const content = document.getElementById('content');
   const rootN = state.stack[0].n;
-  document.getElementById('tabs').innerHTML = TABS[ROLE].map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${ic}</span>${label}</button>`).join('');
+  document.getElementById('tabs').innerHTML = (state.joining ? [] : TABS[ROLE]).map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${ic}</span>${label}</button>`).join('');
   const deep = state.stack.length > 1;
-  document.getElementById('back').classList.toggle('on', deep && !tg);
-  if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
+  document.getElementById('back').classList.toggle('on', deep && (MAXAPP ? !MAXAPP.back : !tg));
+  if (MAXAPP && MAXAPP.back) { try { deep ? MAXAPP.back.show() : MAXAPP.back.hide(); } catch (_) { /* старый клиент MAX */ } }
+  else if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
   const sameScreen = state.ui.lastScreen === s.n;
   state.ui.lastScreen = s.n;
   if (sameScreen && content.firstElementChild) content.classList.add('stale');
@@ -1150,7 +1160,7 @@ async function render() {
     if (on && on !== strip.firstElementChild) strip.scrollLeft = Math.max(0, on.offsetLeft - 12);
   });
   content.querySelectorAll('img[data-file]').forEach(loadAuthImage);   // чеки — только с авторизацией
-  const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4') || document.getElementById('q5'); const qid = q ? q.id : null; const qkey = qid || 'q';
+  const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4') || document.getElementById('q5') || document.getElementById('q6'); const qid = q ? q.id : null; const qkey = qid || 'q';
   if (q && !q.dataset.bound) {
     q.dataset.bound = '1';                               // поле живёт между перерисовками — слушатель один
     let t;
@@ -1182,8 +1192,7 @@ function keepInputPatch(root, newRoot, id) {
 /* <img> не умеет слать Authorization, поэтому тянем файл fetch'ем и подставляем blob. */
 async function loadAuthImage(img) {
   const headers = {};
-  if (tg && tg.initData) headers.Authorization = `tma ${tg.initData}`;
-  else if (DEV) headers.Authorization = 'dev';
+  if (authHeader()) headers.Authorization = authHeader();
   try {
     const resp = await fetch(API_BASE[ROLE] + img.dataset.file, { headers });
     if (!resp.ok) throw new Error(resp.status);
@@ -1323,6 +1332,7 @@ document.addEventListener('click', e => {
 });
 document.getElementById('back').addEventListener('click', () => { closeSheet(); back(); });
 if (tg) { try { tg.BackButton.onClick(() => { closeSheet(); back(); }); } catch (_) { /* нет BackButton */ } }
+if (MAXAPP && MAXAPP.back) { try { MAXAPP.back.onClick(() => { closeSheet(); back(); }); } catch (_) { /* старый клиент MAX */ } }
 
 ACT.switchRole = async ({ to }) => {
   const prev = ROLE; ROLE = to;
@@ -1331,12 +1341,15 @@ ACT.switchRole = async ({ to }) => {
 };
 
 (async () => {
-  // роль подбираем по доступу: администратор → педагог → родитель → спортсмен
+  // роль подбираем по доступу: администратор → педагог → родитель → спортсмен; в MAX — только спортсмен
   let last = null;
-  for (const role of ['admin', 'teacher', 'parent', 'athlete']) {
+  for (const role of MAXAPP || DEV_MAX ? ['athlete'] : ['admin', 'teacher', 'parent', 'athlete']) {
     ROLE = role;
     try { state.me = await api('/me'); last = null; break; }
     catch (e) { last = e; if (!(e instanceof ApiError) || e.status !== 403) break; }
+  }
+  if (last && ROLE === 'athlete' && last.data && last.data.canJoin) {   // MAX: ещё не привязан — «Найдите себя»
+    state.joining = true; state.stack = [{ n: 's.join' }]; render(); return;
   }
   if (last) return fail(last);
   state.stack = [{ n: ROLE_HOME[ROLE] }];
