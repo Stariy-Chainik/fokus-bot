@@ -6,8 +6,9 @@
 <title>Фокус</title>
 <link rel="icon" href="logo.png">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>/* Мини-приложение MAX (кабинет спортсмена): MAX передаёт данные запуска в #WebAppData — тогда грузим его мост */
-if (location.hash.indexOf('WebAppData') >= 0) document.write('<script src="https://st.max.ru/js/max-web-app.js"><\/script>');</script>
+<script>/* Мини-приложение MAX (кабинет спортсмена): MAX передаёт данные запуска в #WebAppData — тогда грузим его мост.
+   Ключ целиком: у Telegram в адресе #tgWebAppData, там мост MAX не нужен. */
+if (/(^#|&)WebAppData=/.test(location.hash)) document.write('<script src="https://st.max.ru/js/max-web-app.js"><\/script>');</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
   :root {
