@@ -1,6 +1,7 @@
 /* Фокус · Mini App — кабинет администратора.
    Без сборки: один файл, данные только через /api/admin/* (суммы считает сервер). */
 'use strict';
+if (window.__bootTimer) clearTimeout(window.__bootTimer);   // сторож запуска из index.html: дошли до app.js
 
 /* ── Telegram ────────────────────────────────────────────────────────── */
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null;

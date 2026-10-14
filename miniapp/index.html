@@ -21,11 +21,18 @@
   window.addEventListener('error', function (e) { send('error', e.message, e.filename, e.lineno); });
   window.addEventListener('unhandledrejection', function (e) { send('reject', e.reason && (e.reason.message || e.reason)); });
   window.__clientLog = send;
+  // сторож запуска: app.js снимает его первой строкой; не снял за 8 с — запуск завис (сеть, внешний файл)
+  window.__bootTimer = setTimeout(function () {
+    var got = [];
+    try { got = performance.getEntriesByType('resource').map(function (r) { return r.name.split('/').pop(); }); } catch (_) { got = []; }
+    send('slow-start', 'не запустился за 8 с; readyState=' + document.readyState + '; загружено: ' + got.join(','));
+  }, 8000);
 })();</script>
 <script>/* Где открыт кабинет. Telegram передаёт #tgWebAppData, MAX — #WebAppData (а на Android и в web.max.ru —
    в адресе первой загрузки или sessionStorage). Скрипт Telegram и шрифт — с нашего сервера (папки vendor/, fonts/):
    telegram.org и fonts.googleapis.com без VPN в России могут не отвечать, а браузер ждёт их до таймаута —
-   кабинет в MAX открывался только с VPN (14.10.2026). Мост MAX — с его CDN st.max.ru (доступен в России). */
+   кабинет в MAX открывался только с VPN (14.10.2026). Мост MAX — тоже своя копия (vendor/max-web-app.js):
+   st.max.ru на части сетей тоже не отвечал, и кабинет в MAX на Android висел на загрузке (14.10.2026, вечер). */
 (function () {
   var nav = '';
   try { var n = performance.getEntriesByType('navigation')[0]; nav = n ? new URL(n.name).hash : ''; } catch (_) { nav = ''; }
@@ -34,7 +41,7 @@
   try { stored = !!sessionStorage.getItem('WebAppData'); } catch (_) { stored = false; }
   var maxUa = / MAX\//.test(navigator.userAgent) || /(^|\.)max\.ru$/.test((document.referrer.split('/')[2] || ''));
   window.__isMax = !isTg && (/(^#|&)WebAppData=/.test(location.hash) || /(^#|&)WebAppData=/.test(nav) || stored || maxUa);
-  document.write(window.__isMax ? '<script src="https://st.max.ru/js/max-web-app.js"><\/script>'
+  document.write(window.__isMax ? '<script src="vendor/max-web-app.js"><\/script>'
                                 : '<script src="vendor/telegram-web-app.js"><\/script>');
 })();</script>
 <link rel="stylesheet" href="fonts/manrope.css">

@@ -49,10 +49,11 @@ def test_screens_have_their_actions() -> None:
 
 def test_page_does_not_block_on_foreign_hosts() -> None:
     """Кабинет в MAX открывался только с VPN: telegram.org и fonts.googleapis.com без VPN в России не отвечают,
-    а внешний скрипт/стиль в <head> браузер ждёт до таймаута (14.10.2026). Внешним остаётся только мост MAX."""
+    а внешний скрипт/стиль в <head> браузер ждёт до таймаута (14.10.2026). Позже так же — st.max.ru."""
     html = (MINIAPP / "index.html").read_text(encoding="utf-8")
     foreign = set(re.findall(r'(?:src|href)=\\?"(https?://[^"\\]+)', html))
-    assert foreign <= {"https://st.max.ru/js/max-web-app.js"}, foreign
+    assert not foreign, foreign                 # ни одного внешнего файла: мост MAX тоже свой (vendor/)
+    assert (MINIAPP / "vendor" / "max-web-app.js").is_file()
     assert (MINIAPP / "vendor" / "telegram-web-app.js").is_file() and (MINIAPP / "fonts" / "manrope.css").is_file()
     css = (MINIAPP / "fonts" / "manrope.css").read_text(encoding="utf-8")
     assert "http" not in css.split("*/", 1)[1] and all((MINIAPP / "fonts" / f).is_file()
