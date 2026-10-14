@@ -127,7 +127,7 @@ http://localhost:8090/app/?dev=1 (данные — живая таблица). �
 notifier), «кто привязан», заявка на отвязку и «это не мой ребёнок» (`remove_parent(addr)`) работают с адресом MAX,
 ЮКасса-watcher сообщает об оплате туда же; фронт в MAX проверяет роли «родитель → спортсмен», ссылку оплаты открывает
 `openExternal` (мост MAX `WebApp.openLink`). В меню бота MAX — «📱 Открыть кабинет» (`menu_rows(max_app=…)`,
-`MAX_MINIAPP_ENABLED`); кнопки бота для родителя в MAX пока остаются. Вход: `/api/admin/me` → 403 → `/api/teacher/me` → 403 → `/api/parent/me`.
+`MAX_MINIAPP_ENABLED`). **Только кабинет** (`MAX_PARENT_CABINET_ONLY`, на проде с 14.10.2026, работает вместе с `MAX_MINIAPP_ENABLED` — `settings.max_cabinet_only`): меню бота MAX — «📱 Открыть кабинет» и «➕ Добавить ребёнка»; `bot/max/middlewares.ParentCabinetOnlyMiddleware` гасит старые кнопки родителя (`MAX_BLOCKED_CALLBACKS`) и файлы в чат подсказкой с кнопкой кабинета; в уведомлениях родителю в MAX кнопки счёта/оплаты заменяются на «📱 Открыть кабинет» (`ParentNotifier.send`). Вход по ссылке группы, привязка и «Добавить ребёнка» — по-прежнему в боте; код экранов бота не удалён. Вход: `/api/admin/me` → 403 → `/api/teacher/me` → 403 → `/api/parent/me`.
 Тесты — `tests/test_parent_api.py`.
 
 **Кабинет спортсмена** — `bot/api/athlete.py` (`/api/athlete/*`) + `miniapp/athlete.js` (экраны `s.*`): сводка

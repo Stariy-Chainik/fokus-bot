@@ -73,3 +73,58 @@ def test_max_menu_gets_cabinet_button_when_enabled():
     rows = menu_rows(platform="max", max_app=True)
     assert rows[0][0].kind == "maxapp" and rows[0][0].label == "📱 Открыть кабинет"
     assert all(b.kind != "maxapp" for row in menu_rows(platform="max") for b in row)    # выключено — как раньше
+
+
+def test_max_cabinet_only_menu(monkeypatch):
+    rows = menu_rows(platform="max", max_app=True, max_cabinet_only=True)
+    assert [[(b.kind, b.label) for b in row] for row in rows] == [
+        [("maxapp", "📱 Открыть кабинет")], [("cb", "➕ Добавить ребёнка")]]
+    monkeypatch.setattr(settings, "max_parent_cabinet_only", True)
+    monkeypatch.setattr(settings, "max_miniapp_enabled", False)
+    assert settings.max_cabinet_only is False                       # без мини-приложения — кнопки бота остаются
+
+
+def test_max_cabinet_only_middleware_and_notifications(monkeypatch):
+    pytest.importorskip("maxapi")
+    from types import SimpleNamespace as NS
+    from bot.max import middlewares
+    from bot.services.parent_notifier import ParentNotifier
+    from bot.screens.types import cb
+    from tests.fakes import StudentRepoWritable, mk_student
+    monkeypatch.setattr(settings, "max_parent_cabinet_only", True)
+    monkeypatch.setattr(settings, "max_miniapp_enabled", True)
+    shown = []
+
+    async def fake_send(bot, uid, text, rows=None, media=None):
+        shown.append((uid, text, [[b.kind for b in row] for row in rows or []]))
+    monkeypatch.setattr("bot.max.render.send_screen", fake_send)
+    passed = []
+
+    async def handler(event, data):
+        passed.append(event)
+
+    acks = []
+
+    async def ack(notification=None):
+        acks.append(notification)
+    mw = middlewares.ParentCabinetOnlyMiddleware()
+    kid = mk_student("STU-1", "Иванов Иван")
+    kid.parent_max_ids = [5]
+    data = {"max_uid": 5, "student_repo": StudentRepoWritable([kid])}
+    old = NS(callback=NS(payload="client_bill:STU-1:2026-10"), bot=None, ack=ack)
+    asyncio.run(mw(handler, old, dict(data)))
+    assert not passed and acks and shown[-1][2] == [["maxapp"]]           # старая кнопка счёта — подсказка
+    asyncio.run(mw(handler, NS(callback=NS(payload="client:add_child"), bot=None, ack=ack), dict(data)))
+    assert len(passed) == 1                                                # «Добавить ребёнка» работает
+    photo = NS(callback=None, message=NS(body=NS(attachments=[object()])), bot=None)
+    asyncio.run(mw(handler, photo, dict(data)))
+    assert len(passed) == 1 and "Чек прикрепляется в кабинете" in shown[-1][1]
+
+    sent = []
+
+    async def fake_screen(bot, uid, text, rows=None, media=None):
+        sent.append([[b.kind for b in row] for row in rows or []])
+    monkeypatch.setattr("bot.max.render.send_screen", fake_screen)
+    n = ParentNotifier(max_bot=object())
+    asyncio.run(n.send(("max", 5), "✅ Оплата подтверждена", [[cb("🧾 Счёт", "client_bill:STU-1:2026-10")]]))
+    assert sent == [[["maxapp"]]]                                          # в уведомлении — кнопка кабинета

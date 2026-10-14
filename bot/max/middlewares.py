@@ -53,3 +53,53 @@ class DedupMiddleware(BaseMiddleware):
                 return None
             self._seen[key] = now
         return await handler(event_object, data)
+
+
+# Кнопки родителя, которые в режиме «только кабинет» живут в мини-приложении (MAX_PARENT_CABINET_ONLY)
+MAX_BLOCKED_CALLBACKS = (
+    "client:my_bills", "client:lessons", "client:family", "client:kgroup", "client:unlink",
+    "cl_bills_more:", "cl_bills_stu:", "client_bill:", "client_pay:", "client_payall:", "pay_method:", "payall:",
+    "cash_notify:", "receipt_upload:", "receipt_upload_all:", "receipt_force:", "rcpick:", "pselgo", "pselt:",
+    "mxl:", "client_family:", "famunl:", "famunl_do:", "famunl_why:", "client_kgroup:", "kgroup_clear:",
+    "client_unlink:", "client_unlink_do:",
+)
+CABINET_HINT = "Счета, оплата и занятия теперь в кабинете — нажмите «📱 Открыть кабинет»."
+CABINET_FILE_HINT = ("📎 Чек прикрепляется в кабинете: «📱 Открыть кабинет» → счёт → «Оплатить» → «По реквизитам» → "
+                     "«Прикрепить чек». Файл, отправленный в чат, администратор не получит.")
+
+
+def is_max_blocked(payload) -> bool:
+    return bool(payload) and str(payload).startswith(MAX_BLOCKED_CALLBACKS)
+
+
+def cabinet_rows() -> list:
+    from bot.screens.types import maxapp
+    return [[maxapp("📱 Открыть кабинет", "parent")]]
+
+
+class ParentCabinetOnlyMiddleware(BaseMiddleware):
+    """Родитель в MAX работает только через мини-приложение (MAX_PARENT_CABINET_ONLY, решение владельца 14.10.2026):
+    старые кнопки счетов, оплаты, занятий и «кто привязан» и файлы в чат отвечают подсказкой с кнопкой кабинета.
+    Вход по ссылке группы, привязка, «Добавить ребёнка» и уведомления работают как прежде."""
+
+    async def __call__(self, handler, event_object, data):
+        from config.settings import settings
+        if not settings.max_cabinet_only:
+            return await handler(event_object, data)
+        from .render import send_screen
+        callback = getattr(event_object, "callback", None)
+        if callback is not None and is_max_blocked(getattr(callback, "payload", None)):
+            try:
+                await event_object.ack(notification=CABINET_HINT)
+            except Exception:
+                pass
+            await send_screen(event_object.bot, data["max_uid"], "📱 Всё по оплате и занятиям — в кабинете:", cabinet_rows())
+            return None
+        message = getattr(event_object, "message", None)
+        body = getattr(message, "body", None) if callback is None else None
+        if body is not None and getattr(body, "attachments", None):
+            repo = data.get("student_repo")
+            if repo is not None and await repo.get_by_parent_max_id(data["max_uid"]):
+                await send_screen(event_object.bot, data["max_uid"], CABINET_FILE_HINT, cabinet_rows())
+                return None
+        return await handler(event_object, data)

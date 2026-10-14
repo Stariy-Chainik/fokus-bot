@@ -13,7 +13,10 @@ def welcome_text(students: list) -> str:
 
 def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
               receipt_email: bool = True, cabinet_url: str = "", kindergarten: bool = False,
-              max_app: bool = False) -> list:
+              max_app: bool = False, max_cabinet_only: bool = False) -> list:
+    if platform == "max" and max_cabinet_only:
+        # MAX — только кабинет (MAX_PARENT_CABINET_ONLY): счета, оплата, занятия, «кто привязан» внутри него
+        return [[maxapp("📱 Открыть кабинет", "parent")], [cb("➕ Добавить ребёнка", "client:add_child")]]
     if platform == "max":
         # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже.
         # max_app — кабинет родителя мини-приложением MAX (MAX_MINIAPP_ENABLED, решение владельца 14.10.2026)

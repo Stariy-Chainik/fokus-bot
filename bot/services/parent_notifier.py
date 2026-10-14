@@ -89,6 +89,13 @@ class ParentNotifier:
                     logger.warning("MAX-бот не запущен: сообщение для max_id=%s не доставлено", ident)
                     return False
                 from bot.max.render import send_screen
+                from config.settings import settings
+                if settings.max_cabinet_only and rows:     # кнопки счёта/оплаты бота → «Открыть кабинет»
+                    from bot.max.middlewares import cabinet_rows, is_max_blocked
+                    kept = [r for r in ([b for b in row if not (b.kind == "cb" and is_max_blocked(b.value))]
+                                        for row in rows) if r]
+                    if sum(map(len, kept)) < sum(map(len, rows)):
+                        rows = cabinet_rows() + kept
                 await send_screen(self.max_bot, ident, text, rows)
                 return True
         except TelegramAPIError as exc:

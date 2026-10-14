@@ -7,7 +7,7 @@ from maxapi import Bot, Dispatcher
 from maxapi.enums.parse_mode import ParseMode
 from maxapi.exceptions.max import InvalidToken
 
-from .middlewares import DepsMiddleware, DedupMiddleware
+from .middlewares import DepsMiddleware, DedupMiddleware, ParentCabinetOnlyMiddleware
 from .handlers import router as parent_router
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def build(token: str, deps: dict, tg_bot):
     dp = Dispatcher(router_id="max")
     dp.register_outer_middleware(DedupMiddleware())
     dp.register_outer_middleware(DepsMiddleware({**deps, "tg_bot": tg_bot, "max_bot": bot}))
+    dp.register_outer_middleware(ParentCabinetOnlyMiddleware())     # MAX_PARENT_CABINET_ONLY
     dp.include_routers(parent_router)
     return bot, dp
 

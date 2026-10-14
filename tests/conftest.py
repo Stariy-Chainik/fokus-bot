@@ -22,6 +22,8 @@ _RESET = {
     "subscription_edit_groups": "",
     "mergeable_groups": "",
     "subscription_share_groups": "",
+    "max_miniapp_enabled": False,          # кнопки мини-приложения MAX тесты включают явно
+    "max_parent_cabinet_only": False,
 }
 
 

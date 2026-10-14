@@ -34,7 +34,7 @@ async def kindergarten_children(students: list) -> list:
 async def max_menu_rows(students: list) -> list:
     from config.settings import settings
     return menu_rows(platform="max", kindergarten=bool(await kindergarten_children(students)),
-                     max_app=settings.max_miniapp_enabled)
+                     max_app=settings.max_miniapp_enabled, max_cabinet_only=settings.max_cabinet_only)
 
 
 async def show_menu(event, students: list, max_uid: int, *, new_message: bool = False) -> None:
