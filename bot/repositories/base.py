@@ -26,6 +26,11 @@ from .sheets_client import SheetsClient
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL: float = 300.0     # секунды кеширования чтений (инвалидируется при любой записи)
+# Устаревший кеш (старше TTL, но моложе этого порога) отдаётся сразу, а лист дочитывается в фоне
+# (stale-while-revalidate, 14.10.2026): запрос кабинета не ждёт Google 0,3–10 с. Старше порога —
+# прогрев, видимо, не работает: ждём свежие данные.
+_STALE_MAX: float = 1800.0
+_READ_RETRIES_ON_WRITE: int = 3   # чтение совпало с записью — перечитать (иначе кеш потерял бы запись)
 _RETRY_ATTEMPTS: int = 3
 _RETRY_STATUSES: frozenset[int] = frozenset({429, 500, 503})
 _RETRY_NETWORK_ERRORS = (
@@ -91,6 +96,10 @@ class BaseRepository:
     _locks: dict[str, asyncio.Lock] = {}
     # Заголовки листов (строка 1) — для проверки ключевой ячейки по живому листу
     _headers: dict[str, list[str]] = {}
+    # Одно чтение листа на всех (single-flight): параллельные запросы ждут уже идущее чтение
+    _inflight: dict[str, asyncio.Task] = {}
+    # Счётчик записей в лист: чтение, во время которого была запись, кеш не перезаписывает
+    _writes: dict[str, int] = {}
 
     def __init__(self, client: SheetsClient, sheet_name: str) -> None:
         self._client = client
@@ -102,10 +111,15 @@ class BaseRepository:
 
     # ── Синхронные хелперы (выполняются внутри потока) ────────────────────────
 
+    def _ws_ready(self) -> gspread.Worksheet:
+        """Лист с повтором: первое обращение читает описание таблицы — тот же запрос к Google, что упирается
+        в минутную квоту (429); без повтора ошибка вылетала мимо `_with_retry` вызова чтения/записи."""
+        return _with_retry(self._client.get_worksheet, self._sheet_name)
+
     def _sync_all_records(self) -> list[dict[str, Any]]:
         t0 = time.monotonic()
         try:
-            result = _with_retry(self._ws.get_all_records, default_blank=None)
+            result = _with_retry(self._ws_ready().get_all_records, default_blank=None)
             logger.info("SHEETS read %s: %d rows in %.0f ms",
                         self._sheet_name, len(result), (time.monotonic() - t0) * 1000)
             return result
@@ -116,7 +130,7 @@ class BaseRepository:
     def _sync_append_row(self, values: list[Any]) -> None:
         t0 = time.monotonic()
         try:
-            _with_retry(self._ws.append_row, values, value_input_option="USER_ENTERED")
+            _with_retry(self._ws_ready().append_row, values, value_input_option="USER_ENTERED")
             logger.info("SHEETS append %s in %.0f ms",
                         self._sheet_name, (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -126,7 +140,7 @@ class BaseRepository:
     def _sync_update_row(self, row_index: int, values: list[Any]) -> None:
         t0 = time.monotonic()
         try:
-            _with_retry(self._ws.update, f"A{row_index}", [values])
+            _with_retry(self._ws_ready().update, f"A{row_index}", [values])
             logger.info("SHEETS update_row %s row=%d in %.0f ms",
                         self._sheet_name, row_index, (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -136,7 +150,7 @@ class BaseRepository:
     def _sync_delete_row(self, row_index: int) -> None:
         t0 = time.monotonic()
         try:
-            _with_retry(self._ws.delete_rows, row_index)
+            _with_retry(self._ws_ready().delete_rows, row_index)
             logger.info("SHEETS delete_row %s row=%d in %.0f ms",
                         self._sheet_name, row_index, (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -146,7 +160,7 @@ class BaseRepository:
     def _sync_update_cell(self, row_index: int, col: int, value: Any) -> None:
         t0 = time.monotonic()
         try:
-            _with_retry(self._ws.update_cell, row_index, col, value)
+            _with_retry(self._ws_ready().update_cell, row_index, col, value)
             logger.info("SHEETS update_cell %s (%d,%d) in %.0f ms",
                         self._sheet_name, row_index, col, (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -164,7 +178,7 @@ class BaseRepository:
         t0 = time.monotonic()
         data = [{"range": rowcol_to_a1(row_index, col), "values": [[value]]} for col, value in cells.items()]
         try:
-            _with_retry(self._ws.batch_update, data, raw=raw)       # по умолчанию USER_ENTERED — как update_cell
+            _with_retry(self._ws_ready().batch_update, data, raw=raw)       # по умолчанию USER_ENTERED — как update_cell
             logger.info("SHEETS update_cells %s row=%d cols=%s in %.0f ms", self._sheet_name, row_index,
                         ",".join(str(c) for c in cells), (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -172,7 +186,7 @@ class BaseRepository:
             raise
 
     def _sync_row_values(self, row_index: int) -> list:
-        return _with_retry(self._ws.row_values, row_index)
+        return _with_retry(self._ws_ready().row_values, row_index)
 
     # ── Запись по ключу (I1) ──────────────────────────────────────────────────
 
@@ -238,7 +252,11 @@ class BaseRepository:
 
     def _invalidate_cache(self) -> None:
         self._bump()
+        self._mark_write()
         BaseRepository._cache.pop(self._sheet_name, None)
+
+    def _mark_write(self) -> None:
+        BaseRepository._writes[self._sheet_name] = BaseRepository._writes.get(self._sheet_name, 0) + 1
 
     # ── Правка кеша на месте (экономит чтение листа после каждой записи) ─────
     # Сохраняем семантику get_all_records(default_blank=None): пусто → None,
@@ -260,6 +278,7 @@ class BaseRepository:
     def _patch_cache(self, row_index: int, values: list[Any] | None = None,
                      cell: tuple[int, Any] | None = None, delete: bool = False, append: bool = False) -> None:
         self._bump()
+        self._mark_write()
         records = self._cached_records()
         headers = BaseRepository._headers.get(self._sheet_name)
         if records is None or headers is None:
@@ -293,9 +312,49 @@ class BaseRepository:
         240 с при TTL 300 с ничего не обновлял: лист протухал на 300-й секунде и до
         480-й каждый запрос кабинета читал Google сам (по 0,3–0,7 с на лист).
         """
-        records: list[dict[str, Any]] = await asyncio.to_thread(self._sync_all_records)
+        await self._load()
+
+    async def _load(self) -> list[dict[str, Any]]:
+        """Прочитать лист в кеш. Одно чтение на всех: если лист уже читается — ждём его (single-flight)."""
+        name = self._sheet_name
+        loop = asyncio.get_running_loop()
+        task = BaseRepository._inflight.get(name)
+        if task is None or task.done() or task.get_loop() is not loop:
+            task = loop.create_task(self._read_into_cache())
+            BaseRepository._inflight[name] = task
+
+            def _forget(t, name=name):
+                if BaseRepository._inflight.get(name) is t:
+                    BaseRepository._inflight.pop(name, None)
+            task.add_done_callback(_forget)
+        return await asyncio.shield(task)
+
+    async def _read_into_cache(self) -> list[dict[str, Any]]:
+        """Чтение листа; если во время него была запись — перечитать: иначе старые строки затёрли бы
+        в кеше только что записанное (запись правит кеш на месте, а чтение кладёт свой снимок поверх)."""
+        name = self._sheet_name
+        records: list[dict[str, Any]] = []
+        for _ in range(_READ_RETRIES_ON_WRITE):
+            epoch = BaseRepository._writes.get(name, 0)
+            records = await asyncio.to_thread(self._sync_all_records)
+            if BaseRepository._writes.get(name, 0) == epoch:
+                break
+            logger.info("Лист %s: во время чтения была запись — перечитываю", name)
         self._bump()
-        BaseRepository._cache[self._sheet_name] = (records, time.monotonic())
+        BaseRepository._cache[name] = (records, time.monotonic())
+        return records
+
+    def _refresh_in_background(self) -> None:
+        """Устаревший кеш уже отдали — дочитать лист в фоне (ошибку только записать в журнал)."""
+        if self._sheet_name in BaseRepository._inflight:
+            return
+
+        async def run() -> None:
+            try:
+                await self._load()
+            except Exception as exc:
+                logger.warning("Фоновое обновление листа %s не удалось: %s", self._sheet_name, exc)
+        asyncio.get_running_loop().create_task(run())
 
     async def _parsed_all(self, parse) -> list:
         """Все строки листа, разобранные `parse`, — один раз на версию листа (копия списка).
@@ -313,15 +372,17 @@ class BaseRepository:
         return list(items)
 
     async def _all_records(self) -> list[dict[str, Any]]:
-        """Читает все записи листа с TTL-кешированием."""
-        now = time.monotonic()
+        """Все записи листа: свежий кеш — сразу; устаревший (до _STALE_MAX) — сразу и фоновое чтение;
+        кеша нет или он совсем старый — одно общее чтение листа (single-flight)."""
         cached = BaseRepository._cache.get(self._sheet_name)
-        if cached and (now - cached[1]) < _CACHE_TTL:
-            return cached[0]
-        records: list[dict[str, Any]] = await asyncio.to_thread(self._sync_all_records)
-        self._bump()
-        BaseRepository._cache[self._sheet_name] = (records, now)
-        return records
+        if cached:
+            age = time.monotonic() - cached[1]
+            if age < _CACHE_TTL:
+                return cached[0]
+            if age < _STALE_MAX:
+                self._refresh_in_background()
+                return cached[0]
+        return await self._load()
 
     async def _append_row(self, values: list[Any]) -> None:
         await asyncio.to_thread(self._sync_append_row, values)

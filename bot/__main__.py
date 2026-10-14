@@ -230,6 +230,9 @@ _WARM_REPOS = (
 )
 
 
+_WARM_PARALLEL = 4
+
+
 async def _cache_warmer(dp: Dispatcher, interval_sec: int = 240) -> None:
     """Держит горячим кеш всех листов (TTL 300 с): каждый цикл перечитывает их принудительно.
 
@@ -239,15 +242,23 @@ async def _cache_warmer(dp: Dispatcher, interval_sec: int = 240) -> None:
     который при живом кеше ничего не перечитывает, — в итоге сводка админа всё равно
     ходила в Google за очередью решений, заявками, расходами и users на каждом открытии.
     """
+    sem = asyncio.Semaphore(_WARM_PARALLEL)
+
+    async def one(key: str) -> None:
+        repo = dp.workflow_data.get(key)
+        if repo is None:
+            return
+        async with sem:
+            try:
+                await repo.refresh()
+            except Exception as exc:                     # прогрев не критичен
+                logger.warning("Прогрев кеша %s: %s", key, exc)
+
     while True:
         t0 = time.monotonic()
-        for key in _WARM_REPOS:
-            repo = dp.workflow_data.get(key)
-            try:
-                if repo is not None:
-                    await repo.refresh()
-            except Exception as exc:                     # прогрев не критичен
-                logger.debug("Прогрев кеша %s: %s", key, exc)
+        # по несколько листов сразу: после рестарта кеш готов за ~5 с, а не за 14–42 (14.10.2026);
+        # больше 4 параллельно не надо — упрёмся в минутную квоту Google на чтение
+        await asyncio.gather(*(one(key) for key in _WARM_REPOS))
         logger.info("Прогрев кеша: %d листов за %.1f с", len(_WARM_REPOS), time.monotonic() - t0)
         await asyncio.sleep(interval_sec)
 

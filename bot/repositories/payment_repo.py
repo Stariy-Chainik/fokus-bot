@@ -31,7 +31,9 @@ def _row_to_payment(row: dict) -> StudentPeriodPayment:
 
 class PaymentRepository(BaseRepository):
     async def get_all(self) -> list[StudentPeriodPayment]:
-        return [_row_to_payment(r) for r in await self._all_records()]
+        # разбор один раз на версию листа (как у занятий): «Зарплаты» и «Не оплатили» звали это ~200 раз
+        # за открытие — 260 тыс. разборов строк, 0,75 с. Объекты общие: менять только вместе с записью в лист.
+        return await self._parsed_all(_row_to_payment)
 
     async def get_by_student_and_period(
         self, student_id: str, period_month: str

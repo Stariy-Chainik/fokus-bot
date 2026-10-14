@@ -707,7 +707,41 @@ class PaymentService:
                 rows.append(ledger.pending)
         return rows
 
+    def _ledger_memo_key(self, since_period, until_period) -> tuple | None:
+        """Ключ запоминания карты: параметры, сегодняшний месяц и версии всех листов, из которых она считается
+        (версия растёт при любом чтении/записи листа), плюс загрузка истории ставок. None — запоминать нельзя
+        (фейковые репозитории в тестах без листа)."""
+        from bot.repositories.base import BaseRepository
+        from bot.services import rate_history
+        gens: list[tuple | None] = []
+        for repo in (self._lesson_repo, self._payment_repo, self._teacher_repo, self._group_repo,
+                     self._student_group_repo, self._sub_override_repo, self._student_repo):
+            if repo is None:
+                gens.append(None)
+                continue
+            name = getattr(repo, "_sheet_name", None)
+            if name is None:
+                return None
+            gens.append((name, BaseRepository._gen.get(name, 0), id(BaseRepository._cache.get(name, (None,))[0])))
+        return (since_period or "", until_period or "", last_periods(1)[0], id(rate_history._rows), tuple(gens))
+
     async def compute_ledger_map(
+        self, since_period: str | None = None, until_period: str | None = None,
+    ) -> dict[tuple[str, str, str], tuple[int, int]]:
+        """Карта «начислено/оплачено» — запоминается до изменения данных (14.10.2026): сводка, «Зарплаты»,
+        «Не оплатили» и диаграммы пересчитывали одно и то же по 170–200 мс на каждом открытии."""
+        key = self._ledger_memo_key(since_period, until_period)
+        memo = getattr(self, "_ledger_memo", None)
+        if key is not None and memo is not None and key in memo:
+            return dict(memo[key])
+        result = await self._compute_ledger_map(since_period, until_period)
+        if key is not None and self._ledger_memo_key(since_period, until_period) == key:   # данные не менялись по ходу
+            memo = memo if memo is not None and len(memo) < 8 else {}
+            memo[key] = result
+            self._ledger_memo = memo
+        return dict(result)
+
+    async def _compute_ledger_map(
         self, since_period: str | None = None, until_period: str | None = None,
     ) -> dict[tuple[str, str, str], tuple[int, int]]:
         """Начислено и оплачено по всем ученикам: (student, teacher | SUB:gid, period) → (начислено, оплачено).
