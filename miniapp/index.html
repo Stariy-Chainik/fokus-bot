@@ -22,19 +22,22 @@
   window.addEventListener('unhandledrejection', function (e) { send('reject', e.reason && (e.reason.message || e.reason)); });
   window.__clientLog = send;
 })();</script>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>/* Мини-приложение MAX: данные запуска — в #WebAppData (ключ целиком: у Telegram #tgWebAppData), а при
-   перезагрузке и на части клиентов — в sessionStorage или адресе первой загрузки; MAX-клиент и web.max.ru. */
+<script>/* Где открыт кабинет. Telegram передаёт #tgWebAppData, MAX — #WebAppData (а на Android и в web.max.ru —
+   в адресе первой загрузки или sessionStorage). Скрипт Telegram и шрифт — с нашего сервера (папки vendor/, fonts/):
+   telegram.org и fonts.googleapis.com без VPN в России могут не отвечать, а браузер ждёт их до таймаута —
+   кабинет в MAX открывался только с VPN (14.10.2026). Мост MAX — с его CDN st.max.ru (доступен в России). */
 (function () {
   var nav = '';
   try { var n = performance.getEntriesByType('navigation')[0]; nav = n ? new URL(n.name).hash : ''; } catch (_) { nav = ''; }
+  var isTg = /(^#|&)tgWebAppData=/.test(location.hash) || /(^#|&)tgWebAppData=/.test(nav);
   var stored = false;
   try { stored = !!sessionStorage.getItem('WebAppData'); } catch (_) { stored = false; }
   var maxUa = / MAX\//.test(navigator.userAgent) || /(^|\.)max\.ru$/.test((document.referrer.split('/')[2] || ''));
-  window.__isMax = /(^#|&)WebAppData=/.test(location.hash) || /(^#|&)WebAppData=/.test(nav) || stored || maxUa;
-  if (window.__isMax) document.write('<script src="https://st.max.ru/js/max-web-app.js"><\/script>');
+  window.__isMax = !isTg && (/(^#|&)WebAppData=/.test(location.hash) || /(^#|&)WebAppData=/.test(nav) || stored || maxUa);
+  document.write(window.__isMax ? '<script src="https://st.max.ru/js/max-web-app.js"><\/script>'
+                                : '<script src="vendor/telegram-web-app.js"><\/script>');
 })();</script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="fonts/manrope.css">
 <style>
   :root {
     --bg: #F4F1F3; --card: #FFFFFF; --ink: #1F171C; --muted: #756A71; --line: #E4DCE0; --line-strong: #CFC3C9;

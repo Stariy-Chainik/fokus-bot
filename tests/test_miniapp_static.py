@@ -45,3 +45,39 @@ def test_screens_have_their_actions() -> None:
     used |= set(re.findall(r"data-act=\\?\"?\$\{?([A-Za-z0-9_]+)", joined)) - {"act", "a"}
     missing = {a for a in used if a not in declared and not a.startswith("$")}
     assert not missing, f"нет обработчиков: {sorted(missing)}"
+
+
+def test_page_does_not_block_on_foreign_hosts() -> None:
+    """Кабинет в MAX открывался только с VPN: telegram.org и fonts.googleapis.com без VPN в России не отвечают,
+    а внешний скрипт/стиль в <head> браузер ждёт до таймаута (14.10.2026). Внешним остаётся только мост MAX."""
+    html = (MINIAPP / "index.html").read_text(encoding="utf-8")
+    foreign = set(re.findall(r'(?:src|href)=\\?"(https?://[^"\\]+)', html))
+    assert foreign <= {"https://st.max.ru/js/max-web-app.js"}, foreign
+    assert (MINIAPP / "vendor" / "telegram-web-app.js").is_file() and (MINIAPP / "fonts" / "manrope.css").is_file()
+    css = (MINIAPP / "fonts" / "manrope.css").read_text(encoding="utf-8")
+    assert "http" not in css.split("*/", 1)[1] and all((MINIAPP / "fonts" / f).is_file()
+                                                        for f in re.findall(r"url\(([^)]+)\)", css))
+
+
+def test_static_serves_fonts_and_vendor_with_cache() -> None:
+    import asyncio
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.api.static import register_miniapp_static
+
+    async def run():
+        app = web.Application()
+        register_miniapp_static(app)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            font = await client.get("/app/fonts/manrope-cyrillic.woff2")
+            tg = await client.get("/app/vendor/telegram-web-app.js")
+            page = await client.get("/app/app.js")
+            bad = await client.get("/app/fonts/..%2Fapp.js")
+            return (font.status, font.headers.get("Cache-Control"), tg.status, page.headers.get("Cache-Control"),
+                    bad.status)
+        finally:
+            await client.close()
+    fs, fcache, ts, pcache, bad = asyncio.run(run())
+    assert (fs, ts, bad) == (200, 200, 404) and "max-age" in fcache and pcache == "no-store"
