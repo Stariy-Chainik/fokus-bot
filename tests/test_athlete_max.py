@@ -126,3 +126,24 @@ def test_max_bot_shows_athlete_screen(monkeypatch):
     assert asyncio.run(start._athlete_entry(None, 777, "athlete", repo)) is True        # ссылка ?start=athlete
     assert asyncio.run(start._athlete_entry(None, 777, "", repo)) is False              # обычный родитель
     assert "Иванов Иван" in shown[0][1] and shown[0][2] == [["maxapp"]] and "найдите себя" in shown[1][1]
+
+
+def test_send_screen_retries_without_app_button():
+    """MAX отклонил кнопку мини-приложения (приложение не подключено) — сообщение уходит без неё."""
+    pytest.importorskip("maxapi")
+    from bot.max.render import send_screen
+    from bot.screens.types import cb, maxapp
+
+    class Bot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, user_id, text, attachments=None):
+            kinds = [getattr(b, "type", None) for a in attachments or [] for row in a.payload.buttons for b in row]
+            if any(getattr(k, "value", k) == "open_app" for k in kinds):
+                raise RuntimeError("open_app not allowed")
+            self.sent.append((user_id, text, [getattr(k, "value", k) for k in kinds]))
+
+    bot = Bot()
+    asyncio.run(send_screen(bot, 1, "Меню", [[maxapp("📱 Открыть кабинет", "parent")], [cb("💳 Оплата", "client:my_bills")]]))
+    assert bot.sent == [(1, "Меню", ["callback"])]

@@ -47,8 +47,27 @@ def split_text(text: str, limit: int = MAX_TEXT) -> list[str]:
     return parts
 
 
+def _without_app(rows):
+    """Те же ряды без кнопок мини-приложения: MAX отклонил сообщение с ними (приложение не подключено к боту)."""
+    if not rows or not any(b.kind == "maxapp" for row in rows for b in row):
+        return None
+    return [r for r in ([b for b in row if b.kind != "maxapp"] for row in rows) if r]
+
+
 async def send_screen(bot, user_id: int, text: str, rows=None, media=None) -> None:
-    """Новое сообщение пользователю: текст (HTML), кнопки, при необходимости вложение."""
+    """Новое сообщение пользователю: текст (HTML), кнопки, при необходимости вложение.
+    Кнопку мини-приложения MAX может отклонить — тогда сообщение уходит без неё, меню не пропадает."""
+    try:
+        await _send(bot, user_id, text, rows, media)
+    except Exception as exc:
+        fallback = _without_app(rows)
+        if fallback is None:
+            raise
+        logger.warning("MAX: сообщение с кнопкой мини-приложения не принято (%s) — отправляю без неё", exc)
+        await _send(bot, user_id, text, fallback, media)
+
+
+async def _send(bot, user_id: int, text: str, rows=None, media=None) -> None:
     chunks = split_text(text)
     kb = to_max_markup(rows)
     for i, chunk in enumerate(chunks):
@@ -68,7 +87,15 @@ async def edit_screen(event, text: str, rows=None) -> None:
         try:
             await event.edit(text=text, attachments=[kb] if kb else [])
             return
-        except Exception as exc:  # сообщение удалено / устарело
+        except Exception as exc:  # сообщение удалено / устарело / не принята кнопка мини-приложения
+            fallback = _without_app(rows)
+            if fallback is not None:
+                try:
+                    await event.edit(text=text, attachments=[to_max_markup(fallback)])
+                    logger.warning("MAX: правка с кнопкой мини-приложения не принята (%s) — без неё", exc)
+                    return
+                except Exception:
+                    pass
             logger.info("MAX edit не удался (%s) — отправляем новое", exc)
     try:
         await event.ack()
