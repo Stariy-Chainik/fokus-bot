@@ -5,10 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Фокус</title>
 <link rel="icon" href="logo.png">
+<script>/* Ошибки запуска кабинета → журнал сервера (/api/client-log): с телефона иначе их не увидеть.
+   Только имена ключей адреса, без данных входа. */
+(function () {
+  function send(kind, msg, src, line) {
+    try {
+      var keys = location.hash.replace(/^#/, '').split('&').map(function (p) { return p.split('=')[0]; }).filter(Boolean).slice(0, 10);
+      var body = JSON.stringify({ kind: kind, msg: String(msg || '').slice(0, 300), src: String(src || '').slice(-80), line: line || 0,
+        keys: keys.join(','), ref: (document.referrer || '').slice(0, 60), wa: typeof window.WebApp,
+        tg: !!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) });
+      if (navigator.sendBeacon) navigator.sendBeacon('/api/client-log', body);
+      else fetch('/api/client-log', { method: 'POST', body: body });
+    } catch (_) { /* журнал не важнее кабинета */ }
+  }
+  window.addEventListener('error', function (e) { send('error', e.message, e.filename, e.lineno); });
+  window.addEventListener('unhandledrejection', function (e) { send('reject', e.reason && (e.reason.message || e.reason)); });
+  window.__clientLog = send;
+})();</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>/* Мини-приложение MAX (кабинет спортсмена): MAX передаёт данные запуска в #WebAppData — тогда грузим его мост.
-   Ключ целиком: у Telegram в адресе #tgWebAppData, там мост MAX не нужен. */
-if (/(^#|&)WebAppData=/.test(location.hash)) document.write('<script src="https://st.max.ru/js/max-web-app.js"><\/script>');</script>
+<script>/* Мини-приложение MAX: данные запуска — в #WebAppData (ключ целиком: у Telegram #tgWebAppData), а при
+   перезагрузке и на части клиентов — в sessionStorage или адресе первой загрузки; MAX-клиент и web.max.ru. */
+(function () {
+  var nav = '';
+  try { var n = performance.getEntriesByType('navigation')[0]; nav = n ? new URL(n.name).hash : ''; } catch (_) { nav = ''; }
+  var stored = false;
+  try { stored = !!sessionStorage.getItem('WebAppData'); } catch (_) { stored = false; }
+  var maxUa = / MAX\//.test(navigator.userAgent) || /(^|\.)max\.ru$/.test((document.referrer.split('/')[2] || ''));
+  window.__isMax = /(^#|&)WebAppData=/.test(location.hash) || /(^#|&)WebAppData=/.test(nav) || stored || maxUa;
+  if (window.__isMax) document.write('<script src="https://st.max.ru/js/max-web-app.js"><\/script>');
+})();</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
   :root {

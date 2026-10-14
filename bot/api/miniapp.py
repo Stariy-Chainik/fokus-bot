@@ -153,9 +153,32 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
         )
         return _json({"confirmationUrl": url, "amount": total})
 
+    import json
+    import time
+    log_window = {"start": 0.0, "count": 0}
+
+    async def client_log(request: web.Request) -> web.Response:
+        """Ошибки запуска кабинета с телефона (window.onerror в index.html) — в журнал сервера. Без авторизации:
+        кабинет мог упасть до неё; только имена ключей адреса, без initData; не больше 60 записей в минуту."""
+        now = time.monotonic()
+        if now - log_window["start"] > 60:
+            log_window.update(start=now, count=0)
+        log_window["count"] += 1
+        if log_window["count"] > 60:
+            return web.Response(status=204)
+        try:
+            data = json.loads((await request.text())[:2000] or "{}")
+        except ValueError:
+            data = {}
+        if isinstance(data, dict):
+            clean = {k: str(data.get(k, ""))[:300] for k in ("kind", "msg", "src", "line", "keys", "ref", "wa", "tg")}
+            logger.warning("Кабинет (телефон): %s | UA %s", clean, request.headers.get("User-Agent", "")[:160])
+        return web.Response(status=204)
+
     async def options(_request: web.Request) -> web.Response:
         return web.Response(status=204, headers=_CORS_HEADERS)
 
+    app.router.add_post("/api/client-log", client_log)
     app.router.add_get("/api/me/bills", bills)
     app.router.add_post("/api/me/pay", pay)
     app.router.add_options("/api/me/bills", options)

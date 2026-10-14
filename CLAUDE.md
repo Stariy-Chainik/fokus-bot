@@ -151,7 +151,7 @@ Telegram; чужой аккаунт MAX на занятом ученике — 4
 «🏃 Открыть дневник спортсмена» (`Btn` kind `maxapp` → `OpenAppButton(contact_id=бот)`, `bot/max/render.ME` из
 `get_me`) — на приветствии нового пользователя, у привязанного спортсмена и по ссылке `https://max.ru/<бот>?start=athlete`;
 показывается только при `MAX_MINIAPP_ENABLED=true` — после того как страница кабинета подключена к боту в кабинете
-организации MAX. Локально: `MINIAPP_DEV_MAX_ID` + `?dev=max` (заголовок `devmax`). Тесты — `tests/test_athlete_max.py`.
+организации MAX. Кнопка `OpenAppButton` обязательно с `web_app` = имя бота (иначе MAX 400 «Field 'webApp' cannot be null»). Данные запуска MAX ищутся в `#WebAppData`, адресе первой загрузки (`performance` navigation) и `sessionStorage` — на части клиентов (Android, web.max.ru) их нет в `location.hash`; мост MAX грузится и по UA « MAX/» или referrer `*.max.ru` (`window.__isMax`). Ошибки запуска кабинета с телефона уходят beacon'ом в `POST /api/client-log` (без авторизации, только имена ключей адреса, ≤ 60/мин) — в журнале «Кабинет (телефон): …». Локально: `MINIAPP_DEV_MAX_ID` + `?dev=max` (заголовок `devmax`). Тесты — `tests/test_athlete_max.py`.
 
 ### MAX front (кабинет родителя в мессенджере MAX)
 

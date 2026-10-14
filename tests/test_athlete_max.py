@@ -102,7 +102,8 @@ def test_max_app_button_only_in_max():
     ME.update(id=500314561096, username="id500314561096_bot")
     rows = [[maxapp("🏃 Открыть дневник спортсмена", "athlete")], [cb("Меню", "go:home")]]
     btn = to_max_markup(rows).payload.buttons[0][0]
-    assert (btn.type.value, btn.contact_id, btn.payload) == ("open_app", 500314561096, "athlete")
+    assert (btn.type.value, btn.web_app, btn.contact_id, btn.payload) == (
+        "open_app", "id500314561096_bot", 500314561096, "athlete")      # webApp обязателен для MAX API
     tg = to_aiogram_markup(rows)
     assert [[b.text for b in row] for row in tg.inline_keyboard] == [["Меню"]]       # в Telegram кнопки нет
 
@@ -147,3 +148,23 @@ def test_send_screen_retries_without_app_button():
     bot = Bot()
     asyncio.run(send_screen(bot, 1, "Меню", [[maxapp("📱 Открыть кабинет", "parent")], [cb("💳 Оплата", "client:my_bills")]]))
     assert bot.sent == [(1, "Меню", ["callback"])]
+
+
+def test_client_log_accepts_beacon_without_auth(monkeypatch):
+    from bot.api import register_miniapp_api
+
+    def make_api_dp():
+        return make_api(monkeypatch)[0]
+
+    async def run():
+        app = web.Application()
+        register_miniapp_api(app, make_api_dp(), None)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            resp = await client.post("/api/client-log", data='{"kind": "error", "msg": "x is not defined", "line": 12}')
+            bad = await client.post("/api/client-log", data="не json")
+            return resp.status, bad.status
+        finally:
+            await client.close()
+    assert asyncio.run(run()) == (204, 204)

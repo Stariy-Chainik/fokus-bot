@@ -16,7 +16,8 @@ def _button(btn):
     if btn.kind in ("url", "webapp"):
         return LinkButton(text=btn.label, url=btn.value)
     if btn.kind == "maxapp":
-        return OpenAppButton(text=btn.label, contact_id=ME.get("id"), web_app=None if ME.get("id") else ME.get("username"),
+        # MAX требует webApp — имя бота (без него 400 «Field 'webApp' cannot be null», 14.10.2026)
+        return OpenAppButton(text=btn.label, web_app=ME.get("username"), contact_id=ME.get("id"),
                              payload=btn.value or None)
     return CallbackButton(text=btn.label, payload=btn.value)
 

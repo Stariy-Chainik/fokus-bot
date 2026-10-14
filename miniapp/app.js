@@ -8,11 +8,19 @@ const DEV = new URLSearchParams(location.search).get('dev') === '1';
 /* MAX: мини-приложение MAX — кабинеты родителя (14.10.2026) и спортсмена (13.10.2026). initData — из моста
    window.WebApp, а если он не загрузился — из #WebAppData; сервер проверяет подпись токеном бота MAX. */
 const MAXAPP = (() => {
-  if (tg && tg.initData) return null;
-  const w = window.WebApp;
-  let data = w && typeof w.initData === 'string' ? w.initData : '';
-  if (!data) { try { data = new URLSearchParams(location.hash.slice(1)).get('WebAppData') || ''; } catch (_) { data = ''; } }
-  return data ? { initData: data, back: (w && w.BackButton) || null } : null;
+  if ((tg && tg.initData) || DEV) return null;          // Telegram или ?dev=1 — не MAX, даже если в хранилище остались данные
+  let w = null;
+  try { w = window.WebApp || null; } catch (_) { w = null; }
+  let data = '';
+  try { data = w && typeof w.initData === 'string' ? w.initData : ''; } catch (_) { data = ''; }
+  const fromHash = h => { try { return new URLSearchParams(String(h || '').replace(/^#/, '')).get('WebAppData') || ''; } catch (_) { return ''; } };
+  if (!data) data = fromHash(location.hash);
+  if (!data) { try { const n = performance.getEntriesByType('navigation')[0]; data = n ? fromHash(new URL(n.name).hash) : ''; } catch (_) { data = ''; } }
+  if (!data) { try { data = sessionStorage.getItem('WebAppData') || ''; } catch (_) { data = ''; } }
+  if (!data && window.__isMax && window.__clientLog) window.__clientLog('max-no-data', 'MAX без данных запуска');
+  let back = null;
+  try { back = (w && w.BackButton) || null; } catch (_) { back = null; }
+  return data ? { initData: data, back } : null;
 })();
 const DEV_MAX = new URLSearchParams(location.search).get('dev') === 'max';   // локально: заголовок devmax
 /* Внешняя ссылка (оплата ЮКассы): в MAX — через его мост, в Telegram — tg.openLink, иначе новая вкладка. */
