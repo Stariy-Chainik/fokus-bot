@@ -1,9 +1,11 @@
 """Общие помощники хендлеров MAX: родитель по max_uid, меню."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from bot.screens.parent_menu import menu_rows, welcome_text
+from bot.services.parent_views import menu_summary
 from bot.services.kindergarten import kindergarten_group_names
 from ..render import send_screen, edit_screen, alert
 
@@ -37,9 +39,23 @@ async def max_menu_rows(students: list) -> list:
                      max_app=settings.max_miniapp_enabled, max_cabinet_only=settings.max_cabinet_only)
 
 
+async def menu_text(students: list) -> str:
+    """Приветствие со сводкой: к оплате / долг, заявки на проверке, занятия месяца (решение владельца 15.10.2026).
+    Сводка необязательна: ошибка или долгое чтение таблицы — меню без неё."""
+    payment_service = DEPS.get("payment_service")
+    summary = None
+    if payment_service is not None:
+        try:
+            summary = await asyncio.wait_for(
+                menu_summary(students, payment_service, DEPS.get("pending_repo")), timeout=6)
+        except Exception as exc:
+            logger.warning("MAX: сводка меню не построена: %r", exc)
+    return welcome_text(students, summary)
+
+
 async def show_menu(event, students: list, max_uid: int, *, new_message: bool = False) -> None:
     """Меню родителя: правка сообщения callback или новое сообщение пользователю max_uid."""
-    text, rows = welcome_text(students), await max_menu_rows(students)
+    text, rows = await menu_text(students), await max_menu_rows(students)
     if new_message or not hasattr(event, "callback"):
         await send_screen(event.bot, max_uid, text, rows)
     else:

@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 
 from bot.utils.bill_format import payment_purpose
-from bot.utils.dates import last_periods, period_label
+from bot.utils.dates import current_period, last_periods, period_label
 from bot.services.parent_notifier import fmt_addr
 from bot.screens.parent_bills import BillDetail, render_bill_detail  # noqa: F401 — BillDetail реэкспорт
 from bot.services.payment_ledger import ledger_totals
@@ -254,3 +254,47 @@ def cash_notice(student_name: str, period_month: str, total: int, breakdown: str
         f"Сумма: {total} руб."
         + (f"\n\n{breakdown}" if breakdown else "")
     )
+
+
+# ─── Сводка под приветствием меню (бот MAX) ──────────────────────────────────
+
+@dataclass
+class ChildSummary:
+    """Что показать родителю над кнопками меню — то же, что сводка кабинета `p.home`, без кнопок."""
+    name: str
+    due: list = field(default_factory=list)       # [(YYYY-MM, остаток)] — месяцы с остатком, ранние первыми
+    pending: list = field(default_factory=list)   # [(kind, сумма, YYYY-MM)] — наличные/чеки ждут решения школы
+    accrued: int = 0                              # начислено за видимые месяцы (0 — счетов ещё не было)
+    lessons: int = 0                              # отмеченных занятий в текущем месяце
+    minutes: int = 0
+    last: str = ""                                # дата последнего занятия месяца, YYYY-MM-DD
+
+
+async def menu_summary(students: list, payment_service, pending_repo=None) -> list[ChildSummary]:
+    """Сводка меню по детям: остатки за последние 3 видимых месяца, открытые заявки об оплате,
+    занятия текущего месяца. Только чтение (`ledger_for(sync=False)`) — строки-остатки не пишутся."""
+    from bot.services.pending_queue import KIND_CASH, KIND_RECEIPT
+    period = current_period()
+    open_actions: list = []
+    if pending_repo is not None:
+        try:
+            open_actions = [a for a in await pending_repo.get_open() if a.kind in (KIND_CASH, KIND_RECEIPT)]
+        except Exception as exc:                       # сводка важнее очереди
+            logger.warning("Сводка меню: очередь решений недоступна: %s", exc)
+    out = []
+    for s in students:
+        c = ChildSummary(name=s.name)
+        for ym in sorted(visible_periods(3)):
+            accrued, _paid, rest = ledger_totals(await payment_service.ledger_for(s, ym, sync=False))
+            c.accrued += accrued
+            if rest > 0:
+                c.due.append((ym, rest))
+        c.pending = [(a.kind, a.amount, a.period_month) for a in open_actions
+                     if a.student_id == s.student_id and not history_hidden(a.period_month)]
+        if not history_hidden(period):
+            month = (await payment_service.student_lesson_marks(s.student_id, period)).lessons
+            c.lessons = len(month)
+            c.minutes = sum(ls.duration_min for ls in month)
+            c.last = max((ls.date for ls in month), default="")
+        out.append(c)
+    return out

@@ -87,9 +87,8 @@ async def _entry(bot, uid: int, payload: str, context, student_repo, student_gro
         return
     students = await parent_students(student_repo, uid)
     if students:
-        from bot.screens.parent_menu import welcome_text
-        from ._common import max_menu_rows
-        await send_screen(bot, uid, welcome_text(students), await max_menu_rows(students))
+        from ._common import max_menu_rows, menu_text
+        await send_screen(bot, uid, await menu_text(students), await max_menu_rows(students))
         return
     if settings.max_miniapp_enabled and await student_repo.get_by_athlete_max_id(uid) is not None:
         return                                      # спортсмену экран уже показан — регистрация родителя не нужна
