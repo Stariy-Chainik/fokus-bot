@@ -190,6 +190,10 @@ class StudentRepoFake(ByIdRepo):
     async def get_by_parent_max_id(self, max_id):
         return [replace(s) for s in self.items if max_id in s.parent_max_ids]
 
+    async def get_by_parent(self, addr):
+        platform, ident = addr
+        return await (self.get_by_parent_max_id(ident) if platform == "max" else self.get_by_parent_tg_id(ident))
+
     async def get_by_athlete_tg_id(self, tg_id):
         return next((replace(s) for s in self.items if s.athlete_tg_id == tg_id), None)
 

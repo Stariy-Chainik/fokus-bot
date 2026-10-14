@@ -144,7 +144,8 @@ SCREENS['s.join'] = async () => {
     <div class="card pad"><div style="font-weight:700">Найдите себя</div>
       <div class="hint" style="margin-top:4px">Кабинет — для учеников спортивной группы. ${d.search || q ? 'Введите фамилию и выберите себя.' : 'Выберите себя в списке.'}</div></div>
     ${d.search || q ? `<input class="search" id="q6" placeholder="Фамилия" value="${esc(q)}" autocomplete="off" style="margin-top:10px">` : ''}
-    ${found}` };
+    ${found}
+    <p class="hint" style="margin-top:12px">Вы родитель? Подключитесь по ссылке группы от педагога — откройте её в MAX, и здесь появится кабинет родителя.</p>` };
 };
 ACT.sJoinAsk = ({ id, name }) => sheet(`<h3>Это вы?</h3><div class="hint">${esc(name)} — дневник тренировок привяжется к вашему аккаунту MAX.</div><div style="margin-top:12px">${btn(`✅ Да, это я`, 'sJoinDo', { id })}${btn('Нет', 'closeSheet', {}, 'ghost')}</div>`);
 ACT.sJoinDo = async ({ id }) => {

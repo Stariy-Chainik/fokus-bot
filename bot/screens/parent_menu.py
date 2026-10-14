@@ -1,7 +1,7 @@
 """Главное меню родителя — общие ряды кнопок для Telegram и MAX."""
 from __future__ import annotations
 
-from .types import cb, webapp
+from .types import cb, maxapp, webapp
 
 
 def welcome_text(students: list) -> str:
@@ -12,10 +12,13 @@ def welcome_text(students: list) -> str:
 
 
 def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
-              receipt_email: bool = True, cabinet_url: str = "", kindergarten: bool = False) -> list:
+              receipt_email: bool = True, cabinet_url: str = "", kindergarten: bool = False,
+              max_app: bool = False) -> list:
     if platform == "max":
-        # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже
+        # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже.
+        # max_app — кабинет родителя мини-приложением MAX (MAX_MINIAPP_ENABLED, решение владельца 14.10.2026)
         return [
+            *([[maxapp("📱 Открыть кабинет", "parent")]] if max_app else []),
             [cb("📅 Занятия", "client:lessons")],
             [cb("💳 Оплата занятий", "client:my_bills")],
             *([[cb("🏫 Группа в саду", "client:kgroup")]] if kindergarten else []),   # дети садовых групп

@@ -341,7 +341,7 @@ ACT.pPayDo = async ({ ym, method, sel, periods }) => {
   try {
     const r = await api('/pay', { method: 'POST', body });
     closeSheet();
-    if (r.url) { try { tg ? tg.openLink(r.url) : window.open(r.url, '_blank'); } catch (_) { window.open(r.url, '_blank'); } toast('Открываю оплату…'); return; }
+    if (r.url) { openExternal(r.url); toast('Открываю оплату…'); return; }
     if (r.details) { sheet(`<h3>Реквизиты · ${fmt(r.amount)}</h3>
     ${r.qr ? `<img src="${r.qr}" alt="QR для оплаты" style="display:block;width:180px;max-width:60%;margin:12px auto;border-radius:10px;background:#fff;padding:8px">` : ''}
     <pre class="hint" style="white-space:pre-wrap;margin:10px 0">${esc(r.details)}</pre><div class="hint">${esc(r.hint || '')}</div>

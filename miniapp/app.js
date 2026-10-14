@@ -5,7 +5,7 @@
 /* ── Telegram ────────────────────────────────────────────────────────── */
 const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null;
 const DEV = new URLSearchParams(location.search).get('dev') === '1';
-/* MAX: мини-приложение MAX открывает только кабинет спортсмена (решение владельца 13.10.2026). initData — из моста
+/* MAX: мини-приложение MAX — кабинеты родителя (14.10.2026) и спортсмена (13.10.2026). initData — из моста
    window.WebApp, а если он не загрузился — из #WebAppData; сервер проверяет подпись токеном бота MAX. */
 const MAXAPP = (() => {
   if (tg && tg.initData) return null;
@@ -15,6 +15,14 @@ const MAXAPP = (() => {
   return data ? { initData: data, back: (w && w.BackButton) || null } : null;
 })();
 const DEV_MAX = new URLSearchParams(location.search).get('dev') === 'max';   // локально: заголовок devmax
+/* Внешняя ссылка (оплата ЮКассы): в MAX — через его мост, в Telegram — tg.openLink, иначе новая вкладка. */
+function openExternal(url) {
+  try {
+    if (MAXAPP && window.WebApp && window.WebApp.openLink) { window.WebApp.openLink(url); return; }
+    if (tg && tg.initData) { tg.openLink(url); return; }
+  } catch (_) { /* старый клиент */ }
+  window.open(url, '_blank');
+}
 const authHeader = () => tg && tg.initData ? `tma ${tg.initData}` : MAXAPP ? `max ${MAXAPP.initData}` : DEV_MAX ? 'devmax' : DEV ? 'dev' : '';
 if (tg) { try { tg.ready(); tg.expand(); } catch (_) { /* старый клиент */ } }
 function applyTheme() { document.documentElement.dataset.theme = tg && tg.colorScheme === 'dark' ? 'dark' : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
@@ -1341,9 +1349,9 @@ ACT.switchRole = async ({ to }) => {
 };
 
 (async () => {
-  // роль подбираем по доступу: администратор → педагог → родитель → спортсмен; в MAX — только спортсмен
+  // роль подбираем по доступу: администратор → педагог → родитель → спортсмен; в MAX — родитель → спортсмен
   let last = null;
-  for (const role of MAXAPP || DEV_MAX ? ['athlete'] : ['admin', 'teacher', 'parent', 'athlete']) {
+  for (const role of MAXAPP || DEV_MAX ? ['parent', 'athlete'] : ['admin', 'teacher', 'parent', 'athlete']) {
     ROLE = role;
     try { state.me = await api('/me'); last = null; break; }
     catch (e) { last = e; if (!(e instanceof ApiError) || e.status !== 403) break; }
