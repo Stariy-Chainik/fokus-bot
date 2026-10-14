@@ -264,7 +264,8 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                     f"❌ Оплата за {period_label(action.period_month)} ({student.name}) не подтверждена. "
                     f"Проверьте сумму или свяжитесь со школой.")
         try:
-            await notifier.send(addr, text)
+            from bot.services.parent_notifier import bills_rows
+            await notifier.send(addr, text, bills_rows())      # в режиме кабинета — «📱 Открыть кабинет»
         except Exception as exc:
             logger.warning("Очередь решений: родителю %s не ушло: %s", action.parent_addr, exc)
 

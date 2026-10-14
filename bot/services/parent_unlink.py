@@ -190,11 +190,12 @@ async def request_unlink(
     )
     if action is None:
         return None, False
+    from html import escape                   # имена из Telegram/MAX и причина — текст пользователя: «<» ломал HTML
     text = (f"👥 <b>Родитель просит отвязать другого родителя</b>\n\n"
-            f"Ученик: <b>{student.name}</b>\n"
-            f"Отвязать: {whom}, <code>{target[1]}</code>{f', привязан {since}' if since else ''}\n"
-            f"Просит: {who}, <code>{requester[1]}</code>\n"
-            + (f"Причина: {reason}\n" if reason else "")
+            f"Ученик: <b>{escape(student.name)}</b>\n"
+            f"Отвязать: {escape(whom)}, <code>{target[1]}</code>{f', привязан {since}' if since else ''}\n"
+            f"Просит: {escape(who)}, <code>{requester[1]}</code>\n"
+            + (f"Причина: {escape(reason)}\n" if reason else "")
             + "\nОтвязать — этот человек перестанет видеть счета и занятия ребёнка и получать уведомления.")
     admins = [u.tg_id for u in await user_repo.get_admins()]
     await notify(tg_bot, admins, text, reply_markup=kb_unlink_decide(action.action_id))
@@ -223,6 +224,9 @@ async def _drop_client_addr(student_repo, client_repo, student, target) -> None:
     else:
         await client_repo.clear_tg_id(client.client_id)
     logger.info("Отвязка родителя: адрес %s снят и с карточки клиента %s", fmt_addr(target), client.client_id)
+
+
+drop_client_addr = _drop_client_addr      # и при самостоятельной отвязке («это не мой ребёнок»)
 
 
 async def approve_unlink(pending_repo, student_repo, client_repo, notifier, action, decided_by: int):

@@ -14,6 +14,8 @@ MAX, решение владельца 13.10.2026), видит только св
 """
 from __future__ import annotations
 
+import asyncio
+import html
 import logging
 
 from aiohttp import web
@@ -41,7 +43,8 @@ def _dp_get(dp, key: str):
     return data.get(key) if hasattr(data, "get") else None
 
 
-JOIN_LIST_LIMIT = 40          # больше — только поиск по фамилии (как в боте)
+JOIN_MIN_QUERY = 3            # список учеников — только по фамилии от 3 букв: целиком постороннему не отдаём
+_join_lock = asyncio.Lock()   # проверка «ученик свободен» и запись — без гонки двух аккаунтов
 
 
 def register_athlete_api(app: web.Application, dp, bot=None) -> None:
@@ -203,16 +206,20 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
         return await diary_service.registration_candidates(query, settings.athlete_group_id_set)
 
     async def join_list(request: web.Request, max_id: int) -> web.Response:
-        """Ученики спортивных групп: весь список, если он короткий, иначе — поиск по фамилии (от 2 букв)."""
+        """Поиск себя среди учеников спортивных групп — только по фамилии от 3 букв (весь список постороннему
+        пользователю MAX не показываем); уже привязанные к другому аккаунту MAX не предлагаются."""
         q = (request.query.get("q") or "").strip()
-        if len(q) < 2:
-            everyone = await _candidates("")
-            if len(everyone) > JOIN_LIST_LIMIT:
-                return _json({"students": [], "search": True})
-            return _json({"students": [{"id": s.student_id, "name": s.name} for s in everyone], "search": False})
-        return _json({"students": [{"id": s.student_id, "name": s.name} for s in await _candidates(q)], "search": True})
+        if len(q) < JOIN_MIN_QUERY:
+            return _json({"students": [], "search": True, "minQuery": JOIN_MIN_QUERY})
+        found = [s for s in await _candidates(q) if not s.athlete_max_id or s.athlete_max_id == max_id]
+        return _json({"students": [{"id": s.student_id, "name": s.name} for s in found[:10]], "search": True,
+                      "minQuery": JOIN_MIN_QUERY})
 
     async def join(request: web.Request, max_id: int) -> web.Response:
+        async with _join_lock:             # два аккаунта на одного ученика / один аккаунт на двух — по очереди
+            return await _join(request, max_id)
+
+    async def _join(request: web.Request, max_id: int) -> web.Response:
         body = await _body(request)
         sid = str(body.get("studentId") or "")
         if await diary_service.athlete_by_max(max_id) is not None:
@@ -222,7 +229,7 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
         student = await student_repo.get_by_id(sid)
         if student is None:
             return _json({"error": "not_found"}, status=404)
-        who = max_user_name(request) or "Пользователь MAX"
+        who = html.escape(max_user_name(request) or "Пользователь MAX")
         admins = [u.tg_id for u in await user_repo.get_admins()] if user_repo is not None else []
         if student.athlete_max_id and student.athlete_max_id != max_id:
             if bot is not None:
@@ -240,7 +247,7 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
                                       f"Ученик: <b>{student.name}</b>", reply_markup=kb)
         await resolve_notifier(bot).send_many(
             student.parent_addrs,
-            f"ℹ️ <b>{student.name}</b> завёл кабинет спортсмена в MAX: теперь он(а) может вести дневник "
+            f"ℹ️ <b>{html.escape(student.name)}</b> завёл кабинет спортсмена в MAX: теперь он(а) может вести дневник "
             f"тренировок, а вы — видеть записи и оценки педагога в разделе «📓 Дневник тренировок».")
         return _json({"ok": True, "name": student.name})
 

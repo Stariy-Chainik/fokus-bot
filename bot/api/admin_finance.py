@@ -112,9 +112,10 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
                     f"Ученик: <b>{d.student.name}</b>\n"
                     f"Задолженность: <b>{d.closed_total} ₽</b>\n"
                     + "\n".join(period_lines)
-                    + "\n\nДетали и оплата — в разделе «💳 Мои счета»."
+                    + "\n\nДетали и оплата — по кнопке ниже."
                 )
-                if await notifier.send_many(d.student.parent_addrs, text) > 0:
+                from bot.services.parent_notifier import bills_rows
+                if await notifier.send_many(d.student.parent_addrs, text, bills_rows()) > 0:
                     sent += 1
                 else:
                     failed += 1

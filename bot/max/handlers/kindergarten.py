@@ -63,7 +63,8 @@ async def on_kgroup_clear(event: MessageCallback, context, max_uid, student_repo
     kid = await _kid(event, max_uid, student_repo, event.callback.payload.split(":", 1)[1])
     if kid is None:
         return
-    await student_repo.update_kindergarten_group(kid.student_id, "", actor=max_uid, who="родитель (MAX)")
+    # actor в ленте — Telegram-id сотрудника; MAX-id туда не пишем
+    await student_repo.update_kindergarten_group(kid.student_id, "", actor=0, who="родитель (MAX)")
     await edit_screen(event, *kgroup_saved_screen(kid, ""))
 
 
@@ -85,6 +86,6 @@ async def on_kgroup_value(event: MessageCreated, context, max_uid, student_repo)
         await send_screen(event.bot, max_uid, "Напишите номер или название группы — не длиннее 40 символов.", [])
         return
     await context.clear()
-    await student_repo.update_kindergarten_group(kid.student_id, value, actor=max_uid, who="родитель (MAX)")
+    await student_repo.update_kindergarten_group(kid.student_id, value, actor=0, who="родитель (MAX)")
     logger.info("MAX: %s указал группу в саду %s для %s", max_uid, value, kid.student_id)
     await send_screen(event.bot, max_uid, *kgroup_saved_screen(kid, value))

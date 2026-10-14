@@ -307,7 +307,15 @@ ACT.pReceipt = async ({ ym, method, amount, periods, force }) => {
   catch (e) {
     if (b) { b.disabled = false; b.textContent = '📎 Прикрепить чек'; }
     // чек сразу после СБП онлайн — скорее всего чек ЮКассы, платёж уже зачтён; настоящий перевод — повтор с force
-    if (e.code === 'online_recent') { state.ui.paying = false; if (confirm(`Ваш платёж ${fmt(e.data.amount)} за ${e.data.periodLabel.toLowerCase()} через СБП онлайн уже зачтён автоматически — чек на него не нужен.\n\nЭто другой перевод по реквизитам?`)) { ACT.pReceipt({ ym, method, amount, periods, force: true }); } return; }
+    // вопрос — прямо в листе (там же выбранный файл): системный confirm() в MAX на Android может не показаться
+    if (e.code === 'online_recent') {
+      state.ui.paying = false;
+      const sh = document.querySelector('.sheet');
+      const q = `<div class="card pad" id="rc-online" style="margin-top:10px;border-color:var(--warn)"><div style="font-weight:700">Платёж ${fmt(e.data.amount)} за ${esc(e.data.periodLabel.toLowerCase())} через СБП онлайн уже зачтён автоматически — чек на него не нужен.</div><div class="hint" style="margin:4px 0 8px">Это другой перевод по реквизитам?</div>${btn('📎 Да, другой перевод — отправить чек', 'pReceipt', { ym, method, amount, periods, force: true }, 'sec')}</div>`;
+      if (sh && !sh.querySelector('#rc-online')) sh.insertAdjacentHTML('beforeend', q);
+      else toast('Этот платёж уже зачтён автоматически');
+      return;
+    }
     toast(errText(e));
   }
   finally { state.ui.paying = false; }

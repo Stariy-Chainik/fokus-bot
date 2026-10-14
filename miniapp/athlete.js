@@ -136,14 +136,15 @@ SCREENS['s.rating'] = async ({ ym, topic }) => {
 SCREENS['s.join'] = async () => {
   const q = state.ui.q6 || '';
   const d = await api(`/join?q=${encodeURIComponent(q)}`);
+  const min = d.minQuery || 3;
   const found = d.students.length
     ? list(d.students.map(s => cell({ lead: '🏃', plain: true, t: esc(s.name), act: 'sJoinAsk', p: { id: s.id, name: s.name } })))
-    : q.trim().length >= 2 ? empty('Не нашли — проверьте написание или спросите педагога') : '';
+    : q.trim().length >= min ? empty('Не нашли — проверьте написание или спросите педагога') : '';
   return { title: 'Кабинет спортсмена', html: `
     ${hero('Дневник тренировок, задания педагога и рейтинг')}
     <div class="card pad"><div style="font-weight:700">Найдите себя</div>
-      <div class="hint" style="margin-top:4px">Кабинет — для учеников спортивной группы. ${d.search || q ? 'Введите фамилию и выберите себя.' : 'Выберите себя в списке.'}</div></div>
-    ${d.search || q ? `<input class="search" id="q6" placeholder="Фамилия" value="${esc(q)}" autocomplete="off" style="margin-top:10px">` : ''}
+      <div class="hint" style="margin-top:4px">Кабинет — для учеников спортивной группы. Введите фамилию (от ${min} букв) и выберите себя.</div></div>
+    <input class="search" id="q6" placeholder="Фамилия" value="${esc(q)}" autocomplete="off" style="margin-top:10px">
     ${found}
     <p class="hint" style="margin-top:12px">Вы родитель? Подключитесь по ссылке группы от педагога — откройте её в MAX, и здесь появится кабинет родителя.</p>` };
 };

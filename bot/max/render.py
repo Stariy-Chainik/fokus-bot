@@ -55,34 +55,50 @@ def _without_app(rows):
     return [r for r in ([b for b in row if b.kind != "maxapp"] for row in rows) if r]
 
 
+def _app_rejected(exc) -> bool:
+    """MAX отклонил кнопку мини-приложения — ответ 400. Сеть/таймаут сюда не относятся: сообщение могло
+    дойти, повтор дал бы родителю дубль."""
+    return getattr(exc, "code", None) == 400
+
+
+async def _ensure_me(bot, rows) -> None:
+    """Кнопке мини-приложения нужно имя бота: если get_me в run_max ещё не прошёл (уведомление с Telegram-стороны
+    в первые секунды после старта), узнаём его здесь."""
+    if ME.get("username") or not rows or not any(b.kind == "maxapp" for row in rows for b in row):
+        return
+    try:
+        me = await bot.get_me()
+        ME.update(id=getattr(me, "user_id", None), username=getattr(me, "username", None))
+    except Exception as exc:
+        logger.warning("MAX: get_me для кнопки мини-приложения не удался: %s", exc)
+
+
 async def send_screen(bot, user_id: int, text: str, rows=None, media=None) -> None:
     """Новое сообщение пользователю: текст (HTML), кнопки, при необходимости вложение.
-    Кнопку мини-приложения MAX может отклонить — тогда сообщение уходит без неё, меню не пропадает."""
+    Кнопку мини-приложения MAX может отклонить (400) — тогда последняя часть уходит без неё, меню не пропадает."""
+    await _ensure_me(bot, rows)
+    chunks = split_text(text)
+    for chunk in chunks[:-1]:
+        await bot.send_message(user_id=user_id, text=chunk, attachments=None)
     try:
-        await _send(bot, user_id, text, rows, media)
+        await _send_last(bot, user_id, chunks[-1], rows, media)
     except Exception as exc:
         fallback = _without_app(rows)
-        if fallback is None:
+        if fallback is None or not _app_rejected(exc):
             raise
         logger.warning("MAX: сообщение с кнопкой мини-приложения не принято (%s) — отправляю без неё", exc)
-        await _send(bot, user_id, text, fallback, media)
+        await _send_last(bot, user_id, chunks[-1], fallback, media)
 
 
-async def _send(bot, user_id: int, text: str, rows=None, media=None) -> None:
-    chunks = split_text(text)
+async def _send_last(bot, user_id: int, chunk: str, rows=None, media=None) -> None:
     kb = to_max_markup(rows)
-    for i, chunk in enumerate(chunks):
-        atts = []
-        if i == len(chunks) - 1:
-            if media is not None:
-                atts.append(media)
-            if kb is not None:
-                atts.append(kb)
-        await bot.send_message(user_id=user_id, text=chunk, attachments=atts or None)
+    atts = [a for a in (media, kb) if a is not None]
+    await bot.send_message(user_id=user_id, text=chunk, attachments=atts or None)
 
 
 async def edit_screen(event, text: str, rows=None) -> None:
     """Правка сообщения с кнопкой (и ответ на callback). Если не вышло — новое сообщение."""
+    await _ensure_me(event.bot, rows)
     kb = to_max_markup(rows)
     if len(text) <= MAX_TEXT and event.message is not None:
         try:
@@ -90,9 +106,10 @@ async def edit_screen(event, text: str, rows=None) -> None:
             return
         except Exception as exc:  # сообщение удалено / устарело / не принята кнопка мини-приложения
             fallback = _without_app(rows)
-            if fallback is not None:
+            if fallback is not None and _app_rejected(exc):
                 try:
-                    await event.edit(text=text, attachments=[to_max_markup(fallback)])
+                    markup = to_max_markup(fallback)
+                    await event.edit(text=text, attachments=[markup] if markup else [])
                     logger.warning("MAX: правка с кнопкой мини-приложения не принята (%s) — без неё", exc)
                     return
                 except Exception:

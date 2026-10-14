@@ -406,6 +406,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "client": {"id": card.client.client_id, "name": card.client.name, "phone": card.client.phone} if card.client else None,
             "parents": [{"platform": a[0], "id": a[1]} for a in s.parent_addrs],
             "isAthlete": s.is_athlete,
+            "athlete": {"tg": bool(s.athlete_tg_id), "max": bool(s.athlete_max_id)},   # кабинет спортсмена по мессенджерам
             # группа в детском саду — у детей садовых групп школы (решение владельца 10.10.2026)
             "kindergarten": any(g.group is not None and is_kindergarten_group(g.group) for g in card.groups),
             "kgroup": s.kindergarten_group,
@@ -692,7 +693,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     from bot.api.admin_manage import register_manage_routes
     register_finance_routes(app, dp, admin_only, PREFIX)
     register_lesson_routes(app, dp, admin_only, PREFIX)
-    register_manage_routes(app, dp, admin_only, PREFIX)
+    register_manage_routes(app, dp, admin_only, PREFIX, bot)
     from bot.api.admin_inbox import register_inbox_routes
     register_inbox_routes(app, dp, admin_only, PREFIX, bot)
     logger.info("Admin API зарегистрирован: %d маршрутов под %s", len(routes), PREFIX)

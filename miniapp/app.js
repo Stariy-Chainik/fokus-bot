@@ -23,6 +23,13 @@ const MAXAPP = (() => {
   return data ? { initData: data, back } : null;
 })();
 const DEV_MAX = new URLSearchParams(location.search).get('dev') === 'max';   // локально: заголовок devmax
+/* С какой кнопки бота MAX открыли приложение: «🏃 Открыть дневник» — athlete, «📱 Открыть кабинет» — parent.
+   Аккаунт может быть и родителем, и спортсменом — тогда роль выбирает кнопка. */
+const MAX_START = (() => {
+  if (!MAXAPP) return new URLSearchParams(location.search).get('start') || '';
+  try { const u = window.WebApp && window.WebApp.initDataUnsafe; if (u && u.start_param) return String(u.start_param); } catch (_) { /* нет моста */ }
+  try { return new URLSearchParams(MAXAPP.initData).get('start_param') || ''; } catch (_) { return ''; }
+})();
 /* Внешняя ссылка (оплата ЮКассы): в MAX — через его мост, в Telegram — tg.openLink, иначе новая вкладка. */
 function openExternal(url) {
   try {
@@ -493,7 +500,7 @@ SCREENS['a.student'] = async ({ id }) => {
     <div class="eyebrow">Занятия</div>${list([cell({ lead: '📅', plain: true, t: 'Занятия ученика', s: 'по месяцам: педагог, группа, сумма, оплата', go: 'a.student.lessons', p: { id, name: s.name } })])}
     <div class="eyebrow">Счета</div>${list(s.months.map(m => cell({ lead: m.total ? (m.rest ? '⏳' : '✅') : '—', plain: true, t: fmon(m.period), s: m.total ? `начислено ${fmt(m.total)} · оплачено ${fmt(m.paid)}` : 'начислений нет', r: m.rest ? pill(fmt(m.rest), m.period < lastPeriods(1)[0] ? 'bad' : 'warn') : '', go: 'a.bill', p: { ym: m.period, sid: id } })))}
     <div style="margin-top:12px">${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym: lastPeriods(1)[0], sid: id }, 'sec')}</div>
-    <div class="eyebrow">Карточка</div>${list([cell({ lead: '💃', plain: true, t: 'Группы ученика', s: 'добавить / убрать', go: 'a.student.groups', p: { id, name: s.name } }), cell({ lead: '👫', plain: true, t: s.partner ? `Партнёр: ${esc(s.partner.name)}` : 'Партнёр не назначен', s: 'сменить / убрать', go: 'a.partner', p: { id, name: s.name } }), cell({ lead: '👨‍👩‍👧', plain: true, t: s.client ? 'Сменить родителя' : 'Привязать родителя', s: s.client ? esc(s.client.name) + (s.client.phone ? ' · ' + esc(s.client.phone) : '') : 'карточка клиента: имя и телефон', go: 'a.parent.link', p: { id, name: s.name } })].concat(s.groups.some(g => g.hasShort) ? [`<button class="cell" data-act="tierToggle" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">⏱</span><span><div class="t">Тариф: ${s.tier === 'short' ? 'короткое занятие' : 'полное занятие'}</div><div class="s">переключить · действует в: ${esc(s.groups.filter(g => g.hasShort).map(g => plainName(g.name)).join(', '))}</div></span><span class="r"><span class="chev">›</span></span></button>`] : []).concat(s.isAthlete ? [`<button class="cell" data-act="athleteUnlink" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">🏃</span><span><div class="t">Кабинет спортсмена привязан</div><div class="s">отвязать Telegram ученика</div></span><span class="r"><span class="chev">›</span></span></button>`] : []))}
+    <div class="eyebrow">Карточка</div>${list([cell({ lead: '💃', plain: true, t: 'Группы ученика', s: 'добавить / убрать', go: 'a.student.groups', p: { id, name: s.name } }), cell({ lead: '👫', plain: true, t: s.partner ? `Партнёр: ${esc(s.partner.name)}` : 'Партнёр не назначен', s: 'сменить / убрать', go: 'a.partner', p: { id, name: s.name } }), cell({ lead: '👨‍👩‍👧', plain: true, t: s.client ? 'Сменить родителя' : 'Привязать родителя', s: s.client ? esc(s.client.name) + (s.client.phone ? ' · ' + esc(s.client.phone) : '') : 'карточка клиента: имя и телефон', go: 'a.parent.link', p: { id, name: s.name } })].concat(s.groups.some(g => g.hasShort) ? [`<button class="cell" data-act="tierToggle" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">⏱</span><span><div class="t">Тариф: ${s.tier === 'short' ? 'короткое занятие' : 'полное занятие'}</div><div class="s">переключить · действует в: ${esc(s.groups.filter(g => g.hasShort).map(g => plainName(g.name)).join(', '))}</div></span><span class="r"><span class="chev">›</span></span></button>`] : []).concat((s.athlete ? [['tg', 'Telegram'], ['max', 'MAX']].filter(([k]) => s.athlete[k]) : s.isAthlete ? [['', 'Telegram']] : []).map(([platform, label]) => `<button class="cell" data-act="athleteUnlink" data-p='${esc(JSON.stringify({ id, platform, label }))}'><span class="lead plain">🏃</span><span><div class="t">Кабинет спортсмена привязан · ${label}</div><div class="s">отвязать ${label} ученика</div></span><span class="r"><span class="chev">›</span></span></button>`)))}
     <div style="margin-top:12px">${btn('✏️ Переименовать', 'studentRename', { id, name: s.name }, 'ghost')}${btn('🗑 Удалить ученика', 'studentDelete', { id, name: s.name }, 'danger')}</div>` };
 };
 
@@ -1012,8 +1019,8 @@ Object.assign(ACT, {
   tierToggle: async ({ id }) => { try { const r = await api(`/students/${id}/tier`, { method: 'POST' }); render(); toast(r.tier === 'short' ? 'Тариф: короткое занятие' : 'Тариф: полное занятие'); } catch (e) { toast(e.code === 'no_per_visit_group' ? 'Тариф есть только в группах «по посещению»' : e.code === 'no_short_tariff' ? 'В группах ученика нет короткого тарифа' : errText(e)); } },
   clientLink: async ({ sid, cid, name }) => { try { await api(`/students/${sid}/client`, { method: 'PUT', body: { clientId: cid } }); state.ui.q4 = ''; back(); toast(`Родитель: ${name}`); } catch (e) { toast(errText(e)); } },
   clientCreate: async ({ sid }) => { const name = val('np-name').trim(), phone = val('np-phone').trim(); if (!phone) { toast('Нужен телефон'); return; } try { await api(`/students/${sid}/client`, { method: 'PUT', body: { name, phone } }); state.ui.q4 = ''; back(); toast('Родитель создан и привязан'); } catch (e) { toast(errText(e)); } },
-  athleteUnlink: ({ id }) => sheet(`<h3>Отвязать Telegram спортсмена?</h3><div class="hint">Записи дневника останутся; ученик сможет привязаться заново через «Я спортсмен».</div><div style="margin-top:12px">${btn('🚫 Отвязать', 'doAthleteUnlink', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
-  doAthleteUnlink: async ({ id }) => { try { await api(`/students/${id}/athlete`, { method: 'DELETE' }); closeSheet(); render(); toast('Telegram отвязан'); } catch (e) { toast(errText(e)); } },
+  athleteUnlink: ({ id, platform, label }) => sheet(`<h3>Отвязать ${esc(label || 'Telegram')} спортсмена?</h3><div class="hint">Записи дневника останутся; ученик сможет привязаться заново${platform === 'max' ? ' в приложении MAX' : ' через «Я спортсмен»'}. Ему придёт сообщение.</div><div style="margin-top:12px">${btn('🚫 Отвязать', 'doAthleteUnlink', { id, platform, label }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
+  doAthleteUnlink: async ({ id, platform, label }) => { try { await api(`/students/${id}/athlete${platform ? `?platform=${platform}` : ''}`, { method: 'DELETE' }); closeSheet(); render(); toast(`${label || 'Telegram'} отвязан`); } catch (e) { toast(errText(e)); } },
   teacherAdd: async () => { const name = val('nt-name').trim(); const rates = { group: +val('nt-g') || 0, teacher: +val('nt-t') || 0, student: +val('nt-s') || 0 }; const tg = val('nt-tg').trim(); if (!name) { toast('Введите имя'); return; } try { const r = await api('/teachers', { method: 'POST', body: { name, rates, tgId: tg ? +tg : null } }); state.stack.pop(); go('a.teacher', { id: r.id }); toast(r.linked ? 'Педагог создан, аккаунт привязан' : 'Педагог создан'); } catch (e) { toast(errText(e)); } },
   ratesForm: ({ id, rates }) => sheet(`<h3>Ставки за 45 минут</h3>${field('r-g', 'Группа, ₽', rates.group, 'inputmode="numeric"')}${field('r-t', 'Индивидуальное — педагогу, ₽', rates.teacher, 'inputmode="numeric"')}${field('r-s', 'Индивидуальное — цена для ученика, ₽', rates.student, 'inputmode="numeric"')}<p class="hint">Новые ставки применяются к занятиям с этого момента; чтобы прошлые месяцы считались по старым, добавьте строку в лист teacher_rate_history.</p><div style="margin-top:12px">${btn('💾 Сохранить', 'ratesSave', { id })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   ratesSave: async ({ id }) => { const rates = { group: +val('r-g') || 0, teacher: +val('r-t') || 0, student: +val('r-s') || 0 }; try { await api(`/teachers/${id}`, { method: 'PATCH', body: { rates } }); closeSheet(); render(); toast('Ставки обновлены'); } catch (e) { toast(errText(e)); } },
@@ -1359,10 +1366,16 @@ ACT.switchRole = async ({ to }) => {
 (async () => {
   // роль подбираем по доступу: администратор → педагог → родитель → спортсмен; в MAX — родитель → спортсмен
   let last = null;
-  for (const role of MAXAPP || DEV_MAX ? ['parent', 'athlete'] : ['admin', 'teacher', 'parent', 'athlete']) {
+  const maxRoles = MAX_START === 'athlete' ? ['athlete', 'parent'] : ['parent', 'athlete'];
+  for (const role of MAXAPP || DEV_MAX ? maxRoles : ['admin', 'teacher', 'parent', 'athlete']) {
     ROLE = role;
     try { state.me = await api('/me'); last = null; break; }
-    catch (e) { last = e; if (!(e instanceof ApiError) || e.status !== 403) break; }
+    catch (e) {
+      last = e;
+      // открыли «🏃 Открыть дневник», а дневник не привязан — сразу «Найдите себя», даже если это родитель
+      if (role === 'athlete' && MAX_START === 'athlete' && e.status === 403 && e.data && e.data.canJoin) break;
+      if (!(e instanceof ApiError) || e.status !== 403) break;
+    }
   }
   if (last && ROLE === 'athlete' && last.data && last.data.canJoin) {   // MAX: ещё не привязан — «Найдите себя»
     state.joining = true; state.stack = [{ n: 's.join' }]; render(); return;

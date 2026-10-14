@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from base64 import b64encode
 from datetime import date
@@ -22,7 +23,7 @@ from aiohttp import web
 from aiogram.types import BufferedInputFile
 
 from bot.utils.groups import lesson_group_title
-from bot.api.admin import auth_max_id, auth_tg_id
+from bot.api.admin import auth_max_id, auth_tg_id, max_user_name
 from bot.utils.bill_format import payment_purpose
 from bot.services import activity, payment_ledger
 from bot.services.diary_service import place_icon
@@ -65,6 +66,9 @@ def _dp_get(dp, key: str):
     return data.get(key) if hasattr(data, "get") else None
 
 
+_pay_locks: dict[str, "asyncio.Lock"] = {}       # ученик → замок оплаты (двойное нажатие)
+
+
 def register_parent_api(app: web.Application, dp, bot=None) -> None:
     student_repo = dp["student_repo"]
     payment_repo = dp["payment_repo"]
@@ -96,11 +100,20 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 return _json({"error": "internal"}, status=500)
         return wrapped
 
+    def _return_url(addr) -> str:
+        """После оплаты ЮКассы — обратно в тот мессенджер, откуда платили (MAX — в чат бота MAX)."""
+        if addr[0] != MAX:
+            return ""
+        from bot.max.render import ME
+        return f"https://max.ru/{ME['username']}" if ME.get("username") else ""
+
     def _child(children, sid: str):
         return next((s for s in children if s.student_id == sid), None)
 
     async def _totals(student, period: str) -> dict:
-        ledgers = await payment_service.ledger_for(student, period)
+        # только посчитать: строку-остаток пересчитывает сама оплата (pay), а запись на каждом открытии сводки
+        # стоила 0,3–0,5 с на начисление и лишние запросы к таблице
+        ledgers = await payment_service.ledger_for(student, period, sync=False)
         accrued, paid, rest = payment_ledger.ledger_totals(ledgers)
         return {"accrued": accrued, "paid": paid, "rest": rest}
 
@@ -214,7 +227,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         period = request.match_info["ym"]
         if _hidden(period):
             return _json({"error": "not_found"}, status=404)
-        ledgers = await payment_service.ledger_for(student, period)
+        ledgers = await payment_service.ledger_for(student, period, sync=False)    # просмотр — без записи остатка
         rows = []
         for key, ledger in sorted(ledgers.items(), key=lambda kv: kv[1].name):
             marks = payment_ledger.lesson_marks(
@@ -331,7 +344,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             try:
                 url, payment_id = await payment_service.create_yookassa_payment(
                     student.student_id, student.name, sorted(due)[0], total, sbp=(method == "ysbp"),
-                    customer_phone=phone, customer_email=email, periods=sorted(due),
+                    customer_phone=phone, customer_email=email, return_url=_return_url(addr), periods=sorted(due),
                 )
             except Exception as exc:
                 logger.error("Кабинет родителя: ошибка платежа ЮКасса за %d мес.: %s", len(due), exc)
@@ -379,11 +392,18 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         """method=yookassa|ysbp — ссылка на оплату; cash — уведомление администратору.
 
         keys/lessonIds — что именно оплачивают: начисления и выбранные занятия.
+        Один ученик — одна оплата за раз: двойное нажатие «наличными» иначе создавало две заявки.
         """
         try:
             body = await request.json()
         except Exception:
             return _json({"error": "bad_request"}, status=400)
+        sid = str((body or {}).get("studentId") or "")
+        lock = _pay_locks.setdefault(sid, asyncio.Lock())
+        async with lock:
+            return await _pay(body, addr, children)
+
+    async def _pay(body, addr, children) -> web.Response:
         student = _child(children, (body or {}).get("studentId") or "")
         period = (body or {}).get("ym") or current_period()
         method = (body or {}).get("method") or "yookassa"
@@ -458,7 +478,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             try:
                 url, payment_id = await payment_service.create_yookassa_payment(
                     student.student_id, student.name, period, amount, sbp=(method == "ysbp"),
-                    customer_phone=phone, customer_email=email,
+                    customer_phone=phone, customer_email=email, return_url=_return_url(addr),
                     teacher_ids=list(chosen) if keys else None,
                     lesson_ids=lesson_ids or None,
                 )
@@ -608,7 +628,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         status, action = await parent_unlink.submit_unlink(
             student, addr, str(body.get("key") or ""), str(body.get("reason") or ""),
             tg_bot=bot, user_repo=user_repo, client_repo=client_repo, pending_repo=_dp_get(dp, "pending_repo"),
-            activity_repo=_dp_get(dp, "activity_repo"), secret=settings.bot_token)
+            activity_repo=_dp_get(dp, "activity_repo"), secret=settings.bot_token,
+            # из MAX имени через Bot API не узнать — берём его из данных входа мини-приложения
+            requester_info={"name": max_user_name(request).split(" @")[0], "username": ""} if addr[0] == MAX else None)
         if status == "ok":
             return _json({"ok": True, "id": action.action_id})
         if status == "already":
@@ -641,6 +663,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         if not await student_repo.remove_parent(student.student_id, addr):
             return _json({"error": "not_found"}, status=404)
+        # адрес мог быть и в карточке клиента — по нему уходили бы счета чужого ребёнка
+        await parent_unlink.drop_client_addr(student_repo, client_repo, student, addr)
         where = f"{'Telegram' if addr[0] == TG else 'MAX'} {addr[1]}"
         await activity.record(activity.STUDENT, f"Родитель отвязался сам: {student.student_id} · {where}",
                               actor=addr[1] if addr[0] == TG else 0, ref=student.student_id)

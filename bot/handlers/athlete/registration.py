@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 import logging
+from html import escape
 
 from aiogram import F
 from aiogram.filters import CommandStart, CommandObject
@@ -210,7 +211,7 @@ async def cb_reg_pick(
         admins = [u.tg_id for u in await user_repo.get_admins()]
         sender = callback.from_user
         await notify(callback.bot, admins,
-                     f"⚠️ {sender.full_name} (<code>{tg_id}</code>) пытался привязаться как спортсмен "
+                     f"⚠️ {escape(sender.full_name)} (<code>{tg_id}</code>) пытался привязаться как спортсмен "
                      f"<b>{student.name}</b>, но к ученику уже привязан <code>{student.athlete_tg_id}</code>.")
         await callback.answer()
         return
@@ -231,7 +232,7 @@ async def cb_reg_pick(
         admins = [u.tg_id for u in await user_repo.get_admins()]
         await notify(callback.bot, admins,
                      f"🏃 <b>Новый спортсмен в боте</b>\n\n"
-                     f"{sender.full_name}{username} (<code>{tg_id}</code>)\n"
+                     f"{escape(sender.full_name)}{escape(username)} (<code>{tg_id}</code>)\n"
                      f"Ученик: <b>{student.name}</b>", reply_markup=kb_undo)
         await resolve_notifier(callback.bot).send_many(student.parent_addrs,
                      f"ℹ️ <b>{student.name}</b> завёл кабинет спортсмена в боте: теперь он(а) может "

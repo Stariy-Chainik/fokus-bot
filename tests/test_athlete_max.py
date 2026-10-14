@@ -52,7 +52,8 @@ def test_max_user_joins_and_gets_in(api):
     status, r = _call(dp, "GET", "/api/athlete/me", _max())
     assert status == 403 and r["canJoin"] is True                        # не привязан — экран «Найдите себя»
     status, r = _call(dp, "GET", "/api/athlete/join", _max())
-    assert status == 200 and [s["name"] for s in r["students"]] == ["Иванов Иван", "Петрова Анна"]
+    assert status == 200 and r["students"] == [] and r["minQuery"] == 3       # весь список постороннему не отдаём
+    assert _call(dp, "GET", "/api/athlete/join?q=пе", _max())[1]["students"] == []
     assert _call(dp, "GET", "/api/athlete/join?q=пет", _max())[1]["students"] == [{"id": "STU-0002", "name": "Петрова Анна"}]
 
     bot = FakeBot()
@@ -142,7 +143,8 @@ def test_send_screen_retries_without_app_button():
         async def send_message(self, user_id, text, attachments=None):
             kinds = [getattr(b, "type", None) for a in attachments or [] for row in a.payload.buttons for b in row]
             if any(getattr(k, "value", k) == "open_app" for k in kinds):
-                raise RuntimeError("open_app not allowed")
+                from maxapi.exceptions.max import MaxApiError
+                raise MaxApiError(400, {"code": "proto.payload", "message": "Field 'webApp' cannot be null"})
             self.sent.append((user_id, text, [getattr(k, "value", k) for k in kinds]))
 
     bot = Bot()
@@ -168,3 +170,39 @@ def test_client_log_accepts_beacon_without_auth(monkeypatch):
         finally:
             await client.close()
     assert asyncio.run(run()) == (204, 204)
+
+
+def test_send_screen_does_not_resend_on_network_error():
+    """Сеть/таймаут — сообщение могло дойти: без повтора, иначе родителю дубль."""
+    pytest.importorskip("maxapi")
+    from bot.max.render import send_screen
+    from bot.screens.types import maxapp
+
+    class Bot:
+        calls = 0
+
+        async def send_message(self, user_id, text, attachments=None):
+            Bot.calls += 1
+            raise TimeoutError("read timeout")
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(send_screen(Bot(), 1, "Меню", [[maxapp("📱 Открыть кабинет", "parent")]]))
+    assert Bot.calls == 1
+
+
+def test_join_is_serialized_for_two_accounts(api):
+    """Два аккаунта MAX одновременно выбирают одного ученика — привязывается один, второй получает «занят»."""
+    dp = api
+
+    async def run():
+        app = web.Application()
+        register_athlete_api(app, dp, None)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            rs = await asyncio.gather(*(client.post("/api/athlete/join", headers=_max(user_id=u), json={"studentId": "STU-0002"})
+                                        for u in (91001, 91002)))
+            return sorted(r.status for r in rs)
+        finally:
+            await client.close()
+    assert asyncio.run(run()) == [200, 409]

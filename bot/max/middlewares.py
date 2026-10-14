@@ -72,6 +72,15 @@ def is_max_blocked(payload) -> bool:
     return bool(payload) and str(payload).startswith(MAX_BLOCKED_CALLBACKS)
 
 
+def _looks_like_receipt(body) -> bool:
+    """Фото или файл — как в `handlers/payment._receipt_attachment`."""
+    for att in getattr(body, "attachments", None) or []:
+        kind = getattr(att, "type", None)
+        if getattr(kind, "value", kind) in ("image", "file"):
+            return True
+    return False
+
+
 def cabinet_rows() -> list:
     from bot.screens.types import maxapp
     return [[maxapp("📱 Открыть кабинет", "parent")]]
@@ -97,7 +106,7 @@ class ParentCabinetOnlyMiddleware(BaseMiddleware):
             return None
         message = getattr(event_object, "message", None)
         body = getattr(message, "body", None) if callback is None else None
-        if body is not None and getattr(body, "attachments", None):
+        if body is not None and _looks_like_receipt(body):         # стикер, голосовое, геолокация — не чек
             repo = data.get("student_repo")
             if repo is not None and await repo.get_by_parent_max_id(data["max_uid"]):
                 await send_screen(event_object.bot, data["max_uid"], CABINET_FILE_HINT, cabinet_rows())

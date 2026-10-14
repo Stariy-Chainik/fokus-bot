@@ -270,10 +270,15 @@ async def cb_group_link_self_undo(
     student_group_repo: StudentGroupRepository,
     group_repo: GroupRepository,
     branch_repo: BranchRepository,
+    client_repo=None,
 ) -> None:
     _, group_id, student_id = callback.data.split(":", 2)
     removed = await student_repo.remove_parent_tg_id(student_id, callback.from_user.id)
-    if removed:
+    if removed:                                  # tg_id мог попасть и в карточку клиента — снимаем и там
+        from bot.services.parent_unlink import drop_client_addr
+        student = await student_repo.get_by_id(student_id)
+        if student is not None:
+            await drop_client_addr(student_repo, client_repo, student, ("tg", callback.from_user.id))
         logger.info(
             "Родитель tg_id=%s сам отменил привязку к %s", callback.from_user.id, student_id,
         )

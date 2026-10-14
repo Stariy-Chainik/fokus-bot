@@ -1,6 +1,7 @@
 """Вход родителя в MAX: /start, ссылка группы, регистрация по фамилии, второй ребёнок."""
 from __future__ import annotations
 import logging
+from html import escape
 
 from maxapi import F
 from maxapi.types import BotStarted, MessageCreated, MessageCallback, CommandStart
@@ -199,19 +200,23 @@ async def on_text_no_state(event: MessageCreated, max_uid, student_repo):
     if students:
         await show_menu(event, students, max_uid, new_message=True)
         return
+    # привязанный спортсмен пишет в чат (например, свою фамилию) — не регистрация родителя, а его дневник
+    if settings.max_miniapp_enabled and await student_repo.get_by_athlete_max_id(max_uid) is not None:
+        await _athlete_entry(event.bot, max_uid, "", student_repo)
+        return
     if len(text) < 2:
         await event.message.answer("Введите фамилию ученика (минимум 2 символа):")
         return
     matches = [s for s in await student_repo.get_all() if _surname_matches(s.name, text)]
     if not matches:
-        await event.message.answer(f"Ученик с фамилией <b>{text}</b> не найден.\n\nПопробуйте ещё раз:")
+        await event.message.answer(f"Ученик с фамилией <b>{escape(text)}</b> не найден.\n\nПопробуйте ещё раз:")
         return
     if len(matches) == 1:
         s = matches[0]
         rows = [[cb("✅ Да, это мой ребёнок", f"client_reg:{s.student_id}")], [cb("❌ Другой ученик", "client_reg_retry")]]
         await send_screen(event.bot, max_uid, f"Нашли: <b>{s.name}</b>\n\nЭто ваш ребёнок?", rows)
     else:
-        await send_screen(event.bot, max_uid, f"Найдено несколько учеников с фамилией <b>{text}</b>. Выберите своего:",
+        await send_screen(event.bot, max_uid, f"Найдено несколько учеников с фамилией <b>{escape(text)}</b>. Выберите своего:",
                           _match_rows(matches, "client_reg", "client_reg_retry"))
 
 
@@ -258,7 +263,7 @@ async def on_add_child_text(event: MessageCreated, max_uid, student_repo):
         return
     matches = [s for s in await student_repo.get_all() if _surname_matches(s.name, text)]
     if not matches:
-        await event.message.answer(f"Ученик с фамилией <b>{text}</b> не найден.\n\nПопробуйте ещё раз:")
+        await event.message.answer(f"Ученик с фамилией <b>{escape(text)}</b> не найден.\n\nПопробуйте ещё раз:")
         return
     if len(matches) == 1:
         s = matches[0]
@@ -276,7 +281,7 @@ async def on_add_retry(event: MessageCallback, context):
 
 
 @router.message_callback(F.callback.payload.startswith("client_add_req:"))
-async def on_add_request(event: MessageCallback, context, max_uid, student_repo, user_repo, tg_bot):
+async def on_add_request(event: MessageCallback, context, max_uid, student_repo, user_repo, tg_bot, pending_repo=None):
     student_id = event.callback.payload.split(":", 1)[1]
     student = await student_repo.get_by_id(student_id)
     await context.clear()
@@ -289,8 +294,11 @@ async def on_add_request(event: MessageCallback, context, max_uid, student_repo,
     sender = event.callback.user
     name = f"{sender.first_name} {sender.last_name or ''}".strip()
     addr = fmt_addr(max_addr(max_uid))
+    from bot.services.pending_queue import KIND_CHILD, queue_action
+    # как в Telegram: заявка и в «Ждут решения» кабинета администратора, не только сообщением в чат
+    await queue_action(pending_repo, KIND_CHILD, student, parent_addr=addr, comment=name)
     await notify(tg_bot, [u.tg_id for u in await user_repo.get_admins()],
-                 f"👤 <b>Запрос на привязку (MAX)</b>\n\nКлиент: {name} (MAX <code>{max_uid}</code>)\n"
+                 f"👤 <b>Запрос на привязку (MAX)</b>\n\nКлиент: {escape(name)} (MAX <code>{max_uid}</code>)\n"
                  f"Ученик: <b>{student.name}</b>",
                  reply_markup=kb_admin_approve_child(addr, student_id))
     logger.info("MAX: заявка на второго ребёнка max_id=%s → %s", max_uid, student_id)

@@ -191,10 +191,11 @@ async def cb_debtors_remind_go(
                 f"Ученик: <b>{d.student.name}</b>\n"
                 f"Задолженность: <b>{d.closed_total} ₽</b>\n"
                 + "\n".join(period_lines)
-                + "\n\nДетали и оплата — в разделе «💳 Мои счета»."
+                + "\n\nДетали и оплата — по кнопке ниже."
             )
+            from bot.services.parent_notifier import bills_rows
             delivered = await resolve_notifier(callback.bot).send_many(
-                d.student.parent_addrs, text,
+                d.student.parent_addrs, text, bills_rows(),
             ) > 0
             if delivered:
                 sent_parents += 1

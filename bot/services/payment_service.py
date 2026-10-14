@@ -905,8 +905,11 @@ class PaymentService:
         teacher_ids: list | None = None,
         lesson_ids: list | None = None,
         periods: list | None = None,
+        return_url: str = "",
     ) -> tuple:
         """Создаёт платёж в ЮКасса, возвращает (confirmation_url, payment_id).
+
+        return_url — куда вернуть после оплаты (родителя из MAX — в MAX); пусто — YOOKASSA_RETURN_URL.
 
         periods — «Оплатить всё»: один платёж за несколько месяцев; в metadata уходит их список,
         а зачёт делает record_payment_periods (с самого раннего месяца).
@@ -939,12 +942,13 @@ class PaymentService:
                     "payment_mode": "full_payment",
                 }],
             }
-        payment = YKPayment.create({
+        # запрос к ЮКассе — в потоке: синхронный SDK иначе останавливает оба бота и кабинеты на время ответа
+        payment = await asyncio.to_thread(YKPayment.create, {
             **extra,
             "amount": {"value": f"{total_amount}.00", "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": settings.yookassa_return_url,
+                "return_url": return_url or settings.yookassa_return_url,
             },
             "capture": True,
             "description": purpose[:128],

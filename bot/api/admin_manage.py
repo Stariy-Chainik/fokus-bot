@@ -58,7 +58,7 @@ def _group_dto(g, students: int = 0, teachers: list[str] | None = None) -> dict:
     }
 
 
-def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None:
+def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=None) -> None:
     branch_repo = dp["branch_repo"]
     group_repo = dp["group_repo"]
     student_group_repo = dp["student_group_repo"]
@@ -432,15 +432,31 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str) -> None
         return _json({"ok": True, "clientId": cid})
 
     async def athlete_unlink(request: web.Request, user) -> web.Response:
+        """Отвязать кабинет спортсмена: `?platform=tg|max` — только этот мессенджер (настоящий спортсмен в Telegram
+        не теряет доступ, если отвязывают посторонний MAX), без параметра — оба. Спортсмену — сообщение, в ленту — событие."""
         sid = request.match_info["sid"]
         s = await student_repo.get_by_id(sid)
         if s is None:
             return _json({"error": "not_found"}, status=404)
-        if s.athlete_tg_id:
+        platform = request.query.get("platform") or ""
+        dropped = []
+        if s.athlete_tg_id and platform in ("", "tg"):
             await student_repo.set_athlete_tg_id(sid, None)
-        if s.athlete_max_id:                        # кабинет в мини-приложении MAX
+            dropped.append(("tg", s.athlete_tg_id))
+        if s.athlete_max_id and platform in ("", "max"):           # кабинет в мини-приложении MAX
             await student_repo.set_athlete_max_id(sid, None)
-        return _json({"ok": True})
+            dropped.append(("max", s.athlete_max_id))
+        if not dropped:
+            return _json({"error": "not_found"}, status=404)
+        from html import escape
+        from bot.services import activity
+        from bot.services.parent_notifier import resolve_notifier
+        await resolve_notifier(bot).send_many(dropped, f"Ваша привязка к спортсмену <b>{escape(s.name)}</b> "
+                                                       f"отменена администратором.")
+        await activity.record(activity.STUDENT, f"Кабинет спортсмена отвязан: {sid} · "
+                              + ", ".join("Telegram" if p == "tg" else "MAX" for p, _ in dropped),
+                              actor=user.tg_id, ref=sid)
+        return _json({"ok": True, "dropped": [p for p, _ in dropped]})
 
     # ── педагоги ─────────────────────────────────────────────────────────
     def _rates(body: dict) -> tuple[int, int, int] | None:

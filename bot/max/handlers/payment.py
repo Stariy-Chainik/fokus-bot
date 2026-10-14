@@ -309,13 +309,15 @@ async def on_unlink_pick(event: MessageCallback, max_uid, student_repo):
 
 
 @router.message_callback(F.callback.payload.startswith("client_unlink_do:"))
-async def on_unlink_do(event: MessageCallback, context, max_uid, student_repo, user_repo, tg_bot):
+async def on_unlink_do(event: MessageCallback, context, max_uid, student_repo, user_repo, tg_bot, client_repo=None):
     sid = event.callback.payload.split(":", 1)[1]
     students = await require_parent(event, student_repo, max_uid)
     student = next((s for s in (students or []) if s.student_id == sid), None)
     if student is None or not await student_repo.remove_parent(sid, ("max", max_uid)):
         await alert(event, "Ученик не найден")
         return
+    from bot.services.parent_unlink import drop_client_addr
+    await drop_client_addr(student_repo, client_repo, student, ("max", max_uid))
     await activity.record(activity.STUDENT, f"Родитель отвязался сам: {sid} · MAX {max_uid}", ref=sid)
     await _notify_admins_tg(tg_bot, user_repo, f"↩️ Родитель отвязался от ученика\nУченик: {student.name}\nMAX: {max_uid}\n"
                             f"Причина: «это не мой ребёнок». Если ошибка — привяжите заново ссылкой группы.", [])

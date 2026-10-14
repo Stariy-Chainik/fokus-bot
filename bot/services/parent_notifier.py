@@ -62,6 +62,26 @@ def addrs_of(student, client=None) -> list:
     return out
 
 
+def _tg_cabinet_rows(rows):
+    """PARENT_CABINET_ONLY: кнопки счетов/оплаты бота в уведомлении родителю → «📱 Открыть кабинет»."""
+    from config.settings import settings
+    if not rows or not (settings.parent_cabinet_only and settings.miniapp_url):
+        return rows
+    from bot.middlewares.parent_cabinet import is_blocked_callback
+    from bot.screens.types import webapp
+    kept = [r for r in ([b for b in row if not (b.kind == "cb" and is_blocked_callback(b.value))] for row in rows) if r]
+    if sum(map(len, kept)) == sum(map(len, rows)):
+        return rows
+    return [[webapp("📱 Открыть кабинет", settings.miniapp_url)]] + kept
+
+
+def bills_rows() -> list:
+    """Кнопка «к счетам» в уведомлении родителю; в режиме «только кабинет» (Telegram и MAX) notifier заменит её
+    на «📱 Открыть кабинет»."""
+    from bot.screens.types import cb
+    return [[cb("💳 Оплата занятий", "client:my_bills")]]
+
+
 class ParentNotifier:
     default: "ParentNotifier | None" = None  # экземпляр процесса (ставится в __main__)
 
@@ -82,6 +102,7 @@ class ParentNotifier:
             if platform == TG:
                 if self.tg_bot is None:
                     return False
+                rows = _tg_cabinet_rows(rows)
                 await self.tg_bot.send_message(ident, text, reply_markup=to_aiogram_markup(rows))
                 return True
             if platform == MAX:

@@ -116,9 +116,12 @@ def test_max_cabinet_only_middleware_and_notifications(monkeypatch):
     assert not passed and acks and shown[-1][2] == [["maxapp"]]           # старая кнопка счёта — подсказка
     asyncio.run(mw(handler, NS(callback=NS(payload="client:add_child"), bot=None, ack=ack), dict(data)))
     assert len(passed) == 1                                                # «Добавить ребёнка» работает
-    photo = NS(callback=None, message=NS(body=NS(attachments=[object()])), bot=None)
+    photo = NS(callback=None, message=NS(body=NS(attachments=[NS(type="image")])), bot=None)
     asyncio.run(mw(handler, photo, dict(data)))
     assert len(passed) == 1 and "Чек прикрепляется в кабинете" in shown[-1][1]
+    sticker = NS(callback=None, message=NS(body=NS(attachments=[NS(type="sticker")])), bot=None)
+    asyncio.run(mw(handler, sticker, dict(data)))
+    assert len(passed) == 2                                                # стикер — не чек, проходит дальше
 
     sent = []
 
@@ -128,3 +131,24 @@ def test_max_cabinet_only_middleware_and_notifications(monkeypatch):
     n = ParentNotifier(max_bot=object())
     asyncio.run(n.send(("max", 5), "✅ Оплата подтверждена", [[cb("🧾 Счёт", "client_bill:STU-1:2026-10")]]))
     assert sent == [[["maxapp"]]]                                          # в уведомлении — кнопка кабинета
+
+
+def test_tg_cabinet_only_notification_gets_cabinet_button(monkeypatch):
+    """Telegram, PARENT_CABINET_ONLY: в уведомлении кнопка счёта бота заменяется на кнопку кабинета."""
+    from bot.services.parent_notifier import _tg_cabinet_rows, bills_rows
+    monkeypatch.setattr(settings, "parent_cabinet_only", True)
+    monkeypatch.setattr(settings, "miniapp_url", "https://example.org/app/")
+    rows = _tg_cabinet_rows(bills_rows())
+    assert [[(b.kind, b.value) for b in r] for r in rows] == [[("webapp", "https://example.org/app/")]]
+    monkeypatch.setattr(settings, "parent_cabinet_only", False)
+    assert _tg_cabinet_rows(bills_rows()) == bills_rows()                    # бот по-старому — кнопка бота
+
+
+def test_self_unlink_drops_client_card_address(api):
+    """«Это не мой ребёнок»: адрес снимается и с карточки клиента — иначе счета приходили бы дальше."""
+    dp = api
+    from bot.models import Client
+    dp["client_repo"].items.append(Client("CLT-0001", "Мама", max_id=PARENT_MAX))
+    dp["student_repo"].items[1].client_id = "CLT-0001"
+    status, _ = _call(dp, "DELETE", "/api/parent/children/STU-0002", _max(), bot=FakeBot())
+    assert status == 200 and dp["client_repo"].items[-1].max_id is None
