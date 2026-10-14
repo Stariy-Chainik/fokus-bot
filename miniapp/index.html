@@ -29,6 +29,9 @@ if (/(^#|&)WebAppData=/.test(location.hash)) document.write('<script src="https:
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Manrope", "Segoe UI", Roboto, system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
   button { font: inherit; color: inherit; }
+  /* имя ученика в карточке — тап открывает «Переименовать» */
+  .name-edit { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; text-align: left; font-weight: 800; font-size: 17px; cursor: pointer; }
+  .name-edit .pen { font-size: 13px; opacity: .65; }
   :where(button, input, textarea):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
   .screen { position: fixed; inset: 0; display: flex; flex-direction: column; }
