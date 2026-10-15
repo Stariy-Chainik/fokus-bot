@@ -69,3 +69,8 @@ def generate_training_entry_id(existing: list[str]) -> str:
 
 def generate_task_id(existing: list[str]) -> str:
     return _next_id("TK", 6, existing)
+
+
+def generate_homework_id(existing: list[str]) -> str:
+    """Номер выдачи домашнего задания группе (общий у всех учениц выдачи)."""
+    return _next_id("HW", 6, existing)

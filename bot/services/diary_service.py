@@ -261,6 +261,31 @@ class DiaryService:
     async def close_task(self, task_id: str) -> Optional[AthleteTask]:
         return await self._tasks.close(task_id)
 
+    # ─── Домашние задания группе (решение владельца 15.10.2026) ──────────
+
+    async def create_homework(
+        self, teacher_id: str, group_id: str, student_ids: list[str], exercise: str, minutes: int = 0,
+        comment: str = "",
+    ) -> list[AthleteTask]:
+        """Одно задание всей группе или выбранным ученицам: строка на каждую, общий batch_id.
+        Кабинет спортсмена не нужен — задание видят родители, оценку ставит педагог."""
+        return await self._tasks.add_batch(student_ids, teacher_id, exercise, minutes, comment, group_id)
+
+    async def grade_task(self, task_id: str, grade: int, comment: str = "") -> Optional[AthleteTask]:
+        """Оценка за выполнение задания 1–5; закрывает задание."""
+        if not 1 <= grade <= 5:
+            raise ValueError("grade must be 1..5")
+        return await self._tasks.grade(task_id, grade, comment.strip()[:300])
+
+    async def teacher_homework(self, teacher_id: str) -> list[AthleteTask]:
+        """Задания группам, выданные педагогом (строки с batch_id), новые первыми."""
+        rows = [t for t in await self._tasks.get_all() if t.teacher_id == teacher_id and t.batch_id]
+        return sorted(rows, key=lambda t: (t.created_at, t.task_id), reverse=True)
+
+    async def student_tasks(self, student_id: str) -> list[AthleteTask]:
+        """Все задания ученика (и домашние, и спортсмену), новые первыми — дневник у родителя."""
+        return sorted(await self._tasks.get_for_student(student_id), key=lambda t: t.created_at, reverse=True)
+
     async def task_usage(self, student_id: str) -> dict[str, tuple[int, str]]:
         """task_id → (сколько раз отработано, дата последнего раза)."""
         usage: dict[str, tuple[int, str]] = {}

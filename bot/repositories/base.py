@@ -127,6 +127,16 @@ class BaseRepository:
             logger.error("Ошибка чтения листа %s: %s", self._sheet_name, exc)
             raise
 
+    def _sync_append_rows(self, rows: list[list[Any]]) -> None:
+        t0 = time.monotonic()
+        try:
+            _with_retry(self._ws_ready().append_rows, rows, value_input_option="USER_ENTERED")
+            logger.info("SHEETS append %s ×%d in %.0f ms",
+                        self._sheet_name, len(rows), (time.monotonic() - t0) * 1000)
+        except Exception as exc:
+            logger.error("Ошибка добавления строк в %s: %s", self._sheet_name, exc)
+            raise
+
     def _sync_append_row(self, values: list[Any]) -> None:
         t0 = time.monotonic()
         try:
@@ -387,6 +397,14 @@ class BaseRepository:
     async def _append_row(self, values: list[Any]) -> None:
         await asyncio.to_thread(self._sync_append_row, values)
         self._patch_cache(0, values=values, append=True)
+
+    async def _append_rows(self, rows: list[list[Any]]) -> None:
+        """Несколько строк одним запросом к Google (а не по запросу на строку)."""
+        if not rows:
+            return
+        await asyncio.to_thread(self._sync_append_rows, rows)
+        for values in rows:
+            self._patch_cache(0, values=values, append=True)
 
     async def _find_row_index(self, col_header: str, value: str) -> int | None:
         """

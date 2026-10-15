@@ -33,7 +33,7 @@ SCREENS['s.home'] = async () => {
     <div style="margin-top:14px">${btn('➕ Записать тренировку', 'sLogForm', {})}</div>
     ${h.openTasks.length ? `<div class="eyebrow">Задания педагога</div>${list(h.openTasks.slice(0, 3).map(t => cell({
       lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise),
-      s: `${t.minutes} мин${t.done ? ` · сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : ''}`,
+      s: [t.minutes ? `${t.minutes} мин` : '', t.done ? `сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : ''].filter(Boolean).join(' · '),
       go: 's.tasks', p: {},
     })))}` : ''}
     <div class="eyebrow">Последние тренировки</div>
@@ -79,7 +79,7 @@ SCREENS['s.log'] = async () => {
       <div class="chips">${topics.map(t => chip(esc(t), d.topics.includes(t), 'sLogTopic', { v: t })).join('')}</div>` : ''}
     ${tasks.length ? `<div class="eyebrow">Задания педагога</div>
       ${list(tasks.map(t => cell({ lead: d.tasks.includes(t.id) ? '☑️' : '⬜', plain: true, cls: 'wrap',
-        t: esc(t.exercise), s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}`,
+        t: esc(t.exercise), s: [t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · '),
         act: 'sLogTask', p: { v: t.id } })))}` : ''}
     <div class="eyebrow">Комментарий</div>
     <input class="search" id="s-comment" placeholder="Что получилось, что нет" value="${esc(d.comment)}">
@@ -106,7 +106,7 @@ SCREENS['s.tasks'] = async () => {
   return { title: 'Мои задания', html: `
     ${d.tasks.length ? list(d.tasks.map(t => cell({
       lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise),
-      s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}${t.done ? `<br>сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : '<br>ещё не отрабатывали'}`,
+      s: `${[t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ') || 'задание педагога'}${t.done ? `<br>сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : '<br>ещё не отрабатывали'}`,
     }))) : empty('Открытых заданий нет', '<p class="hint" style="margin:0">Задания выдаёт педагог после тренировки</p>')}
     ${d.tasks.length ? `<div style="margin-top:12px">${btn('➕ Записать тренировку', 'sLogForm', {}, 'sec')}</div>
       <p class="hint" style="margin-top:8px">Отметьте задание в записи — педагог увидит, что вы его отработали. Закрывает задание педагог.</p>` : ''}` };

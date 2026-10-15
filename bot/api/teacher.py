@@ -23,6 +23,7 @@ from typing import Any, cast
 
 from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_tg_id
+from bot.api.homework import homework_routes
 from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
@@ -1421,6 +1422,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/bills/student/{sid}/receipt", bills_receipt),
         ("DELETE", "/payments/{pid}", bills_cancel),
         ("PUT", "/bills/student/{sid}/subscription", bills_sub_amount),
+        *homework_routes(dp, diary_service, notifier, _own_group_ids, _group_names),    # задания группе (15.10.2026)
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

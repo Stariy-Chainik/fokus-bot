@@ -1000,6 +1000,24 @@ class AthleteTaskRepoFake:
             task.status, task.closed_at = "closed", "2026-09-20 12:00:00"
         return task
 
+    async def add_batch(self, student_ids, teacher_id, exercise, minutes, comment="", group_id=""):
+        batch = f"HW-{len({t.batch_id for t in self.items if t.batch_id}) + 1:06d}"
+        out = []
+        for sid in student_ids:
+            task = AthleteTask(task_id=f"TK-{len(self.items) + 1:06d}", student_id=sid, teacher_id=teacher_id,
+                               exercise=exercise, minutes=minutes, comment=comment, created_at="2026-10-15 12:00:00",
+                               batch_id=batch, group_id=group_id)
+            self.items.append(task)
+            out.append(task)
+        return out
+
+    async def grade(self, task_id, grade, comment=""):
+        task = await self.get_by_id(task_id)
+        if task is not None:
+            task.grade, task.grade_comment, task.graded_at = grade, comment, "2026-10-16 12:00:00"
+            task.status, task.closed_at = "closed", task.closed_at or "2026-10-16 12:00:00"
+        return task
+
 
 def mk_entry(entry_id: str, student_id: str, date: str, minutes: int = 60,
              topics=(), grade=None, comment: str = "", task_ids=()) -> TrainingEntry:

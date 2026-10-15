@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from base64 import b64encode
-from datetime import date
+from datetime import date, timedelta
 
 from aiohttp import web
 from aiogram.types import BufferedInputFile
@@ -185,7 +185,14 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     if e.grade:
                         grades.append({"date": e.date, "grade": e.grade, "topics": list(e.topics or []),
                                        "teacher": teachers.get(e.graded_by, ""), "comment": e.grade_comment or ""})
-                grades.sort(key=lambda g: g["date"], reverse=True)
+            if diary_service is not None:                       # оценки за домашние задания — всем детям
+                week_ago = (date.today() - timedelta(days=7)).isoformat()
+                for t in await diary_service.student_tasks(s.student_id):
+                    if t.grade and t.graded_at[:10] >= week_ago:
+                        grades.append({"date": t.graded_at[:10], "grade": t.grade, "topics": [t.exercise],
+                                       "teacher": teachers.get(t.teacher_id, ""), "comment": t.grade_comment,
+                                       "homework": True})
+            grades.sort(key=lambda g: g["date"], reverse=True)
             kids.append({
                 "id": s.student_id, "name": s.name, "rest": rest,
                 "thisMonth": next((m for m in months if m["ym"] == period), None),
@@ -319,6 +326,11 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                         for e in sorted(entries, key=lambda e: e.date, reverse=True)],
             "openTasks": [{"exercise": t.exercise, "minutes": t.minutes, "comment": t.comment}
                           for t in await diary_service.open_tasks(student.student_id)],
+            # все задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — 15.10.2026
+            "homework": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
+                          "teacher": teachers.get(t.teacher_id, ""), "createdAt": t.created_at, "status": t.status,
+                          "grade": t.grade, "gradeComment": t.grade_comment, "gradedAt": t.graded_at}
+                         for t in (await diary_service.student_tasks(student.student_id))[:30]],
         })
 
     # ── оплата ───────────────────────────────────────────────────────────

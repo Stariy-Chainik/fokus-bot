@@ -173,7 +173,7 @@ async def _ask_tasks_or_comment(callback: CallbackQuery, state: FSMContext, diar
         await state.update_data(ath_tasks=[], ath_tsel=[])
         await _ask_comment(callback, state, back_cb="athlog:back:tp")
         return
-    pairs = [(t.task_id, f"{t.exercise} · {t.minutes} мин") for t in tasks]
+    pairs = [(t.task_id, f"{t.exercise} · {t.minutes} мин" if t.minutes else t.exercise) for t in tasks]
     await state.set_state(LogTrainingStates.choosing_tasks)
     await state.update_data(ath_tasks=pairs)
     sel = set(data.get("ath_tsel") or [])

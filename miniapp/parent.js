@@ -41,7 +41,7 @@ SCREENS['p.home'] = async () => {
       s: 'номер или название — педагог забирает детей по группам', act: 'pKgAsk', p: { id: c.id, name: c.name, value: '' },
     }));
     c.grades.forEach(g => attention.push(cell({
-      lead: '⭐', plain: true, cls: 'wrap', t: `Новая оценка${who(c)}`,
+      lead: '⭐', plain: true, cls: 'wrap', t: `${g.homework ? 'Оценка за задание' : 'Новая оценка'}${who(c)}`,
       s: `${fdate(g.date)}${g.topics.length ? ` · ${esc(g.topics.join(', '))}` : ''}${g.teacher ? ` · ${esc(g.teacher)}` : ''}${g.comment ? `<br>📝 ${esc(g.comment)}` : ''}`,
       r: `<b>${g.grade}/5</b>`, act: 'pOpen', p: { id: c.id, screen: 'p.diary' },
     })));
@@ -437,9 +437,17 @@ SCREENS['p.diary'] = async ({ ym }) => {
   let d;
   try { d = await api(`/diary/${kid()}?ym=${period}`); }
   catch (e) { return { title: 'Дневник', html: empty('Дневник недоступен', `<p class="hint" style="margin:0">${esc(errText(e))}</p>`) }; }
+  // задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — у всех детей (15.10.2026)
+  const hw = d.homework || [];
+  const hwBlock = hw.length ? `<div class="eyebrow">Задания педагога</div>${list(hw.map(t => cell({
+    lead: t.grade ? '⭐' : t.status === 'open' ? '📋' : '✔️', plain: true, cls: 'wrap', t: esc(t.exercise),
+    s: [fdate(t.createdAt.slice(0, 10)), t.teacher ? esc(t.teacher) : '', t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ')
+      + (t.gradeComment ? `<br>📝 ${esc(t.gradeComment)}` : ''),
+    r: t.grade ? `<b>${t.grade}/5</b>` : t.status === 'open' ? pill('задано', 'acc') : pill('закрыто', 'mute'),
+  })))}` : '';
   if (!d.athlete && !d.entries.length) {
     return { title: 'Дневник', html: `${kidChips('p.diary', { ym: period })}
-      ${empty('Дневник пока не ведётся', '<p class="hint" style="margin:0">Дневник тренировок доступен ученикам спортивных групп: ребёнок заводит кабинет спортсмена в боте и записывает тренировки сам.</p>')}` };
+      ${hwBlock || empty('Заданий пока нет', '<p class="hint" style="margin:0">Здесь появятся домашние задания педагога и оценки за их выполнение. Дневник тренировок ведут ученики спортивных групп в кабинете спортсмена.</p>')}` };
   }
   const st = d.stats;
   const topics = Object.entries(st.byTopic || {}).sort((a, b) => b[1] - a[1]);
@@ -456,6 +464,5 @@ SCREENS['p.diary'] = async ({ ym }) => {
       s: `${esc(e.topics.join(', ') || 'без темы')}${e.comment ? ` · ${esc(e.comment)}` : ''}${e.gradeComment ? `<br>📝 ${esc(e.gradeComment)}${e.gradedBy ? ` — ${esc(e.gradedBy)}` : ''}` : ''}`,
       r: e.grade ? `<b>${e.grade}/5</b>` : pill('без оценки', 'mute'),
     }))) : empty('Записей за месяц нет', '<p class="hint" style="margin:0">Ребёнок записывает тренировки сам в боте</p>')}
-    ${d.openTasks.length ? `<div class="eyebrow">Задания педагога</div>${list(d.openTasks.map(t => cell({
-      lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise), s: `${t.minutes} мин${t.comment ? ` · ${esc(t.comment)}` : ''}` })))}` : ''}` };
+    ${hwBlock}` };
 };

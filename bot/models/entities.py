@@ -289,3 +289,9 @@ class AthleteTask:
     created_at: str = ""
     status: str = "open"       # open | closed
     closed_at: str = ""
+    # домашнее задание группе (решение владельца 15.10.2026): одна выдача — общий batch_id у всех учениц
+    batch_id: str = ""         # HW-XXXXXX; пусто — задание одному спортсмену
+    group_id: str = ""         # группа, которой выдано
+    grade: int = 0             # оценка педагога за выполнение, 1–5; 0 — не оценено
+    grade_comment: str = ""
+    graded_at: str = ""
