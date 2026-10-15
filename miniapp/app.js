@@ -100,18 +100,13 @@ const myName = () => {
   const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   return (u && u.first_name) || '';
 };
-/* Логотип (15.10.2026): золотая «F» с короной и искрами — ролик 8 с проигрывается один раз за открытие кабинета
-   и замирает на последнем кадре; тап — ещё раз. Повторная отрисовка шапки во время ролика продолжает его с того же
-   места (#t=), а не начинает заново. «Уменьшить движение» — сразу последний кадр. После заставки при запуске
-   (index.html, тот же ролик крупно) в шапке сразу последний кадр. */
-const LOGO_SEC = 8;
-const logoStill = '<img src="logo-end.jpg" alt="Фокус" width="52" height="52">';
-const logoVideo = t => `<video src="logo-intro.mp4${t > 0.3 ? `#t=${t.toFixed(1)}` : ''}" poster="logo-end.jpg" autoplay muted playsinline preload="auto" disablepictureinpicture width="52" height="52" aria-hidden="true"></video>`;
+/* Логотип в шапке (15–16.10.2026): золотая «F» с короной и искрами непрерывно вращается — бесшовная петля 4,4 с
+   (полный оборот из ролика «Focus_3D_Gold_Sparks», конец и начало склеены плавным переходом). «Уменьшить
+   движение» — неподвижный кадр. */
 const logoHtml = () => {
-  const still = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-  if (!state.logoAt) state.logoAt = window.__splashOn ? 1 : Date.now();      // после заставки ролик уже показан
-  const t = (Date.now() - state.logoAt) / 1000;
-  return `<button class="logo" data-act="logoReplay" aria-label="Фокус">${still || t >= LOGO_SEC ? logoStill : logoVideo(t)}</button>`;
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return `<span class="logo">${still ? '<img src="logo-end.jpg" alt="Фокус" width="52" height="52">'
+    : '<video src="logo-loop.mp4" poster="logo-end.jpg" autoplay muted loop playsinline preload="auto" disablepictureinpicture width="52" height="52" aria-label="Фокус"></video>'}</span>`;
 };
 /* Шапка кабинета: логотип школы, приветствие и строка роли. */
 const hero = sub => `<div class="hero">${logoHtml()}
@@ -1151,10 +1146,6 @@ Object.assign(ACT, {
         <div class="card pad" style="white-space:pre-wrap;user-select:text;-webkit-user-select:text;font-size:14px;margin-top:10px">${esc(d.text)}</div>
         <div style="margin-top:12px">${d.tg ? btn('✈️ Отправить в Telegram', 'inviteShare', { url: d.tg, text: d.shareText }) : ''}${btn('📋 Скопировать текст', 'inviteCopy', { text: d.text }, 'sec')}${btn('Закрыть', 'closeSheet', {}, 'ghost')}</div>`);
     } catch (e) { toast(errText(e)); }
-  },
-  logoReplay: () => {
-    state.logoAt = Date.now();
-    document.querySelectorAll('.hero .logo').forEach(el => { el.innerHTML = logoVideo(0); });
   },
   inviteShare: ({ url, text }) => {
     const u = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;

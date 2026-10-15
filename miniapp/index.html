@@ -88,7 +88,7 @@
   #splash video { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (min-aspect-ratio: 2/3) { #splash video { object-fit: contain; } }
   #splash.hide { opacity: 0; pointer-events: none; }
-  .hero .logo { flex: none; display: block; width: 52px; height: 52px; padding: 0; border: 0; border-radius: 50%; overflow: hidden; background: #000; box-shadow: 0 2px 8px rgba(212,160,40,.35); cursor: pointer; }
+  .hero .logo { flex: none; display: block; width: 52px; height: 52px; padding: 0; border: 0; border-radius: 50%; overflow: hidden; background: #000; box-shadow: 0 2px 8px rgba(212,160,40,.35); }
   .hero .logo img, .hero .logo video { display: block; width: 52px; height: 52px; object-fit: cover; }
   .hero .hi { font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
   .h2 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 12px; text-wrap: balance; }
@@ -232,15 +232,13 @@
 <script>/* Заставка при запуске кабинета (решение владельца 15.10.2026): конец ролика логотипа — «F» доворачивается,
    загорается «ФОКУС · Танцевально-спортивный клуб», ~3 с. Кабинет грузится под ней, ничего не ждёт; тап — пропустить;
    не дольше 4,5 с, даже если ролик не пошёл. Один раз за открытие (sessionStorage: тихая перезагрузка после
-   обновления кабинета её не показывает), «уменьшить движение» — без заставки. Логотип в шапке после неё — сразу
-   последний кадр (window.__splashOn). */
+   обновления кабинета её не показывает), «уменьшить движение» — без заставки. */
 (function () {
   var s = document.getElementById('splash'), v = document.getElementById('splash-v');
   var skip = false;
   try { skip = matchMedia('(prefers-reduced-motion: reduce)').matches || !!sessionStorage.getItem('splashShown'); } catch (_) { skip = false; }
   if (skip) { s.parentNode.removeChild(s); return; }
   try { sessionStorage.setItem('splashShown', '1'); } catch (_) { /* приватный режим — не страшно */ }
-  window.__splashOn = true;
   function hide() {
     if (!s.parentNode || s.className === 'hide') return;
     s.className = 'hide';
