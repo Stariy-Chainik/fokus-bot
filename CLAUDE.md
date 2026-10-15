@@ -44,7 +44,8 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
 2. Construct **14 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
 3. Construct **8 services**: `LessonService`, `PaymentService`, `ProfitService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
 4. Pick **FSM storage**: `RedisStorage` if `REDIS_URL` is set, else `MemoryStorage`.
-5. Register two middlewares (in this order):
+5. Register middlewares (in this order):
+   - **`PrivateChatsOnlyMiddleware`** (outer, first; 15.10.2026) — бот работает только в личных чатах: сообщения и нажатия из групп и каналов до обработчиков не доходят (у бота выключен режим приватности, добавленный в группу педагогов, он видел бы всю переписку). Добавление/удаление бота в группе (`my_chat_member`) пишется в журнал с номером чата («Бот в чате -100… «…»») — `common.on_bot_membership`; по этому номеру администратор шлёт объявления в группу.
    - **`DedupUpdateMiddleware`** (outer) — drops re-delivered Telegram updates by `m:{chat_id}:{message_id}` / `c:{callback_query.id}` key with 60 s TTL, GC after 256 entries.
    - **`AuthMiddleware`** (with `user_repo`) — loads `User` by `tg_id`, injects into `data["user"]` (or `None` for unknown). Also logs per-update latency.
 6. Inject every repo / service into the dispatcher via `dp["key"]`. Handlers receive them as typed parameters — aiogram resolves the names automatically.

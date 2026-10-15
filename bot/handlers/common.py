@@ -4,7 +4,9 @@ import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command, ExceptionTypeFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ErrorEvent, MaybeInaccessibleMessage
+from aiogram.types import (
+    CallbackQuery, ChatMemberUpdated, ErrorEvent, InlineKeyboardMarkup, MaybeInaccessibleMessage, Message,
+)
 from aiogram.exceptions import TelegramBadRequest
 
 from bot.models import User
@@ -312,3 +314,13 @@ async def on_bad_request(event: ErrorEvent) -> None:
             await cb.answer()
         except TelegramBadRequest:
             pass
+
+
+@router.my_chat_member()
+async def on_bot_membership(event: ChatMemberUpdated) -> None:
+    """Бота добавили в группу или убрали из неё: в группах он молчит (PrivateChatsOnlyMiddleware), а номер чата
+    пишется в журнал — по нему администратор рассылает объявления, например в общую группу педагогов."""
+    if event.chat.type == "private":
+        return
+    logger.info("Бот в чате %s «%s» (%s): %s → %s, кто: %s", event.chat.id, event.chat.title, event.chat.type,
+                event.old_chat_member.status, event.new_chat_member.status, event.from_user.id)
