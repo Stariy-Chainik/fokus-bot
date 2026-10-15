@@ -82,3 +82,24 @@ def test_static_serves_fonts_and_vendor_with_cache() -> None:
             await client.close()
     fs, fcache, ts, pcache, bad = asyncio.run(run())
     assert (fs, ts, bad) == (200, 200, 404) and "max-age" in fcache and pcache == "no-store"
+
+
+def test_webp_served_as_image(tmp_path):
+    """Анимированный логотип .webp — image/webp, а не application/octet-stream (на проде у python типа нет)."""
+    import asyncio
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from bot.api.static import register_miniapp_static
+
+    (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (tmp_path / "logo-loop.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+
+    async def run():
+        app = web.Application()
+        register_miniapp_static(app, tmp_path)
+        async with TestClient(TestServer(app)) as c:
+            r = await c.get("/app/logo-loop.webp")
+            return r.status, r.headers.get("Content-Type")
+    assert asyncio.run(run()) == (200, "image/webp")

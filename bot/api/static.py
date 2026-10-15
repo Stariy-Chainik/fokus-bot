@@ -8,6 +8,9 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
+# aiohttp берёт типы из своей таблицы, и .webp в ней нет (на проде логотип уходил как application/octet-stream)
+_EXTRA_TYPES = {".webp": "image/webp"}
+
 MINIAPP_DIR = Path(__file__).resolve().parents[2] / "miniapp"
 _NO_CACHE = {"Cache-Control": "no-store"}
 # Шрифты и скрипт Telegram (папки fonts/, vendor/) не меняются от деплоя к деплою — пусть телефон держит их у себя:
@@ -30,7 +33,10 @@ def register_miniapp_static(app: web.Application, directory: Path = MINIAPP_DIR)
         path = (directory / name).resolve()
         if directory.resolve() not in path.parents or not path.is_file():
             raise web.HTTPNotFound
-        return web.FileResponse(path, headers=_LONG_CACHE if name.split("/", 1)[0] in _CACHED_DIRS else _NO_CACHE)
+        headers = dict(_LONG_CACHE if name.split("/", 1)[0] in _CACHED_DIRS else _NO_CACHE)
+        if path.suffix in _EXTRA_TYPES:
+            headers["Content-Type"] = _EXTRA_TYPES[path.suffix]
+        return web.FileResponse(path, headers=headers)
 
     app.router.add_get("/app", index)
     app.router.add_get("/app/", index)
