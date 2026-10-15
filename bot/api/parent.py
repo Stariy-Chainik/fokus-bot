@@ -26,6 +26,7 @@ from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_max_id, auth_tg_id, max_user_name
 from bot.utils.bill_format import payment_purpose
 from bot.services import activity, payment_ledger
+from bot.api.homework import homework_title, short
 from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, kindergarten_group_names
 from bot.services import parent_unlink
@@ -169,6 +170,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
         kids, rest_total = [], 0
         kg = await _kg(children)
+        hw_numbers = await diary_service.homework_numbers() if diary_service is not None else {}
         for s in children:
             months = []
             for ym in _visible_periods(3):
@@ -189,9 +191,11 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 week_ago = (date.today() - timedelta(days=7)).isoformat()
                 for t in await diary_service.student_tasks(s.student_id):
                     if t.grade and t.graded_at[:10] >= week_ago:
-                        grades.append({"date": t.graded_at[:10], "grade": t.grade, "topics": [t.exercise],
+                        title = homework_title(hw_numbers.get(t.batch_id, 0), t.created_at)
+                        grades.append({"date": t.graded_at[:10], "grade": t.grade,
+                                       "topics": [f"{title}: {short(t.exercise)}"],
                                        "teacher": teachers.get(t.teacher_id, ""), "comment": t.grade_comment,
-                                       "homework": True})
+                                       "homework": True, "scale": settings.homework_scale(t.teacher_id)})
             grades.sort(key=lambda g: g["date"], reverse=True)
             kids.append({
                 "id": s.student_id, "name": s.name, "rest": rest,
@@ -312,6 +316,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         board = await diary_service.leaderboard(period)
         row = next((r for r in board if r.student_id == student.student_id), None)
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
+        hw_numbers = await diary_service.homework_numbers()
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
             "athlete": student.is_athlete,      # кабинет спортсмена заведён — дневник ведётся
@@ -329,7 +334,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             # все задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — 15.10.2026
             "homework": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
                           "teacher": teachers.get(t.teacher_id, ""), "createdAt": t.created_at, "status": t.status,
-                          "grade": t.grade, "gradeComment": t.grade_comment, "gradedAt": t.graded_at}
+                          "grade": t.grade, "gradeComment": t.grade_comment, "gradedAt": t.graded_at,
+                          "number": hw_numbers.get(t.batch_id, 0), "scale": settings.homework_scale(t.teacher_id)}
                          for t in (await diary_service.student_tasks(student.student_id))[:30]],
         })
 

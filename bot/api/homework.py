@@ -1,10 +1,14 @@
 """Домашние задания группе в кабинете педагога (решение владельца 15.10.2026).
 
-Педагог выдаёт одно задание всей своей группе или выбранным ученицам: в листе `athlete_tasks` — строка на
-каждую ученицу с общим номером выдачи `batch_id` (HW-…). Кабинет спортсмена не нужен: задание уходит
-сообщением родителям (и самой спортсменке, если кабинет есть), видно в «Дневнике» кабинета родителя.
-За выполнение педагог ставит каждой оценку 1–5 с комментарием — она закрывает задание и тоже уходит
-родителям. На рейтинг спортсменов (очки за тренировки) оценка задания не влияет.
+Педагог выдаёт одно задание всей своей группе или выбранным ученикам: в листе `athlete_tasks` — строка на
+каждого с общим номером выдачи `batch_id` (HW-…). Кабинет спортсмена не нужен: задание уходит сообщением
+родителям (и самому ученику, если кабинет есть), видно в «Дневнике» кабинета родителя.
+За выполнение педагог ставит каждому оценку по своей шкале (`settings.homework_scale`: 1–5, у Яковлевой 1–10)
+с комментарием — она закрывает задание и тоже уходит родителям. На рейтинг спортсменов (очки за тренировки)
+оценка задания не влияет.
+
+У заданий группы номера по порядку выдачи — «Задание №3 от 15.10» (`DiaryService.homework_numbers`): так из
+сообщения об оценке понятно, за какое из нескольких заданий она поставлена.
 """
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ from html import escape
 from aiohttp import web
 
 from bot.services.rosters import group_members
+from bot.utils.dates import format_date_display
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,15 @@ def _json(data, status: int = 200) -> web.Response:
 
 def _minutes(m: int) -> str:
     return f" — {m} мин" if m else ""
+
+
+def homework_title(number: int, created_at: str) -> str:
+    """«Задание №3 от 15.10» — как задание называют в сообщениях и экранах."""
+    return f"Задание №{number} от {format_date_display(created_at[:10])[:5]}" if number else "Задание"
+
+
+def short(text: str, limit: int = 60) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> list[tuple]:
@@ -52,10 +67,11 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         _background.add(task)
         task.add_done_callback(_background.discard)
 
-    def _batch_row(tasks: list, names: dict) -> dict:
+    def _batch_row(tasks: list, names: dict, numbers: dict) -> dict:
         t0 = tasks[0]
-        return {"id": t0.batch_id, "exercise": t0.exercise, "minutes": t0.minutes, "comment": t0.comment,
-                "groupId": t0.group_id, "groupName": names.get(t0.group_id, ""), "createdAt": t0.created_at,
+        return {"id": t0.batch_id, "number": numbers.get(t0.batch_id, 0), "exercise": t0.exercise,
+                "minutes": t0.minutes, "comment": t0.comment, "groupId": t0.group_id,
+                "groupName": names.get(t0.group_id, ""), "createdAt": t0.created_at,
                 "total": len(tasks), "graded": sum(1 for t in tasks if t.grade)}
 
     async def hw_list(request: web.Request, user, teacher) -> web.Response:
@@ -63,7 +79,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         if diary_service is None:
             return _unavailable()
         gid = request.query.get("gid") or ""
-        names = await group_names()
+        names, numbers = await group_names(), await diary_service.homework_numbers()
         own = await own_group_ids(teacher)
         batches: dict[str, list] = {}
         for t in await diary_service.teacher_homework(teacher.teacher_id):
@@ -72,7 +88,8 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         return _json({
             "groups": sorted(({"id": g, "name": names.get(g, g)} for g in own), key=lambda g: g["name"]),
             "groupId": gid, "groupName": names.get(gid, "") if gid else "",
-            "batches": [_batch_row(ts, names) for ts in batches.values()],
+            "scale": settings.homework_scale(teacher.teacher_id),
+            "batches": [_batch_row(ts, names, numbers) for ts in batches.values()],
         })
 
     async def hw_batch(request: web.Request, user, teacher) -> web.Response:
@@ -84,7 +101,8 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             return _json({"error": "not_found"}, status=404)
         students = {s.student_id: s.name for s in await student_repo.get_all()}
         return _json({
-            **_batch_row(tasks, await group_names()),
+            **_batch_row(tasks, await group_names(), await diary_service.homework_numbers()),
+            "scale": settings.homework_scale(teacher.teacher_id),
             "students": sorted(({"taskId": t.task_id, "studentId": t.student_id,
                                  "name": students.get(t.student_id, t.student_id), "grade": t.grade,
                                  "gradeComment": t.grade_comment, "status": t.status} for t in tasks),
@@ -113,24 +131,27 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         members = {s.student_id: s for s in await group_members(student_repo, student_group_repo, gid)}
         ids = [sid for sid in dict.fromkeys(wanted) if sid in members]
         if not ids:
-            return _json({"error": "bad_request", "message": "Отметьте хотя бы одну ученицу"}, status=400)
+            return _json({"error": "bad_request", "message": "Отметьте хотя бы одного ученика"}, status=400)
         tasks = await diary_service.create_homework(teacher.teacher_id, gid, ids, exercise, minutes, comment)
+        number = (await diary_service.homework_numbers()).get(tasks[0].batch_id, 0)
+        title = homework_title(number, tasks[0].created_at)
         group = (await group_names()).get(gid, "")
         note = f"\n💬 {escape(comment)}" if comment else ""
         what = f"<b>{escape(exercise)}</b>{_minutes(minutes)}{note}"
         msgs = []
         for t in tasks:
             s = members[t.student_id]
-            msgs.append((s.athlete_addrs, f"📋 <b>Домашнее задание от {escape(teacher.name)}</b>\n\n{what}"))
-            msgs.append((s.parent_addrs, f"📋 <b>{escape(s.name)}</b>: домашнее задание от {escape(teacher.name)}"
-                                         f" ({escape(group)})\n\n{what}\n\nОценку за выполнение педагог поставит в дневнике."))
+            msgs.append((s.athlete_addrs, f"📋 <b>Домашнее задание</b>\n{title} · {escape(teacher.name)}\n\n{what}"))
+            msgs.append((s.parent_addrs, f"📋 <b>{escape(s.name)}</b>: новое домашнее задание\n"
+                                         f"{title} · {escape(teacher.name)}, {escape(group)}\n\n{what}\n\n"
+                                         f"Оценку за выполнение педагог поставит в дневнике."))
         _send_later(msgs)
-        logger.info("Mini App: педагог %s выдал задание %s группе %s — %d", teacher.teacher_id,
-                    tasks[0].batch_id, gid, len(tasks))
-        return _json({"ok": True, "id": tasks[0].batch_id, "count": len(tasks)})
+        logger.info("Mini App: педагог %s выдал задание %s (№%d) группе %s — %d", teacher.teacher_id,
+                    tasks[0].batch_id, number, gid, len(tasks))
+        return _json({"ok": True, "id": tasks[0].batch_id, "number": number, "count": len(tasks)})
 
     async def hw_grade(request: web.Request, user, teacher) -> web.Response:
-        """Оценка за выполнение: {grade 1–5, comment}; можно поменять. Сообщение ученице и родителям."""
+        """Оценка за выполнение по шкале педагога: {grade, comment}; можно поменять. Сообщение ученику и родителям."""
         if diary_service is None:
             return _unavailable()
         try:
@@ -141,22 +162,24 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         task = await diary_service.task(request.match_info["tid"])
         if task is None or task.teacher_id != teacher.teacher_id:
             return _json({"error": "not_found"}, status=404)
-        if not isinstance(grade, int) or not 1 <= grade <= 5:
-            return _json({"error": "bad_request", "message": "Оценка — число от 1 до 5"}, status=400)
-        updated = await diary_service.grade_task(task.task_id, grade, comment)
+        scale = settings.homework_scale(teacher.teacher_id)
+        if not isinstance(grade, int) or not 1 <= grade <= scale:
+            return _json({"error": "bad_request", "message": f"Оценка — число от 1 до {scale}"}, status=400)
+        updated = await diary_service.grade_task(task.task_id, grade, comment, scale=scale)
         if updated is None:
             return _json({"error": "not_found"}, status=404)
         s = await student_repo.get_by_id(task.student_id)
         if s is not None:
+            title = homework_title((await diary_service.homework_numbers()).get(task.batch_id, 0), task.created_at)
             note = f"\n📝 {escape(updated.grade_comment)}" if updated.grade_comment else ""
-            what = f"«{escape(task.exercise)}»: <b>{grade}/5</b>{note}"
+            what = f"{title} «{escape(short(task.exercise))}»: <b>{grade}/{scale}</b>{note}"
             _send_later([
-                (s.athlete_addrs, f"⭐ <b>{escape(teacher.name)}</b> оценил(а) домашнее задание {what}"),
-                (s.parent_addrs, f"⭐ <b>{escape(s.name)}</b>: домашнее задание {what} — оценка педагога "
-                                 f"{escape(teacher.name)}"),
+                (s.athlete_addrs, f"⭐ <b>{escape(teacher.name)}</b> оценил(а) домашнее задание\n{what}"),
+                (s.parent_addrs, f"⭐ <b>{escape(s.name)}</b>: оценка за домашнее задание "
+                                 f"({escape(teacher.name)})\n{what}"),
             ])
-        logger.info("Mini App: педагог %s оценил задание %s на %s", teacher.teacher_id, task.task_id, grade)
-        return _json({"ok": True, "grade": updated.grade, "gradeComment": updated.grade_comment})
+        logger.info("Mini App: педагог %s оценил задание %s на %s/%s", teacher.teacher_id, task.task_id, grade, scale)
+        return _json({"ok": True, "grade": updated.grade, "gradeComment": updated.grade_comment, "scale": scale})
 
     return [
         ("GET", "/homework", hw_list), ("POST", "/homework", hw_create),

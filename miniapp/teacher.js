@@ -391,7 +391,7 @@ SCREENS['t.hw'] = async ({ gid }) => {
     ${gid ? `<div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.groupName)}</div></div><div style="margin:12px 0">${start}</div>` : ''}
     <div class="eyebrow">Выданные задания</div>
     ${d.batches.length ? list(d.batches.map(b => cell({
-      lead: b.graded === b.total ? '✅' : '📋', plain: true, cls: 'wrap', t: esc(b.exercise),
+      lead: b.graded === b.total ? '✅' : '📋', plain: true, cls: 'wrap', t: `${b.number ? `<b>№${b.number}</b> · ` : ''}${esc(b.exercise)}`,
       s: `${gid ? '' : `${esc(b.groupName)} · `}${fdate(b.createdAt.slice(0, 10))} · ${plural(b.total, ['ученик', 'ученика', 'учеников'])}`,
       r: pill(b.graded === b.total ? 'оценено' : `оценено ${b.graded}/${b.total}`, b.graded === b.total ? 'ok' : b.graded ? 'warn' : 'mute'),
       go: 't.hw.b', p: { id: b.id },
@@ -440,35 +440,35 @@ ACT.hwSend = async ({ gid }) => {
     state.ui.hwSel = null;
     state.stack.pop();
     go('t.hw.b', { id: r.id });
-    toast(`Задание выдано: ${plural(r.count, ['ученик', 'ученика', 'учеников'])}, родителям отправлено`);
+    toast(`Задание №${r.number} выдано: ${plural(r.count, ['ученик', 'ученика', 'учеников'])}, родителям отправлено`);
   } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
   finally { hwSending = false; }
 };
 
 SCREENS['t.hw.b'] = async ({ id }) => {
   const d = await api(`/homework/${id}`);
-  return { title: 'Задание', html: `
-    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.exercise)}</div>
+  return { title: d.number ? `Задание №${d.number}` : 'Задание', html: `
+    <div class="card pad"><div class="hint">${d.number ? `Задание №${d.number} от ${fdate(d.createdAt.slice(0, 10))}` : ''}</div><div style="font-weight:800;font-size:16px">${esc(d.exercise)}</div>
       <div class="hint">${esc(d.groupName)} · ${fdate(d.createdAt.slice(0, 10))}${d.minutes ? ` · ${d.minutes} мин в день` : ''}${d.comment ? `<br>💬 ${esc(d.comment)}` : ''}</div></div>
     <div class="eyebrow">Оценено ${d.graded} из ${d.total}</div>
     ${list(d.students.map(s => cell({
       lead: s.grade ? '⭐' : '📋', plain: true, cls: 'wrap', t: esc(s.name),
       s: s.grade ? (s.gradeComment ? `📝 ${esc(s.gradeComment)}` : 'оценено') : s.status === 'closed' ? 'закрыто без оценки' : 'не оценено',
-      r: s.grade ? `<b>${s.grade}/5</b>` : pill('оценить', 'warn'),
-      act: 'hwGradeAsk', p: { tid: s.taskId, name: s.name, grade: s.grade || 0, comment: s.gradeComment || '' },
+      r: s.grade ? `<b>${s.grade}/${d.scale}</b>` : pill('оценить', 'warn'),
+      act: 'hwGradeAsk', p: { tid: s.taskId, name: s.name, grade: s.grade || 0, comment: s.gradeComment || '', scale: d.scale, number: d.number },
     })))}
-    <p class="hint" style="margin-top:8px">Тап по ученику — оценка за выполнение от 1 до 5. Она сразу уходит родителям; поставленную оценку можно поменять.</p>` };
+    <p class="hint" style="margin-top:8px">Тап по ученику — оценка за выполнение от 1 до ${d.scale}. Она сразу уходит родителям; поставленную оценку можно поменять.</p>` };
 };
-ACT.hwGradeAsk = ({ tid, name, grade, comment }) => {
+ACT.hwGradeAsk = ({ tid, name, grade, comment, scale = 5, number }) => {
   state.ui.tGrade = grade;
-  sheet(`<h3>Оценка за задание</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/5` : ''}</div>
-  <div class="chips" style="margin-top:12px">${[1, 2, 3, 4, 5].map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
+  sheet(`<h3>Оценка за задание${number ? ` №${number}` : ''}</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/${scale}` : ''} · от 1 до ${scale}</div>
+  <div class="chips" style="margin-top:12px">${Array.from({ length: scale }, (_, i) => i + 1).map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
   ${field('hw-gc', 'Комментарий (необязательно)', comment, 'placeholder="Что получилось, что подтянуть" maxlength="300"')}
-  <div style="margin-top:12px">${btn('⭐ Сохранить оценку', 'hwGradeDo', { tid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+  <div style="margin-top:12px">${btn('⭐ Сохранить оценку', 'hwGradeDo', { tid, scale })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 };
-ACT.hwGradeDo = async ({ tid }) => {
+ACT.hwGradeDo = async ({ tid, scale = 5 }) => {
   const grade = state.ui.tGrade;
-  if (!grade) { toast('Выберите оценку от 1 до 5'); return; }
+  if (!grade) { toast(`Выберите оценку от 1 до ${scale}`); return; }
   try { await api(`/homework/tasks/${tid}/grade`, { method: 'POST', body: { grade, comment: val('hw-gc').trim() } }); state.ui.tGrade = 0; closeSheet(); render(); toast('Оценка сохранена, родителям отправлено'); }
   catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };

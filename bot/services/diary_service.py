@@ -271,16 +271,28 @@ class DiaryService:
         Кабинет спортсмена не нужен — задание видят родители, оценку ставит педагог."""
         return await self._tasks.add_batch(student_ids, teacher_id, exercise, minutes, comment, group_id)
 
-    async def grade_task(self, task_id: str, grade: int, comment: str = "") -> Optional[AthleteTask]:
-        """Оценка за выполнение задания 1–5; закрывает задание."""
-        if not 1 <= grade <= 5:
-            raise ValueError("grade must be 1..5")
+    async def grade_task(self, task_id: str, grade: int, comment: str = "", scale: int = 5) -> Optional[AthleteTask]:
+        """Оценка за выполнение задания по шкале педагога (`settings.homework_scale`: 1–5, у Яковлевой 1–10;
+        оценки тренировок всегда 1–5 — они дают очки рейтинга); закрывает задание."""
+        if not 1 <= grade <= scale:
+            raise ValueError(f"grade must be 1..{scale}")
         return await self._tasks.grade(task_id, grade, comment.strip()[:300])
 
     async def teacher_homework(self, teacher_id: str) -> list[AthleteTask]:
         """Задания группам, выданные педагогом (строки с batch_id), новые первыми."""
         rows = [t for t in await self._tasks.get_all() if t.teacher_id == teacher_id and t.batch_id]
         return sorted(rows, key=lambda t: (t.created_at, t.task_id), reverse=True)
+
+    async def homework_numbers(self) -> dict[str, int]:
+        """batch_id → номер задания у группы (№1, №2… по порядку выдачи у этого педагога в этой группе).
+
+        Номер не хранится: выдачи не удаляются, порядок номеров HW- не меняется, поэтому номер постоянный.
+        Нужен, чтобы родитель и педагог понимали, за какое из нескольких заданий оценка."""
+        batches: dict[tuple[str, str], set[str]] = {}
+        for t in await self._tasks.get_all():
+            if t.batch_id:
+                batches.setdefault((t.teacher_id, t.group_id), set()).add(t.batch_id)
+        return {bid: i for ids in batches.values() for i, bid in enumerate(sorted(ids), start=1)}
 
     async def student_tasks(self, student_id: str) -> list[AthleteTask]:
         """Все задания ученика (и домашние, и спортсмену), новые первыми — дневник у родителя."""

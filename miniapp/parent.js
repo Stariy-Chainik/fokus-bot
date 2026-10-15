@@ -43,7 +43,7 @@ SCREENS['p.home'] = async () => {
     c.grades.forEach(g => attention.push(cell({
       lead: '⭐', plain: true, cls: 'wrap', t: `${g.homework ? 'Оценка за задание' : 'Новая оценка'}${who(c)}`,
       s: `${fdate(g.date)}${g.topics.length ? ` · ${esc(g.topics.join(', '))}` : ''}${g.teacher ? ` · ${esc(g.teacher)}` : ''}${g.comment ? `<br>📝 ${esc(g.comment)}` : ''}`,
-      r: `<b>${g.grade}/5</b>`, act: 'pOpen', p: { id: c.id, screen: 'p.diary' },
+      r: `<b>${g.grade}/${g.scale || 5}</b>`, act: 'pOpen', p: { id: c.id, screen: 'p.diary' },
     })));
   });
   const lessonRows = h.children.map(c => {
@@ -440,10 +440,10 @@ SCREENS['p.diary'] = async ({ ym }) => {
   // задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — у всех детей (15.10.2026)
   const hw = d.homework || [];
   const hwBlock = hw.length ? `<div class="eyebrow">Задания педагога</div>${list(hw.map(t => cell({
-    lead: t.grade ? '⭐' : t.status === 'open' ? '📋' : '✔️', plain: true, cls: 'wrap', t: esc(t.exercise),
+    lead: t.grade ? '⭐' : t.status === 'open' ? '📋' : '✔️', plain: true, cls: 'wrap', t: `${t.number ? `<b>Задание №${t.number}</b> · ` : ''}${esc(t.exercise)}`,
     s: [fdate(t.createdAt.slice(0, 10)), t.teacher ? esc(t.teacher) : '', t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ')
       + (t.gradeComment ? `<br>📝 ${esc(t.gradeComment)}` : ''),
-    r: t.grade ? `<b>${t.grade}/5</b>` : t.status === 'open' ? pill('задано', 'acc') : pill('закрыто', 'mute'),
+    r: t.grade ? `<b>${t.grade}/${t.scale || 5}</b>` : t.status === 'open' ? pill('задано', 'acc') : pill('закрыто', 'mute'),
   })))}` : '';
   if (!d.athlete && !d.entries.length) {
     return { title: 'Дневник', html: `${kidChips('p.diary', { ym: period })}

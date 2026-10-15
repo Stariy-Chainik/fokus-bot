@@ -49,7 +49,7 @@ def test_whole_group_and_selected_and_grade(api):  # noqa: F811
     # всей группе: оба ученика GRP-0001; минуты необязательны
     st, r = _call(app, "POST", "/api/teacher/homework",
                   json={"groupId": "GRP-0001", "studentIds": ["STU-0001", "STU-0002"], "exercise": "Растяжка <шпагат>"})
-    assert st == 200 and r["count"] == 2
+    assert st == 200 and r["count"] == 2 and r["number"] == 1
     tasks = dp["task_repo"].items
     assert {t.student_id for t in tasks} == {"STU-0001", "STU-0002"} and len({t.batch_id for t in tasks}) == 1
     sent = dp["notifier"].sent
@@ -60,7 +60,7 @@ def test_whole_group_and_selected_and_grade(api):  # noqa: F811
     # выбранным: только Петровой; чужой ученик и чужая группа отсекаются
     st, r2 = _call(app, "POST", "/api/teacher/homework",
                    json={"groupId": "GRP-0001", "studentIds": ["STU-0002", "STU-9999"], "exercise": "Связка", "minutes": 15})
-    assert st == 200 and r2["count"] == 1 and r2["id"] != r["id"]
+    assert st == 200 and r2["count"] == 1 and r2["id"] != r["id"] and r2["number"] == 2   # №2 у этой группы
     assert _call(app, "POST", "/api/teacher/homework",
                  json={"groupId": "GRP-0404", "studentIds": ["STU-0001"], "exercise": "x"})[0] == 404
     assert _call(app, "POST", "/api/teacher/homework", json={"groupId": "GRP-0001", "studentIds": [], "exercise": "x"})[0] == 400
@@ -78,7 +78,9 @@ def test_whole_group_and_selected_and_grade(api):  # noqa: F811
     assert st == 200 and g["grade"] == 5
     task = next(t for t in dp["task_repo"].items if t.task_id == tid)
     assert (task.grade, task.status) == (5, "closed")
-    assert any(addrs == [("tg", PARENT_TG)] and "<b>5/5</b>" in text for addrs, text in dp["notifier"].sent)
+    # из сообщения ясно, за какое задание оценка: номер, дата выдачи, начало текста
+    assert any(addrs == [("tg", PARENT_TG)] and "Задание №1 от" in text and "<b>5/5</b>" in text
+               for addrs, text in dp["notifier"].sent)
     assert _call(app, "POST", f"/api/teacher/homework/tasks/{tid}/grade", json={"grade": 7})[0] == 400
     assert _call(app, "GET", f"/api/teacher/homework/{r['id']}")[1]["graded"] == 1
 
@@ -89,7 +91,26 @@ def test_whole_group_and_selected_and_grade(api):  # noqa: F811
     # родитель видит задание и оценку в «Дневнике», даже без кабинета спортсмена
     task.teacher_id = "TCH-0001"
     st, d = _parent(dp, "GET", "/api/parent/diary/STU-0001")
-    assert st == 200 and [(h["exercise"], h["grade"]) for h in d["homework"]] == [("Растяжка <шпагат>", 5)]
+    assert st == 200 and [(h["exercise"], h["grade"], h["number"], h["scale"]) for h in d["homework"]] == [
+        ("Растяжка <шпагат>", 5, 1, 5)]
+
+
+def test_ten_point_scale_for_chosen_teacher(api, monkeypatch):  # noqa: F811
+    """HOMEWORK_GRADE_SCALE=TCH-0011:10 — шкала 1–10 только у этого педагога (Яковлева), у остальных 1–5."""
+    from config.settings import settings
+    app, dp = api
+    monkeypatch.setattr(settings, "homework_grade_scales", "TCH-0001:10")
+    assert settings.homework_scale("TCH-0001") == 10 and settings.homework_scale("TCH-0002") == 5
+    r = _call(app, "POST", "/api/teacher/homework", json={"groupId": "GRP-0001", "studentIds": ["STU-0001"], "exercise": "Шпагат"})[1]
+    b = _call(app, "GET", f"/api/teacher/homework/{r['id']}")[1]
+    assert b["scale"] == 10
+    tid = b["students"][0]["taskId"]
+    assert _call(app, "POST", f"/api/teacher/homework/tasks/{tid}/grade", json={"grade": 11})[0] == 400
+    st, g = _call(app, "POST", f"/api/teacher/homework/tasks/{tid}/grade", json={"grade": 8})
+    assert st == 200 and (g["grade"], g["scale"]) == (8, 10)
+    assert any("<b>8/10</b>" in text for _addrs, text in dp["notifier"].sent)
+    st, d = _parent(dp, "GET", "/api/parent/diary/STU-0001")
+    assert [(h["grade"], h["scale"]) for h in d["homework"]] == [(8, 10)]
 
 
 @pytest.mark.parametrize("grade", [0, 6])

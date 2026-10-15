@@ -193,6 +193,17 @@ class Settings(BaseSettings):
     # Аренда считается только с этого месяца включительно (YYYY-MM); пусто — за всё время.
     hall_rent_since_period: str = Field(default="", alias="HALL_RENT_SINCE_PERIOD")
 
+    # Шкала оценки за домашнее задание группе по педагогам, по умолчанию 1–5:
+    # TCH-0011:10 — Яковлева ставит по 10-балльной (решение владельца 15.10.2026)
+    homework_grade_scales: str = Field(default="", alias="HOMEWORK_GRADE_SCALE")
+
+    def homework_scale(self, teacher_id: str) -> int:
+        for chunk in self.homework_grade_scales.replace("|", ",").split(","):
+            tid, _, value = chunk.partition(":")
+            if tid.strip() == teacher_id and value.strip().isdigit() and 2 <= int(value) <= 100:
+                return int(value)
+        return 5
+
     @property
     def hall_rent_map(self) -> dict:
         out = {}
