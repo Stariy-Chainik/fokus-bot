@@ -24,6 +24,7 @@ from typing import Any, cast
 from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_tg_id
 from bot.api.homework import homework_routes
+from bot.services.group_invite import group_invite
 from bot.api.record import RecordError, record_create, record_options
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
@@ -913,6 +914,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return await handler(request, user, teacher)
         return wrapped
 
+    async def group_invite_view(request: web.Request, user, teacher) -> web.Response:
+        """«🔗 Пригласить родителей» своей группы: короткий текст со ссылками (Telegram, MAX)."""
+        gid = request.match_info["gid"]
+        if gid not in await _own_group_ids(teacher):
+            return _json({"error": "not_found"}, status=404)
+        return _json(await group_invite(gid, (await _group_names()).get(gid, gid), bot))
+
     async def _own_group_ids(teacher) -> set:
         return set(hide_service_groups(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id)))
 
@@ -1403,6 +1411,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),
+        ("GET", "/groups/{gid}/invite", group_invite_view),
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
         ("GET", "/students/{sid}", student), ("PATCH", "/students/{sid}", student_rename),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),

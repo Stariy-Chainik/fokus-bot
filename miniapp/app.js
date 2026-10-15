@@ -907,7 +907,7 @@ SCREENS['a.group'] = async ({ id, ym }) => {
     <div class="eyebrow">Состав · ${active.length}</div>${active.length ? `<div class="list">${active.map(m => memberRow(m)).join('')}</div>` : '<div class="empty">Состав пуст</div>'}
     ${left.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Ушли <span class="hint">· ${left.length}</span></span><span class="r hint">не в составе</span></summary>
       <div class="accbody"><div class="accsum">Уже убраны из группы: с месяца ухода абонемент не начисляется. Строка хранится ради прошлых месяцев — за них уже выставлены и оплачены счета.</div>${left.map(m => memberRow(m, true)).join('')}</div></details>` : ''}
-    <div style="margin-top:10px">${goBtn('➕ Добавить ученика', 'a.group.addst', { id, name: g.name }, 'sec')}</div>
+    <div style="margin-top:10px">${btn('🔗 Пригласить родителей', 'inviteOpen', { gid: id })}${goBtn('➕ Добавить ученика', 'a.group.addst', { id, name: g.name }, 'sec')}</div>
     <div class="eyebrow">Расписание</div>
     ${g.schedule.length ? list(g.schedule.map(x => `<div class="cell static"><span class="lead plain">🕒</span><span><div class="t">${WD_FULL[x.weekday - 1]} · ${x.start}–${x.end}</div>${x.teacherId ? `<div class="s">${esc((g.teachers.find(t => t.id === x.teacherId) || { name: x.teacherId }).name)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="schedDel" data-p='${esc(JSON.stringify({ gid: id, slot: x.id }))}' aria-label="Удалить">✖</button></span></div>`)) : '<div class="card pad hint">Расписания нет — напоминания педагогу не приходят. В 21:00 бот напомнит отметить занятие, если по расписанию оно было, а в боте его нет.</div>'}
     <div style="margin-top:10px">${btn('➕ Время занятия', 'schedForm', { gid: id, teachers: g.teachers.filter(t => t.assigned).map(t => [t.id, t.name]) }, 'sec')}</div>
@@ -1128,6 +1128,32 @@ function rwGroupChips(o, w, items, idsOf) {
   return `<div class="chips scroll">${chip('', `Все · ${items.length}`, !w.fgid)}${counts.map(([g, n]) => chip(g.id, `${esc(plainName(g.name))} · ${n}`, w.fgid === g.id)).join('')}</div>`;
 }
 function yesterdayOf(today) { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+Object.assign(ACT, {
+  /* «🔗 Пригласить родителей» (решение владельца 15.10.2026): короткий текст со ссылками группы — вместо
+     Google-документа. Админ и педагог: один и тот же лист, путь API у каждой роли свой. */
+  inviteOpen: async ({ gid }) => {
+    try {
+      const d = await api(`/groups/${gid}/invite`);
+      sheet(`<h3>Пригласить родителей</h3><div class="hint">Отправьте это сообщение в чат родителей группы «${esc(d.groupName)}». Родитель откроет ссылку, запустит бота и выберет ребёнка.</div>
+        <div class="card pad" style="white-space:pre-wrap;user-select:text;-webkit-user-select:text;font-size:14px;margin-top:10px">${esc(d.text)}</div>
+        <div style="margin-top:12px">${d.tg ? btn('✈️ Отправить в Telegram', 'inviteShare', { url: d.tg, text: d.shareText }) : ''}${btn('📋 Скопировать текст', 'inviteCopy', { text: d.text }, 'sec')}${btn('Закрыть', 'closeSheet', {}, 'ghost')}</div>`);
+    } catch (e) { toast(errText(e)); }
+  },
+  inviteShare: ({ url, text }) => {
+    const u = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(u); else openExternal(u);
+  },
+  inviteCopy: async ({ text }) => {
+    try { await navigator.clipboard.writeText(text); toast('Текст скопирован — вставьте в чат родителей'); return; } catch (e) { /* ниже — запасной способ */ }
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    toast(ok ? 'Текст скопирован — вставьте в чат родителей' : 'Не удалось скопировать — выделите текст и скопируйте вручную');
+  },
+});
 Object.assign(ACT, {
   rwDate: ({ v }) => { rw().date = v; render(); },
   rwFilter: ({ v }) => { rw().fgid = v; render(); },

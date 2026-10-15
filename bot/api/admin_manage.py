@@ -12,6 +12,7 @@ import logging
 from aiohttp import web
 
 from bot.models.enums import GroupBillingMode, StudentGroupTier
+from bot.services.group_invite import group_invite
 from bot.services.kindergarten import clean_value, is_kindergarten_group
 from bot.services.membership import leave_group
 from bot.services.student_service import TierToggleError
@@ -114,6 +115,13 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         return _json({"ok": ok}, status=200 if ok else 404)
 
     # ── группы ───────────────────────────────────────────────────────────
+    async def group_invite_view(request: web.Request, user) -> web.Response:
+        """«🔗 Пригласить родителей»: короткий текст со ссылками группы (Telegram, MAX)."""
+        g = await group_repo.get_by_id(request.match_info["gid"])
+        if g is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json(await group_invite(g.group_id, g.name, bot))
+
     async def group_card(request: web.Request, user) -> web.Response:
         gid = request.match_info["gid"]
         g = await group_repo.get_by_id(gid)
@@ -521,6 +529,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         ("GET", "/branches", branches), ("POST", "/branches", branch_add),
         ("PATCH", "/branches/{bid}", branch_rename), ("DELETE", "/branches/{bid}", branch_delete),
         ("GET", "/groups/{gid}", group_card), ("POST", "/groups", group_add),
+        ("GET", "/groups/{gid}/invite", group_invite_view),
         ("PATCH", "/groups/{gid}", group_patch), ("DELETE", "/groups/{gid}", group_delete),
         ("PUT", "/groups/{gid}/billing", group_billing),
         ("PUT", "/groups/{gid}/overrides", override_put), ("DELETE", "/groups/{gid}/overrides", override_delete),
