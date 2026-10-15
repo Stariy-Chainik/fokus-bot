@@ -100,14 +100,11 @@ const myName = () => {
   const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   return (u && u.first_name) || '';
 };
-/* Логотип в шапке (15–16.10.2026): золотая «F» с короной и искрами непрерывно вращается — бесшовная петля 4,4 с
-   (полный оборот из ролика «Focus_3D_Gold_Sparks», конец и начало склеены плавным переходом). «Уменьшить
-   движение» — неподвижный кадр. */
-const logoHtml = () => {
-  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return `<span class="logo">${still ? '<img src="logo-end.jpg" alt="Фокус" width="52" height="52">'
-    : '<video src="logo-loop.mp4" poster="logo-end.jpg" autoplay muted loop playsinline preload="auto" disablepictureinpicture width="52" height="52" aria-label="Фокус"></video>'}</span>`;
-};
+/* Логотип в шапке (15–16.10.2026): золотая «F» с короной и искрами непрерывно вращается — анимированный WebP
+   (бесшовная петля полного оборота из ролика «Focus_3D_Gold_Sparks», 156 px, 20 к/с, 4,4 с, ~170 КБ). Картинка,
+   а не <video>: видео телефон может не запустить сам (энергосбережение, «уменьшить движение») и рисует поверх
+   кнопку ▶. «Уменьшить движение» — неподвижный кадр. */
+const logoHtml = () => `<span class="logo"><picture><source srcset="logo-loop.webp" media="(prefers-reduced-motion: no-preference)" type="image/webp"><img src="logo-end.jpg" alt="Фокус" width="52" height="52"></picture></span>`;
 /* Шапка кабинета: логотип школы, приветствие и строка роли. */
 const hero = sub => `<div class="hero">${logoHtml()}
   <div><div class="hi">${hello()}${myName() ? `, ${esc(myName())}` : ''}</div><div class="hint">${sub}</div></div></div>`;
