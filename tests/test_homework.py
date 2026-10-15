@@ -70,6 +70,9 @@ def test_whole_group_and_selected_and_grade(api):  # noqa: F811
     assert st == 200 and [(b["exercise"], b["total"], b["graded"]) for b in lst["batches"]] == [
         ("Связка", 1, 0), ("Растяжка <шпагат>", 2, 0)]                     # новые первыми
     assert lst["groups"] == [{"id": "GRP-0001", "name": "БП Джаз"}]
+    assert [b["single"] for b in lst["batches"]] == ["Петрова Анна", ""]       # индивидуальное — видно, кому
+    # из карточки ученика задание выдаётся от его группы
+    assert _call(app, "GET", "/api/teacher/students/STU-0002")[1]["groupIds"] == ["GRP-0001"]
 
     st, b = _call(app, "GET", f"/api/teacher/homework/{r['id']}")
     assert st == 200 and [s["name"] for s in b["students"]] == ["Иванов Иван", "Петрова Анна"]

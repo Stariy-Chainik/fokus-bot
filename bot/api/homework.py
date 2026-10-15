@@ -1,6 +1,6 @@
-"""Домашние задания группе в кабинете педагога (решение владельца 15.10.2026).
+"""Домашние задания в кабинете педагога (решение владельца 15.10.2026).
 
-Педагог выдаёт одно задание всей своей группе или выбранным ученикам: в листе `athlete_tasks` — строка на
+Педагог выдаёт задание всей своей группе, нескольким ученикам или одному (из карточки ученика): в листе `athlete_tasks` — строка на
 каждого с общим номером выдачи `batch_id` (HW-…). Кабинет спортсмена не нужен: задание уходит сообщением
 родителям (и самому ученику, если кабинет есть), видно в «Дневнике» кабинета родителя.
 За выполнение педагог ставит каждому оценку по своей шкале (`settings.homework_scale`: 1–5, у Яковлевой 1–10)
@@ -67,12 +67,14 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         _background.add(task)
         task.add_done_callback(_background.discard)
 
-    def _batch_row(tasks: list, names: dict, numbers: dict) -> dict:
+    def _batch_row(tasks: list, names: dict, numbers: dict, students: dict) -> dict:
         t0 = tasks[0]
         return {"id": t0.batch_id, "number": numbers.get(t0.batch_id, 0), "exercise": t0.exercise,
                 "minutes": t0.minutes, "comment": t0.comment, "groupId": t0.group_id,
                 "groupName": names.get(t0.group_id, ""), "createdAt": t0.created_at,
-                "total": len(tasks), "graded": sum(1 for t in tasks if t.grade)}
+                "total": len(tasks), "graded": sum(1 for t in tasks if t.grade),
+                # индивидуальное задание (один ученик) — в списке видно, кому
+                "single": students.get(t0.student_id, t0.student_id) if len(tasks) == 1 else ""}
 
     async def hw_list(request: web.Request, user, teacher) -> web.Response:
         """Выдачи педагога (новые первыми), `?gid=` — одной группы; плюс свои группы для «выдать»."""
@@ -80,6 +82,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             return _unavailable()
         gid = request.query.get("gid") or ""
         names, numbers = await group_names(), await diary_service.homework_numbers()
+        students = {s.student_id: s.name for s in await student_repo.get_all()}
         own = await own_group_ids(teacher)
         batches: dict[str, list] = {}
         for t in await diary_service.teacher_homework(teacher.teacher_id):
@@ -89,7 +92,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             "groups": sorted(({"id": g, "name": names.get(g, g)} for g in own), key=lambda g: g["name"]),
             "groupId": gid, "groupName": names.get(gid, "") if gid else "",
             "scale": settings.homework_scale(teacher.teacher_id),
-            "batches": [_batch_row(ts, names, numbers) for ts in batches.values()],
+            "batches": [_batch_row(ts, names, numbers, students) for ts in batches.values()],
         })
 
     async def hw_batch(request: web.Request, user, teacher) -> web.Response:
@@ -101,7 +104,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             return _json({"error": "not_found"}, status=404)
         students = {s.student_id: s.name for s in await student_repo.get_all()}
         return _json({
-            **_batch_row(tasks, await group_names(), await diary_service.homework_numbers()),
+            **_batch_row(tasks, await group_names(), await diary_service.homework_numbers(), students),
             "scale": settings.homework_scale(teacher.teacher_id),
             "students": sorted(({"taskId": t.task_id, "studentId": t.student_id,
                                  "name": students.get(t.student_id, t.student_id), "grade": t.grade,
@@ -110,7 +113,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         })
 
     async def hw_create(request: web.Request, user, teacher) -> web.Response:
-        """Выдать задание группе: {groupId, studentIds, exercise, minutes?, comment?}."""
+        """Выдать задание: {groupId, studentIds, exercise, minutes?, comment?} — всей группе или выбранным."""
         if diary_service is None:
             return _unavailable()
         try:

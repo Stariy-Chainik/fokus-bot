@@ -226,7 +226,7 @@ SCREENS['t.group'] = async ({ id, ym }) => {
     : tab === 'solo'
       ? (g.soloists.length ? list(g.soloists.map(s => cell({ lead: initials(s.name), t: esc(s.name), go: 't.student', p: { id: s.id } }))) : '<div class="empty">Солистов нет</div>')
       : (g.students.length ? list(g.students.map(s => tMemberRow(g, id, s))) : '<div class="empty">В группе никого нет</div>')
-        + `<div style="margin-top:12px">${goBtn('📋 Задание группе', 't.hw.new', { gid: id })}${goBtn('📒 Задания группы и оценки', 't.hw', { gid: id }, 'sec')}${btn('➕ Добавить ученика', 'tAddAsk', { gid: id, group: g.name }, 'sec')}</div>`;
+        + `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: id })}${goBtn('📒 Домашние задания и оценки', 't.hw', { gid: id }, 'sec')}${btn('➕ Добавить ученика', 'tAddAsk', { gid: id, group: g.name }, 'sec')}</div>`;
   return { title: g.name, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div></div>
     ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`],
@@ -271,6 +271,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
     ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}
+    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}</div>` : ''}
     ${state.me.canBill ? `<div style="margin-top:12px">${goBtn(`🧾 Счёт за ${MON_NOM[+(s.period).slice(5) - 1].toLowerCase()}`, 't.bill', { sid: id, ym: s.period }, 'sec')}</div>` : ''}` };
 };
 
@@ -322,7 +323,7 @@ SCREENS['t.money'] = async ({ ym }) => {
 SCREENS['t.diary'] = async () => {
   const d = await api('/diary');
   return { title: 'Дневники', html: `
-    <div class="chips"><button class="chip" data-go="t.hw" data-p='{}'>📋 Задания группам</button><button class="chip" data-go="t.rating" data-p='${esc(JSON.stringify({ ym: d.period }))}'>🏆 Рейтинг</button></div>
+    <div class="chips"><button class="chip" data-go="t.hw" data-p='{}'>📋 Домашние задания</button><button class="chip" data-go="t.rating" data-p='${esc(JSON.stringify({ ym: d.period }))}'>🏆 Рейтинг</button></div>
     ${d.athletes.length ? list(d.athletes.map(a => cell({
       lead: initials(a.name), t: esc(a.name), s: a.unrated ? `🆕 ${plural(a.unrated, ['запись', 'записи', 'записей'])} без оценки` : 'всё оценено',
       r: a.unrated ? pill(String(a.unrated), 'warn') : '', go: 't.diary.s', p: { id: a.id },
@@ -379,33 +380,35 @@ SCREENS['t.rating'] = async ({ ym }) => {
     <p class="hint" style="margin-top:8px">Очки = минуты × оценка (без оценки коэффициент 3).</p>` };
 };
 
-/* ── Задания группе (решение владельца 15.10.2026) ──────────────────────
-   Одно задание всей группе или выбранным ученикам; за выполнение — оценка каждому 1–5.
+/* ── Домашние задания (решение владельца 15.10.2026) ────────────────────
+   Задание всей группе, нескольким ученикам или одному (из карточки ученика); за выполнение — оценка
+   каждому по шкале педагога (1–5, у Яковлевой 1–10). Номер задания — по порядку у группы.
    Кабинет спортсмена не нужен: задание и оценка уходят родителям, видны в их «Дневнике». */
 SCREENS['t.hw'] = async ({ gid }) => {
   const d = await api(`/homework${gid ? `?gid=${gid}` : ''}`);
   const start = gid
     ? goBtn('📋 Выдать новое задание', 't.hw.new', { gid })
-    : d.groups.length ? `<div class="eyebrow">Выдать задание группе</div>${list(d.groups.map(g => cell({ lead: '👥', plain: true, t: esc(g.name), go: 't.hw.new', p: { gid: g.id } })))}` : '';
-  return { title: gid ? 'Задания группы' : 'Задания группам', html: `
+    : d.groups.length ? `<div class="eyebrow">Выдать задание · выберите группу</div>${list(d.groups.map(g => cell({ lead: '👥', plain: true, t: esc(g.name), go: 't.hw.new', p: { gid: g.id } })))}` : '';
+  return { title: 'Домашние задания', html: `
     ${gid ? `<div class="card pad"><div style="font-weight:800;font-size:16px">${esc(d.groupName)}</div></div><div style="margin:12px 0">${start}</div>` : ''}
     <div class="eyebrow">Выданные задания</div>
     ${d.batches.length ? list(d.batches.map(b => cell({
       lead: b.graded === b.total ? '✅' : '📋', plain: true, cls: 'wrap', t: `${b.number ? `<b>№${b.number}</b> · ` : ''}${esc(b.exercise)}`,
-      s: `${gid ? '' : `${esc(b.groupName)} · `}${fdate(b.createdAt.slice(0, 10))} · ${plural(b.total, ['ученик', 'ученика', 'учеников'])}`,
+      s: `${gid ? '' : `${esc(b.groupName)} · `}${fdate(b.createdAt.slice(0, 10))} · ${b.single ? `👤 ${esc(b.single)}` : plural(b.total, ['ученик', 'ученика', 'учеников'])}`,
       r: pill(b.graded === b.total ? 'оценено' : `оценено ${b.graded}/${b.total}`, b.graded === b.total ? 'ok' : b.graded ? 'warn' : 'mute'),
       go: 't.hw.b', p: { id: b.id },
     }))) : '<div class="empty">Заданий пока нет</div>'}
     ${gid ? '' : start}` };
 };
 
-SCREENS['t.hw.new'] = async ({ gid }) => {
+SCREENS['t.hw.new'] = async ({ gid, only }) => {
   const g = await api(`/groups/${gid}`);
-  if (!state.ui.hwSel || state.ui.hwSel.gid !== gid) state.ui.hwSel = { gid, ids: new Set(g.students.map(s => s.id)) };
+  const key = `${gid}:${only || ''}`;      // из карточки ученика — отмечен только он
+  if (!state.ui.hwSel || state.ui.hwSel.key !== key) state.ui.hwSel = { key, ids: new Set(only ? [only] : g.students.map(s => s.id)) };
   const sel = state.ui.hwSel.ids;
-  return { title: 'Задание группе', html: `
+  return { title: 'Домашнее задание', html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div>
-      <div class="hint">Задание получит каждый отмеченный ученик: сообщение уйдёт родителям (и самому ученику, если у него кабинет спортсмена). Потом вы поставите каждому оценку за выполнение.</div></div>
+      <div class="hint">Задание всей группе, нескольким ученикам или одному — отметьте, кому. Сообщение уйдёт родителям (и самому ученику, если у него кабинет спортсмена). Потом вы поставите каждому оценку за выполнение.</div></div>
     ${field('hw-e', 'Что задано', '', 'placeholder="Растяжка каждый день, выучить связку…" maxlength="300" autocomplete="off"')}
     ${field('hw-m', 'Минут в день (необязательно)', '', 'inputmode="numeric" placeholder="например, 15"')}
     ${field('hw-c', 'Комментарий (необязательно)', '', 'maxlength="300" autocomplete="off"')}
@@ -448,7 +451,7 @@ ACT.hwSend = async ({ gid }) => {
 SCREENS['t.hw.b'] = async ({ id }) => {
   const d = await api(`/homework/${id}`);
   return { title: d.number ? `Задание №${d.number}` : 'Задание', html: `
-    <div class="card pad"><div class="hint">${d.number ? `Задание №${d.number} от ${fdate(d.createdAt.slice(0, 10))}` : ''}</div><div style="font-weight:800;font-size:16px">${esc(d.exercise)}</div>
+    <div class="card pad"><div class="hint">${d.number ? `Задание №${d.number} от ${fdate(d.createdAt.slice(0, 10))}` : ''}${d.single ? ' · индивидуальное' : ''}</div><div style="font-weight:800;font-size:16px">${esc(d.exercise)}</div>
       <div class="hint">${esc(d.groupName)} · ${fdate(d.createdAt.slice(0, 10))}${d.minutes ? ` · ${d.minutes} мин в день` : ''}${d.comment ? `<br>💬 ${esc(d.comment)}` : ''}</div></div>
     <div class="eyebrow">Оценено ${d.graded} из ${d.total}</div>
     ${list(d.students.map(s => cell({

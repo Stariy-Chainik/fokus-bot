@@ -667,6 +667,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
+            "groupIds": [g for g in gids if g in own_visible],     # «📋 Домашнее задание» ученику — от его группы
             "subscriptions": subscriptions,
             "period": ym,
             "lessons": [_lesson_brief(ls, teacher, groups_map, names)
