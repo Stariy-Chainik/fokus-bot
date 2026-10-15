@@ -100,8 +100,20 @@ const myName = () => {
   const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   return (u && u.first_name) || '';
 };
+/* Логотип (15.10.2026): золотая «F» с короной и искрами — ролик 8 с проигрывается один раз за открытие кабинета
+   и замирает на последнем кадре; тап — ещё раз. Повторная отрисовка шапки во время ролика продолжает его с того же
+   места (#t=), а не начинает заново. «Уменьшить движение» — сразу последний кадр. */
+const LOGO_SEC = 8;
+const logoStill = '<img src="logo-end.jpg" alt="Фокус" width="52" height="52">';
+const logoVideo = t => `<video src="logo-intro.mp4${t > 0.3 ? `#t=${t.toFixed(1)}` : ''}" poster="logo-end.jpg" autoplay muted playsinline preload="auto" disablepictureinpicture width="52" height="52" aria-hidden="true"></video>`;
+const logoHtml = () => {
+  const still = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (!state.logoAt) state.logoAt = Date.now();
+  const t = (Date.now() - state.logoAt) / 1000;
+  return `<button class="logo" data-act="logoReplay" aria-label="Фокус">${still || t >= LOGO_SEC ? logoStill : logoVideo(t)}</button>`;
+};
 /* Шапка кабинета: логотип школы, приветствие и строка роли. */
-const hero = sub => `<div class="hero"><picture class="logo"><source srcset="logo-anim.webp" media="(prefers-reduced-motion: no-preference)" type="image/webp"><img src="logo.png" alt="Фокус" width="52" height="52"></picture>
+const hero = sub => `<div class="hero">${logoHtml()}
   <div><div class="hi">${hello()}${myName() ? `, ${esc(myName())}` : ''}</div><div class="hint">${sub}</div></div></div>`;
 
 /* Имя группы без эмодзи — для чипов и других узких мест (в карточках эмодзи остаются). */
@@ -1138,6 +1150,10 @@ Object.assign(ACT, {
         <div class="card pad" style="white-space:pre-wrap;user-select:text;-webkit-user-select:text;font-size:14px;margin-top:10px">${esc(d.text)}</div>
         <div style="margin-top:12px">${d.tg ? btn('✈️ Отправить в Telegram', 'inviteShare', { url: d.tg, text: d.shareText }) : ''}${btn('📋 Скопировать текст', 'inviteCopy', { text: d.text }, 'sec')}${btn('Закрыть', 'closeSheet', {}, 'ghost')}</div>`);
     } catch (e) { toast(errText(e)); }
+  },
+  logoReplay: () => {
+    state.logoAt = Date.now();
+    document.querySelectorAll('.hero .logo').forEach(el => { el.innerHTML = logoVideo(0); });
   },
   inviteShare: ({ url, text }) => {
     const u = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
