@@ -102,13 +102,14 @@ const myName = () => {
 };
 /* Логотип (15.10.2026): золотая «F» с короной и искрами — ролик 8 с проигрывается один раз за открытие кабинета
    и замирает на последнем кадре; тап — ещё раз. Повторная отрисовка шапки во время ролика продолжает его с того же
-   места (#t=), а не начинает заново. «Уменьшить движение» — сразу последний кадр. */
+   места (#t=), а не начинает заново. «Уменьшить движение» — сразу последний кадр. После заставки при запуске
+   (index.html, тот же ролик крупно) в шапке сразу последний кадр. */
 const LOGO_SEC = 8;
 const logoStill = '<img src="logo-end.jpg" alt="Фокус" width="52" height="52">';
 const logoVideo = t => `<video src="logo-intro.mp4${t > 0.3 ? `#t=${t.toFixed(1)}` : ''}" poster="logo-end.jpg" autoplay muted playsinline preload="auto" disablepictureinpicture width="52" height="52" aria-hidden="true"></video>`;
 const logoHtml = () => {
   const still = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-  if (!state.logoAt) state.logoAt = Date.now();
+  if (!state.logoAt) state.logoAt = window.__splashOn ? 1 : Date.now();      // после заставки ролик уже показан
   const t = (Date.now() - state.logoAt) / 1000;
   return `<button class="logo" data-act="logoReplay" aria-label="Фокус">${still || t >= LOGO_SEC ? logoStill : logoVideo(t)}</button>`;
 };
