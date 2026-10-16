@@ -49,7 +49,8 @@ def test_month_flow_classifies_new_gone_and_moves():
         ("Остался Коля", ["ВБ ХГ Младшая 🤸"], "ушёл из группы, остался в ВБ ХГ Средняя"),
         ("Переходов Миша", ["ВБ ХГ Средняя"], "из ВБ ХГ Младшая 🤸"),
         ("Старов Петя", ["БП Джаз"], "ушёл из группы, остался в ВБ ХГ Средняя")]
-    assert r.net == 1 and r.as_dict()["counts"] == {"new": 2, "gone": 1, "moves": 4, "deleted": 2, "net": 1}
+    assert r.net == 1 and r.as_dict()["counts"] == {"new": 2, "gone": 1, "deleted": 2, "net": 1}
+    assert "moves" not in r.as_dict()                       # переводы наружу не отдаются (16.10.2026)
 
 
 def test_transfer_event_counts_per_visit_source_as_left():
@@ -66,7 +67,9 @@ def test_home_and_flow_api(monkeypatch):
         if x.student_id == "STU-0002":
             x.joined_period = YM                         # Петрова пришла в этом месяце
     h = _call(dp, "GET", "/api/admin/home", tg_id=ADMIN_TG)[1]
-    assert h["flow"] == {"new": 1, "gone": 0, "moves": 0, "deleted": 0, "net": 1}
+    assert h["flow"] == {"new": 1, "gone": 0, "deleted": 0, "net": 1}
     st, d = _call(dp, "GET", f"/api/admin/flow?ym={YM}", tg_id=ADMIN_TG)
     assert st == 200 and [x["name"] for x in d["new"]] == ["Петрова Анна"] and d["counts"]["net"] == 1
+    assert len(d["months"]) == 6 and d["months"][0] == {"ym": YM, "new": 1, "gone": 0, "deleted": 0, "net": 1}
+    assert all(m["new"] == 0 for m in d["months"][1:])      # прошлые месяцы — без движения
     assert _call(dp, "GET", "/api/admin/flow?ym=2020-01", tg_id=ADMIN_TG)[1]["counts"]["net"] == 0

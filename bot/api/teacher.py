@@ -1224,6 +1224,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             if led and led.paid > amount:
                 return _json({"error": "paid_more", "message": f"За этот месяц уже оплачено {led.paid} ₽ — "
                               f"сумму ниже оплаченного поставить нельзя"}, status=409)
+            if old == amount:
+                # повторное «Сохранить» с той же суммой (16.10.2026: Яковлева нажала трижды, администратору
+                # пришло три сообщения «изменил абонемент») — ничего не пишем и никого не беспокоим
+                return _json({"ok": True, "old": old, "amount": amount, "unchanged": True})
             await dp["subscription_override_repo"].upsert(gid, period, sid, amount)
             await payment_service.ledger_for(s, period)                  # остаток пересчитать сразу
         await activity.record(activity.PAYMENT, f"Абонемент {sid} в {gid} за {period}: {old} → {amount} ₽"

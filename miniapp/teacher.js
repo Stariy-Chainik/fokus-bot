@@ -545,10 +545,15 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
 ACT.tSubAsk = ({ sid, ym, gid, total, paid, student }) => sheet(`<h3>Абонемент за ${fmon(ym)}</h3><div class="hint">${esc(student)}. Сейчас начислено ${fmt(total)}${paid ? `, оплачено ${fmt(paid)}` : ''}. Новая сумма действует только на этот месяц — например, если ребёнок пришёл в середине месяца.</div>
   ${field('sub-a', 'Сумма абонемента за месяц, ₽', String(total), 'inputmode="numeric"')}${field('sub-r', 'Причина (необязательно)', '', 'placeholder="пришла с 15 числа, 2 занятия…"')}
   <div style="margin-top:12px">${btn('💾 Сохранить', 'tSubDo', { sid, ym, gid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+let subSaving = false;        // повторный тап по «Сохранить», пока идёт запрос, — не второй запрос (16.10.2026)
 ACT.tSubDo = async ({ sid, ym, gid }) => {
   const amount = +val('sub-a'); if (!(amount >= 0) || val('sub-a').trim() === '') { toast('Укажите сумму'); return; }
-  try { const r = await api(`/bills/student/${sid}/subscription`, { method: 'PUT', body: { ym, groupId: gid, amount, reason: val('sub-r').trim() } }); closeSheet(); state.ui.tbill = null; render(); toast(`Абонемент за месяц: ${fmt(r.old)} → ${fmt(r.amount)}`); }
+  if (subSaving) return;
+  subSaving = true;
+  document.querySelectorAll('[data-act="tSubDo"]').forEach(b => { b.disabled = true; b.textContent = '⏳ Сохраняю…'; });
+  try { const r = await api(`/bills/student/${sid}/subscription`, { method: 'PUT', body: { ym, groupId: gid, amount, reason: val('sub-r').trim() } }); closeSheet(); state.ui.tbill = null; render(); if (r.unchanged) { toast('Сумма не изменилась'); return; } toast(`Абонемент за месяц: ${fmt(r.old)} → ${fmt(r.amount)}`); }
   catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  finally { subSaving = false; }
 };
 function tbillTotal() {
   const a = state.ui.tbill; if (!a || !a.data) return 0;

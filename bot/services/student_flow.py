@@ -8,7 +8,9 @@
   или карточка заведена в этом месяце без группы;
 - **gone** («ушли») — ушли из школы: членство закончилось в этом месяце (`left_period` = месяц или «убран из
   группы» по посещению) и других групп не осталось;
-- **moves** — внутри школы: перешёл из группы в группу, добавлен ещё в одну, ушёл из одной группы, оставшись в другой;
+- **moves** — внутри школы: перешёл из группы в группу, добавлен ещё в одну, ушёл из одной группы, оставшись в другой —
+  считаются, чтобы не попасть в new/gone, но **наружу не отдаются** (решение владельца 16.10.2026: переводы на сводке
+  не показывать, достаточно ленты событий);
 - **deleted** — удалённые в этом месяце карточки: отдельным списком и **в «ушли» не считаются** — на проде это в
   основном чистка дублей (16.10.2026: 17 удалений за октябрь без единого имени); ушедшего ученика отмечают
   «ушёл из группы», и он попадает в gone.
@@ -56,12 +58,14 @@ class FlowReport:
     def net(self) -> int:
         return len(self.new) - len(self.gone)
 
+    @property
+    def counts(self) -> dict:
+        return {"new": len(self.new), "gone": len(self.gone), "deleted": len(self.deleted), "net": self.net}
+
     def as_dict(self) -> dict:
         return {"period": self.period, "new": [x.as_dict() for x in self.new],
-                "gone": [x.as_dict() for x in self.gone], "moves": [x.as_dict() for x in self.moves],
-                "deleted": [x.as_dict() for x in self.deleted],
-                "counts": {"new": len(self.new), "gone": len(self.gone), "moves": len(self.moves),
-                           "deleted": len(self.deleted), "net": self.net}}
+                "gone": [x.as_dict() for x in self.gone], "deleted": [x.as_dict() for x in self.deleted],
+                "counts": self.counts}
 
 
 def _month_word(period: str) -> str:

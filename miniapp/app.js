@@ -289,8 +289,9 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
 
-/* Движение учеников за месяц (решение владельца 16.10.2026): пришли в школу, ушли из школы, переводы между
-   группами. Считает сервер (`student_flow.month_flow`) по составам групп и ленте событий. */
+/* Движение учеников (решение владельца 16.10.2026): пришли в школу и ушли из школы — то, что меняет бюджет
+   клуба; переводы между группами не показываются (они в ленте событий). Считает сервер
+   (`student_flow.month_flow`) по составам групп и ленте событий; внизу — те же числа по последним месяцам. */
 SCREENS['a.flow'] = async ({ ym }) => {
   ym = ym || lastPeriods(1)[0];
   const d = await api(`/flow?ym=${ym}`);
@@ -305,10 +306,13 @@ SCREENS['a.flow'] = async ({ ym }) => {
     <div class="kpis">${kpi(`+${d.counts.new}`, `пришли за ${mon}`, d.counts.new ? 'ok' : '')}${kpi(`−${d.counts.gone}`, `ушли за ${mon} · итог ${net > 0 ? '+' : ''}${net}`, d.counts.gone ? 'bad' : '')}</div>
     ${section('Пришли в школу', d.new, '➕', 'Новых учеников нет')}
     ${section('Ушли из школы', d.gone, '➖', 'Никто не ушёл')}
-    ${section('Переводы внутри школы', d.moves, '🔄', 'Переводов нет')}
+    <div class="eyebrow">По месяцам</div>
+    ${list(d.months.map(m => cell({ lead: m.ym === ym ? '●' : '○', plain: true, t: monthLabel(m.ym),
+      s: `пришли ${m.new} · ушли ${m.gone}`, r: `<b class="money ${m.net > 0 ? 'ok' : m.net < 0 ? 'bad' : ''}">${m.net > 0 ? '+' : ''}${m.net}</b>`,
+      go: 'a.flow', p: { ym: m.ym } })))}
     ${d.deleted.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Удалены карточки <span class="hint">· ${d.deleted.length}</span></span><span class="r hint">не в «ушли»</span></summary>
       <div class="accbody"><div class="accsum">Удалённые карточки в «ушли» не считаются: обычно это дубли и ошибочные записи. Ушедшего ученика отмечайте «ушёл из группы» — тогда он попадёт в список выше.</div>${d.deleted.map(x => cell({ lead: '🗑', plain: true, cls: 'wrap', t: esc(x.name), s: [x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · ') })).join('')}</div></details>` : ''}
-    <p class="hint" style="margin-top:8px">Пришёл — первое членство в группе началось в этом месяце. Ушёл — членство закончилось с этого месяца и других групп не осталось. Тап по ученику — карточка.</p>` };
+    <p class="hint" style="margin-top:8px">Пришёл — впервые в школе: до этого месяца не числился ни в одной группе. Ушёл — членство закончилось с этого месяца и других групп не осталось. Переводы между группами сюда не входят — они в «Событиях». Тап по ученику — карточка.</p>` };
 };
 
 /* «Деньги»: всё про оплаты и финансы одной вкладкой (раньше — «Оплаты» и «Финансы»). */

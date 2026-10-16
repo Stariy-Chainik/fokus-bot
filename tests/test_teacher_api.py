@@ -762,6 +762,10 @@ def test_billing_teacher_sets_subscription_amount_for_the_month(api, monkeypatch
                       json={"ym": YM, "groupId": "GRP-0001", "amount": 3000, "reason": "пришёл с 15 числа"})
     assert status == 200 and (r["old"], r["amount"]) == (6000, 3000)
     assert bot.sent and "изменил абонемент" in bot.sent[0][1] and "6000 ₽ → стало 3000 ₽" in bot.sent[0][1]
+    # повторное «Сохранить» с той же суммой — без записи и без второго сообщения (16.10.2026, три сообщения от Яковлевой)
+    status, r = _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription", bot=bot,
+                      json={"ym": YM, "groupId": "GRP-0001", "amount": 3000})
+    assert status == 200 and r["unchanged"] is True and len(bot.sent) == 1
     bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")[1]
     assert next(x for x in bill["rows"] if x["key"] == "SUB:GRP-0001")["total"] == 3000
     asyncio.run(dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 3000, ADMIN_TG, ["SUB:GRP-0001"], None, "cash"))

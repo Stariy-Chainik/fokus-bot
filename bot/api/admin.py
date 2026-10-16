@@ -205,31 +205,42 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                                  key=lambda x: (-x["plan"], x["name"])),
             },
             "studentsCount": len(await student_repo.get_all()),
-            "flow": (await _flow(period)).as_dict()["counts"],      # плитки «пришли / ушли» (16.10.2026)
+            "flow": (await _flow(period)).counts,                   # плитки «пришли / ушли» (16.10.2026)
             "activityToday": await _activity_count(today),
             # колокольчик «События»: новые с последнего просмотра (?seen= — ts последнего просмотренного события)
             "activityNew": await _activity_count(request.query.get("seen") or today, strict=bool(request.query.get("seen"))),
         })
 
-    async def _flow(period: str):
-        """Движение учеников за месяц: составы групп + лента событий месяца (`student_flow.month_flow`)."""
+    FLOW_MONTHS = 6                                   # помесячная статистика на экране «Движение учеников»
+
+    async def _flow_data(since: str) -> tuple:
+        """Составы групп, лента событий с месяца `since` и имена — один раз на все месяцы."""
         repo = _dp_get(dp, "activity_repo")
         events: list = []
         if repo is not None:
             try:
-                events = await repo.since(f"{period}-01")
+                events = await repo.since(f"{since}-01")
             except Exception as exc:                  # лента вспомогательная — сводка важнее
                 logger.warning("Лента изменений недоступна: %s", exc)
-        return month_flow(period, await dp["student_group_repo"].get_all(), events,
-                          {s.student_id: s.name for s in await student_repo.get_all()},
-                          {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
+        return (await dp["student_group_repo"].get_all(), events,
+                {s.student_id: s.name for s in await student_repo.get_all()},
+                {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
+
+    async def _flow(period: str):
+        """Движение учеников за месяц: составы групп + лента событий месяца (`student_flow.month_flow`)."""
+        return month_flow(period, *await _flow_data(period))
 
     async def flow(request: web.Request, user) -> web.Response:
-        """Экран «Движение учеников»: пришли в школу / ушли / переводы между группами за месяц."""
+        """Экран «Движение учеников»: пришли в школу / ушли за месяц + те же числа по последним месяцам
+        (переводы между группами не показываются — решение владельца 16.10.2026)."""
         current = current_period()
         ym = request.query.get("ym") or ""
         period = ym if re.fullmatch(r"\d{4}-\d{2}", ym) and ym <= current else current
-        return _json((await _flow(period)).as_dict())
+        months = sorted({*last_periods(FLOW_MONTHS), period}, reverse=True)
+        data = await _flow_data(min(months))
+        reports = {m: month_flow(m, *data) for m in months}
+        return _json({**reports[period].as_dict(),
+                      "months": [{"ym": m, **reports[m].counts} for m in months]})
 
     async def pay_breakdown(request: web.Request, user) -> web.Response:
         """Оплаты месяца: филиалы → группы → ученики (плитка «Не оплатили за …»)."""
