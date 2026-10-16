@@ -209,6 +209,39 @@ ACT.tRenameDo = async ({ sid, force }) => {
     if (e.code !== 'duplicate') toast(e.data && e.data.message ? e.data.message : errText(e));
   }
 };
+/* «🔄 Перевести в другую группу» (решение владельца 16.10.2026): из своей группы в свою одним действием —
+   добавить в новую (абонемент с этого месяца) и убрать из старой (абонемент — с выбранного месяца). */
+ACT.tMoveAsk = async ({ sid, name }) => {
+  try {
+    const d = await api(`/students/${sid}/transfer`);
+    if (!d.to.length) { toast('Переводить некуда: других ваших групп нет'); return; }
+    state.ui.tMove = { sid, name, d, from: d.from[0].id, to: d.to.length === 1 ? d.to[0].id : '', left: d.leaveOptions[0].ym };
+    tMoveSheet();
+  } catch (e) { toast(errText(e)); }
+};
+const tMoveSheet = () => {
+  const m = state.ui.tMove, d = m.d;
+  const from = d.from.find(g => g.id === m.from) || d.from[0];
+  const chips = (items, key, cur, label) => `<div class="chips">${items.map(x => `<button class="chip" aria-pressed="${x[0] === cur}" data-act="tMovePick" data-p='${esc(JSON.stringify({ [key]: x[0] }))}'>${esc(label(x[1]))}</button>`).join('')}</div>`;
+  // при выборе чипа лист перерисовывается на месте (sheet() добавил бы второй поверх)
+  const open = document.querySelector('.sheet-wrap .sheet');
+  const show = html => { if (open) open.innerHTML = `<div class="grab"></div>${html}`; else sheet(html); };
+  show(`<h3>Перевести в другую группу</h3><div class="hint">${esc(m.name)}. Ученик добавится в новую группу с этого месяца и уйдёт из старой; история занятий и оплат сохранится. Администратор получит сообщение.</div>
+    ${d.from.length > 1 ? `<div class="eyebrow">Из какой группы</div>${chips(d.from.map(g => [g.id, g.name]), 'from', m.from, plainName)}` : `<div class="hint" style="margin-top:10px">Из: <b>${esc(plainName(from.name))}</b></div>`}
+    <div class="eyebrow">В какую группу</div>${chips(d.to.map(g => [g.id, g.name]), 'to', m.to, plainName)}
+    ${from.subscription ? `<div class="eyebrow">Уходит из старой</div>${chips(d.leaveOptions.map(o => [o.ym, o.label]), 'left', m.left, x => x)}` : ''}
+    <div style="margin-top:12px">${btn('🔄 Перевести', 'tMoveDo', {}, m.to ? '' : 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.tMovePick = p => { Object.assign(state.ui.tMove, p); tMoveSheet(); };
+ACT.tMoveDo = async () => {
+  const m = state.ui.tMove;
+  if (!m || !m.to) { toast('Выберите группу'); return; }
+  try {
+    const r = await api(`/students/${m.sid}/transfer`, { method: 'POST', body: { fromGroupId: m.from, toGroupId: m.to, leftPeriod: m.left } });
+    state.ui.tMove = null; closeSheet(); render();
+    toast(`Переведён в «${plainName(r.toName)}»${r.result === 'marked' ? ` · из старой с ${fmon(r.leftPeriod).toLowerCase()}` : ''}${r.debt ? ` · долг ${fmt(r.debt)} остаётся` : ''}`);
+  } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
@@ -271,7 +304,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
     ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}
-    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}</div>` : ''}
+    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}${btn('🔄 Перевести в другую группу', 'tMoveAsk', { sid: id, name: s.name }, 'sec')}</div>` : ''}
     ${state.me.canBill ? `<div style="margin-top:12px">${goBtn(`🧾 Счёт за ${MON_NOM[+(s.period).slice(5) - 1].toLowerCase()}`, 't.bill', { sid: id, ym: s.period }, 'sec')}</div>` : ''}` };
 };
 
