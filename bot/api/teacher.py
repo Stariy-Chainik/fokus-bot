@@ -556,7 +556,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
 
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
-        он остаётся за учеником и пишется в сообщение администраторам. Абонементная группа — пометка
+        сумма пишется в сообщение администраторам, у ушедшего из школы в должниках не считается (16.10.2026). Абонементная группа — пометка
         `left_period` (история и оплаты сохраняются), остальные — строка членства удаляется; карточка не трогается."""
         gid, sid = request.match_info["gid"], request.match_info["sid"]
         try:
@@ -584,9 +584,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             text = (f"👋 Педагог {teacher.name}: ученик уходит из группы\nУченик: {s.name}\nГруппа: {group.name}\n"
                     + (f"С месяца: {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
                        else "Убран из состава (оплата по посещениям — история сохранена)")
-                    + (f"\n⚠️ Долг ученика: {debt} ₽ — остаётся за ним" if debt > 0 else "\nДолгов нет."))
+                    + (f"\nНеоплачено {debt} ₽ — у ушедшего в должниках не считается" if debt > 0 else "\nДолгов нет."))
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
-        logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s, долг %d)", teacher.teacher_id, sid, gid, left, result, debt)
+        logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s, неоплачено %d)",
+                    teacher.teacher_id, sid, gid, left, result, debt)
         return _json({"ok": True, "result": result, "leftPeriod": left, "debt": debt})
 
     async def student_transfer_options(request: web.Request, user, teacher) -> web.Response:
@@ -650,9 +651,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                     f"Из: {g_from.name}\nВ: {g_to.name}\n"
                     + (f"Из старой — с {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
                        else "Из старой убран сразу (оплата по посещениям — история сохранена)")
-                    + (f"\n⚠️ Долг ученика: {debt} ₽ — остаётся за ним" if debt > 0 else "\nДолгов нет."))
+                    + (f"\nНеоплачено {debt} ₽ — остаётся в счёте" if debt > 0 else "\nДолгов нет."))
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
-        logger.info("Mini App: педагог %s перевёл %s: %s → %s (%s, с %s, долг %d)",
+        logger.info("Mini App: педагог %s перевёл %s: %s → %s (%s, с %s, неоплачено %d)",
                     teacher.teacher_id, sid, src, dst, result, left, debt)
         return _json({"ok": True, "result": result, "leftPeriod": left, "debt": debt, "toName": g_to.name})
 

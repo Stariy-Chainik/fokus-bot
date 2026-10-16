@@ -239,7 +239,7 @@ ACT.tMoveDo = async () => {
   try {
     const r = await api(`/students/${m.sid}/transfer`, { method: 'POST', body: { fromGroupId: m.from, toGroupId: m.to, leftPeriod: m.left } });
     state.ui.tMove = null; closeSheet(); render();
-    toast(`Переведён в «${plainName(r.toName)}»${r.result === 'marked' ? ` · из старой с ${fmon(r.leftPeriod).toLowerCase()}` : ''}${r.debt ? ` · долг ${fmt(r.debt)} остаётся` : ''}`);
+    toast(`Переведён в «${plainName(r.toName)}»${r.result === 'marked' ? ` · из старой с ${fmon(r.leftPeriod).toLowerCase()}` : ''}`);
   } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
@@ -247,7 +247,7 @@ ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушё�
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
     : btn('✖ Убрать из группы', 'tLeaveDo', { gid, sid, ym: (options[0] || {}).ym }, 'sec')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
 ACT.tLeaveDo = async ({ gid, sid, ym }) => {
-  try { const r = await api(`/groups/${gid}/members/${sid}/leave`, { method: 'PUT', body: { leftPeriod: ym } }); closeSheet(); render(); toast((r.result === 'marked' ? `Ученик ушёл с ${fmon(r.leftPeriod)}` : 'Ученик убран из группы') + (r.debt ? ` · долг ${fmt(r.debt)} остаётся` : '')); }
+  try { const r = await api(`/groups/${gid}/members/${sid}/leave`, { method: 'PUT', body: { leftPeriod: ym } }); closeSheet(); render(); toast(r.result === 'marked' ? `Ученик ушёл с ${fmon(r.leftPeriod)}` : 'Ученик убран из группы'); }
   catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 SCREENS['t.group'] = async ({ id, ym }) => {

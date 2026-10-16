@@ -26,7 +26,7 @@ def test_options_and_transfer_from_subscription_group(api):  # noqa: F811
     assert st == 200 and (r["result"], r["toName"], r["debt"]) == ("marked", "БП Хип-хоп", 6800)   # долг не мешает
     rows = {(x.group_id): x for x in asyncio.run(dp["student_group_repo"].get_all()) if x.student_id == "STU-0002"}
     assert rows["GRP-0002"].left_period == "" and rows["GRP-0001"].left_period == o["leaveOptions"][1]["ym"]
-    assert bot.sent and "перевёл ученика" in bot.sent[0][1] and "Петрова Анна" in bot.sent[0][1] and "Долг ученика: 6800" in bot.sent[0][1]
+    assert bot.sent and "перевёл ученика" in bot.sent[0][1] and "Петрова Анна" in bot.sent[0][1] and "Неоплачено 6800" in bot.sent[0][1]
     # повтор: ученик уже там — 409; обратно из группы, где его больше нет (ушёл), — 404
     assert _call(app, "POST", "/api/teacher/students/STU-0002/transfer",
                  json={"fromGroupId": "GRP-0001", "toGroupId": "GRP-0002"})[0] in (404, 409)

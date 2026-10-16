@@ -8,7 +8,7 @@ from typing import Any
 from bot.models import StudentPeriodPayment, Student, Teacher
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
 from bot.utils import now_str
-from bot.utils.dates import last_periods
+from bot.utils.dates import current_period, last_periods
 from bot.repositories import (
     PaymentRepository, LessonRepository, TeacherRepository,
 )
@@ -816,17 +816,33 @@ class PaymentService:
                 paid[key] = paid.get(key, 0) + p.total_amount
 
         # Удалённый ученик: его занятия остаются в журнале, но долг нигде не считается — ни в должниках, ни в
-        # сборе месяца, ни в диаграммах, ни у педагога (решение владельца 11.10.2026)
+        # сборе месяца, ни в диаграммах, ни у педагога (решение владельца 11.10.2026). Ушедший — так же
+        # (решение владельца 16.10.2026): «человек просто ушёл, долг нигде не должен висеть».
         alive = ({s.student_id for s in await self._student_repo.get_all()}
                  if self._student_repo is not None else None)
+        departed = await self._departed_students()
         ledger: dict[tuple[str, str, str], tuple[int, int]] = {}
         for key, amount in accrued.items():
             if since_period and key[2] < since_period:
                 continue
             if alive is not None and key[0] not in alive:
                 continue
+            if key[0] in departed:
+                continue
             ledger[key] = (amount, paid.get(key, 0))
         return ledger
+
+    async def _departed_students(self) -> set[str]:
+        """Ушедшие из школы: были в группах, но ни одно членство не покрывает текущий месяц (`left_period`
+        наступил). Ученик без строк членства (индивидуальные без группы) ушедшим не считается — у него
+        долг остаётся. Ушедший «со следующего месяца» до его наступления ещё в школе."""
+        if self._student_group_repo is None:
+            return set()
+        current = current_period()
+        rows: dict[str, list] = {}
+        for (sid, _gid), sg in (await self._student_group_repo.get_membership_map()).items():
+            rows.setdefault(sid, []).append(sg)
+        return {sid for sid, sgs in rows.items() if not any(sg.covers(current) for sg in sgs)}
 
     async def compute_debt_map(
         self, since_period: str | None = None, until_period: str | None = None,

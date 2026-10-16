@@ -495,13 +495,13 @@ def test_joined_period_does_not_touch_per_visit_groups():
 # ── Месяц ухода: прошлые месяцы сохраняются, новые не начисляются ────────────
 
 def test_left_period_keeps_past_months_and_stops_future():
-    """Ушёл с июня: апрель и май остаются в долге, июнь уже нет."""
+    """Ушёл с июня: в счёте апрель и май начислены, июнь уже нет; в должниках ушедшего нет вовсе
+    (решение владельца 16.10.2026 — «человек просто ушёл, долг нигде не должен висеть»)."""
     svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
                    left={("STU-A", "GRP-0001"): "2026-06"})
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04"))["SUB:GRP-0001"].total == 3000
     assert _run(svc.compute_bills_for_student_period("STU-A", "2026-06")) == {}
-    assert _run(svc.compute_debt_map(until_period="2026-06")) == {
-        "STU-A": {"2026-04": 3000, "2026-05": 3000}}
+    assert _run(svc.compute_debt_map(until_period="2026-06")) == {}
 
 
 def test_left_period_excludes_from_revenue_of_that_month():
@@ -517,7 +517,9 @@ def test_joined_and_left_together_bill_only_the_window():
     svc = _service(_sub_lessons(), [_sub_group(price=3000)], [("STU-A", "GRP-0001")],
                    joined={("STU-A", "GRP-0001"): "2026-05"},
                    left={("STU-A", "GRP-0001"): "2026-06"})
-    assert _run(svc.compute_debt_map(until_period="2026-06")) == {"STU-A": {"2026-05": 3000}}
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-05"))["SUB:GRP-0001"].total == 3000
+    assert _run(svc.compute_bills_for_student_period("STU-A", "2026-04")) == {}
+    assert _run(svc.compute_debt_map(until_period="2026-06")) == {}      # ушедший — не должник
 
 
 def test_membership_covers_helper():
