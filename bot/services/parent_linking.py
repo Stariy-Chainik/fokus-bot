@@ -22,8 +22,26 @@ def needs_approval(student, addr) -> bool:
     return bool(others)
 
 
-async def request_approval(tg_bot, user_repo, pending_repo, student, addr, sender_name: str, source: str) -> None:
+async def has_open_request(pending_repo, student_id: str, addr) -> bool:
+    """Открытая заявка этого родителя на этого ребёнка уже есть."""
+    if pending_repo is None:
+        return False
+    try:
+        return any(a.kind == KIND_CHILD and a.student_id == student_id and a.parent_addr == fmt_addr(addr)
+                   for a in await pending_repo.get_open())
+    except Exception as exc:                       # очередь вспомогательная — заявку всё равно отправим
+        logger.warning("Очередь решений недоступна: %s", exc)
+        return False
+
+
+async def request_approval(tg_bot, user_repo, pending_repo, student, addr, sender_name: str, source: str) -> bool:
+    """Заявка администраторам; False — такая уже открыта, повторно не шлём (16.10.2026: родитель Урдихановой
+    в MAX открыл ссылку группы и дважды зарегистрировался по фамилии за минуту — три заявки и три сообщения)."""
     from bot.keyboards.client import kb_admin_approve_child      # локально: клавиатуры тянут aiogram-слой
+    if await has_open_request(pending_repo, student.student_id, addr):
+        logger.info("Второй родитель %s → %s: заявка уже открыта, повтор не шлём (%s)",
+                    fmt_addr(addr), student.student_id, source)
+        return False
     platform = "MAX" if addr[0] == "max" else "Telegram"
     text = (f"👥 <b>Второй родитель просит доступ</b>\n\n"
             f"Кто: {sender_name} ({platform} <code>{addr[1]}</code>)\n"
@@ -35,6 +53,7 @@ async def request_approval(tg_bot, user_repo, pending_repo, student, addr, sende
     await queue_action(pending_repo, KIND_CHILD, student, parent_addr=fmt_addr(addr),
                        comment=f"второй родитель · {sender_name} · {source}")
     logger.info("Второй родитель %s → %s: заявка администратору (%s)", fmt_addr(addr), student.student_id, source)
+    return True
 
 
 WAIT_TEXT = ("⏳ К ребёнку <b>{name}</b> уже привязан другой родитель.\n\n"

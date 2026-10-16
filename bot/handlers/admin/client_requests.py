@@ -35,6 +35,13 @@ async def cb_admin_child_ok(
     if not student or parent_addr is None:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    if parent_addr in student.parent_addrs:
+        # уже одобрено другой кнопкой (копии заявки в чате) — родителя второй раз не уведомляем
+        await close_actions(pending_repo, student_id, "", DONE, callback.from_user.id, kinds=(KIND_CHILD,))
+        await callback.message.edit_text(f"✅ Уже одобрено\n\nУченик: {student.name}\nРодитель: {parent_raw}",
+                                         reply_markup=kb_back("admin:menu"))
+        await callback.answer("Родитель уже привязан")
+        return
 
     await student_repo.add_parent(student_id, parent_addr)
     await close_actions(pending_repo, student_id, "", DONE, callback.from_user.id, kinds=(KIND_CHILD,))

@@ -35,6 +35,22 @@ def test_second_parent_by_surname_goes_to_admin(monkeypatch):
     assert [(a.kind, a.student_id, a.parent_addr) for a in pending.items] == [("child", "STU-0001", str(NEW_PARENT))]
     sent = [x for x in cb.bot.sent if x[0] == ADMIN_TG]
     assert sent and "Второй родитель" in sent[0][1]
+    # повтор (родитель жмёт ещё раз, пока заявка открыта): второй заявки и второго сообщения админу нет (16.10.2026)
+    cb2 = _run(cb_client_reg_confirm, "client_reg:STU-0001", dp,
+               student_repo=dp["student_repo"], user_repo=dp["user_repo"], pending_repo=pending)
+    assert len(pending.items) == 1 and not [x for x in cb2.bot.sent if x[0] == ADMIN_TG]
+    # одобрение: первая кнопка привязывает и уведомляет родителя, вторая (копия в чате) — «уже привязан», без уведомления
+    from bot.handlers.admin.client_requests import cb_admin_child_ok
+    from tests.fakes import mk_user
+    admin = mk_user(ADMIN_TG, is_admin=True)
+    ok1 = FakeCallbackQuery(f"admin_child_ok:{NEW_PARENT}:STU-0001", user_id=ADMIN_TG)
+    asyncio.run(cb_admin_child_ok(ok1, admin, student_repo=dp["student_repo"], pending_repo=pending))
+    assert NEW_PARENT in asyncio.run(dp["student_repo"].get_by_id("STU-0001")).parent_tg_ids
+    assert all(a.status != "open" for a in pending.items)
+    assert [x for x in ok1.bot.sent if x[0] == NEW_PARENT and "одобрена" in x[1]]
+    ok2 = FakeCallbackQuery(f"admin_child_ok:{NEW_PARENT}:STU-0001", user_id=ADMIN_TG)
+    asyncio.run(cb_admin_child_ok(ok2, admin, student_repo=dp["student_repo"], pending_repo=pending))
+    assert not [x for x in ok2.bot.sent if x[0] == NEW_PARENT] and "Уже одобрено" in ok2.message.screens[-1][0]
     # первый родитель привязывается сам, как раньше
     cb = _run(cb_client_reg_confirm, "client_reg:STU-0002", dp,
               student_repo=dp["student_repo"], user_repo=dp["user_repo"], pending_repo=pending)
