@@ -156,13 +156,15 @@ class StudentRepository(BaseRepository):
     async def delete(self, student_id: str) -> bool:
         # Перед удалением — разорвать пару, чтобы у бывшего партнёра
         # не осталась висячая ссылка partner_id на удалённого.
+        existing = await self.get_by_id(student_id)
+        name = existing.name if existing is not None else ""     # в событие — имя: карточки потом уже нет
         await self.clear_partner(student_id)
         async with self._locked_row(student_id=student_id) as row_idx:
             if row_idx is None:
                 return False
             await self._delete_row(row_idx)
         from bot.services import activity
-        await activity.record(activity.STUDENT, f"Удалён ученик {student_id}", ref=student_id)
+        await activity.record(activity.STUDENT, f"Удалён ученик {student_id} {name}".rstrip(), ref=student_id)
         return True
 
     # ─── Управление партнёрами ────────────────────────────────────────────────

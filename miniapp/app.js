@@ -267,10 +267,17 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
       ${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `не оплатили за ${mon.toLowerCase()} · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : `за ${mon.toLowerCase()} всё оплачено`, c.rest ? 'bad' : 'ok', 'a.unpaid', { ym: h.period })}
       ${kpi(fmt(h.profitMonth), `${past ? 'прибыль' : 'ожидаемая прибыль'} за ${mon.toLowerCase()} · собрано ${c.percent}%`, h.profitMonth < 0 ? 'bad' : 'ok', 'a.profit', { ym: h.period })}
     </div>`;
+  // движение учеников за месяц: пришли в школу / ушли из школы, тап — списки и переводы (16.10.2026)
+  const f = h.flow || { new: 0, gone: 0, net: 0 };
+  const flowTiles = `<div class="kpis" style="margin-bottom:6px">
+      ${kpi(`+${f.new}`, `пришли за ${mon.toLowerCase()}`, f.new ? 'ok' : '', 'a.flow', { ym: h.period })}
+      ${kpi(`−${f.gone}`, `ушли за ${mon.toLowerCase()} · итог ${f.net > 0 ? '+' : ''}${f.net}`, f.gone ? 'bad' : '', 'a.flow', { ym: h.period })}
+    </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
+    ${flowTiles}
     ${planChart(h.subscriptions, h.period, 'subs')}
     ${planChart(h.lessons, h.period, 'lessons')}
     <div class="eyebrow">Требует внимания</div>
@@ -280,6 +287,28 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
+};
+
+/* Движение учеников за месяц (решение владельца 16.10.2026): пришли в школу, ушли из школы, переводы между
+   группами. Считает сервер (`student_flow.month_flow`) по составам групп и ленте событий. */
+SCREENS['a.flow'] = async ({ ym }) => {
+  ym = ym || lastPeriods(1)[0];
+  const d = await api(`/flow?ym=${ym}`);
+  const mon = MON_NOM[+ym.slice(5) - 1].toLowerCase();
+  const row = (x, lead) => cell({ lead, plain: true, cls: 'wrap', t: esc(x.name),
+    s: [x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · '),
+    go: x.note === 'карточка удалена' ? undefined : 'a.student', p: { id: x.id } });
+  const section = (title, items, lead, none) => `<div class="eyebrow">${title} · ${items.length}</div>${items.length ? list(items.map(x => row(x, lead))) : `<div class="empty">${none}</div>`}`;
+  const net = d.counts.net;
+  return { title: 'Движение учеников', html: `
+    ${monthChips('a.flow', ym, {})}
+    <div class="kpis">${kpi(`+${d.counts.new}`, `пришли за ${mon}`, d.counts.new ? 'ok' : '')}${kpi(`−${d.counts.gone}`, `ушли за ${mon} · итог ${net > 0 ? '+' : ''}${net}`, d.counts.gone ? 'bad' : '')}</div>
+    ${section('Пришли в школу', d.new, '➕', 'Новых учеников нет')}
+    ${section('Ушли из школы', d.gone, '➖', 'Никто не ушёл')}
+    ${section('Переводы внутри школы', d.moves, '🔄', 'Переводов нет')}
+    ${d.deleted.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Удалены карточки <span class="hint">· ${d.deleted.length}</span></span><span class="r hint">не в «ушли»</span></summary>
+      <div class="accbody"><div class="accsum">Удалённые карточки в «ушли» не считаются: обычно это дубли и ошибочные записи. Ушедшего ученика отмечайте «ушёл из группы» — тогда он попадёт в список выше.</div>${d.deleted.map(x => cell({ lead: '🗑', plain: true, cls: 'wrap', t: esc(x.name), s: [x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · ') })).join('')}</div></details>` : ''}
+    <p class="hint" style="margin-top:8px">Пришёл — первое членство в группе началось в этом месяце. Ушёл — членство закончилось с этого месяца и других групп не осталось. Тап по ученику — карточка.</p>` };
 };
 
 /* «Деньги»: всё про оплаты и финансы одной вкладкой (раньше — «Оплаты» и «Финансы»). */

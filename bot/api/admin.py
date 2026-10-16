@@ -26,6 +26,7 @@ from bot.services.payment_service import (
     debtors_summary, lesson_collection, payment_lock, period_collection, subscription_collection,
 )
 from bot.services.pending_queue import rest_for_keys, settle_actions
+from bot.services.student_flow import month_flow
 from bot.services.profit_service import calculate_profit_lesson
 from bot.services.student_service import has_short_tariff
 from bot.utils.attendees import parse_attendees
@@ -204,10 +205,31 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                                  key=lambda x: (-x["plan"], x["name"])),
             },
             "studentsCount": len(await student_repo.get_all()),
+            "flow": (await _flow(period)).as_dict()["counts"],      # плитки «пришли / ушли» (16.10.2026)
             "activityToday": await _activity_count(today),
             # колокольчик «События»: новые с последнего просмотра (?seen= — ts последнего просмотренного события)
             "activityNew": await _activity_count(request.query.get("seen") or today, strict=bool(request.query.get("seen"))),
         })
+
+    async def _flow(period: str):
+        """Движение учеников за месяц: составы групп + лента событий месяца (`student_flow.month_flow`)."""
+        repo = _dp_get(dp, "activity_repo")
+        events: list = []
+        if repo is not None:
+            try:
+                events = await repo.since(f"{period}-01")
+            except Exception as exc:                  # лента вспомогательная — сводка важнее
+                logger.warning("Лента изменений недоступна: %s", exc)
+        return month_flow(period, await dp["student_group_repo"].get_all(), events,
+                          {s.student_id: s.name for s in await student_repo.get_all()},
+                          {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
+
+    async def flow(request: web.Request, user) -> web.Response:
+        """Экран «Движение учеников»: пришли в школу / ушли / переводы между группами за месяц."""
+        current = current_period()
+        ym = request.query.get("ym") or ""
+        period = ym if re.fullmatch(r"\d{4}-\d{2}", ym) and ym <= current else current
+        return _json((await _flow(period)).as_dict())
 
     async def pay_breakdown(request: web.Request, user) -> web.Response:
         """Оплаты месяца: филиалы → группы → ученики (плитка «Не оплатили за …»)."""
@@ -673,7 +695,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         return _json({"period": period, "debtors": out})
 
     routes = [
-        ("GET", "/me", me), ("GET", "/home", home), ("GET", "/activity", activity),
+        ("GET", "/me", me), ("GET", "/home", home), ("GET", "/flow", flow), ("GET", "/activity", activity),
         ("GET", "/pay/breakdown", pay_breakdown),
         ("GET", "/activity/file", activity_file),
         ("GET", "/students", students), ("GET", "/students/{sid}", student_card),
