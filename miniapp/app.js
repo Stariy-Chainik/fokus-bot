@@ -326,7 +326,12 @@ SCREENS['a.money'] = async () => {
       cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }),
       cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' }),
     ])}
-    <div class="eyebrow">Школа</div>${list([cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} })])}
+    <div class="eyebrow">Школа</div>${list([
+      cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} }),
+      // прочие доходы и расходы месяца — прямо из «Денег», не только со дна экрана «Прибыль» (решение владельца 18.10.2026)
+      cell({ lead: '➕', plain: true, t: 'Записать доход', s: 'турнир, продажа костюмов, аренда зала другим…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'income' } }),
+      cell({ lead: '➖', plain: true, t: 'Записать расход', s: 'аренда, реклама, костюмы, инвентарь…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'expense' } }),
+    ])}
     <div class="eyebrow">Педагоги</div>${list([
       cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }),
       cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} }),
@@ -823,7 +828,9 @@ Object.assign(ACT, {
   abillAll: () => { if (state.ui.abill) { billAllToggle(state.ui.abill); render(); } },
   cancelPayAsk: ({ pid, title, amount }) => sheet(`<h3>Убрать оплату?</h3><div class="hint">${title}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(amount)}</div><p class="hint">Запись об оплате удалится, сумма снова станет неоплаченной: ученик вернётся в должники, родитель увидит остаток в счёте. Педагог, который отмечал оплату, получит сообщение.</p>${field('cp-r', 'Причина (необязательно)', '', 'placeholder="ошибочная отметка, перевод не пришёл…"')}<div style="margin-top:12px">${btn('❌ Убрать оплату', 'cancelPayDo', { pid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   cancelPayDo: async ({ pid }) => { try { const r = await api(`/payments/${pid}?reason=${encodeURIComponent(val('cp-r').trim())}`, { method: 'DELETE' }); closeSheet(); render(); toast(`Оплата ${fmt(r.amount)} снята`); } catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); } },
-  finForm: ({ ym, kind }) => sheet(`<h3>${kind === 'income' ? '➕ Доход' : '➕ Расход'} · ${fmon(ym)}</h3>${field('fin-t', 'Название', '', kind === 'income' ? 'placeholder="Турнир, аренда костюмов…"' : 'placeholder="Аренда зала, реклама…"')}${field('fin-a', 'Сумма, ₽', '', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить', 'addFin', { ym, kind })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
+  finForm: ({ ym, kind }) => { closeSheet(); sheet(`<h3>${kind === 'income' ? '➕ Доход' : '➖ Расход'} · ${fmon(ym)}</h3><div class="hint">${kind === 'income' ? 'Любой доход школы помимо занятий — попадёт в выручку и прибыль месяца.' : 'Любой расход школы — вычтется из прибыли месяца.'}</div>
+    <div class="chips" style="margin-top:8px">${lastPeriods(3).map(m => `<button class="chip" aria-pressed="${m === ym}" data-act="finForm" data-p='${esc(JSON.stringify({ ym: m, kind }))}'>${MON_NOM[+m.slice(5) - 1]}</button>`).join('')}</div>
+    ${field('fin-t', 'Статья (что это)', '', kind === 'income' ? 'placeholder="Турнир, продажа костюмов, аренда зала…"' : 'placeholder="Аренда зала, реклама, костюмы…"')}${field('fin-a', 'Сумма, ₽', '', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Сохранить', 'addFin', { ym, kind })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`); },
   addFin: async ({ ym, kind }) => { const title = val('fin-t').trim(), amount = +val('fin-a'); if (!title || !amount) { toast('Нужны название и сумма'); return; } try { await api('/finance', { method: 'POST', body: { periodMonth: ym, kind, title, amount } }); closeSheet(); render(); toast('Записано'); } catch (e) { toast(errText(e)); } },
   delFin: async ({ id }) => { try { await api(`/finance/${id}`, { method: 'DELETE' }); render(); toast('Запись удалена'); } catch (e) { toast(errText(e)); } },
   payoutRest: ({ tid, ym, amount, name }) => { if (!amount) return; sheet(`<h3>Выплатить остаток?</h3><div class="hint">${esc(name)} · ${fmon(ym)}</div><div class="money" style="font-size:26px;font-weight:800;margin:10px 0">${fmt(amount)}</div>${btn('💸 Выплатить', 'doPayout', { tid, ym, amount, comment: 'остаток' })}${btn('Отмена', 'closeSheet', {}, 'ghost')}`); },
