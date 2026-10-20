@@ -192,6 +192,19 @@ class Settings(BaseSettings):
     hall_rent_per_lesson: str = Field(default="", alias="HALL_RENT_PER_LESSON")
     # Аренда считается только с этого месяца включительно (YYYY-MM); пусто — за всё время.
     hall_rent_since_period: str = Field(default="", alias="HALL_RENT_SINCE_PERIOD")
+    # Аренда за занятие с конкретным учеником вместо ставки педагога (решение владельца 21.10.2026):
+    # TCH-0002:STU-0306:800,TCH-0002:STU-0012:800 — Клецова с Моргуновой и Мадатовой Ирой платит 800 за час
+    hall_rent_student_rates: str = Field(default="", alias="HALL_RENT_STUDENT_RATES")
+
+    @property
+    def hall_rent_student_map(self) -> dict:
+        """(teacher_id, student_id) → ставка за начатый час."""
+        out = {}
+        for chunk in self.hall_rent_student_rates.replace("|", ",").split(","):
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) == 3 and parts[0] and parts[1] and parts[2].isdigit():
+                out[(parts[0], parts[1])] = int(parts[2])
+        return out
 
     # Шкала оценки за домашнее задание группе по педагогам, по умолчанию 1–5:
     # TCH-0011:10 — Яковлева ставит по 10-балльной (решение владельца 15.10.2026)

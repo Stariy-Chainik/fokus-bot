@@ -172,6 +172,8 @@ def lesson_rent(lesson: Lesson) -> int:
     Родители платят такому педагогу напрямую (DIRECT_PAY_TEACHER_IDS), а он
     перечисляет школе за зал ставку HALL_RENT_PER_LESSON за каждый начатый час урока:
     45 и 60 мин — ставка, 90 мин — вдвое (решение владельца 04.10.2026); число учеников не влияет.
+    У отдельных учеников своя ставка (HALL_RENT_STUDENT_RATES, 21.10.2026: Клецова с Моргуновой и Мадатовой
+    Ирой — 800 вместо 500); в паре берётся наибольшая из ставок участников.
     """
     import math
     from config.settings import settings
@@ -183,6 +185,10 @@ def lesson_rent(lesson: Lesson) -> int:
     if since and lesson.date[:7] < since:
         return 0
     base = settings.hall_rent_map.get(lesson.teacher_id, 0)
+    personal = settings.hall_rent_student_map
+    for sid in (lesson.student_1_id, lesson.student_2_id, lesson.student_3_id, lesson.student_4_id):
+        if sid and (lesson.teacher_id, sid) in personal:
+            base = max(base, personal[(lesson.teacher_id, sid)])
     return base * max(1, math.ceil((lesson.duration_min or 60) / 60))
 
 

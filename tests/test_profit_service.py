@@ -158,6 +158,23 @@ def test_hall_rent_counts_direct_pay_individual_lessons(monkeypatch):
     assert sorted(r.rent for r in detail.lessons) == [0, 500, 500, 1000]
 
 
+def test_hall_rent_personal_student_rate(monkeypatch):
+    """HALL_RENT_STUDENT_RATES: с отдельными учениками аренда выше (Клецова с Моргуновой и Мадатовой — 800);
+    в паре — наибольшая ставка; у остальных — ставка педагога."""
+    from bot.services.profit_service import lesson_rent
+    from config.settings import settings
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
+    monkeypatch.setattr(settings, "hall_rent_student_rates", "TCH-0001:STU-0306:800, TCH-0001:STU-0012:800")
+    assert settings.hall_rent_student_map == {("TCH-0001", "STU-0306"): 800, ("TCH-0001", "STU-0012"): 800}
+    assert lesson_rent(_lesson("LES-1", "2026-10-01")) == 500                                   # STU-0001 — обычная
+    assert lesson_rent(_lesson("LES-2", "2026-10-01", student_1_id="STU-0306")) == 800
+    assert lesson_rent(_lesson("LES-3", "2026-10-01", student_1_id="STU-0306", duration_min=90)) == 1600
+    assert lesson_rent(_lesson("LES-4", "2026-10-01", student_1_id="STU-0001", student_2_id="STU-0012")) == 800   # пара
+    monkeypatch.setattr(settings, "hall_rent_student_rates", "TCH-0009:STU-0306:800")        # другой педагог — не влияет
+    assert lesson_rent(_lesson("LES-5", "2026-10-01", student_1_id="STU-0306")) == 500
+
+
 def test_hall_rent_not_applied_without_direct_pay(monkeypatch):
     """Без DIRECT_PAY аренда не начисляется: занятие оплачивает ученик."""
     from config.settings import settings
