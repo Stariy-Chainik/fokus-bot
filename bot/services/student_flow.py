@@ -33,6 +33,8 @@ _REMOVED = re.compile(r"Ученик (STU-\d{4}) убран из группы (G
 _TRANSFER = re.compile(r"Ученик (STU-\d{4}) переведён .*?: (GRP-\d{4}) → (GRP-\d{4})")
 _DELETED = re.compile(r"Удалён ученик (STU-\d{4})(?: (.+))?$")
 _CREATED = re.compile(r"Новый ученик(?: по заявке родителя)?: (STU-\d{4})")
+_ADDED = re.compile(r"Ученик (STU-\d{4}) добавлен в группу (GRP-\d{4})")
+_LEFT = re.compile(r"Ученик (STU-\d{4}) уходит из группы (GRP-\d{4})")
 
 
 @dataclass
@@ -41,9 +43,10 @@ class FlowItem:
     name: str
     groups: list = field(default_factory=list)      # названия групп, о которых речь (куда пришёл / откуда ушёл)
     note: str = ""                                   # «с ноября», «карточка удалена», «из ВБ ХГ Младшая»…
+    date: str = ""                                   # день события из ленты (YYYY-MM-DD); пусто — известен только месяц
 
     def as_dict(self) -> dict:
-        return {"id": self.student_id, "name": self.name, "groups": self.groups, "note": self.note}
+        return {"id": self.student_id, "name": self.name, "groups": self.groups, "note": self.note, "date": self.date}
 
 
 @dataclass
@@ -88,18 +91,28 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
     removed: dict[str, set] = {}        # ученик → группы, откуда убран в этом месяце (строки уже нет)
     deleted: dict[str, str] = {}        # ученик → имя из события (у старых событий имени нет)
     created: set = set()
+    came_at: dict[str, str] = {}        # ученик → день прихода (первое «добавлен в группу» / «Новый ученик» месяца)
+    gone_at: dict[str, str] = {}        # ученик → день ухода (последнее «уходит / убран / переведён» не позже месяца)
     for e in events:
-        if (getattr(e, "ts", "") or "")[:7] != period:
+        ts = getattr(e, "ts", "") or ""
+        if ts[:7] > period:
             continue
         text = getattr(e, "text", "") or ""
-        if m := _REMOVED.search(text):
-            removed.setdefault(m.group(1), set()).add(m.group(2))
-        elif m := _TRANSFER.search(text):
-            removed.setdefault(m.group(1), set()).add(m.group(2))
+        day, in_month = ts[:10], ts[:7] == period
+        if (m := _REMOVED.search(text)) or (m := _TRANSFER.search(text)):
+            if in_month:
+                removed.setdefault(m.group(1), set()).add(m.group(2))
+            gone_at[m.group(1)] = max(gone_at.get(m.group(1), ""), day)
+        elif m := _LEFT.search(text):
+            gone_at[m.group(1)] = max(gone_at.get(m.group(1), ""), day)
         elif m := _DELETED.search(text):
-            deleted[m.group(1)] = (m.group(2) or "").strip()
-        elif m := _CREATED.search(text):
-            created.add(m.group(1))
+            if in_month:
+                deleted[m.group(1)] = (m.group(2) or "").strip()
+        elif (m := _CREATED.search(text)) or (m := _ADDED.search(text)):
+            if in_month:
+                if text.startswith("Новый ученик"):
+                    created.add(m.group(1))
+                came_at[m.group(1)] = min(came_at.get(m.group(1), "9999"), day)
 
     joined: dict[str, list] = {}         # ученик → группы, куда пришёл в этом месяце
     left: dict[str, list] = {}           # ученик → группы, откуда ушёл с этого месяца (абонемент)
@@ -135,7 +148,7 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
             continue
         came, went = joined.get(sid, []), left.get(sid, [])
         if came and not earlier(sid):
-            report.new.append(FlowItem(sid, sname(sid), [gname(g) for g in came]))
+            report.new.append(FlowItem(sid, sname(sid), [gname(g) for g in came], date=came_at.get(sid, "")))
         elif came:
             note = f"из {', '.join(gname(g) for g in went)}" if went else "ещё одна группа"
             report.moves.append(FlowItem(sid, sname(sid), [gname(g) for g in came], note))
@@ -143,7 +156,10 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
             report.moves.append(FlowItem(sid, sname(sid), [gname(g) for g in went],
                                          f"ушёл из группы, остался в {', '.join(gname(g) for g in remaining(sid))}"))
         elif went:
-            report.gone.append(FlowItem(sid, sname(sid), [gname(g) for g in went], f"с {_month_word(period)}"))
+            report.gone.append(FlowItem(sid, sname(sid), [gname(g) for g in went], f"с {_month_word(period)}",
+                                        date=gone_at.get(sid, "")))
         elif sid in created and sid in students:
-            report.new.append(FlowItem(sid, sname(sid), [], "без группы"))
+            report.new.append(FlowItem(sid, sname(sid), [], "без группы", date=came_at.get(sid, "")))
+    for items in (report.new, report.gone):            # по дням; без даты — в конце
+        items.sort(key=lambda x: (not x.date, x.date, x.name.lower()))
     return report

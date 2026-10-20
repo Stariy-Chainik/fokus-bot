@@ -219,7 +219,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         events: list = []
         if repo is not None:
             try:
-                events = await repo.since(f"{since}-01")
+                # с прошлого месяца: день ухода «со следующего месяца» записан месяцем раньше
+                events = await repo.since(f"{_prev_period(since)}-01")
             except Exception as exc:                  # лента вспомогательная — сводка важнее
                 logger.warning("Лента изменений недоступна: %s", exc)
         return (await dp["student_group_repo"].get_all(), events,

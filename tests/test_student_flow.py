@@ -31,6 +31,8 @@ def test_month_flow_classifies_new_gone_and_moves():
     ]
     events = [
         _ev(f"{YM_}-03 12:00:00", "Новый ученик: STU-0006 Безгруппов Ваня"),            # карточка без группы
+        _ev(f"{YM_}-02 10:00:00", "Ученик STU-0001 добавлен в группу GRP-0002 с 2026-10"),   # день прихода
+        _ev("2026-09-28 18:00:00", "Ученик STU-0003 уходит из группы GRP-0002 с 2026-10"),   # ушла «со следующего» — день в сентябре
         _ev(f"{YM_}-05 12:00:00", "Удалён ученик STU-0099"),                             # карточки больше нет
         _ev(f"{YM_}-06 12:00:00", "Удалён ученик STU-0097 Дублёва Маша"),                # новое событие — с именем
         _ev(f"{YM_}-07 12:00:00", "Ученик STU-0002 убран из группы GRP-0001"),           # по посещению: строка удалена
@@ -39,9 +41,11 @@ def test_month_flow_classifies_new_gone_and_moves():
     rows = [r for r in rows if r.student_id != "STU-0002"] + [
         StudentGroup("STU-0002", "GRP-0003", joined_period="2026-04")]                    # Петя остался в Средней
     r = month_flow(YM_, rows, events, STUDENTS, GROUPS)
-    assert [(x.name, x.groups, x.note) for x in r.new] == [
-        ("Безгруппов Ваня", [], "без группы"), ("Новикова Аня", ["ВБ ХГ Младшая 🤸"], "")]
-    assert [(x.name, x.groups, x.note) for x in r.gone] == [("Ушакова Лена", ["ВБ ХГ Младшая 🤸"], "с октября")]
+    assert [(x.name, x.groups, x.note, x.date) for x in r.new] == [                 # по дням
+        ("Новикова Аня", ["ВБ ХГ Младшая 🤸"], "", f"{YM_}-02"), ("Безгруппов Ваня", [], "без группы", f"{YM_}-03")]
+    assert [(x.name, x.groups, x.note, x.date) for x in r.gone] == [
+        ("Ушакова Лена", ["ВБ ХГ Младшая 🤸"], "с октября", "2026-09-28")]
+    assert r.as_dict()["new"][0]["date"] == f"{YM_}-02"
     # удалённые карточки — отдельно и не в «ушли»: на проде это чистка дублей
     assert [(x.name, x.note) for x in r.deleted] == [("Дублёва Маша", ""), ("STU-0099", "имя не сохранилось")]
     assert [(x.name, x.groups, x.note) for x in r.moves] == [

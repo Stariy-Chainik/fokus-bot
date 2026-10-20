@@ -296,8 +296,9 @@ SCREENS['a.flow'] = async ({ ym }) => {
   ym = ym || lastPeriods(1)[0];
   const d = await api(`/flow?ym=${ym}`);
   const mon = MON_NOM[+ym.slice(5) - 1].toLowerCase();
+  // дата — день события из ленты (добавлен в группу / новая карточка / ушёл); без неё — только месяц
   const row = (x, lead) => cell({ lead, plain: true, cls: 'wrap', t: esc(x.name),
-    s: [x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · '),
+    s: [x.date ? fdate(x.date) : '', x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · '),
     go: x.note === 'карточка удалена' ? undefined : 'a.student', p: { id: x.id } });
   const section = (title, items, lead, none) => `<div class="eyebrow">${title} · ${items.length}</div>${items.length ? list(items.map(x => row(x, lead))) : `<div class="empty">${none}</div>`}`;
   const net = d.counts.net;
