@@ -15,8 +15,10 @@ from bot.models.enums import GroupBillingMode, StudentGroupTier
 from bot.services.group_invite import group_invite
 from bot.services.kindergarten import clean_value, is_kindergarten_group
 from bot.services.membership import leave_group
+from bot.services.student_archive import archive_preview, archive_student, unarchive_student
 from bot.services.student_service import TierToggleError
 from bot.utils.dates import current_period
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -364,11 +366,50 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         return _json({"ok": ok, "value": value}, status=200 if ok else 404)
 
     async def student_delete(request: web.Request, user) -> web.Response:
+        """Стереть карточку совсем — кнопки в кабинете больше нет (решение владельца 21.10.2026: «Удалить
+        ученика» = архив, `student_archive`); маршрут оставлен для скриптов и чистки дублей."""
         sid = request.match_info["sid"]
         ok = await student_service.delete_student(sid)
         if ok:
             logger.info("Mini App: админ %s удалил ученика %s", user.tg_id, sid)
         return _json({"ok": ok}, status=200 if ok else 404)
+
+    def _archive_deps() -> dict:
+        return {"student_repo": student_repo, "student_group_repo": student_group_repo, "group_repo": group_repo,
+                "payment_service": payment_service, "since": settings.debtors_since_period or None}
+
+    async def student_archive_preview(request: web.Request, user) -> web.Response:
+        """Лист «Удалить ученика»: с каких групп снимем, сколько родителей, партнёр, долг с разбивкой."""
+        p = await archive_preview(request.match_info["sid"], **_archive_deps())
+        if p is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json(p.as_dict())
+
+    async def student_archive(request: web.Request, user) -> web.Response:
+        """«🗑 Удалить ученика» = ушёл из школы (решение владельца 21.10.2026): в архив — см.
+        `bot/services/student_archive.py`. Долг есть и `confirmDebt` нет → 409 `debt` с суммой."""
+        sid = request.match_info["sid"]
+        body = await _body(request) or {}
+        r = await archive_student(sid, **_archive_deps(), client_repo=client_repo, actor=user.tg_id,
+                                  confirm_debt=bool(body.get("confirmDebt")))
+        if isinstance(r, str):
+            if r == "not_found":
+                return _json({"error": "not_found"}, status=404)
+            if r == "already":
+                return _json({"error": "already", "message": "Ученик уже в архиве"}, status=409)
+            p = await archive_preview(sid, **_archive_deps())
+            return _json({"error": "debt", "debt": p.debt.as_dict() if p else {}}, status=409)
+        logger.info("Mini App: админ %s — ученик %s в архиве", user.tg_id, sid)
+        return _json(r.as_dict())
+
+    async def student_unarchive(request: web.Request, user) -> web.Response:
+        err = await unarchive_student(request.match_info["sid"], student_repo=student_repo,
+                                      student_group_repo=student_group_repo, actor=user.tg_id)
+        if err == "not_found":
+            return _json({"error": "not_found"}, status=404)
+        if err:
+            return _json({"error": err}, status=409)
+        return _json({"ok": True})
 
     async def partner_candidates(request: web.Request, user) -> web.Response:
         s = await student_repo.get_by_id(request.match_info["sid"])
@@ -538,6 +579,8 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         ("POST", "/groups/{gid}/members", member_add), ("DELETE", "/groups/{gid}/members/{sid}", member_remove),
         ("PUT", "/groups/{gid}/members/{sid}", member_periods),
         ("POST", "/students", student_add), ("PATCH", "/students/{sid}", student_patch), ("DELETE", "/students/{sid}", student_delete),
+        ("GET", "/students/{sid}/archive", student_archive_preview), ("POST", "/students/{sid}/archive", student_archive),
+        ("POST", "/students/{sid}/unarchive", student_unarchive),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("GET", "/students/{sid}/partner-candidates", partner_candidates), ("PUT", "/students/{sid}/partner", partner_put),
         ("PUT", "/students/{sid}/groups", student_groups), ("POST", "/students/{sid}/tier", student_tier),

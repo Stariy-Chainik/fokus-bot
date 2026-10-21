@@ -243,7 +243,7 @@ async def cb_subovr_list(
         await callback.answer("Переопределений нет", show_alert=True)
         return
     rows = []
-    names = {s.student_id: s.name for s in await student_repo.get_all()}
+    names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
     for o in overrides:
         if o.student_id:
             who = names.get(o.student_id, o.student_id)

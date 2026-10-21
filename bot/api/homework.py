@@ -82,7 +82,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             return _unavailable()
         gid = request.query.get("gid") or ""
         names, numbers = await group_names(), await diary_service.homework_numbers()
-        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         own = await own_group_ids(teacher)
         batches: dict[str, list] = {}
         for t in await diary_service.teacher_homework(teacher.teacher_id):
@@ -102,7 +102,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         tasks = [t for t in await diary_service.teacher_homework(teacher.teacher_id) if t.batch_id == bid]
         if not tasks:
             return _json({"error": "not_found"}, status=404)
-        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         return _json({
             **_batch_row(tasks, await group_names(), await diary_service.homework_numbers(), students),
             "scale": settings.homework_scale(teacher.teacher_id),

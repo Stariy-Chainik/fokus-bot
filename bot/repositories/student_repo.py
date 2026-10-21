@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # 1 student_id | 2 name | 3 partner_id | 4 group_id (устарело) | 5 group_tier | 6 client_id | 7 parent_tg_ids
 # 8 kindergarten_group (группа в детском саду: номер или название) | 9 athlete_tg_id (свой Telegram спортсмена)
 # 10 parent_max_ids | 11 athlete_max_id (свой MAX спортсмена; scripts/setup_athlete_max.py)
+# 12 archived (YYYY-MM-DD — ушёл из школы, карточка в архиве; scripts/setup_student_archive.py)
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
@@ -19,6 +20,7 @@ KINDERGARTEN_GROUP_MAX = 40
 _ATHLETE_TG_ID_COL = 9
 _PARENT_MAX_IDS_COL = 10
 _ATHLETE_MAX_ID_COL = 11
+_ARCHIVED_COL = 12
 
 
 def _parse_id_list(raw) -> list[int]:
@@ -67,18 +69,33 @@ def _row_to_student(row: dict) -> Student:
         parent_max_ids=_parse_id_list(row.get("parent_max_ids")),
         kindergarten_group=str(row.get("kindergarten_group") or "").strip(),
         athlete_max_id=_parse_tg_id(row.get("athlete_max_id")),
+        archived=str(row.get("archived") or "").strip(),
     )
 
 
 class StudentRepository(BaseRepository):
-    async def get_all(self) -> list[Student]:
-        return [_row_to_student(r) for r in await self._all_records()]
+    async def get_all(self, include_archived: bool = False) -> list[Student]:
+        """Ученики школы. Архивные (ушедшие, `archived` заполнен) по умолчанию не отдаются — их нет ни в
+        списках, ни в поиске, ни в начислениях; `include_archived=True` — для карт имён в истории
+        (занятия, оплаты, лента) и для выдачи номеров."""
+        return [s for s in (_row_to_student(r) for r in await self._all_records())
+                if include_archived or not s.archived]
 
     async def get_by_id(self, student_id: str) -> Optional[Student]:
-        for s in await self.get_all():
+        """По номеру — и архивный тоже: карточка из истории открывается."""
+        for s in await self.get_all(include_archived=True):
             if s.student_id == student_id:
                 return s
         return None
+
+    async def set_archived(self, student_id: str, value: str) -> bool:
+        """Архив ученика (решение владельца 21.10.2026): дата ухода `YYYY-MM-DD`, пусто — вернуть из архива.
+        Требует заголовок `archived` в 12-й колонке (scripts/setup_student_archive.py)."""
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cells(row_idx, {_ARCHIVED_COL: value}, raw=True)
+            return True
 
     async def _used_student_ids(self) -> list[str]:
         """Номера учеников из истории: занятия, оплаты, переопределения абонемента, заявки, лента «Новый ученик».
@@ -116,7 +133,7 @@ class StudentRepository(BaseRepository):
         # номер — под замком листа (два заведения в одну секунду иначе получали один номер) и больше любого
         # номера из истории, а не только из листа учеников: номер удалённого ученика повторно не выдаётся
         async with self._sheet_lock():
-            existing_ids = [s.student_id for s in await self.get_all()] + await self._used_student_ids()
+            existing_ids = [s.student_id for s in await self.get_all(include_archived=True)] + await self._used_student_ids()
             student_id = generate_student_id(existing_ids)
             # Колонка 4 (устаревшая group_id) заполняется пустой строкой.
             await self._append_row([student_id, name, "", "", StudentGroupTier.FULL.value])

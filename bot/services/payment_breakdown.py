@@ -28,7 +28,7 @@ async def month_breakdown(dp, period: str) -> dict:
     ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
     groups = {g.group_id: g for g in await dp["group_repo"].get_all(include_archived=True)}
     branches = {b.branch_id: b.name for b in await dp["branch_repo"].get_all()}
-    names = {s.student_id: s.name for s in await dp["student_repo"].get_all()}
+    names = {s.student_id: s.name for s in await dp["student_repo"].get_all(include_archived=True)}
     service = set(settings.revenue_share_group_map)
     membership = await dp["student_group_repo"].get_membership_map()
     student_groups: dict[str, list[str]] = {}

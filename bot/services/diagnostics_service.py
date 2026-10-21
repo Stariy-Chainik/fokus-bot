@@ -27,7 +27,7 @@ class DiagnosticsService:
     async def run_consistency_check(self) -> DiagnosticsReport:
         lessons = await self._lesson_repo.get_all()
         teacher_ids = {t.teacher_id for t in await self._teacher_repo.get_all()}
-        student_ids = {s.student_id for s in await self._student_repo.get_all()}
+        student_ids = {s.student_id for s in await self._student_repo.get_all(include_archived=True)}
 
         missing_teacher: list[str] = []
         missing_student: list[str] = []

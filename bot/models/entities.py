@@ -45,6 +45,11 @@ class Student:
     parent_max_ids: list[int] = field(default_factory=list)  # родители в MAX (колонка 10)
     kindergarten_group: str = ""  # группа в детском саду — номер или название (колонка 8)
     athlete_max_id: Optional[int] = None  # свой MAX спортсмена — кабинет в мини-приложении MAX (колонка 11)
+    archived: str = ""  # YYYY-MM-DD — ушёл из школы, карточка в архиве (колонка 12; решение владельца 21.10.2026)
+
+    @property
+    def is_archived(self) -> bool:
+        return bool(self.archived)
 
     @property
     def is_athlete(self) -> bool:

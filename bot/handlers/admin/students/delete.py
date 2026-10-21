@@ -6,12 +6,12 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from bot.models import User
 from bot.repositories import (
-    StudentRepository,
+    ClientRepository, StudentRepository,
     GroupRepository, BranchRepository, StudentGroupRepository,
 )
-from bot.services import (
-    StudentService,
-)
+from bot.services import PaymentService
+from bot.services.student_archive import archive_preview, archive_student
+from config.settings import settings
 from bot.keyboards.admin import (
     kb_confirm,
     kb_back,
@@ -109,21 +109,35 @@ async def cb_delete_student_group(
     await callback.answer()
 
 
+def _archive_deps(student_repo, student_group_repo, group_repo, payment_service) -> dict:
+    return {"student_repo": student_repo, "student_group_repo": student_group_repo, "group_repo": group_repo,
+            "payment_service": payment_service, "since": settings.debtors_since_period or None}
+
+
 @router.callback_query(F.data.startswith("del_student:"), AdminOnly())
 async def cb_delete_student_confirm(
     callback: CallbackQuery, user: User, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository, group_repo: GroupRepository, payment_service: PaymentService,
 ) -> None:
+    """Подтверждение — как в кабинете (решение владельца 21.10.2026): ученик уходит в архив, долг показывается."""
     _, group_id, student_id = callback.data.split(":", 2)
-    student = await student_repo.get_by_id(student_id)
-    if not student:
+    p = await archive_preview(student_id, **_archive_deps(student_repo, student_group_repo, group_repo, payment_service))
+    if p is None:
         await callback.answer("Ученик не найден", show_alert=True)
         return
+    lines = [f"<b>Удалить ученика «{p.name}» ({student_id})?</b>", "",
+             "Ученик уйдёт из школы: снимется с групп "
+             + (", ".join(n for _g, n in p.groups) if p.groups else "(не состоит в группах)")
+             + ", родитель и партнёр отвяжутся, в списках его не будет. История занятий и оплат сохранится."]
+    if p.debt.total:
+        lines += ["", f"⚠️ Неоплачено {p.debt.total} ₽: абонемент {p.debt.sub} · групповые {p.debt.group} · "
+                  f"индивидуальные {p.debt.ind}. У ушедшего в должниках не считается."]
     await callback.message.edit_text(
-        f"<b>Удалить ученика «{student.name}» ({student_id})?</b>",
+        "\n".join(lines),
         reply_markup=kb_confirm(
             f"confirm_del_student:{group_id}:{student_id}",
             f"del_st_grp:{group_id}",
-            confirm_text="🗑 Удалить",
+            confirm_text=f"🗑 Удалить (долг {p.debt.total} ₽)" if p.debt.total else "🗑 Удалить",
         ),
     )
     await callback.answer()
@@ -131,13 +145,18 @@ async def cb_delete_student_confirm(
 
 @router.callback_query(F.data.startswith("confirm_del_student:"), AdminOnly())
 async def cb_delete_student_do(
-    callback: CallbackQuery,
-    user: User,
-    student_service: StudentService,
+    callback: CallbackQuery, user: User, student_repo: StudentRepository,
+    student_group_repo: StudentGroupRepository, group_repo: GroupRepository, payment_service: PaymentService,
+    client_repo: ClientRepository,
 ) -> None:
     _, group_id, student_id = callback.data.split(":", 2)
-    ok = await student_service.delete_student(student_id)
-    text = f"Ученик {student_id} удалён." if ok else "Ученик не найден."
+    r = await archive_student(student_id, **_archive_deps(student_repo, student_group_repo, group_repo, payment_service),
+                              client_repo=client_repo, actor=user.tg_id, confirm_debt=True)
+    if isinstance(r, str):
+        text = "Ученик не найден." if r == "not_found" else "Ученик уже в архиве."
+    else:
+        text = (f"Ученик «{r.name}» ушёл из школы — карточка в архиве."
+                + (f"\nНеоплачено {r.debt.total} ₽ — в должниках не считается." if r.debt.total else ""))
     await callback.message.edit_text(
         text, reply_markup=kb_back(f"del_st_grp:{group_id}"),
     )

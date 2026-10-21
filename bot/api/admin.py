@@ -224,7 +224,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             except Exception as exc:                  # лента вспомогательная — сводка важнее
                 logger.warning("Лента изменений недоступна: %s", exc)
         return (await dp["student_group_repo"].get_all(), events,
-                {s.student_id: s.name for s in await student_repo.get_all()},
+                {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)},
                 {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
 
     async def _flow(period: str):
@@ -263,7 +263,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     _ID_RE = re.compile(r"\b(STU|GRP|TCH)-\d{4}\b")
 
     async def _activity_names() -> dict:
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         names.update({g.group_id: g.name for g in await group_repo.get_all(include_archived=True)})
         names.update({t.teacher_id: t.name for t in await teacher_repo.get_all()})
         return names
@@ -349,7 +349,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         """
         teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
         groups = await _groups_by_id()
-        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         blocks: dict[str, dict] = {}
         for ls in sorted(lessons_today, key=lambda x: x.recorded_at or ""):
             t = teachers.get(ls.teacher_id)
@@ -391,6 +391,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         group_id = request.query.get("group", "").strip()
         no_parent = request.query.get("noparent") == "1"
         with_debt = request.query.get("debt") == "1"
+        archived_only = request.query.get("archived") == "1"          # «📦 Архив»: только ушедшие
         groups = await _groups_by_id()
         by_student = await student_group_repo.get_map_by_student()
         debtors: set[str] = set()
@@ -399,7 +400,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
             debtors = {sid for sid, m in debt_map.items() if any(ym < period and amt > 0 for ym, amt in m.items())}
         out = []
-        for s in sorted(await student_repo.get_all(), key=lambda x: x.name.lower()):
+        for s in sorted(await student_repo.get_all(include_archived=archived_only), key=lambda x: x.name.lower()):
+            if archived_only != bool(s.archived):
+                continue
             gids = by_student.get(s.student_id, [])
             in_branch = not branch_id or any(g in groups and groups[g].branch_id == branch_id for g in gids)
             if (q and q not in s.name.lower()) or (group_id and group_id not in gids) or not in_branch \
@@ -408,7 +411,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             out.append({
                 "id": s.student_id, "name": s.name,
                 "groups": [groups[g].name for g in gids if g in groups],
-                "hasParent": bool(s.parent_addrs), "isAthlete": s.is_athlete,
+                "hasParent": bool(s.parent_addrs), "isAthlete": s.is_athlete, "archived": s.archived,
             })
         return _json({"students": out, "total": len(await student_repo.get_all())})
 
@@ -434,6 +437,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             months.append({"period": ym, **summary})
         debt = sum(m["rest"] for m in months if m["period"] < period)
         s = card.student
+        all_groups = {g.group_id: g for g in await dp["group_repo"].get_all(include_archived=True)}
         # история оплат в карточке (решение владельца 21.10.2026): последние 5 зачтённых платежей, как в «Истории оплат»
         paid_rows = sorted((p for p in await dp["payment_repo"].get_all()
                             if p.student_id == sid and p.status == PaymentStatus.PAID),
@@ -459,6 +463,11 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                         **(await _frequency(sid, g.group))} for g in card.groups],
             "months": months, "debt": debt,
             "recentPayments": recent, "paymentsTotal": len(paid_rows),
+            # архив (решение владельца 21.10.2026): дата ухода и группы, откуда снят («ушёл с октября»)
+            "archived": s.archived,
+            "left": [{"id": sg.group_id, "name": all_groups[sg.group_id].name if sg.group_id in all_groups else sg.group_id,
+                      "leftPeriod": sg.left_period}
+                     for sg in await student_group_repo.get_all() if sg.student_id == sid and sg.left_period],
         })
 
     async def _frequency(sid: str, group) -> dict:

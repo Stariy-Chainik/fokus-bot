@@ -495,18 +495,27 @@ SCREENS['a.debtors'] = async () => {
 
 /* Ученики: сначала филиал → группы → состав группы. Поиск и быстрые фильтры
    («без родителя», «с долгом») показывают плоский список по всей школе. */
+// лист «Удалить ученика» — общий для администратора и педагога (архив, долг с подтверждением)
+const archiveSheetHtml = (p, name, act, params) => {
+  const groups = p.groups.map(g => plainName(g.name)).join(', ');
+  const d = p.debt || { total: 0 };
+  return `<h3>Удалить ${esc(name)}?</h3>
+    <div class="hint">Ученик уйдёт из школы: ${p.groups.length ? `снимется с ${p.groups.length === 1 ? 'группы' : 'групп'} ${esc(groups)}` : 'в группах не состоит'}${p.others ? ` и ещё ${plural(p.others, ['группы', 'групп', 'групп'])} других педагогов` : ''}${p.parents ? `, родител${p.parents === 1 ? 'ь отвяжется' : 'и отвяжутся'}` : ''}${p.partner ? `, партнёр ${esc(p.partner)} отвяжется` : ''}. В списках и кабинетах его не будет, история занятий и оплат сохранится.</div>
+    ${d.total ? `<div class="card pad" style="margin-top:10px;background:var(--bad-soft)"><b>⚠️ Неоплачено ${fmt(d.total)}</b><div class="hint" style="margin-top:4px">абонемент ${fmt(d.sub)} · групповые ${fmt(d.group)} · индивидуальные ${fmt(d.ind)}. У ушедшего долг в должниках не считается.</div></div>` : ''}
+    <div style="margin-top:12px">${btn(d.total ? `🗑 Удалить (долг ${fmt(d.total)})` : '🗑 Удалить', act, { ...params, confirmDebt: !!d.total }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`;
+};
 const stuCell = s => cell({ lead: initials(s.name), t: esc(s.name),
-  s: groupsShort(s.groups) + (s.hasParent ? '' : ' · без родителя'), go: 'a.student', p: { id: s.id } });
+  s: s.archived ? `📦 в архиве с ${fdate(s.archived)}` : groupsShort(s.groups) + (s.hasParent ? '' : ' · без родителя'), go: 'a.student', p: { id: s.id } });
 
 SCREENS['a.students'] = async () => {
-  const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false });
+  const f = state.ui.sf || (state.ui.sf = { group: '', noparent: false, debt: false, archived: false });
   const q = state.ui.q || '';
   if (!state.ui.groupsCache) state.ui.groupsCache = (await api('/pay/groups')).branches;
-  const flat = !!(q || f.noparent || f.debt);            // ищем по всей школе, мимо филиалов
-  const d = await api(`/students?q=${encodeURIComponent(q)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}`);
+  const flat = !!(q || f.noparent || f.debt || f.archived);            // ищем по всей школе, мимо филиалов
+  const d = await api(`/students?q=${encodeURIComponent(q)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}${f.archived ? '&archived=1' : ''}`);
   const head = stickyFilters(`
     <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
-    <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button>${flat ? '<button class="chip" data-act="sfReset" data-p=\'{}\'>✕ Сбросить</button>' : ''}</div>`);
+    <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button><button class="chip" aria-pressed="${f.archived}" data-act="sfToggle" data-p='{"k":"archived"}'>📦 Архив</button>${flat ? '<button class="chip" data-act="sfReset" data-p=\'{}\'>✕ Сбросить</button>' : ''}</div>`);
   const body = flat
     ? `<p class="hint" style="margin:0 0 8px">Показано ${d.students.length} из ${d.total}</p>
        ${d.students.length ? list(d.students.map(stuCell)) : empty('Никого не нашли', btn('✕ Сбросить', 'sfReset', {}, 'sec'))}`
@@ -538,9 +547,10 @@ SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
   const cur = s.months.find(m => m.period === lastPeriods(1)[0]) || { total: 0, paid: 0, rest: 0 };
   return { title: s.name, html: `
-    <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><button class="name-edit" data-act="studentRename" data-p='${esc(JSON.stringify({ id, name: s.name }))}' aria-label="Изменить фамилию и имя">${esc(s.name)}<span class="pen" aria-hidden="true">✏️</span></button><div class="hint">${s.client ? 'Родитель: ' + esc(s.client.name) : s.parents.length ? 'Родитель в ' + s.parents.map(p => p.platform === 'tg' ? 'Telegram' : 'MAX').join(', ') : 'Родитель не привязан'}${s.isAthlete ? ' · 🏃 спортсмен' : ''}${s.partner ? ' · пара с ' + esc(s.partner.name) : ''}</div>${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="aKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}</div>${s.debt ? pill(`долг ${fmt(s.debt)}`, 'bad') : cur.rest ? pill(`к оплате ${fmt(cur.rest)}`, 'warn') : cur.total ? pill('оплачено', 'ok') : ''}</div></div>
+    <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><button class="name-edit" data-act="studentRename" data-p='${esc(JSON.stringify({ id, name: s.name }))}' aria-label="Изменить фамилию и имя">${esc(s.name)}<span class="pen" aria-hidden="true">✏️</span></button><div class="hint">${s.client ? 'Родитель: ' + esc(s.client.name) : s.parents.length ? 'Родитель в ' + s.parents.map(p => p.platform === 'tg' ? 'Telegram' : 'MAX').join(', ') : 'Родитель не привязан'}${s.isAthlete ? ' · 🏃 спортсмен' : ''}${s.partner ? ' · пара с ' + esc(s.partner.name) : ''}</div>${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="aKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}</div>${s.archived ? pill(`📦 в архиве с ${fdate(s.archived)}`, 'bad') : s.debt ? pill(`долг ${fmt(s.debt)}`, 'bad') : cur.rest ? pill(`к оплате ${fmt(cur.rest)}`, 'warn') : cur.total ? pill('оплачено', 'ok') : ''}</div></div>
     <div class="eyebrow">Группы</div>${s.groups.length ? list(s.groups.map(g => g.freq ? `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${esc(g.branch)} · абонемент ${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)}${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
-      <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>` : cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : '<div class="empty">Не состоит в группах</div>'}
+      <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>` : cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : (s.left || []).length ? '' : '<div class="empty">Не состоит в группах</div>'}
+    ${(s.left || []).length ? list(s.left.map(g => cell({ lead: '👋', plain: true, t: esc(g.name), s: `ушёл с ${monthLabel(g.leftPeriod).toLowerCase()}` }))) : ''}
     ${s.teachers.length ? `<div class="eyebrow">Педагоги</div><div class="card pad">${esc(s.teachers.join(', '))}</div>` : ''}
     <div class="eyebrow">Занятия</div>${list([cell({ lead: '📅', plain: true, t: 'Занятия ученика', s: 'по месяцам: педагог, группа, сумма, оплата', go: 'a.student.lessons', p: { id, name: s.name } })])}
     <div class="eyebrow">Счета</div>${list(s.months.map(m => cell({ lead: m.total ? (m.rest ? '⏳' : '✅') : '—', plain: true, t: fmon(m.period), s: m.total ? `начислено ${fmt(m.total)} · оплачено ${fmt(m.paid)}` : 'начислений нет', r: m.rest ? pill(fmt(m.rest), m.period < lastPeriods(1)[0] ? 'bad' : 'warn') : '', go: 'a.bill', p: { ym: m.period, sid: id } })))}
@@ -549,7 +559,7 @@ SCREENS['a.student'] = async ({ id }) => {
       <div class="accbody">${s.recentPayments.map(p => paidCell(`${esc(p.teacherName)} — ${fmt(p.amount)}`, `${MON_NOM[+p.period.slice(5) - 1]} · ${p.paidAt ? fdate(p.paidAt.slice(0, 10)) + ' · ' : ''}${p.byTgId === 0 ? 'ЮКасса' : (METHOD[p.method] || p.method || 'вручную')}`, p.id, p.amount)).join('')}
       ${s.paymentsTotal > s.recentPayments.length ? cell({ lead: '📜', plain: true, t: 'Вся история оплат', s: 'по месяцам', go: 'a.payhist.months', p: { sid: id } }) : ''}</div></details>` : '<div class="card pad hint" style="margin-top:12px">Оплат ещё не было</div>'}
     <div class="eyebrow">Карточка</div>${list([cell({ lead: '💃', plain: true, t: 'Группы ученика', s: 'добавить / убрать', go: 'a.student.groups', p: { id, name: s.name } }), cell({ lead: '👫', plain: true, t: s.partner ? `Партнёр: ${esc(s.partner.name)}` : 'Партнёр не назначен', s: 'сменить / убрать', go: 'a.partner', p: { id, name: s.name } }), cell({ lead: '👨‍👩‍👧', plain: true, t: s.client ? 'Сменить родителя' : 'Привязать родителя', s: s.client ? esc(s.client.name) + (s.client.phone ? ' · ' + esc(s.client.phone) : '') : 'карточка клиента: имя и телефон', go: 'a.parent.link', p: { id, name: s.name } })].concat(s.groups.some(g => g.hasShort) ? [`<button class="cell" data-act="tierToggle" data-p='${esc(JSON.stringify({ id }))}'><span class="lead plain">⏱</span><span><div class="t">Тариф: ${s.tier === 'short' ? 'короткое занятие' : 'полное занятие'}</div><div class="s">переключить · действует в: ${esc(s.groups.filter(g => g.hasShort).map(g => plainName(g.name)).join(', '))}</div></span><span class="r"><span class="chev">›</span></span></button>`] : []).concat((s.athlete ? [['tg', 'Telegram'], ['max', 'MAX']].filter(([k]) => s.athlete[k]) : s.isAthlete ? [['', 'Telegram']] : []).map(([platform, label]) => `<button class="cell" data-act="athleteUnlink" data-p='${esc(JSON.stringify({ id, platform, label }))}'><span class="lead plain">🏃</span><span><div class="t">Кабинет спортсмена привязан · ${label}</div><div class="s">отвязать ${label} ученика</div></span><span class="r"><span class="chev">›</span></span></button>`)))}
-    <div style="margin-top:12px">${btn('✏️ Переименовать', 'studentRename', { id, name: s.name }, 'ghost')}${btn('🗑 Удалить ученика', 'studentDelete', { id, name: s.name }, 'danger')}</div>` };
+    <div style="margin-top:12px">${btn('✏️ Переименовать', 'studentRename', { id, name: s.name }, 'ghost')}${s.archived ? btn('↩ Вернуть из архива', 'studentUnarchive', { id, name: s.name }, 'sec') : btn('🗑 Удалить ученика', 'studentArchiveAsk', { id, name: s.name }, 'danger')}</div>` };
 };
 
 /* Занятия ученика по месяцам: кто вёл, группа, длительность, доля ученика и ✅/⬜ оплаты (как в счёте). */
@@ -1060,6 +1070,22 @@ Object.assign(ACT, {
   studentAdd: async () => { const name = val('ns-name').trim(); if (!name) { toast('Введите имя'); return; } try { const r = await api('/students', { method: 'POST', body: { name, groupIds: [...state.ui.ns.groups] } }); state.ui.ns = null; state.stack.pop(); go('a.student', { id: r.id }); toast('Ученик создан'); } catch (e) { toast(errText(e)); } },
   studentRename: ({ id, name }) => sheet(`<h3>Переименовать</h3>${field('rn', 'Новое имя', name)}<p class="hint">В прошлых занятиях и счетах останется старое написание — так устроен бот.</p><div style="margin-top:12px">${btn('💾 Сохранить', 'doStudentRename', { id })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   doStudentRename: async ({ id }) => { const name = val('rn').trim(); if (!name) return; try { await api(`/students/${id}`, { method: 'PATCH', body: { name } }); closeSheet(); render(); toast('Переименовано'); } catch (e) { toast(errText(e)); } },
+  // «Удалить ученика» = ушёл из школы, в архив (решение владельца 21.10.2026): снять со всех групп, отвязать
+  // родителей и партнёра, из списков убрать; история остаётся. Долг показывается, кнопка — подтверждение.
+  studentArchiveAsk: async ({ id, name }) => {
+    let p;
+    try { p = await api(`/students/${id}/archive`); } catch (e) { toast(errText(e)); return; }
+    sheet(archiveSheetHtml(p, name, 'studentArchiveDo', { id }));
+  },
+  studentArchiveDo: async ({ id, confirmDebt }) => {
+    try {
+      const r = await api(`/students/${id}/archive`, { method: 'POST', body: { confirmDebt: !!confirmDebt } });
+      closeSheet(); render(); toast(`${r.name} — в архиве${r.debt.total ? `, неоплачено ${fmt(r.debt.total)}` : ''}`);
+    } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  },
+  studentUnarchive: async ({ id, name }) => {
+    try { await api(`/students/${id}/unarchive`, { method: 'POST' }); render(); toast(`${name} — снова в школе; проверьте группы и родителя`); } catch (e) { toast(errText(e)); }
+  },
   studentDelete: ({ id, name }) => sheet(`<h3>Удалить ${esc(name)}?</h3><div class="hint">Партнёр отвяжется, членства снимутся; отмеченные занятия останутся в истории.</div><div style="margin-top:12px">${btn('🗑 Удалить', 'doStudentDelete', { id }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
   doStudentDelete: async ({ id }) => { try { await api(`/students/${id}`, { method: 'DELETE' }); closeSheet(); state.stack = [{ n: 'a.students' }]; render(); toast('Ученик удалён'); } catch (e) { toast(errText(e)); } },
   partnerSet: async ({ id, pid, name }) => { try { await api(`/students/${id}/partner`, { method: 'PUT', body: { partnerId: pid } }); back(); toast(`Пара: с ${name.split(' ')[0]}`); } catch (e) { toast(errText(e)); } },
@@ -1417,7 +1443,7 @@ ACT.payGroupPick = ({ v }) => {
 };
 /* Быстрые фильтры на экране «Ученики»: показывают плоский список по всей школе. */
 ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };
-ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false }; state.ui.q = ''; render(); };
+ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false, archived: false }; state.ui.q = ''; render(); };
 
 document.addEventListener('click', e => {
   const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');

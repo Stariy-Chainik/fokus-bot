@@ -806,6 +806,11 @@ class StudentRepoWritable(StudentRepoFake):
         if s: s.athlete_max_id = max_id  # noqa: E701
         return s is not None
 
+    async def set_archived(self, sid, value):
+        s = self._find(sid)
+        if s: s.archived = value  # noqa: E701
+        return s is not None
+
     async def add_parent_tg_id(self, sid, tg_id):
         return await self.add_parent(sid, ("tg", tg_id))
 

@@ -82,7 +82,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         tid = request.query.get("tid") or ""
         teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
         groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         rows = [x for x in await lesson_repo.get_all()
                 if (x.date[:7] == ym if ym else x.date == day) and (not tid or x.teacher_id == tid)]
         out = []
@@ -108,7 +108,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             return _json({"error": "not_found"}, status=404)
         t = await teacher_repo.get_by_id(ls.teacher_id)
         g = await group_repo.get_by_id(ls.group_id) if ls.group_id else None
-        students = {s.student_id: s.name for s in await student_repo.get_all()}
+        students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         if ls.type == LessonType.GROUP:
             attendees = [{"studentId": e.student_id, "name": students.get(e.student_id, e.student_id),
                           "durationMin": e.duration_min, "amount": e.amount} for e in parse_attendees(ls.attendees)]

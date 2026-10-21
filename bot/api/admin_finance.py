@@ -82,7 +82,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
 
     async def _debtor_rows():
         debt_map = await payment_service.compute_debt_map(since_period=settings.debtors_since_period or None)
-        students = {s.student_id: s for s in await student_repo.get_all()}
+        students = {s.student_id: s for s in await student_repo.get_all(include_archived=True)}
         return build_debtor_rows(debt_map, students, current_period())
 
     # ── должники: напомнить всем ─────────────────────────────────────────
@@ -160,7 +160,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         считаются месяцем и здесь не участвуют (их блок — «Абонементы»)."""
         teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
         groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         units: dict[str, dict] = {}
         for ls in await lesson_repo.get_all():
             if not ls.date.startswith(period):
@@ -224,7 +224,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         group = await group_repo.get_by_id(gid)
         if rows is None or group is None:
             return _json({"error": "not_found"}, status=404)
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
 
         def status(r) -> str:
             if r.accrued == 0:
@@ -248,7 +248,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             return _json({"error": "not_found"}, status=404)
         lessons = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(tid, period)}
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
 
         def who(ls) -> list[str]:
             if ls is None:
@@ -379,7 +379,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         sg = set() if lessons_only else (await _sub_groups_by_teacher(period)).get(tid, set())
         col = teacher_collection(ledger, period, tid, sg)
         unpaid = await _unpaid_lessons(period, tid, col, {})
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         students = [{"id": sid, "name": names.get(sid, sid), "accrued": a, "paid": p, "rest": a - p,
                      "unpaidLessons": unpaid.get(sid, 0),
                      "status": "paid" if a <= p else "partial" if p else "unpaid"} for sid, (a, p) in col.items()]
@@ -396,7 +396,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         lines = await salary_service.lines_for(t, period)
         by_id = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(t.teacher_id, period)}
         groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         out = []
         for ln in lines:
             d = _salary_line(ln)

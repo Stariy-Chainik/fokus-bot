@@ -36,6 +36,7 @@ from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
+from bot.services.student_archive import archive_preview, archive_student
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services.profit_service import lesson_rent
@@ -229,7 +230,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def _add_pay_counts(teacher, rows: list, items: list) -> None:
         """В строки журнала — «оплатили N из M» (paidCount / payableCount), одним кешем на запрос."""
         groups_by_id = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        students = {s.student_id: s for s in await student_repo.get_all()}
+        students = {s.student_id: s for s in await student_repo.get_all(include_archived=True)}
         cache: dict = {}
         for ls, item in zip(rows, items, strict=True):
             g = groups_by_id.get(ls.group_id) if ls.group_id else None
@@ -254,7 +255,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         today_lessons = sorted((ls for ls in month if ls.date == today), key=lambda x: x.recorded_at or "")
         submitted = await _submitted(teacher.teacher_id)
         prev = last_periods(2)[1]
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         groups = await _group_names()
         today_items = [_lesson_brief(ls, teacher, groups, names) for ls in today_lessons]
         await _add_pay_counts(teacher, today_lessons, today_items)
@@ -314,7 +315,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if len(key) not in (7, 10):
             return _json({"error": "bad_request"}, status=400)
         rows = await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, key)
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         groups = await _group_names()
         submitted = await _submitted(teacher.teacher_id)
         ordered = sorted(rows, key=lambda x: (x.date, x.recorded_at or ""))
@@ -332,7 +333,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if ls is None or ls.teacher_id != teacher.teacher_id:
             return _json({"error": "not_found"}, status=404)
         g = await group_repo.get_by_id(ls.group_id) if ls.group_id else None
-        students = {s.student_id: s for s in await student_repo.get_all()}
+        students = {s.student_id: s for s in await student_repo.get_all(include_archived=True)}
         names = {sid: s.name for sid, s in students.items()}
         if ls.type == LessonType.GROUP:
             attendees = [{"studentId": e.student_id, "name": names.get(e.student_id, e.student_id),
@@ -590,6 +591,64 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                     teacher.teacher_id, sid, gid, left, result, debt)
         return _json({"ok": True, "result": result, "leftPeriod": left, "debt": debt})
 
+    def _archive_deps() -> dict:
+        return {"student_repo": student_repo, "student_group_repo": student_group_repo, "group_repo": group_repo,
+                "payment_service": payment_service, "since": settings.debtors_since_period or None}
+
+    async def student_archive_preview(request: web.Request, user, teacher) -> web.Response:
+        """«🗑 Удалить ученика» у педагога (решение владельца 21.10.2026) — тот же сценарий, что у администратора:
+        ученик уходит из школы (архив). Только ученик своих групп; в листе — свои группы по имени, чужие — числом."""
+        sid = request.match_info["sid"]
+        own = await _own_group_ids(teacher)
+        if not own & set(await student_group_repo.get_groups_for_student(sid)):
+            return _json({"error": "not_found"}, status=404)
+        p = await archive_preview(sid, **_archive_deps())
+        if p is None:
+            return _json({"error": "not_found"}, status=404)
+        d = p.as_dict()
+        d["groups"] = [g for g in d["groups"] if g["id"] in own]
+        d["others"] = len(p.groups) - len(d["groups"])
+        return _json(d)
+
+    async def student_archive(request: web.Request, user, teacher) -> web.Response:
+        """Ушёл из школы: снять со всех групп (и чужих — ученик ушёл совсем), отвязать родителей и партнёра,
+        карточку в архив. Долг есть и `confirmDebt` нет → 409 `debt`. Администраторам и педагогам других
+        групп ученика — сообщение."""
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        own = await _own_group_ids(teacher)
+        current = set(await student_group_repo.get_groups_for_student(sid))
+        if not own & current:
+            return _json({"error": "not_found"}, status=404)
+        r = await archive_student(sid, **_archive_deps(), client_repo=client_repo, actor=user.tg_id,
+                                  who=f"педагог {teacher.name}", confirm_debt=bool((body or {}).get("confirmDebt")))
+        if isinstance(r, str):
+            if r == "not_found":
+                return _json({"error": "not_found"}, status=404)
+            if r == "already":
+                return _json({"error": "already", "message": "Ученик уже в архиве"}, status=409)
+            p = await archive_preview(sid, **_archive_deps())
+            return _json({"error": "debt", "debt": p.debt.as_dict() if p else {}}, status=409)
+        if bot is not None:
+            others = {g for g, _n in r.groups} - own
+            text = (f"📦 Педагог {teacher.name}: ученик ушёл из школы\nУченик: {r.name}\n"
+                    f"Снят с групп: {', '.join(n for _g, n in r.groups) or 'не состоял в группах'}\n"
+                    f"Родителей отвязано: {r.parents}" + (f" · партнёр {r.partner} отвязан" if r.partner else "")
+                    + (f"\nНеоплачено {r.debt.total} ₽ — у ушедшего в должниках не считается"
+                       if r.debt.total else "\nДолгов нет.")
+                    + "\nКарточка в архиве, вернуть — в карточке ученика.")
+            admins = {u.tg_id for u in await user_repo.get_admins()}
+            if others:                                           # педагоги чужих групп — им ученик тоже пропал
+                tids = {tg.teacher_id for tg in await teacher_group_repo.get_all() if tg.group_id in others}
+                admins |= {u.tg_id for u in await user_repo.get_all()
+                           if u.teacher_id in tids and u.tg_id != user.tg_id}
+            await notify(bot, sorted(admins), text)
+        logger.info("Mini App: педагог %s — ученик %s в архиве", teacher.teacher_id, sid)
+        return _json(r.as_dict())
+
     async def student_transfer_options(request: web.Request, user, teacher) -> web.Response:
         """«🔄 Перевести в другую группу» (решение владельца 16.10.2026): из каких своих групп ученика можно
         перевести и в какие свои (где его ещё нет; архивные не предлагаются), месяцы ухода для абонемента."""
@@ -708,7 +767,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         mine = [ls for ls in await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, ym)
                 if sid in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id)
                 or sid in [e.student_id for e in parse_attendees(ls.attendees or "")]]
-        names = {x.student_id: x.name for x in await student_repo.get_all()}
+        names = {x.student_id: x.name for x in await student_repo.get_all(include_archived=True)}
         gids = await student_group_repo.get_groups_for_student(sid)
         own_visible = await _own_group_ids(teacher)
         tariffs = []
@@ -749,7 +808,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         lines = await salary_service.lines_for(teacher, ym)
         rows = await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, ym)
         submitted = await _submitted(teacher.teacher_id)
-        names = {s.student_id: s.name for s in await student_repo.get_all()}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         groups = await _group_names()
         by_id = {ls.lesson_id: ls for ls in rows}
 
@@ -1492,6 +1551,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/students/{sid}/transfer", student_transfer_options),   # «Перевести в другую группу» (16.10.2026)
         ("POST", "/students/{sid}/transfer", student_transfer),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
+        ("GET", "/students/{sid}/archive", student_archive_preview), ("POST", "/students/{sid}/archive", student_archive),
         ("POST", "/groups/{gid}/members", member_add),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),

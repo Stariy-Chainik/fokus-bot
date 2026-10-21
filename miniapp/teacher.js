@@ -242,6 +242,19 @@ ACT.tMoveDo = async () => {
     toast(`Переведён в «${plainName(r.toName)}»${r.result === 'marked' ? ` · из старой с ${fmon(r.leftPeriod).toLowerCase()}` : ''}`);
   } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
+// «Удалить ученика» у педагога — тот же архив, что у администратора (решение владельца 21.10.2026)
+ACT.tArchiveAsk = async ({ sid, name }) => {
+  let p;
+  try { p = await api(`/students/${sid}/archive`); } catch (e) { toast(errText(e)); return; }
+  sheet(archiveSheetHtml(p, name, 'tArchiveDo', { sid }));
+};
+ACT.tArchiveDo = async ({ sid, confirmDebt }) => {
+  try {
+    const r = await api(`/students/${sid}/archive`, { method: 'POST', body: { confirmDebt: !!confirmDebt } });
+    closeSheet(); back();                                   // ученик больше не виден педагогу
+    toast(`${r.name} ушёл из школы${r.debt.total ? `, неоплачено ${fmt(r.debt.total)}` : ''}`);
+  } catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
@@ -304,7 +317,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
     ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}
-    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}${btn('🔄 Перевести в другую группу', 'tMoveAsk', { sid: id, name: s.name }, 'sec')}</div>` : ''}
+    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}${btn('🔄 Перевести в другую группу', 'tMoveAsk', { sid: id, name: s.name }, 'sec')}${btn('🗑 Удалить ученика', 'tArchiveAsk', { sid: id, name: s.name }, 'danger')}</div>` : ''}
     ${state.me.canBill ? `<div style="margin-top:12px">${goBtn(`🧾 Счёт за ${MON_NOM[+(s.period).slice(5) - 1].toLowerCase()}`, 't.bill', { sid: id, ym: s.period }, 'sec')}</div>` : ''}` };
 };
 
