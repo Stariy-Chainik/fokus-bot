@@ -35,7 +35,7 @@ def kb_students_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💃 Пары", callback_data="students:pairs")],
         [InlineKeyboardButton(text="🎯 Солисты", callback_data="students:soloists")],
         [InlineKeyboardButton(text="➕ Добавить ученика", callback_data="students:add")],
-        [InlineKeyboardButton(text="🗑 Удалить ученика", callback_data="students:delete")],
+        # «Удалить ученика» — только в кабинете (архив; решение владельца 21.10.2026), в боте кнопки нет
         [InlineKeyboardButton(text="« Назад", callback_data="admin:menu")],
     ])
 
