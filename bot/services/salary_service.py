@@ -129,12 +129,6 @@ def settings_share(group_id: str, period: str) -> int | None:
     return settings.subscription_share(group_id, period)
 
 
-def lesson_amounts(lines: list[SalaryLine]) -> dict[str, int]:
-    """Зарплата за каждое занятие по строкам: {lesson_id: ₽}; занятия в смене, в корректировке дня и в проценте
-    от абонементов — 0. Единственный источник суммы «начислено» у занятия во всех экранах (21.10.2026)."""
-    return {ln.lesson_id: ln.amount for ln in lines if ln.lesson_id}
-
-
 def salary_total(lines: list[SalaryLine]) -> int:
     return sum(line.amount for line in lines)
 
@@ -192,10 +186,6 @@ class SalaryService:
             out.append(SalaryLine(date=f"{month}-01", kind="share", label=label, minutes=0, amount=amount,
                                   group_id=gid))
         return out
-
-    async def lesson_amounts_for(self, teacher, period: str) -> dict[str, int]:
-        """{lesson_id: ₽} за месяц `period` (YYYY-MM или дата — берётся её месяц)."""
-        return lesson_amounts(await self.lines_for(teacher, period[:7]))
 
     async def lines_for(self, teacher, period: str) -> list[SalaryLine]:
         """period: YYYY-MM (месяц) или YYYY-MM-DD (день — строки только этой даты, без премий)."""

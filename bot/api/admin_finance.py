@@ -162,16 +162,13 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         units: dict[str, dict] = {}
-        amounts: dict[str, dict] = {}                     # педагог → {lesson_id: ₽} из строк зарплаты
         for ls in await lesson_repo.get_all():
             if not ls.date.startswith(period):
                 continue
             t = teachers.get(ls.teacher_id)
             if t is None:
                 continue
-            if ls.teacher_id not in amounts:
-                amounts[ls.teacher_id] = await salary_service.lesson_amounts_for(t, period)
-            row = calculate_profit_lesson(ls, t, earned=amounts[ls.teacher_id].get(ls.lesson_id))
+            row = calculate_profit_lesson(ls, t)
             if row is None:
                 continue
             service = ls.group_id in settings.revenue_share_group_map        # техгруппа «Индивидуальные — …»
