@@ -816,8 +816,10 @@ class PaymentService:
                 paid[key] = paid.get(key, 0) + p.total_amount
 
         # Удалённый ученик: его занятия остаются в журнале, но долг нигде не считается — ни в должниках, ни в
-        # сборе месяца, ни в диаграммах, ни у педагога (решение владельца 11.10.2026). Ушедший — так же
-        # (решение владельца 16.10.2026): «человек просто ушёл, долг нигде не должен висеть».
+        # сборе месяца, ни в диаграммах, ни у педагога (решение владельца 11.10.2026). Ушедший (и архивный) — так же
+        # (решение владельца 16.10.2026): «человек просто ушёл, долг нигде не должен висеть». Но то, что он
+        # реально заплатил, в сборе остаётся (решение владельца 21.10.2026): начисление урезается до оплаченного,
+        # пропадает только неоплаченный остаток — сбор прошлых месяцев задним числом не уменьшается.
         alive = ({s.student_id for s in await self._student_repo.get_all()}
                  if self._student_repo is not None else None)
         departed = await self._departed_students()
@@ -825,11 +827,12 @@ class PaymentService:
         for key, amount in accrued.items():
             if since_period and key[2] < since_period:
                 continue
-            if alive is not None and key[0] not in alive:
-                continue
-            if key[0] in departed:
-                continue
-            ledger[key] = (amount, paid.get(key, 0))
+            paid_amount = paid.get(key, 0)
+            if (alive is not None and key[0] not in alive) or key[0] in departed:
+                amount = min(amount, paid_amount)
+                if amount <= 0:
+                    continue
+            ledger[key] = (amount, paid_amount)
         return ledger
 
     async def _departed_students(self) -> set[str]:
