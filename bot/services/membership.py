@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 
 from bot.models.enums import GroupBillingMode
 from bot.utils.dates import current_period, next_period
@@ -47,40 +46,3 @@ async def leave_group(student_id: str, group_id: str, left_period: str,
         return "missing"
     removed = await student_group_repo.remove(student_id, group_id)
     return "removed" if removed else "missing"
-
-
-@dataclass
-class LeaveSchoolResult:
-    """Что сделано при уходе из школы: по каким группам пометка ухода, где строка удалена."""
-    left_period: str
-    marked: list = field(default_factory=list)      # абонементные группы — `left_period`
-    removed: list = field(default_factory=list)     # остальные — строка членства удалена
-
-    @property
-    def groups(self) -> list:
-        return self.marked + self.removed
-
-
-async def leave_school(student_id: str, left_period: str, group_repo, student_group_repo,
-                       only_groups=None, who: str = "", actor: int = 0) -> LeaveSchoolResult:
-    """«Удалить ученика» в карточке = ушёл из школы (решение владельца 21.10.2026): снять со всех групп,
-    карточку, занятия и оплаты оставить. Абонементные группы — пометка `left_period`, остальные — строка
-    удаляется (как `leave_group`). `only_groups` — ограничить своими группами (педагог: чужие направления не
-    трогает). Одно событие в ленте от имени `actor`; репозитории пишут свои по каждой группе."""
-    gids = await student_group_repo.get_groups_for_student(student_id)
-    if only_groups is not None:
-        gids = [g for g in gids if g in only_groups]
-    result = LeaveSchoolResult(left_period)
-    for gid in gids:
-        r = await leave_group(student_id, gid, left_period, group_repo, student_group_repo)
-        if r == "marked":
-            result.marked.append(gid)
-        elif r == "removed":
-            result.removed.append(gid)
-    if result.groups:
-        from bot.services import activity
-        await activity.record(activity.STUDENT, f"Ученик {student_id} ушёл из школы с {left_period}: "
-                              + ", ".join(result.groups) + (f" ({who})" if who else ""), actor=actor, ref=student_id)
-        logger.info("Ученик %s ушёл из школы с %s: пометка %s, убран %s (%s)",
-                    student_id, left_period, result.marked, result.removed, who or "админ")
-    return result

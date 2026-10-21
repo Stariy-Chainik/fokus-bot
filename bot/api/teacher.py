@@ -35,7 +35,7 @@ from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
-from bot.services.membership import leave_group, leave_options, leave_school
+from bot.services.membership import leave_group, leave_options
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services.profit_service import lesson_rent
@@ -589,64 +589,6 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s, неоплачено %d)",
                     teacher.teacher_id, sid, gid, left, result, debt)
         return _json({"ok": True, "result": result, "leftPeriod": left, "debt": debt})
-
-    async def student_leave_options(request: web.Request, user, teacher) -> web.Response:
-        """«🗑 Удалить ученика» в карточке у педагога = ушёл из школы (решение владельца 21.10.2026): из каких
-        своих групп снимем, есть ли группы других педагогов (их не трогаем), месяцы ухода для абонемента."""
-        sid = request.match_info["sid"]
-        own, names = await _own_group_ids(teacher), await _group_names()
-        current = set(await student_group_repo.get_groups_for_student(sid))
-        s = await student_repo.get_by_id(sid)
-        if s is None or not own & current:
-            return _json({"error": "not_found"}, status=404)
-        live = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        return _json({
-            "student": {"id": sid, "name": s.name},
-            "groups": [{"id": gid, "name": names.get(gid, gid),
-                        "subscription": gid in live and live[gid].billing_mode == GroupBillingMode.SUBSCRIPTION}
-                       for gid in sorted(own & current, key=lambda g: str(names.get(g, g)))],
-            "others": len(current - own),
-            "leaveOptions": [{"ym": ym, "label": label} for ym, label in leave_options()],
-        })
-
-    async def student_leave(request: web.Request, user, teacher) -> web.Response:
-        """Ушёл из школы: снять ученика со всех **своих** групп одним действием (абонемент — пометка с
-        `leftPeriod`, иначе строка удаляется); группы других педагогов остаются — их снимают они сами.
-        Долг не мешает и пишется в сообщение администраторам."""
-        sid = request.match_info["sid"]
-        try:
-            body = await request.json()
-        except Exception:
-            return _json({"error": "bad_request"}, status=400)
-        left = str((body or {}).get("leftPeriod") or current_period())
-        own = await _own_group_ids(teacher)
-        current = set(await student_group_repo.get_groups_for_student(sid))
-        s = await student_repo.get_by_id(sid)
-        if s is None or not own & current:
-            return _json({"error": "not_found"}, status=404)
-        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
-        has_sub = any(groups[g].billing_mode == GroupBillingMode.SUBSCRIPTION for g in own & current if g in groups)
-        if has_sub and left not in {ym for ym, _ in leave_options()}:
-            return _json({"error": "bad_request", "message": "Выберите месяц ухода"}, status=400)
-        ledger = await payment_service.compute_ledger_map(since_period=settings.debtors_since_period or None)
-        debt = sum(a - p for (st_id, _k, _ym), (a, p) in ledger.items() if st_id == sid and a > p)
-        r = await leave_school(sid, left, group_repo, student_group_repo, only_groups=own,
-                               who=f"педагог {teacher.name}", actor=user.tg_id)
-        remaining = len(current - own)
-        if bot is not None:
-            names = await _group_names()
-            text = (f"👋 Педагог {teacher.name}: ученик ушёл из школы\nУченик: {s.name}\n"
-                    f"Группы: {', '.join(str(names.get(g, g)) for g in r.groups)}\n"
-                    + (f"С месяца: {period_label(left)} (абонемент дальше не начисляется)\n" if r.marked else "")
-                    + ("Убран из состава (оплата по посещениям — история сохранена)\n" if r.removed else "")
-                    + (f"Остался в группах других педагогов: {remaining} — их снимают они сами"
-                       if remaining else "Других групп нет — ученик ушёл из школы")
-                    + (f"\nНеоплачено {debt} ₽ — у ушедшего в должниках не считается" if debt > 0 else "\nДолгов нет."))
-            await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
-        logger.info("Mini App: педагог %s — ученик %s ушёл из школы с %s (пометка %s, убран %s, осталось чужих %d, неоплачено %d)",
-                    teacher.teacher_id, sid, left, r.marked, r.removed, remaining, debt)
-        return _json({"ok": True, "leftPeriod": left, "marked": r.marked, "removed": r.removed,
-                      "remaining": remaining, "debt": debt})
 
     async def student_transfer_options(request: web.Request, user, teacher) -> web.Response:
         """«🔄 Перевести в другую группу» (решение владельца 16.10.2026): из каких своих групп ученика можно
@@ -1550,7 +1492,6 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/students/{sid}/transfer", student_transfer_options),   # «Перевести в другую группу» (16.10.2026)
         ("POST", "/students/{sid}/transfer", student_transfer),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
-        ("GET", "/students/{sid}/leave", student_leave_options), ("POST", "/students/{sid}/leave", student_leave),
         ("POST", "/groups/{gid}/members", member_add),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),

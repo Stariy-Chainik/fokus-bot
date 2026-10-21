@@ -432,13 +432,7 @@ class StudentGroupRepoFake:
         return any(r.student_id == student_id and r.group_id == group_id for r in self.rows)
 
     async def add(self, student_id, group_id, joined_period=None):
-        for r in self.rows:                                   # как настоящий: вернувшемуся снимаем пометку ухода
-            if r.student_id == student_id and r.group_id == group_id:
-                r.left_period = ""
-                return r
-        sg = StudentGroup(student_id, group_id, joined_period or "")
-        self.rows.append(sg)
-        return sg
+        self.rows.append(StudentGroup(student_id, group_id, joined_period or ""))
 
     async def remove(self, student_id, group_id):
         before = len(self.rows)

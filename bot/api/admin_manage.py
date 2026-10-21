@@ -14,7 +14,7 @@ from aiohttp import web
 from bot.models.enums import GroupBillingMode, StudentGroupTier
 from bot.services.group_invite import group_invite
 from bot.services.kindergarten import clean_value, is_kindergarten_group
-from bot.services.membership import leave_group, leave_options, leave_school
+from bot.services.membership import leave_group
 from bot.services.student_service import TierToggleError
 from bot.utils.dates import current_period
 
@@ -364,30 +364,11 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         return _json({"ok": ok, "value": value}, status=200 if ok else 404)
 
     async def student_delete(request: web.Request, user) -> web.Response:
-        """Удалить карточку совсем — только для дублей и ошибочных карточек (второй шаг в листе «Удалить
-        ученика»); обычный уход — `student_leave`."""
         sid = request.match_info["sid"]
         ok = await student_service.delete_student(sid)
         if ok:
             logger.info("Mini App: админ %s удалил ученика %s", user.tg_id, sid)
         return _json({"ok": ok}, status=200 if ok else 404)
-
-    async def student_leave(request: web.Request, user) -> web.Response:
-        """«🗑 Удалить ученика» в карточке = ушёл из школы (решение владельца 21.10.2026): снять со всех групп
-        с месяца `leftPeriod` (абонемент — пометка, по посещениям — строка удаляется), карточка и история
-        остаются; ученик попадает в «Ушли из школы», долг в должниках не считается."""
-        sid = request.match_info["sid"]
-        if await student_repo.get_by_id(sid) is None:
-            return _json({"error": "not_found"}, status=404)
-        body = await _body(request) or {}
-        left = str(body.get("leftPeriod") or "")
-        if left not in {ym for ym, _ in leave_options()}:
-            return _json({"error": "bad_request", "message": "Выберите месяц ухода"}, status=400)
-        if not await student_group_repo.get_groups_for_student(sid):
-            return _json({"error": "no_groups", "message": "Ученик не состоит в группах"}, status=409)
-        r = await leave_school(sid, left, group_repo, student_group_repo, actor=user.tg_id)
-        logger.info("Mini App: админ %s — ученик %s ушёл из школы с %s", user.tg_id, sid, left)
-        return _json({"ok": True, "leftPeriod": left, "marked": r.marked, "removed": r.removed})
 
     async def partner_candidates(request: web.Request, user) -> web.Response:
         s = await student_repo.get_by_id(request.match_info["sid"])
@@ -557,7 +538,6 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         ("POST", "/groups/{gid}/members", member_add), ("DELETE", "/groups/{gid}/members/{sid}", member_remove),
         ("PUT", "/groups/{gid}/members/{sid}", member_periods),
         ("POST", "/students", student_add), ("PATCH", "/students/{sid}", student_patch), ("DELETE", "/students/{sid}", student_delete),
-        ("POST", "/students/{sid}/leave", student_leave),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("GET", "/students/{sid}/partner-candidates", partner_candidates), ("PUT", "/students/{sid}/partner", partner_put),
         ("PUT", "/students/{sid}/groups", student_groups), ("POST", "/students/{sid}/tier", student_tier),
