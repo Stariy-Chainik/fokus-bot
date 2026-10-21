@@ -37,8 +37,8 @@ from bot.services import (
     DiaryService,
 )
 from bot.middlewares import (
-    AuthMiddleware, DedupUpdateMiddleware, ParentCabinetOnlyMiddleware, PrivateChatsOnlyMiddleware,
-    TeacherCabinetOnlyMiddleware,
+    AdminCabinetOnlyMiddleware, AthleteCabinetOnlyMiddleware, AuthMiddleware, DedupUpdateMiddleware,
+    ParentCabinetOnlyMiddleware, PrivateChatsOnlyMiddleware, TeacherCabinetOnlyMiddleware,
 )
 from bot.handlers import common_router, admin_router, teacher_router, athlete_router, client_router
 
@@ -190,6 +190,10 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         dp.message.outer_middleware(ParentCabinetOnlyMiddleware())
     if settings.teacher_cabinet_only and settings.miniapp_url:      # педагог — только кабинет
         dp.callback_query.outer_middleware(TeacherCabinetOnlyMiddleware())
+    if settings.admin_cabinet_only and settings.miniapp_url:        # администратор — только кабинет (21.10.2026)
+        dp.callback_query.outer_middleware(AdminCabinetOnlyMiddleware())
+    if settings.athlete_cabinet_only and settings.miniapp_url:      # спортсмен — только приложение (21.10.2026)
+        dp.callback_query.outer_middleware(AthleteCabinetOnlyMiddleware())
 
     # ── Роутеры ──────────────────────────────────────────────────────────────
     dp.include_routers(common_router, admin_router, teacher_router, athlete_router, client_router)

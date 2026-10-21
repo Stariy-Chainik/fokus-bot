@@ -9,8 +9,11 @@ from config.settings import settings
 
 
 def teacher_cabinet_only(can_switch_role: bool = False) -> bool:
-    """Чистый педагог работает только через кабинет (TEACHER_CABINET_ONLY); администратору бот-меню остаётся."""
-    return bool(settings.teacher_cabinet_only and settings.miniapp_url and not can_switch_role)
+    """Чистый педагог работает только через кабинет (TEACHER_CABINET_ONLY); администратору в режиме педагога
+    бот-меню остаётся, пока не включён ADMIN_CABINET_ONLY (решение владельца 21.10.2026)."""
+    if not settings.miniapp_url:
+        return False
+    return bool(settings.admin_cabinet_only if can_switch_role else settings.teacher_cabinet_only)
 
 
 TEACHER_CABINET_TEXT = "Добро пожаловать!\n\nВсё для работы — занятия, группы, зарплата, счета — в кабинете. Нажмите кнопку ниже."

@@ -417,6 +417,11 @@ class Settings(BaseSettings):
     # Педагог работает только через кабинет (решение владельца 01.10.2026): в боте — одна кнопка «Войти в кабинет»,
     # прежние кнопки меню отвечают подсказкой. Администратора (в т.ч. в режиме педагога) не затрагивает. Нужен MINIAPP_URL.
     teacher_cabinet_only: bool = Field(default=False, alias="TEACHER_CABINET_ONLY")
+    # Администратор и спортсмен — тоже только кабинет (решение владельца 21.10.2026: «Telegram-бот только как
+    # мини-приложение»): /start и меню — одна кнопка кабинета, прежние кнопки меню отвечают подсказкой; кнопки
+    # решений в уведомлениях (чек, наличные, заявки) работают. Нужен MINIAPP_URL. Код меню бота не удалён.
+    admin_cabinet_only: bool = Field(default=False, alias="ADMIN_CABINET_ONLY")
+    athlete_cabinet_only: bool = Field(default=False, alias="ATHLETE_CABINET_ONLY")
     payment_bank_details: str = Field(default="", alias="PAYMENT_BANK_DETAILS")
     payment_qr_image_url: str = Field(default="", alias="PAYMENT_QR_IMAGE_URL")
     payment_qr_data: str = Field(default="", alias="PAYMENT_QR_DATA")

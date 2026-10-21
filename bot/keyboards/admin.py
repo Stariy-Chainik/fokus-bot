@@ -1,5 +1,5 @@
 from __future__ import annotations
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 
 from bot.keyboards.common import nav_row
@@ -7,7 +7,19 @@ from bot.utils.paging import Page
 from config.settings import settings
 
 
+def admin_cabinet_only() -> bool:
+    """Администратор работает только через кабинет (ADMIN_CABINET_ONLY, решение владельца 21.10.2026)."""
+    return bool(settings.admin_cabinet_only and settings.miniapp_url)
+
+
+ADMIN_CABINET_TEXT = ("Добро пожаловать!\n\nВсё управление школой — ученики, группы, педагоги, занятия, деньги — "
+                      "в кабинете. Нажмите кнопку ниже.")
+
+
 def kb_admin_menu(can_switch_role: bool = False) -> InlineKeyboardMarkup:
+    if admin_cabinet_only():
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text="📱 Открыть кабинет", web_app=WebAppInfo(url=settings.miniapp_url))]])
     rows = [
         [InlineKeyboardButton(text="👨‍🏫 Педагоги", callback_data="teachers:list")],
         [InlineKeyboardButton(text="👩‍🎓 Ученики", callback_data="admin:students")],

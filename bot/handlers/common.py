@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 from bot.models import User
 from bot.repositories import UserRepository, TeacherRepository, StudentRepository
 from bot.keyboards import kb_mode_select, kb_admin_menu, kb_teacher_menu
+from bot.keyboards.admin import ADMIN_CABINET_TEXT, admin_cabinet_only
 from bot.keyboards.teacher import TEACHER_CABINET_TEXT, teacher_cabinet_only
 from bot.keyboards.common import kb_mode_select_family, kb_welcome_choice
 from bot.keyboards.client import kb_client_menu, client_welcome_text
@@ -94,6 +95,10 @@ async def cmd_start(
         await message.answer("Добро пожаловать!\n\nКто вы?", reply_markup=kb_welcome_choice())
         return
 
+    if user.is_admin and admin_cabinet_only():          # только кабинет (21.10.2026): без выбора режима
+        await message.answer(ADMIN_CABINET_TEXT, reply_markup=kb_admin_menu())
+        return
+
     if user.is_admin and user.teacher_id:
         await message.answer("Выберите режим работы:", reply_markup=kb_mode_select())
         return
@@ -143,6 +148,10 @@ async def _clear_state_preserve_role(state: FSMContext) -> str | None:
     return role
 
 
+def _admin_menu_text() -> str:
+    return ADMIN_CABINET_TEXT if admin_cabinet_only() else "Меню администратора:"
+
+
 async def _show_role_menu(
     send_target, user: User, state: FSMContext, role_hint: str | None,
 ) -> None:
@@ -168,7 +177,7 @@ async def _show_role_menu(
 
     await _set_current_role(state, role)
     if role == "admin":
-        text, kb = "Меню администратора:", kb_admin_menu(can_switch_role=can_switch)
+        text, kb = _admin_menu_text(), kb_admin_menu(can_switch_role=can_switch)
     else:
         text, kb = "Меню педагога:", kb_teacher_menu(can_switch_role=can_switch, teacher_id=user.teacher_id)
 
@@ -210,7 +219,7 @@ async def cb_mode_admin(callback: CallbackQuery, user: User | None, state: FSMCo
     await _set_current_role(state, "admin")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
-        "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
+        _admin_menu_text(), reply_markup=kb_admin_menu(can_switch_role=can_switch),
     )
     await callback.answer()
 
@@ -251,7 +260,7 @@ async def cb_admin_menu(callback: CallbackQuery, user: User | None, state: FSMCo
     await _set_current_role(state, "admin")
     can_switch = bool(user.is_admin and user.teacher_id)
     await callback.message.edit_text(
-        "Меню администратора:", reply_markup=kb_admin_menu(can_switch_role=can_switch),
+        _admin_menu_text(), reply_markup=kb_admin_menu(can_switch_role=can_switch),
     )
     await callback.answer()
 

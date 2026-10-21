@@ -2,12 +2,21 @@
 from __future__ import annotations
 from datetime import date, timedelta
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from bot.utils.dates import format_date_display
 
 
+def athlete_cabinet_only() -> bool:
+    """Спортсмен работает только через кабинет (ATHLETE_CABINET_ONLY, решение владельца 21.10.2026)."""
+    from config.settings import settings
+    return bool(settings.athlete_cabinet_only and settings.miniapp_url)
+
+
 def athlete_welcome_text(student) -> str:
+    if athlete_cabinet_only():
+        return (f"🏃 <b>Дневник спортсмена</b>\nСпортсмен: <b>{student.name}</b>\n\n"
+                "Тренировки, задания, оценки и рейтинг — в приложении. Нажмите кнопку ниже.")
     return (
         f"🏃 <b>Кабинет спортсмена</b>\nСпортсмен: <b>{student.name}</b>\n\n"
         f"Выберите раздел:"
@@ -15,6 +24,12 @@ def athlete_welcome_text(student) -> str:
 
 
 def kb_athlete_menu(can_switch_parent: bool = False) -> InlineKeyboardMarkup:
+    if athlete_cabinet_only():
+        from config.settings import settings
+        rows = [[InlineKeyboardButton(text="📱 Открыть дневник", web_app=WebAppInfo(url=settings.miniapp_url))]]
+        if can_switch_parent:
+            rows.append([InlineKeyboardButton(text="👨‍👩‍👧 Кабинет родителя", callback_data="mode:client")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
     rows = [
         [InlineKeyboardButton(text="➕ Записать тренировку", callback_data="ath:log")],
         [InlineKeyboardButton(text="📓 Мои тренировки", callback_data="ath:entries")],
