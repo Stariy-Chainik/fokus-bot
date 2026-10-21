@@ -18,7 +18,7 @@ from aiohttp import web
 
 from bot.utils.groups import lesson_group_title
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
-from bot.models.enums import LessonType
+from bot.models.enums import LessonType, PaymentStatus
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
 from bot.services.payment_methods import ADMIN_MANUAL
@@ -434,6 +434,14 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             months.append({"period": ym, **summary})
         debt = sum(m["rest"] for m in months if m["period"] < period)
         s = card.student
+        # история оплат в карточке (решение владельца 21.10.2026): последние 5 зачтённых платежей, как в «Истории оплат»
+        paid_rows = sorted((p for p in await dp["payment_repo"].get_all()
+                            if p.student_id == sid and p.status == PaymentStatus.PAID),
+                           key=lambda p: (p.paid_at or "", p.period_month), reverse=True)
+        recent = [{"id": p.payment_id, "period": p.period_month, "teacherId": p.teacher_id,
+                   "teacherName": p.teacher_name or p.teacher_id, "amount": p.total_amount, "paidAt": p.paid_at,
+                   "method": p.payment_method or "", "comment": p.comment or "", "byTgId": p.confirmed_by_tg_id}
+                  for p in paid_rows[:5]]
         return _json({
             "id": s.student_id, "name": s.name, "tier": getattr(s.group_tier, "value", str(s.group_tier)),
             "partner": {"id": card.partner.student_id, "name": card.partner.name} if card.partner else None,
@@ -450,6 +458,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                         "hasShort": has_short_tariff(g.group),                            # где тариф вообще есть
                         **(await _frequency(sid, g.group))} for g in card.groups],
             "months": months, "debt": debt,
+            "recentPayments": recent, "paymentsTotal": len(paid_rows),
         })
 
     async def _frequency(sid: str, group) -> dict:

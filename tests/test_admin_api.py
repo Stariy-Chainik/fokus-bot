@@ -216,6 +216,16 @@ def test_students_list_and_card(api):
     assert status == 200 and card["name"] == "Иванов Иван" and card["teachers"] == ["Река Станислав"]
     cur = next(m for m in card["months"] if m["period"] == YM)
     assert (cur["total"], cur["paid"], cur["rest"]) == (4800, 0, 4800)
+    assert card["recentPayments"] == [] and card["paymentsTotal"] == 0
+    # история оплат в карточке: последние 5 зачтённых, новые первыми (21.10.2026)
+    for i in range(6):
+        row = mk_payment(f"PAY-H{i}", "STU-0001", "2026-08", "TCH-0001", 100 + i, status=PaymentStatus.PAID)
+        row.paid_at = f"2026-08-{10 + i:02d} 12:00:00"
+        dp_payments = app["payment_repo"].rows
+        dp_payments.append(row)
+    card = _call(app, "GET", "/api/admin/students/STU-0001")[1]
+    assert card["paymentsTotal"] == 6 and [p["amount"] for p in card["recentPayments"]] == [105, 104, 103, 102, 101]
+    assert card["recentPayments"][0]["period"] == "2026-08" and card["recentPayments"][0]["teacherName"]
     assert _call(app, "GET", "/api/admin/students/STU-0404")[0] == 404
 
 
