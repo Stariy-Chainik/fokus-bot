@@ -270,8 +270,8 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
   // движение учеников за месяц: пришли в школу / ушли из школы, тап — списки и переводы (16.10.2026)
   const f = h.flow || { new: 0, gone: 0, net: 0 };
   const flowTiles = `<div class="kpis" style="margin-bottom:6px">
-      ${kpi(`+${f.new}`, `пришли за ${mon.toLowerCase()}`, f.new ? 'ok' : '', 'a.flow', { ym: h.period })}
-      ${kpi(`−${f.gone}`, `ушли за ${mon.toLowerCase()} · итог ${f.net > 0 ? '+' : ''}${f.net}`, f.gone ? 'bad' : '', 'a.flow', { ym: h.period })}
+      ${kpi(`+${f.new}`, `пришли за ${mon.toLowerCase()}`, f.new ? 'ok' : '', 'a.flow', { ym: h.period, tab: 'new' })}
+      ${kpi(`−${f.gone}`, `ушли за ${mon.toLowerCase()} · итог ${f.net > 0 ? '+' : ''}${f.net}`, f.gone ? 'bad' : '', 'a.flow', { ym: h.period, tab: 'gone' })}
     </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
@@ -292,8 +292,9 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
 /* Движение учеников (решение владельца 16.10.2026): пришли в школу и ушли из школы — то, что меняет бюджет
    клуба; переводы между группами не показываются (они в ленте событий). Считает сервер
    (`student_flow.month_flow`) по составам групп и ленте событий; внизу — те же числа по последним месяцам. */
-SCREENS['a.flow'] = async ({ ym }) => {
+SCREENS['a.flow'] = async ({ ym, tab }) => {
   ym = ym || lastPeriods(1)[0];
+  tab = tab === 'gone' ? 'gone' : 'new';                      // плитка «ушли» открывает список ушедших (21.10.2026)
   const d = await api(`/flow?ym=${ym}`);
   const mon = MON_NOM[+ym.slice(5) - 1].toLowerCase();
   // дата — день события из ленты (добавлен в группу / новая карточка / ушёл); без неё — только месяц
@@ -303,14 +304,14 @@ SCREENS['a.flow'] = async ({ ym }) => {
   const section = (title, items, lead, none) => `<div class="eyebrow">${title} · ${items.length}</div>${items.length ? list(items.map(x => row(x, lead))) : `<div class="empty">${none}</div>`}`;
   const net = d.counts.net;
   return { title: 'Движение учеников', html: `
-    ${monthChips('a.flow', ym, {})}
+    ${monthChips('a.flow', ym, { tab })}
     <div class="kpis">${kpi(`+${d.counts.new}`, `пришли за ${mon}`, d.counts.new ? 'ok' : '')}${kpi(`−${d.counts.gone}`, `ушли за ${mon} · итог ${net > 0 ? '+' : ''}${net}`, d.counts.gone ? 'bad' : '')}</div>
-    ${section('Пришли в школу', d.new, '➕', 'Новых учеников нет')}
-    ${section('Ушли из школы', d.gone, '➖', 'Никто не ушёл')}
+    <div class="chips"><button class="chip" aria-pressed="${tab === 'new'}" data-go="a.flow" data-p='${esc(JSON.stringify({ ym, tab: 'new' }))}' data-replace="1">➕ Пришли · ${d.counts.new}</button><button class="chip" aria-pressed="${tab === 'gone'}" data-go="a.flow" data-p='${esc(JSON.stringify({ ym, tab: 'gone' }))}' data-replace="1">➖ Ушли · ${d.counts.gone}</button></div>
+    ${tab === 'gone' ? section('Ушли из школы', d.gone, '➖', 'Никто не ушёл') : section('Пришли в школу', d.new, '➕', 'Новых учеников нет')}
     <div class="eyebrow">По месяцам</div>
     ${list(d.months.map(m => cell({ lead: m.ym === ym ? '●' : '○', plain: true, t: monthLabel(m.ym),
       s: `пришли ${m.new} · ушли ${m.gone}`, r: `<b class="money ${m.net > 0 ? 'ok' : m.net < 0 ? 'bad' : ''}">${m.net > 0 ? '+' : ''}${m.net}</b>`,
-      go: 'a.flow', p: { ym: m.ym } })))}
+      go: 'a.flow', p: { ym: m.ym, tab } })))}
     ${d.deleted.length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>Удалены карточки <span class="hint">· ${d.deleted.length}</span></span><span class="r hint">не в «ушли»</span></summary>
       <div class="accbody"><div class="accsum">Удалённые карточки в «ушли» не считаются: обычно это дубли и ошибочные записи. Ушедшего ученика отмечайте «ушёл из группы» — тогда он попадёт в список выше.</div>${d.deleted.map(x => cell({ lead: '🗑', plain: true, cls: 'wrap', t: esc(x.name), s: [x.groups.map(plainName).join(' + '), x.note].filter(Boolean).map(esc).join(' · ') })).join('')}</div></details>` : ''}
     <p class="hint" style="margin-top:8px">Пришёл — впервые в школе: до этого месяца не числился ни в одной группе. Ушёл — членство закончилось с этого месяца и других групп не осталось. Переводы между группами сюда не входят — они в «Событиях». Тап по ученику — карточка.</p>` };
