@@ -63,20 +63,6 @@ def test_override_replaces_shift(monkeypatch):
     assert not [ln for ln in lines if ln.kind == "shift"]  # расчёт по группам заменён
 
 
-def test_override_zeroes_all_lessons_of_the_day(monkeypatch):
-    """Корректировка заменяет всю оплату дня (решение владельца 21.10.2026: сад 20.10 без оплаты),
-    а не только смену: обычное занятие в этот день — 0 ₽ строкой in_override."""
-    monkeypatch.setattr(settings, "shift_groups", "")
-    t = _teacher()
-    lessons = [_lesson("L1", "2026-10-20", "GRP-0008", 60), _lesson("L2", "2026-10-21", "GRP-0008", 60)]
-    lines = compute_salary_lines(t, lessons, overrides={"2026-10-20": (0, "сад без оплаты")})
-    by = {(ln.date, ln.kind): ln for ln in lines}
-    assert by[("2026-10-20", "in_override")].amount == 0 and by[("2026-10-20", "in_override")].lesson_id == "L1"
-    assert by[("2026-10-20", "override")].amount == 0 and "сад без оплаты" in by[("2026-10-20", "override")].label
-    assert by[("2026-10-21", "lesson")].amount == 1700                 # соседний день не тронут
-    assert salary_total(lines) == 1700
-
-
 def test_shift_rate_from_group_salary_rates_since_month(monkeypatch):
     """Боброво у Яковлевой — 1400 ₽/ч с октября 2026 (решение владельца 12.10.2026): ставка часа смены
     из GROUP_SALARY_RATES с месяцем; сентябрь — прежние 1700 ₽/ч, сад — по ставке педагога."""

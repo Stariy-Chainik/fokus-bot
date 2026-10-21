@@ -41,9 +41,6 @@ def _kb(rows) -> InlineKeyboardMarkup:
 
 # ─── Месяц → педагоги ────────────────────────────────────────────────────────
 
-
-_KIND_NOTE = {"in_shift": "в смене", "in_override": "корректировка дня", "in_share": "% от абонементов"}
-
 @router.callback_query(F.data == "admin:payouts", AdminOnly())
 async def cb_payouts_periods(callback: CallbackQuery, user: User) -> None:
     rows = [[InlineKeyboardButton(text=display_period(p), callback_data=f"payout_p:{p}")]
@@ -413,7 +410,7 @@ async def _detail_lines(
             bname = branches.get(g.branch_id, "—") if g else "—"
             gname = g.name if g else (ls.group_id or "без группы")
             by_branch.setdefault(bname, {}).setdefault(gname, []).append(
-                (f"{dd} {ls.duration_min}м", ln.amount, _KIND_NOTE.get(ln.kind, "")))
+                (f"{dd} {ls.duration_min}м", ln.amount, {"in_shift": "в смене", "in_share": "% от абонементов"}.get(ln.kind, "")))
         else:
             who = " + ".join(n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n)
             individual.append((f"{dd} {ls.duration_min}м {who}", ln.amount))

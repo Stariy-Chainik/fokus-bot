@@ -7,9 +7,7 @@
 не идут (calc_earned → 0), их длительности остаются реальными для родителей.
 
 Корректировка дня (лист salary_day_overrides): нестандартный случай — админ
-задаёт минуты за конкретную дату; они заменяют ВСЮ зарплату педагога за этот день
-(решение владельца 21.10.2026; раньше — только смену): занятия дня — строки in_override
-по 0 ₽, в зарплату идёт override = минуты × ставка, 0 минут = день без оплаты.
+задаёт минуты смены за конкретную дату; они заменяют расчёт по группам.
 
 Премия (лист teacher_bonuses): сумма сверх зарплаты месяца — строка «Премия: …»
 после занятий; в итог дня не входит (bot/services/bonuses.py).
@@ -33,7 +31,7 @@ from bot.utils.constants import MINUTES_PER_UNIT
 @dataclass(frozen=True)
 class SalaryLine:
     date: str
-    kind: str          # lesson | in_shift | shift | override | in_override | bonus | in_share | share
+    kind: str          # lesson | in_shift | shift | override | bonus | in_share | share
     label: str
     minutes: int
     amount: int
@@ -92,14 +90,11 @@ def compute_salary_lines(
         in_shift = ls.type == LessonType.GROUP and ls.group_id in shift_map
         if in_shift:
             present_by_day[ls.date].add(ls.group_id)
-        # корректировка дня заменяет всю оплату за день (решение владельца 21.10.2026: сад 20.10 без оплаты):
-        # занятия этого дня — 0 ₽ строками in_override, сумма дня — строка override (минуты × ставка)
-        in_override = ls.date in overrides
-        amount = 0 if in_shift or in_override else calc_earned(
+        amount = 0 if in_shift else calc_earned(
             ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date,
         )
         lines.append(SalaryLine(
-            date=ls.date, kind="in_override" if in_override else "in_shift" if in_shift else "lesson",
+            date=ls.date, kind="in_shift" if in_shift else "lesson",
             label="", minutes=ls.duration_min, amount=amount,
             lesson_id=ls.lesson_id, group_id=ls.group_id or "",
         ))
