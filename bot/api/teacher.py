@@ -109,12 +109,17 @@ def _direct_summary(lessons: list, teacher, student_names: dict) -> dict | None:
     }
 
 
-def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
+def _lesson_brief(ls, teacher, group_names: dict, student_names: dict, amounts: dict | None = None) -> dict:
     """Строка списка занятий: кто занимался и сколько начислено педагогу.
 
+    `amounts` — {lesson_id: ₽} из строк зарплаты (`SalaryService.lesson_amounts_for`): занятие в смене,
+    в корректировке дня или в проценте от абонементов — 0, как в «Зарплате»; без карты — по ставке.
     У занятий с прямой оплатой школа начисляет 0 — вместо пустого нуля отдаём
     сумму, которую платит родитель, и аренду зала, которую педагог перечисляет школе.
     """
+    earned = calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date)
+    if amounts is not None:
+        earned = amounts.get(ls.lesson_id, earned)
     if ls.type == LessonType.GROUP:
         who = [student_names.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
     else:
@@ -123,7 +128,7 @@ def _lesson_brief(ls, teacher, group_names: dict, student_names: dict) -> dict:
         "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,
         "groupId": ls.group_id or "", "groupName": lesson_group_title(ls, group_names),
         "students": who, "recordedAt": ls.recorded_at,
-        "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
+        "earned": earned,
         "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
         "rent": lesson_rent(ls),
     }
@@ -257,7 +262,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         prev = last_periods(2)[1]
         names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         groups = await _group_names()
-        today_items = [_lesson_brief(ls, teacher, groups, names) for ls in today_lessons]
+        amounts = await salary_service.lesson_amounts_for(teacher, period)
+        today_items = [_lesson_brief(ls, teacher, groups, names, amounts) for ls in today_lessons]
         await _add_pay_counts(teacher, today_lessons, today_items)
         unrated = 0
         if diary_service is not None:
@@ -319,7 +325,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         groups = await _group_names()
         submitted = await _submitted(teacher.teacher_id)
         ordered = sorted(rows, key=lambda x: (x.date, x.recorded_at or ""))
-        out = [_lesson_brief(ls, teacher, groups, names) for ls in ordered]
+        amounts = await salary_service.lesson_amounts_for(teacher, key)
+        out = [_lesson_brief(ls, teacher, groups, names, amounts) for ls in ordered]
         for item in out:
             item["locked"] = item["date"][:7] in submitted
         await _add_pay_counts(teacher, ordered, out)      # «оплатили N из M» в каждой строке
@@ -368,7 +375,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
-            "earned": calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date),
+            "earned": (await salary_service.lesson_amounts_for(teacher, ls.date)).get(
+                ls.lesson_id, calc_earned(ls.type, ls.duration_min, teacher, ls.group_id, ls.attendees, ls.date)),
             "direct": is_direct(ls, teacher), "directAmount": direct_amount(ls, teacher),
             "rent": lesson_rent(ls),
             "locked": ls.date[:7] in await _submitted(teacher.teacher_id),
@@ -798,7 +806,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "groupIds": [g for g in gids if g in own_visible],     # «📋 Домашнее задание» ученику — от его группы
             "subscriptions": subscriptions,
             "period": ym,
-            "lessons": [_lesson_brief(ls, teacher, groups_map, names)
+            "lessons": [_lesson_brief(ls, teacher, groups_map, names, await salary_service.lesson_amounts_for(teacher, ym))
                         for ls in sorted(mine, key=lambda x: x.date)],
         })
 

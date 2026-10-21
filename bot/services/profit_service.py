@@ -12,6 +12,7 @@ from bot.models import FinanceEntry, Lesson, Teacher
 from bot.models.enums import LessonType
 
 from .billing_service import build_billing_rows, calc_earned
+from .salary_service import lesson_amounts
 
 
 @dataclass(frozen=True)
@@ -201,19 +202,22 @@ def is_owner(teacher_id: str) -> bool:
 def calculate_profit_lesson(
     lesson: Lesson,
     teacher: Teacher,
+    earned: int | None = None,
 ) -> ProfitLessonRow | None:
     """Возвращает строку только для тарифицируемого занятия.
 
     Зарплата экрана «Прибыль» учитывается только у занятия с ненулевой
     клиентской выручкой — это зафиксированное текущее правило экрана.
     Занятие без выручки от ученика попадает в расчёт, если приносит школе
-    аренду зала (``lesson_rent``).
+    аренду зала (``lesson_rent``). `earned` — зарплата за занятие из строк
+    `SalaryService` (смена, корректировка дня, процент — 0); без неё — по ставке.
     """
     income = sum(row.amount for row in build_billing_rows(lesson, teacher))
     rent = lesson_rent(lesson) if income == 0 else 0
     if income == 0 and rent == 0:
         return None
-    earned = calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date)
+    if earned is None:
+        earned = calc_earned(lesson.type, lesson.duration_min, teacher, lesson.group_id, lesson.attendees, lesson.date)
     owner = is_owner(teacher.teacher_id)
     return ProfitLessonRow(
         lesson_id=lesson.lesson_id,
@@ -231,11 +235,14 @@ def calculate_teacher_profit(
     teacher: Teacher,
     lessons: list[Lesson],
     extra_salary: int = 0,
+    lesson_salary: dict[str, int] | None = None,
 ) -> TeacherProfitRow | None:
-    """extra_salary — зарплата вне занятий: смены, корректировки дней и премии (salary_service)."""
+    """extra_salary — зарплата вне занятий: смены, корректировки дней и премии (salary_service);
+    lesson_salary — {lesson_id: ₽} из тех же строк, чтобы занятие в смене/корректировке не считалось дважды."""
+    amounts = lesson_salary or {}
     billed_lessons = [
         row for lesson in lessons
-        if (row := calculate_profit_lesson(lesson, teacher)) is not None
+        if (row := calculate_profit_lesson(lesson, teacher, earned=amounts.get(lesson.lesson_id))) is not None
     ]
     if not billed_lessons and extra_salary == 0:
         return None
@@ -261,10 +268,12 @@ def build_teacher_profit_detail(
     teacher: Teacher,
     lessons: list[Lesson],
     period: str,
+    lesson_salary: dict[str, int] | None = None,
 ) -> TeacherProfitDetail:
+    amounts = lesson_salary or {}
     billed_lessons = tuple(
         row for lesson in sorted(lessons, key=lambda item: item.date)
-        if (row := calculate_profit_lesson(lesson, teacher)) is not None
+        if (row := calculate_profit_lesson(lesson, teacher, earned=amounts.get(lesson.lesson_id))) is not None
     )
     return TeacherProfitDetail(
         teacher_id=teacher.teacher_id,
@@ -297,13 +306,12 @@ class ProfitService:
                 teacher.teacher_id,
                 period,
             )
-            extra = 0
+            extra, amounts = 0, None
             if self._salary_service is not None:
-                extra = sum(
-                    line.amount for line in await self._salary_service.lines_for(teacher, period)
-                    if line.kind in ("shift", "override", "bonus", "share")
-                )
-            row = calculate_teacher_profit(teacher, lessons, extra_salary=extra)
+                lines = await self._salary_service.lines_for(teacher, period)
+                extra = sum(line.amount for line in lines if line.kind in ("shift", "override", "bonus", "share"))
+                amounts = lesson_amounts(lines)
+            row = calculate_teacher_profit(teacher, lessons, extra_salary=extra, lesson_salary=amounts)
             if row is not None:
                 rows.append(row)
         return ProfitSummary(period=period, teacher_rows=tuple(rows))
@@ -353,4 +361,6 @@ class ProfitService:
             teacher_id,
             period,
         )
-        return build_teacher_profit_detail(teacher, lessons, period)
+        amounts = (await self._salary_service.lesson_amounts_for(teacher, period)
+                   if self._salary_service is not None else None)
+        return build_teacher_profit_detail(teacher, lessons, period, lesson_salary=amounts)

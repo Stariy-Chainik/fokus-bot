@@ -351,9 +351,12 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         groups = await _groups_by_id()
         students = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         blocks: dict[str, dict] = {}
+        amounts: dict[str, dict] = {}                     # педагог → {lesson_id: ₽} из строк зарплаты
         for ls in sorted(lessons_today, key=lambda x: x.recorded_at or ""):
             t = teachers.get(ls.teacher_id)
-            prow = calculate_profit_lesson(ls, t) if t else None
+            if t and ls.teacher_id not in amounts:
+                amounts[ls.teacher_id] = await salary_service.lesson_amounts_for(t, ls.date)
+            prow = calculate_profit_lesson(ls, t, earned=amounts[ls.teacher_id].get(ls.lesson_id)) if t else None
             if ls.type == LessonType.GROUP:
                 who = [students.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees or "")]
                 title = lesson_group_title(ls, groups, "Группа")

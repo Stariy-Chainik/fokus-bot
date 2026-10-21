@@ -8,7 +8,7 @@ from aiohttp import web
 
 from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType
-from bot.services.billing_service import build_billing_rows, calc_earned
+from bot.services.billing_service import build_billing_rows
 from bot.api.record import RecordError, record_create, record_options
 from bot.services.profit_service import is_owner, lesson_rent
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
@@ -86,8 +86,11 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         rows = [x for x in await lesson_repo.get_all()
                 if (x.date[:7] == ym if ym else x.date == day) and (not tid or x.teacher_id == tid)]
         out = []
+        amounts: dict[str, dict] = {}                     # педагог → {lesson_id: ₽} из строк зарплаты
         for ls in sorted(rows, key=lambda x: (x.date, x.recorded_at or "")):
             t = teachers.get(ls.teacher_id)
+            if t and ls.teacher_id not in amounts:
+                amounts[ls.teacher_id] = await salary_service.lesson_amounts_for(t, key)
             names = (_slot_names(ls) if ls.type != LessonType.GROUP
                      else [students.get(e.student_id, e.student_id) for e in parse_attendees(ls.attendees)])
             out.append({
@@ -95,7 +98,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
                 "teacherName": t.name if t else ls.teacher_name, "type": ls.type.value,
                 "groupName": lesson_group_title(ls, groups),
                 "students": names, "durationMin": ls.duration_min,
-                "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
+                "earned": amounts[ls.teacher_id].get(ls.lesson_id, 0) if t else 0,
                 "rent": lesson_rent(ls),        # аренда зала у педагога с прямой оплатой (статистика, не оплата)
                 "recordedAt": ls.recorded_at, "locked": await _locked(ls),
             })
@@ -125,7 +128,7 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             "groupMode": g.billing_mode.value if g else "",
             "freeLabel": free_attendee_label(g, has_amount_snapshots(ls.attendees)),
             "attendees": attendees, "recordedAt": ls.recorded_at,
-            "earned": calc_earned(ls.type, ls.duration_min, t, ls.group_id, ls.attendees, ls.date) if t else 0,
+            "earned": (await salary_service.lesson_amounts_for(t, ls.date)).get(ls.lesson_id, 0) if t else 0,
             "locked": await _locked(ls),
             "economy": await _economy(ls, t, g),
         })
