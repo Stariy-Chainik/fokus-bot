@@ -242,6 +242,24 @@ ACT.tMoveDo = async () => {
     toast(`Переведён в «${plainName(r.toName)}»${r.result === 'marked' ? ` · из старой с ${fmon(r.leftPeriod).toLowerCase()}` : ''}`);
   } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
+// «Удалить ученика» в карточке = ушёл из школы (решение владельца 21.10.2026): снимаем со всех своих групп,
+// группы других педагогов не трогаем — их снимают они сами. Карточка и история остаются.
+ACT.tLeaveSchoolAsk = async ({ sid, name }) => {
+  let o;
+  try { o = await api(`/students/${sid}/leave`); } catch (e) { toast(errText(e)); return; }
+  const sub = o.groups.some(g => g.subscription);
+  sheet(`<h3>Ученик уходит из школы?</h3><div class="hint">${esc(name)} будет снят с ${o.groups.length === 1 ? 'группы' : 'ваших групп'}: ${esc(o.groups.map(g => plainName(g.name)).join(', '))}. Карточка, занятия и оплаты сохранятся, администратор получит сообщение.${o.others ? ' В группах других педагогов ученик останется — их снимают они сами.' : ''}</div>
+    <div style="margin-top:12px">${sub
+      ? o.leaveOptions.map(x => btn(x.label, 'tLeaveSchoolDo', { sid, ym: x.ym }, 'sec')).join('')
+      : btn('👋 Ушёл из школы', 'tLeaveSchoolDo', { sid, ym: (o.leaveOptions[0] || {}).ym }, 'danger')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+ACT.tLeaveSchoolDo = async ({ sid, ym }) => {
+  try {
+    const r = await api(`/students/${sid}/leave`, { method: 'POST', body: { leftPeriod: ym } });
+    closeSheet(); back();                                   // ученик больше не виден педагогу — карточку не перерисовать
+    toast(r.marked.length ? `Ученик ушёл из школы с ${fmon(r.leftPeriod).toLowerCase()}` : 'Ученик ушёл из школы');
+  } catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
+};
 ACT.tLeaveAsk = ({ gid, sid, name, group, options, mode }) => sheet(`<h3>Ушёл из группы?</h3><div class="hint">${esc(name)} · ${esc(plainName(group))}. Карточка ученика сохранится, история занятий и оплат тоже. Если есть долг, он останется за учеником. Администратор получит сообщение.</div>
   <div style="margin-top:12px">${mode === 'subscription'
     ? options.map(o => btn(o.label, 'tLeaveDo', { gid, sid, ym: o.ym }, 'sec')).join('')
@@ -304,7 +322,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
     <div class="eyebrow">Мои занятия с учеником</div>
     ${monthChips('t.student', s.period, { id })}
     ${s.lessons.length ? list(s.lessons.map(l => tLessonCell(l, true))) : '<div class="empty">В этом месяце занятий не было</div>'}
-    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}${btn('🔄 Перевести в другую группу', 'tMoveAsk', { sid: id, name: s.name }, 'sec')}</div>` : ''}
+    ${(s.groupIds || []).length ? `<div style="margin-top:12px">${goBtn('📋 Домашнее задание', 't.hw.new', { gid: s.groupIds[0], only: id }, 'sec')}${btn('🔄 Перевести в другую группу', 'tMoveAsk', { sid: id, name: s.name }, 'sec')}${btn('🗑 Удалить ученика', 'tLeaveSchoolAsk', { sid: id, name: s.name }, 'danger')}</div>` : ''}
     ${state.me.canBill ? `<div style="margin-top:12px">${goBtn(`🧾 Счёт за ${MON_NOM[+(s.period).slice(5) - 1].toLowerCase()}`, 't.bill', { sid: id, ym: s.period }, 'sec')}</div>` : ''}` };
 };
 

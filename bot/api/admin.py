@@ -21,6 +21,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
+from bot.services.membership import leave_options
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import (
     debtors_summary, lesson_collection, payment_lock, period_collection, subscription_collection,
@@ -393,6 +394,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         with_debt = request.query.get("debt") == "1"
         groups = await _groups_by_id()
         by_student = await student_group_repo.get_map_by_student()
+        with_rows = {sg.student_id for sg in await student_group_repo.get_all()}     # ушедшие: строки есть, активных нет
         debtors: set[str] = set()
         if with_debt:
             period = current_period()
@@ -409,6 +411,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                 "id": s.student_id, "name": s.name,
                 "groups": [groups[g].name for g in gids if g in groups],
                 "hasParent": bool(s.parent_addrs), "isAthlete": s.is_athlete,
+                "left": not gids and s.student_id in with_rows,
             })
         return _json({"students": out, "total": len(await student_repo.get_all())})
 
@@ -434,6 +437,10 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             months.append({"period": ym, **summary})
         debt = sum(m["rest"] for m in months if m["period"] < period)
         s = card.student
+        all_groups = {g.group_id: g for g in await dp["group_repo"].get_all(include_archived=True)}
+        left_rows = [{"id": sg.group_id, "name": all_groups[sg.group_id].name if sg.group_id in all_groups else sg.group_id,
+                      "leftPeriod": sg.left_period}
+                     for sg in await student_group_repo.get_all() if sg.student_id == sid and sg.left_period]
         # история оплат в карточке (решение владельца 21.10.2026): последние 5 зачтённых платежей, как в «Истории оплат»
         paid_rows = sorted((p for p in await dp["payment_repo"].get_all()
                             if p.student_id == sid and p.status == PaymentStatus.PAID),
@@ -459,6 +466,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                         **(await _frequency(sid, g.group))} for g in card.groups],
             "months": months, "debt": debt,
             "recentPayments": recent, "paymentsTotal": len(paid_rows),
+            # ушедшие членства (решение владельца 21.10.2026): «ушёл с октября · ↩ Вернуть»; departed — активных нет
+            "left": left_rows, "departed": bool(left_rows) and not card.groups,
+            "leaveOptions": [{"ym": ym, "label": label} for ym, label in leave_options()],
         })
 
     async def _frequency(sid: str, group) -> dict:
