@@ -177,12 +177,21 @@ ACT.tAddFind = async ({ gid }) => {
     document.getElementById('add-res').innerHTML = (d.students.length
       ? `<div class="hint" style="margin:10px 0 4px">Уже есть в базе — выберите, если это он:</div>${d.students.map(s => btn(`${esc(s.name)} · ${s.groups.length ? esc(s.groups.map(plainName).join(', ')) : 'без группы'}`, 'tAddDo', { gid, studentId: s.id }, 'ghost')).join('')}`
       : '<div class="hint" style="margin:10px 0 4px">В базе такого ученика нет.</div>')
-      + btn(`➕ Создать новую карточку «${esc(name)}»`, 'tAddDo', { gid, name, force: true }, 'sec');
+      + btn(`➕ Создать новую карточку «${esc(name)}»`, 'tAddDo', { gid, name }, 'sec');
   } catch (e) { toast(errText(e)); }
 };
 ACT.tAddDo = async ({ gid, studentId, name, force }) => {
   try { const r = await api(`/groups/${gid}/members`, { method: 'POST', body: studentId ? { studentId } : { name, force: !!force } }); closeSheet(); render(); toast(r.created ? `Добавлен новый ученик: ${r.name}` : `${r.name} — в группе`); }
-  catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  catch (e) {
+    if (e.code === 'duplicate' && e.data && e.data.students) {        // тёзка уже в базе — добавить его, не новую карточку
+      closeSheet();
+      sheet(`<h3>Такой ученик уже есть</h3><div class="hint">Чтобы не было двух карточек одного ребёнка, добавьте в группу существующего. Новую карточку создавайте, только если это точно другой ребёнок.</div>
+        ${e.data.students.map(s => btn(`➕ Добавить ${esc(s.name)} · ${s.groups && s.groups.length ? esc(s.groups.map(plainName).join(', ')) : 'без группы'}`, 'tAddDo', { gid, studentId: s.id })).join('')}
+        <div style="margin-top:12px">${btn(`Это другой ребёнок — создать «${esc(name)}»`, 'tAddDo', { gid, name, force: true }, 'ghost')}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+      return;
+    }
+    toast(e.data && e.data.message ? e.data.message : errText(e));
+  }
 };
 /* Группа ребёнка в детском саду — номер или название; заполняет педагог или родитель (решение владельца 10.10.2026). */
 ACT.tKgAsk = ({ sid, name, value }) => sheet(`<h3>Группа в детском саду</h3><div class="hint">${esc(name)}. Номер или название группы в саду. Пусто — стереть.</div>

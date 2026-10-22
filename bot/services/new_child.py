@@ -42,6 +42,33 @@ class ApprovedChild:
     added_to_group: bool = False
 
 
+def person_key(name: str) -> str:
+    """«Фамилия имя» без цифр, регистра и ё: «Вергер Алексия 34» и «вергер алексия» — один человек."""
+    words = [w for w in _norm(name).split() if not w.isdigit()]
+    return " ".join(words[:2])
+
+
+def same_person(a: str, b: str) -> bool:
+    ka, kb = person_key(a), person_key(b)
+    return bool(ka) and len(ka.split()) == 2 and ka == kb
+
+
+async def find_candidates(student_repo, student_group_repo, name: str, group_names: dict, limit: int = 8) -> list:
+    """Дети школы с такой же фамилией — родителю по ссылке группы предлагаем выбрать своего, а не заводить
+    новую карточку (решение владельца 22.10.2026). [(student, [названия активных групп])], по имени."""
+    surname = (_norm(name).split() or [""])[0]
+    if len(surname) < 3:
+        return []
+    groups_of: dict[str, list] = {}
+    for m in await student_group_repo.get_all():
+        if m.is_active:
+            groups_of.setdefault(m.student_id, []).append(str(group_names.get(m.group_id, m.group_id)))
+    found = [(s, groups_of.get(s.student_id, [])) for s in await student_repo.get_all()
+             if (_norm(s.name).split() or [""])[0] == surname]
+    found.sort(key=lambda x: x[0].name.lower())
+    return found[:limit]
+
+
 async def open_duplicate(pending_repo, name: str, group_id: str):
     """Открытая заявка «нет в списке» с тем же именем в ту же группу — от любого родителя и из любого
     мессенджера (21.10.2026: заявка из MAX и из Telegram давала две карточки и двойной «пришёл»)."""
@@ -53,6 +80,15 @@ async def open_duplicate(pending_repo, name: str, group_id: str):
     except Exception as exc:                       # очередь вспомогательная — заявку всё равно отправим
         logger.warning("Очередь решений недоступна: %s", exc)
         return None
+
+
+async def existing_for(student_repo, student_group_repo, action):
+    """Кого привязывать по заявке: выбранный родителем ребёнок (`student_id`), иначе тёзка по имени."""
+    if action.student_id:
+        s = await student_repo.get_by_id(action.student_id)
+        if s is not None:
+            return s
+    return await existing_match(student_repo, student_group_repo, action.student_name, group_of(action))
 
 
 async def existing_match(student_repo, student_group_repo, name: str, group_id: str):
@@ -84,34 +120,47 @@ def group_of(action) -> str:
 
 async def request_new_child(
     pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo, group, name: str, addr,
-    sender_name: str,
+    sender_name: str, existing=None, existing_groups: list | None = None,
 ):
-    """Поставить заявку в очередь и разослать её администраторам и педагогам группы."""
+    """Поставить заявку в очередь и разослать её администраторам и педагогам группы.
+    `existing` — родитель выбрал ребёнка из базы: заявка «добавить в группу и привязать», без новой карточки."""
     from bot.keyboards.client import kb_new_child_decide      # локально: клавиатуры тянут aiogram-слой
 
+    if existing is not None:
+        name = existing.name
     dup = await open_duplicate(pending_repo, name, group.group_id)
     if dup is not None:
         logger.info("Новый ребёнок по ссылке: %s в %s от %s — заявка %s уже открыта, повтор не плодим",
                     name, group.group_id, fmt_addr(addr), dup.action_id)
         return NewChildRequest(dup, duplicate=True)
     action = await queue_action(
-        pending_repo, KIND_NEWCHILD, student_name=name, parent_addr=fmt_addr(addr),
+        pending_repo, KIND_NEWCHILD, student_id=existing.student_id if existing is not None else "",
+        student_name=name, parent_addr=fmt_addr(addr),
         comment=f"{group.name} · {sender_name}", teacher_keys=[group.group_id],
     )
     if action is None:
         return None
     platform = "MAX" if addr[0] == "max" else "Telegram"
-    text = (f"🆕 <b>Родитель не нашёл ребёнка в группе</b>\n\n"
-            f"Ребёнок: <b>{name}</b>\nГруппа: {group.name}\n"
-            f"Родитель: {sender_name} ({platform} <code>{addr[1]}</code>)\n\n"
-            f"Одобрить — завести карточку в группе и привязать родителя.")
+    if existing is not None:
+        text = (f"🔁 <b>Родитель нашёл ребёнка в базе</b>\n\n"
+                f"Ребёнок: <b>{name}</b> ({existing.student_id}"
+                + (f", {', '.join(existing_groups)}" if existing_groups else "") + ")\n"
+                f"Группа: {group.name}\n"
+                f"Родитель: {sender_name} ({platform} <code>{addr[1]}</code>)\n\n"
+                f"Одобрить — добавить ребёнка в группу и привязать родителя (новая карточка не нужна).")
+    else:
+        text = (f"🆕 <b>Родитель не нашёл ребёнка в группе</b>\n\n"
+                f"Ребёнок: <b>{name}</b>\nГруппа: {group.name}\n"
+                f"Родитель: {sender_name} ({platform} <code>{addr[1]}</code>)\n\n"
+                f"Одобрить — завести карточку в группе и привязать родителя.")
     teachers = {t.teacher_id: t for t in await teacher_repo.get_all()}
     teacher_tgs = {
         teachers[tg.teacher_id].tg_id for tg in await teacher_group_repo.get_all()
         if tg.group_id == group.group_id and tg.teacher_id in teachers and teachers[tg.teacher_id].tg_id
     }
     admins = {u.tg_id for u in await user_repo.get_admins()}
-    await notify(tg_bot, sorted(admins | teacher_tgs), text, reply_markup=kb_new_child_decide(action.action_id))
+    await notify(tg_bot, sorted(admins | teacher_tgs), text,
+                 reply_markup=kb_new_child_decide(action.action_id, existing=existing is not None))
     logger.info("Новый ребёнок по ссылке: %s в %s от %s → заявка %s", name, group.group_id,
                 fmt_addr(addr), action.action_id)
     return NewChildRequest(action)
@@ -137,7 +186,7 @@ async def approve_new_child(pending_repo, student_repo, student_group_repo, noti
     if not await pending_repo.claim(action.action_id, DONE, decided_by):
         return None
     gid = group_of(action)
-    student = await existing_match(student_repo, student_group_repo, action.student_name, gid)
+    student = await existing_for(student_repo, student_group_repo, action)
     existing, added = student is not None, False
     if student is None:
         student = await student_repo.add(name=action.student_name)

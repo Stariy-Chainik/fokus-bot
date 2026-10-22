@@ -824,6 +824,10 @@ def test_teacher_adds_student_to_own_group(api):
     assert bot.sent and "добавил ученика" in bot.sent[0][1] and "новая карточка" in bot.sent[0][1]
     status, dup = _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "сидорова мария"})
     assert status == 409 and dup["error"] == "duplicate" and dup["students"][0]["id"] == r["studentId"]
+    # тёзка без учёта цифр и регистра тоже дубль (22.10.2026: «Вергер Алексия 34» ≠ «Вергер Алексия»), с группами
+    status, dup = _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "Сидорова Мария 12"})
+    assert status == 409 and dup["students"][0]["groups"] == ["БП Джаз"]
+    assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "Сидорова Марина"})[0] == 200  # другое имя
     assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"studentId": "STU-0001"})[0] == 409   # уже в группе
     assert _call(app, "POST", "/api/teacher/groups/GRP-0099/members", json={"name": "Новый Ученик"})[0] == 404
     assert _call(app, "POST", "/api/teacher/groups/GRP-0001/members", json={"name": "Я"})[0] == 400

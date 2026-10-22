@@ -19,7 +19,7 @@ from ..render import send_screen, edit_screen, alert
 from ..states import MaxParentStates
 from . import router
 from ._common import parent_students, show_menu
-from bot.services.new_child import normalize_name, request_new_child
+from bot.services.new_child import find_candidates, normalize_name, request_new_child
 from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
 
 logger = logging.getLogger(__name__)
@@ -164,32 +164,84 @@ async def on_group_none(event: MessageCallback, context, group_repo):
                       "и вам придёт сообщение.", [])
 
 
+async def _submit_new_child(answer, context, group, name, max_uid, who, user_repo, teacher_repo, teacher_group_repo,
+                            pending_repo, tg_bot, existing=None, existing_groups=None):
+    await context.clear()
+    req = await request_new_child(pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo,
+                                  group, name, max_addr(max_uid), who, existing=existing, existing_groups=existing_groups)
+    shown = existing.name if existing is not None else name
+    if req is None:
+        await answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    if req.duplicate:
+        await answer(f"⏳ Заявка на {shown} в группу «{group.name}» уже отправлена и ждёт решения. "
+                     "Как только ребёнка добавят, вам придёт сообщение.")
+        return
+    if existing is not None:
+        await answer(f"⏳ Заявка отправлена: {shown} уже есть в школе — педагог или администратор добавит ребёнка "
+                     f"в группу «{group.name}» и привяжет вас. Вам придёт сообщение.")
+        return
+    await answer(f"⏳ Заявка отправлена: {shown}, группа «{group.name}». "
+                 "Как только ребёнка добавят, вам придёт сообщение и откроется кабинет.")
+
+
 @router.message_created(MaxParentStates.new_child_name)
 async def on_new_child_name(event: MessageCreated, context, max_uid, group_repo, user_repo, tg_bot,
-                            teacher_repo=None, teacher_group_repo=None, pending_repo=None):
+                            teacher_repo=None, teacher_group_repo=None, pending_repo=None,
+                            student_repo=None, student_group_repo=None):
     name = normalize_name(event.message.body.text or "")
     if name is None:
         await event.message.answer("Напишите фамилию и имя ребёнка, например: Иванова Мария")
         return
     data = await context.get_data()
     group = await group_repo.get_by_id((data or {}).get("nchild_group_id") or "")
-    await context.clear()
     if group is None:
+        await context.clear()
         await event.message.answer("Ссылка группы устарела — откройте её заново из чата группы.")
+        return
+    cands = []
+    if student_repo is not None and student_group_repo is not None:      # тот же выбор, что в Telegram (22.10.2026)
+        gnames = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        cands = await find_candidates(student_repo, student_group_repo, name, gnames)
+    if cands:
+        await context.update_data(nchild_name=name)
+        rows = [[cb(s.name + (f" · {', '.join(gr)}" if gr else ""), f"glnc_pick:{s.student_id}")] for s, gr in cands]
+        rows.append([cb("❌ Нет, моего ребёнка здесь нет", "glnc_new")])
+        await send_screen(event.bot, max_uid, f"Похоже, ребёнок уже есть в школе. Это ваш ребёнок? Если да — педагог "
+                          f"добавит его в группу «{group.name}» без новой карточки.", rows)
         return
     sender = event.message.sender
     who = f"{sender.first_name} {sender.last_name or ''}".strip()
-    req = await request_new_child(pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo,
-                                  group, name, max_addr(max_uid), who)
-    if req is None:
-        await event.message.answer("Не получилось отправить заявку — напишите педагогу.")
+    await _submit_new_child(event.message.answer, context, group, name, max_uid, who, user_repo, teacher_repo,
+                            teacher_group_repo, pending_repo, tg_bot)
+
+
+@router.message_callback(F.callback.payload.startswith("glnc_"))
+async def on_new_child_choice(event: MessageCallback, context, max_uid, group_repo, user_repo, tg_bot,
+                              teacher_repo=None, teacher_group_repo=None, pending_repo=None,
+                              student_repo=None, student_group_repo=None):
+    data = await context.get_data()
+    group = await group_repo.get_by_id((data or {}).get("nchild_group_id") or "")
+    name = (data or {}).get("nchild_name") or ""
+    if group is None or not name:
+        await alert(event, "Заявка устарела — откройте ссылку группы заново")
         return
-    if req.duplicate:
-        await event.message.answer(f"⏳ Заявка на {name} в группу «{group.name}» уже отправлена и ждёт решения. "
-                                   "Как только ребёнка добавят, вам придёт сообщение.")
-        return
-    await event.message.answer(f"⏳ Заявка отправлена: {name}, группа «{group.name}». "
-                               "Как только ребёнка добавят, вам придёт сообщение и откроется кабинет.")
+    existing, groups = None, None
+    payload = event.callback.payload
+    if payload.startswith("glnc_pick:"):
+        existing = await student_repo.get_by_id(payload.split(":", 1)[1]) if student_repo else None
+        if existing is None:
+            await alert(event, "Ученик не найден")
+            return
+        gnames = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        groups = [str(gnames.get(g, g)) for g in await student_group_repo.get_groups_for_student(existing.student_id)]
+    sender = event.callback.user
+    who = f"{sender.first_name} {sender.last_name or ''}".strip()
+
+    async def answer(text):
+        await edit_screen(event, text, [])
+    await _submit_new_child(answer, context, group, name, max_uid, who, user_repo, teacher_repo,
+                            teacher_group_repo, pending_repo, tg_bot, existing, groups)
 
 
 # ─── Регистрация по фамилии (первый ребёнок) ─────────────────────────────────

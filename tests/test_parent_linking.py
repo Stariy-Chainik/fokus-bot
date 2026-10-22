@@ -188,3 +188,56 @@ def test_approve_links_parent_to_existing_student_instead_of_duplicate(monkeypat
     aid3 = pending.items[-1].action_id
     status, r = _call(app, "POST", f"/api/admin/inbox/{aid3}/decide", json={"approve": True})
     assert status == 200 and r["existing"] is False and len(asyncio.run(dp["student_repo"].get_all())) == before + 1
+
+
+def test_parent_picks_existing_child_by_group_link(monkeypatch):
+    """Родитель по ссылке другой группы не нашёл ребёнка: бот ищет по фамилии во всей школе и предлагает своего;
+    выбор — заявка «добавить в группу и привязать» с student_id, одобрение не заводит карточку (22.10.2026)."""
+    from bot.handlers.client.group_link import cb_group_link_child_choice, msg_group_link_child_name
+    from bot.services.new_child import KIND_NEWCHILD
+    from tests.fakes import FakeMessage
+    from tests.test_admin_api import _call
+
+    dp, app = make_api(monkeypatch)
+    pending = PendingRepoFake()
+    dp["pending_repo"] = pending
+    dp["group_repo"].items.append(mk_group("GRP-0002", "ВБ Современные"))
+    deps = dict(group_repo=dp["group_repo"], user_repo=dp["user_repo"], teacher_repo=dp["teacher_repo"],
+                teacher_group_repo=dp["teacher_group_repo"], pending_repo=pending,
+                student_repo=dp["student_repo"], student_group_repo=dp["student_group_repo"])
+    state = FakeState()
+    asyncio.run(state.update_data(nchild_group_id="GRP-0002"))
+    msg = FakeMessage("Петрова Аня", user_id=NEW_PARENT)
+    asyncio.run(msg_group_link_child_name(msg, state, **deps))
+    text, kb = msg.screens[-1][0], msg.screens[-1][1]
+    assert "уже есть в школе" in text and not pending.items                         # заявки пока нет — выбор
+    buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert buttons == ["glnc_pick:STU-0002", "glnc_new"]
+    assert "БП Джаз" in kb.inline_keyboard[0][0].text                                # группа тёзки
+    cb = FakeCallbackQuery("glnc_pick:STU-0002", user_id=NEW_PARENT)
+    asyncio.run(cb_group_link_child_choice(cb, state, **deps))
+    a = pending.items[-1]
+    assert (a.kind, a.student_id, a.student_name, a.keys) == (KIND_NEWCHILD, "STU-0002", "Петрова Анна", ["GRP-0002"])
+    assert "уже есть в школе" in cb.message.screens[-1][0]
+    assert "нашёл ребёнка в базе" in cb.bot.sent[0][1] and "Добавить в группу и привязать" in str(cb.bot.sent[0][2])
+    # в «Ждут решения» — подсказка и кнопка; одобрение: без новой карточки, в группу, родитель привязан
+    item = next(i for i in _call(app, "GET", "/api/admin/inbox")[1]["items"] if i["id"] == a.action_id)
+    assert item["approveLabel"] == "✅ Добавить в группу и привязать" and "STU-0002" in item["note"]
+    before = len(asyncio.run(dp["student_repo"].get_all()))
+    status, r = _call(app, "POST", f"/api/admin/inbox/{a.action_id}/decide", json={"approve": True})
+    assert status == 200 and r["studentId"] == "STU-0002" and r["existing"] is True
+    assert len(asyncio.run(dp["student_repo"].get_all())) == before
+    assert "GRP-0002" in asyncio.run(dp["student_group_repo"].get_groups_for_student("STU-0002"))
+    assert NEW_PARENT in asyncio.run(dp["student_repo"].get_by_id("STU-0002")).parent_tg_ids
+    # «нет, моего ребёнка здесь нет» → обычная заявка на новую карточку
+    state2 = FakeState()
+    asyncio.run(state2.update_data(nchild_group_id="GRP-0002", nchild_name="Петрова Вера"))
+    cb2 = FakeCallbackQuery("glnc_new", user_id=NEW_PARENT)
+    asyncio.run(cb_group_link_child_choice(cb2, state2, **deps))
+    assert pending.items[-1].student_id == "" and pending.items[-1].student_name == "Петрова Вера"
+    # фамилии в базе нет — заявка сразу, без выбора
+    state3 = FakeState()
+    asyncio.run(state3.update_data(nchild_group_id="GRP-0002"))
+    msg3 = FakeMessage("Новикова Вера", user_id=NEW_PARENT)
+    asyncio.run(msg_group_link_child_name(msg3, state3, **deps))
+    assert pending.items[-1].student_name == "Новикова Вера" and "Заявка отправлена" in msg3.screens[-1][0]

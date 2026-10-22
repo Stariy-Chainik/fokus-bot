@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # кнопки уведомлений и входа — работают и в режиме «только кабинет»
 ADMIN_ALLOWED = ("pact:", "pnay:", "admin_child_", "nchild_", "unlink_ok:", "unlink_no:", "receipt_confirm:", "rcpt_no:",
-                 "rcpp:", "remind:", "athreg:", "go:home", "mode:", "noop", "glink", "client_reg", "client_add")
+                 "rcpp:", "remind:", "athreg:", "go:home", "mode:", "noop", "glink", "glnc_", "client_reg", "client_add")
 ADMIN_HINT = "Управление школой теперь в кабинете. Нажмите «📱 Открыть кабинет»."
 
 ATHLETE_BLOCKED = ("ath:", "athent:", "athlog:", "athcal_")

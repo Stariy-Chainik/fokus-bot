@@ -37,7 +37,7 @@ from bot.utils.group_links import parse_start_payload
 from bot.services.parent_notifier import resolve_notifier, parse_addr
 from bot.services.parent_notifier import tg_addr
 from bot.services.parent_linking import WAIT_TEXT, needs_approval, request_approval
-from bot.services.new_child import normalize_name, request_new_child
+from bot.services.new_child import find_candidates, normalize_name, request_new_child
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_group_link")
@@ -233,10 +233,40 @@ async def cb_group_link_none(callback: CallbackQuery, state: FSMContext, group_r
     await callback.answer()
 
 
+def _who(user) -> str:
+    username = getattr(user, "username", None)
+    return f"{user.full_name}{' @' + username if username else ''}"
+
+
+async def _submit_new_child(answer, bot, state: FSMContext, group, name: str, sender, user_repo, teacher_repo,
+                            teacher_group_repo, pending_repo, existing=None, existing_groups=None) -> None:
+    """Отправить заявку (новая карточка или выбранный из базы ребёнок) и ответить родителю."""
+    await state.clear()
+    req = await request_new_child(pending_repo, bot, user_repo, teacher_repo, teacher_group_repo,
+                                  group, name, tg_addr(sender.id), _who(sender),
+                                  existing=existing, existing_groups=existing_groups)
+    shown = existing.name if existing is not None else name
+    if req is None:
+        await answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    if req.duplicate:
+        await answer(f"⏳ Заявка на <b>{shown}</b> в группу «{group.name}» уже отправлена и ждёт решения "
+                     "педагога или администратора. Как только ребёнка добавят, вам придёт сообщение.")
+        return
+    if existing is not None:
+        await answer(f"⏳ Заявка отправлена: <b>{shown}</b> уже есть в школе — педагог или администратор добавит "
+                     f"ребёнка в группу «{group.name}» и привяжет вас. Вам придёт сообщение.")
+        return
+    await answer(
+        f"⏳ Заявка отправлена: <b>{shown}</b>, группа «{group.name}».\n\n"
+        "Как только педагог или администратор добавит ребёнка, вам придёт сообщение и откроется кабинет.",
+    )
+
+
 @router.message(GroupLinkStates.waiting_child_name, F.text)
 async def msg_group_link_child_name(
     message: Message, state: FSMContext, group_repo: GroupRepository, user_repo: UserRepository,
-    teacher_repo=None, teacher_group_repo=None, pending_repo=None,
+    teacher_repo=None, teacher_group_repo=None, pending_repo=None, student_repo=None, student_group_repo=None,
 ) -> None:
     name = normalize_name(message.text or "")
     if name is None:
@@ -244,26 +274,56 @@ async def msg_group_link_child_name(
         return
     data = await state.get_data()
     group = await group_repo.get_by_id(data.get("nchild_group_id") or "")
-    await state.clear()
     if group is None:
+        await state.clear()
         await message.answer("Ссылка группы устарела — откройте её заново из чата группы.")
         return
-    sender = message.from_user
-    username = getattr(sender, "username", None)
-    who = f"{sender.full_name}{' @' + username if username else ''}"
-    req = await request_new_child(pending_repo, message.bot, user_repo, teacher_repo, teacher_group_repo,
-                                  group, name, tg_addr(sender.id), who)
-    if req is None:
-        await message.answer("Не получилось отправить заявку — напишите педагогу.")
+    # ребёнок с такой фамилией уже в школе (другое направление) — пусть родитель выберет его, а не заведёт
+    # вторую карточку (решение владельца 22.10.2026)
+    cands = []
+    if student_repo is not None and student_group_repo is not None:
+        gnames = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        cands = await find_candidates(student_repo, student_group_repo, name, gnames)
+    if cands:
+        await state.update_data(nchild_name=name)
+        rows = [[InlineKeyboardButton(text=f"{s.name}" + (f" · {', '.join(gr)}" if gr else ""),
+                                      callback_data=f"glnc_pick:{s.student_id}")] for s, gr in cands]
+        rows.append([InlineKeyboardButton(text="❌ Нет, моего ребёнка здесь нет", callback_data="glnc_new")])
+        await message.answer(
+            f"Похоже, ребёнок уже есть в школе. Это ваш ребёнок? Если да — педагог добавит его в группу "
+            f"«{group.name}» без новой карточки.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
         return
-    if req.duplicate:
-        await message.answer(f"⏳ Заявка на <b>{name}</b> в группу «{group.name}» уже отправлена и ждёт решения "
-                             "педагога или администратора. Как только ребёнка добавят, вам придёт сообщение.")
+    await _submit_new_child(message.answer, message.bot, state, group, name, message.from_user,
+                            user_repo, teacher_repo, teacher_group_repo, pending_repo)
+
+
+@router.callback_query(F.data.startswith("glnc_pick:"))
+@router.callback_query(F.data == "glnc_new")
+async def cb_group_link_child_choice(
+    callback: CallbackQuery, state: FSMContext, group_repo: GroupRepository, user_repo: UserRepository,
+    teacher_repo=None, teacher_group_repo=None, pending_repo=None, student_repo=None, student_group_repo=None,
+) -> None:
+    """Выбор родителя после «нет в списке»: свой ребёнок из базы (заявка «добавить в группу и привязать»)
+    или действительно новый (заявка на карточку, как раньше)."""
+    data = await state.get_data()
+    group = await group_repo.get_by_id(data.get("nchild_group_id") or "")
+    name = data.get("nchild_name") or ""
+    if group is None or not name:
+        await callback.answer("Заявка устарела — откройте ссылку группы заново", show_alert=True)
         return
-    await message.answer(
-        f"⏳ Заявка отправлена: <b>{name}</b>, группа «{group.name}».\n\n"
-        "Как только педагог или администратор добавит ребёнка, вам придёт сообщение и откроется кабинет.",
-    )
+    existing, groups = None, None
+    if callback.data.startswith("glnc_pick:"):
+        existing = await student_repo.get_by_id(callback.data.split(":", 1)[1]) if student_repo else None
+        if existing is None:
+            await callback.answer("Ученик не найден", show_alert=True)
+            return
+        gnames = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        groups = [str(gnames.get(g, g)) for g in await student_group_repo.get_groups_for_student(existing.student_id)]
+    await _submit_new_child(callback.message.edit_text, callback.bot, state, group, name, callback.from_user,
+                            user_repo, teacher_repo, teacher_group_repo, pending_repo, existing, groups)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("glink_self_undo:"))

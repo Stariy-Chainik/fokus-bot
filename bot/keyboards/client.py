@@ -38,10 +38,12 @@ def kb_admin_approve_child(parent_tg_id, student_id: str) -> InlineKeyboardMarku
     ]])
 
 
-def kb_new_child_decide(action_id: str) -> InlineKeyboardMarkup:
-    """Заявка «моего ребёнка нет в группе»: решают администратор и педагоги группы."""
+def kb_new_child_decide(action_id: str, existing: bool = False) -> InlineKeyboardMarkup:
+    """Заявка «моего ребёнка нет в группе»: решают администратор и педагоги группы.
+    existing — родитель выбрал ребёнка из базы: добавить в группу и привязать, карточка не заводится."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Завести и привязать", callback_data=f"nchild_ok:{action_id}"),
+        InlineKeyboardButton(text="✅ Добавить в группу и привязать" if existing else "✅ Завести и привязать",
+                             callback_data=f"nchild_ok:{action_id}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"nchild_no:{action_id}"),
     ]])
 

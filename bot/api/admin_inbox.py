@@ -18,7 +18,7 @@ from aiohttp import web
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
-from bot.services.new_child import KIND_NEWCHILD, approve_new_child, existing_match, group_of, reject_new_child
+from bot.services.new_child import KIND_NEWCHILD, approve_new_child, existing_for, reject_new_child
 from bot.services.parent_notifier import notify_payment_confirmed, parse_addr
 from bot.services.parent_unlink import KIND_UNLINK, approve_unlink, reject_unlink
 from bot.services.pending_queue import rest_for_keys
@@ -72,9 +72,10 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             approve, reject = "✋ Деньги у меня", "❌ Денег не было"
         elif a.kind == KIND_NEWCHILD:
             approve, reject = "✅ Завести и привязать", "❌ Отклонить"
-            if existing is not None:                     # тёзка уже в базе — вторую карточку не заводим
-                approve = "✅ Привязать к существующему"
-                note = f"Ученик с таким именем уже есть: {existing.name} ({existing.student_id}) — родитель будет привязан к нему"
+            if existing is not None:                     # ребёнок уже в базе — вторую карточку не заводим
+                approve = "✅ Добавить в группу и привязать" if a.student_id else "✅ Привязать к существующему"
+                note = (f"Родитель выбрал ребёнка из базы: {existing.name} ({existing.student_id})" if a.student_id
+                        else f"Ученик с таким именем уже есть: {existing.name} ({existing.student_id}) — родитель будет привязан к нему")
         elif a.kind == KIND_UNLINK:
             approve, reject = "✅ Отвязать", "❌ Оставить"
         return {
@@ -109,7 +110,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                         rest = sum(v.remainder for v in ledgers.values())
                 existing = None
                 if a.kind == KIND_NEWCHILD:                 # тёзка уже в базе — покажем до решения
-                    existing = await existing_match(student_repo, dp["student_group_repo"], a.student_name, group_of(a))
+                    existing = await existing_for(student_repo, dp["student_group_repo"], a)
                 items.append(_action_dto(a, rest, user, names, existing))
         requests = []
         if request_repo is not None and scope is None:

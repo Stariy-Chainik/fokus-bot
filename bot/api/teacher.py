@@ -36,6 +36,7 @@ from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
+from bot.services.new_child import same_person
 from bot.services.student_archive import archive_preview, archive_student
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
@@ -492,10 +493,18 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         else:
             if not 3 <= len(name) <= 60:
                 return _json({"error": "bad_request", "message": "Введите фамилию и имя"}, status=400)
-            same = [x for x in await student_repo.get_all() if _norm_name(x.name) == _norm_name(name)]
+            # тёзка по фамилии и имени без цифр/регистра (22.10.2026: «Вергер Алексия 34» ≠ «Вергер Алексия»
+            # завело вторую карточку); педагог видит его группы и добавляет его, а не новую карточку
+            same = [x for x in await student_repo.get_all() if same_person(x.name, name)]
             if same and not bool((body or {}).get("force")):
-                return _json({"error": "duplicate", "message": "Ученик с таким именем уже есть в базе — выберите его из списка",
-                              "students": [{"id": x.student_id, "name": x.name} for x in same]}, status=409)
+                gnames = await _group_names()
+                groups_of: dict[str, list[str]] = {}
+                for m in await student_group_repo.get_all():
+                    if m.is_active:
+                        groups_of.setdefault(m.student_id, []).append(str(gnames.get(m.group_id, m.group_id)))
+                return _json({"error": "duplicate", "message": "Такой ученик уже есть в базе — добавьте его в группу",
+                              "students": [{"id": x.student_id, "name": x.name, "groups": groups_of.get(x.student_id, [])}
+                                           for x in same]}, status=409)
             s = (await dp["student_service"].create_with_group(name, gid)).student
             created = True
         if bot is not None:
