@@ -251,10 +251,14 @@ async def msg_group_link_child_name(
     sender = message.from_user
     username = getattr(sender, "username", None)
     who = f"{sender.full_name}{' @' + username if username else ''}"
-    action = await request_new_child(pending_repo, message.bot, user_repo, teacher_repo, teacher_group_repo,
-                                     group, name, tg_addr(sender.id), who)
-    if action is None:
+    req = await request_new_child(pending_repo, message.bot, user_repo, teacher_repo, teacher_group_repo,
+                                  group, name, tg_addr(sender.id), who)
+    if req is None:
         await message.answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    if req.duplicate:
+        await message.answer(f"⏳ Заявка на <b>{name}</b> в группу «{group.name}» уже отправлена и ждёт решения "
+                             "педагога или администратора. Как только ребёнка добавят, вам придёт сообщение.")
         return
     await message.answer(
         f"⏳ Заявка отправлена: <b>{name}</b>, группа «{group.name}».\n\n"

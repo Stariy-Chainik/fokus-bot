@@ -18,7 +18,7 @@ from aiohttp import web
 from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
-from bot.services.new_child import KIND_NEWCHILD, approve_new_child, reject_new_child
+from bot.services.new_child import KIND_NEWCHILD, approve_new_child, existing_match, group_of, reject_new_child
 from bot.services.parent_notifier import notify_payment_confirmed, parse_addr
 from bot.services.parent_unlink import KIND_UNLINK, approve_unlink, reject_unlink
 from bot.services.pending_queue import rest_for_keys
@@ -54,7 +54,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
     async def _teacher_names() -> dict:
         return {t.teacher_id: t.name for t in await teacher_repo.get_all()} if teacher_repo else {}
 
-    def _action_dto(a, rest: int | None = None, user=None, names: dict | None = None) -> dict:
+    def _action_dto(a, rest: int | None = None, user=None, names: dict | None = None, existing=None) -> dict:
         """Кнопки зависят от того, кто смотрит: наличные педагог не зачитывает (только «деньги у меня»),
         администратор зачитывает наличные у педагога, когда получит деньги."""
         teacher_view = scope is not None
@@ -72,6 +72,9 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             approve, reject = "✋ Деньги у меня", "❌ Денег не было"
         elif a.kind == KIND_NEWCHILD:
             approve, reject = "✅ Завести и привязать", "❌ Отклонить"
+            if existing is not None:                     # тёзка уже в базе — вторую карточку не заводим
+                approve = "✅ Привязать к существующему"
+                note = f"Ученик с таким именем уже есть: {existing.name} ({existing.student_id}) — родитель будет привязан к нему"
         elif a.kind == KIND_UNLINK:
             approve, reject = "✅ Отвязать", "❌ Оставить"
         return {
@@ -104,7 +107,10 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
                     if student is not None:
                         ledgers = await payment_service.ledger_for(student, a.period_month, sync=False)
                         rest = sum(v.remainder for v in ledgers.values())
-                items.append(_action_dto(a, rest, user, names))
+                existing = None
+                if a.kind == KIND_NEWCHILD:                 # тёзка уже в базе — покажем до решения
+                    existing = await existing_match(student_repo, dp["student_group_repo"], a.student_name, group_of(a))
+                items.append(_action_dto(a, rest, user, names, existing))
         requests = []
         if request_repo is not None and scope is None:
             for r in await request_repo.get_pending():
@@ -163,11 +169,11 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         if action.kind == KIND_NEWCHILD:          # карточки ещё нет — заводим по заявке родителя
             notifier = (getattr(dp, "workflow_data", dp)).get("notifier")
             if approve:
-                student = await approve_new_child(pending_repo, student_repo, dp["student_group_repo"],
-                                                  notifier, action, user.tg_id)
-                if student is None:
+                res = await approve_new_child(pending_repo, student_repo, dp["student_group_repo"],
+                                              notifier, action, user.tg_id)
+                if res is None:
                     return _json({"error": "already_decided"}, status=409)
-                return _json({"ok": True, "status": DONE, "studentId": student.student_id})
+                return _json({"ok": True, "status": DONE, "studentId": res.student.student_id, "existing": res.existing})
             if not await reject_new_child(pending_repo, notifier, action, user.tg_id):
                 return _json({"error": "already_decided"}, status=409)
             return _json({"ok": True, "status": REJECTED})

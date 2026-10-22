@@ -103,14 +103,18 @@ async def cb_new_child_ok(
     if not await may_decide(user, action, teacher_group_repo):
         await callback.answer("Это заявка не вашей группы", show_alert=True)
         return
-    student = await approve_new_child(pending_repo, student_repo, student_group_repo,
-                                      resolve_notifier(callback.bot), action, callback.from_user.id)
-    if student is None:
+    res = await approve_new_child(pending_repo, student_repo, student_group_repo,
+                                  resolve_notifier(callback.bot), action, callback.from_user.id)
+    if res is None:
         await callback.answer("Заявку уже решили", show_alert=True)
         return
+    student = res.student
     await callback.message.edit_text(
-        f"✅ Заведён ученик <b>{student.name}</b> ({student.student_id}), родитель привязан.\n"
-        f"Группа: {action.comment.split(' · ')[0]}",
+        (f"✅ Ученик <b>{student.name}</b> ({student.student_id}) уже был в базе — родитель привязан к нему"
+         + (", в группу добавлен" if res.added_to_group else "") + ".\n"
+         if res.existing else
+         f"✅ Заведён ученик <b>{student.name}</b> ({student.student_id}), родитель привязан.\n")
+        + f"Группа: {action.comment.split(' · ')[0]}",
     )
     await callback.answer()
 

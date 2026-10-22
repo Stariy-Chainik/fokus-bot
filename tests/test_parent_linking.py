@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from bot.handlers.client.group_link import cb_group_link_pick
 from bot.handlers.client.start import cb_client_reg_confirm
 from bot.services.parent_linking import needs_approval
-from tests.fakes import FakeCallbackQuery, FakeState
+from tests.fakes import FakeCallbackQuery, FakeState, mk_group
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, make_api
 from tests.test_admin_inbox_api import PendingRepoFake
 
@@ -130,3 +130,61 @@ def test_new_child_request_visible_and_decidable_in_admin_inbox(monkeypatch):
     s = asyncio.run(dp["student_repo"].get_by_id(r["studentId"]))
     assert s.name == "Петров Пётр" and NEW_PARENT in s.parent_tg_ids
     assert _call(app, "POST", f"/api/admin/inbox/{aid}/decide", json={"approve": True})[0] == 409
+
+
+def test_duplicate_new_child_request_is_not_repeated(monkeypatch):
+    """Повторная заявка «нет в списке» на то же имя в ту же группу (из MAX и Telegram, дважды) — одна заявка,
+    без второго сообщения администраторам (21.10.2026)."""
+    from bot.services.new_child import KIND_NEWCHILD, request_new_child
+    from tests.fakes import FakeBot
+
+    dp, _ = make_api(monkeypatch)
+    pending, bot = PendingRepoFake(), FakeBot()
+    group = dp["group_repo"].items[0]
+    args = (pending, bot, dp["user_repo"], dp["teacher_repo"], dp["teacher_group_repo"], group)
+    first = asyncio.run(request_new_child(*args, "Сидорова Мария", ("tg", NEW_PARENT), "Папа"))
+    assert first.duplicate is False and len(bot.sent) >= 1
+    sent_before = len(bot.sent)
+    again = asyncio.run(request_new_child(*args, "  сидорова   мария ", ("max", 555), "Мама в MAX"))
+    assert again.duplicate is True and again.action.action_id == first.action.action_id
+    assert len(pending.items) == 1 and len(bot.sent) == sent_before            # ни строки, ни сообщений
+    # другая группа — отдельная заявка
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Другая"))
+    other = asyncio.run(request_new_child(pending, bot, dp["user_repo"], dp["teacher_repo"], dp["teacher_group_repo"],
+                                          dp["group_repo"].items[-1], "Сидорова Мария", ("tg", NEW_PARENT), "Папа"))
+    assert other.duplicate is False and len(pending.items) == 2
+    assert all(a.kind == KIND_NEWCHILD for a in pending.items)
+
+
+def test_approve_links_parent_to_existing_student_instead_of_duplicate(monkeypatch):
+    """Ученик с таким именем уже есть — одобрение не заводит вторую карточку: привязка к существующей,
+    в группу добавляется, если его там нет; в «Ждут решения» подсказка и кнопка «Привязать к существующему»."""
+    from bot.services.new_child import KIND_NEWCHILD
+    from tests.test_admin_api import _call
+
+    dp, app = make_api(monkeypatch)
+    pending = PendingRepoFake()
+    dp["pending_repo"] = pending
+    # Петрова Анна (STU-0002) уже в базе, состоит в GRP-0001; заявка на «петрова анна» в GRP-0001
+    asyncio.run(pending.add(KIND_NEWCHILD, "", "петрова   анна", "", 0, "", str(NEW_PARENT), "", "", "Группа · Мама", "GRP-0001", ""))
+    aid = pending.items[-1].action_id
+    item = next(i for i in _call(app, "GET", "/api/admin/inbox")[1]["items"] if i["id"] == aid)
+    assert item["approveLabel"] == "✅ Привязать к существующему" and "STU-0002" in item["note"]
+    before = len(asyncio.run(dp["student_repo"].get_all()))
+    status, r = _call(app, "POST", f"/api/admin/inbox/{aid}/decide", json={"approve": True})
+    assert status == 200 and r["studentId"] == "STU-0002" and r["existing"] is True
+    assert len(asyncio.run(dp["student_repo"].get_all())) == before                    # второй карточки нет
+    assert NEW_PARENT in asyncio.run(dp["student_repo"].get_by_id("STU-0002")).parent_tg_ids
+    # тёзка не в этой группе — его добавят в группу, карточку не плодим
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Другая"))
+    asyncio.run(pending.add(KIND_NEWCHILD, "", "Петрова Анна", "", 0, "", "m777", "", "", "Другая · Папа", "GRP-0002", ""))
+    aid2 = pending.items[-1].action_id
+    status, r = _call(app, "POST", f"/api/admin/inbox/{aid2}/decide", json={"approve": True})
+    assert status == 200 and r["studentId"] == "STU-0002"
+    assert "GRP-0002" in asyncio.run(dp["student_group_repo"].get_groups_for_student("STU-0002"))
+    assert 777 in asyncio.run(dp["student_repo"].get_by_id("STU-0002")).parent_max_ids
+    # незнакомое имя — новая карточка, как раньше
+    asyncio.run(pending.add(KIND_NEWCHILD, "", "Новикова Вера", "", 0, "", str(NEW_PARENT), "", "", "Группа · Мама", "GRP-0001", ""))
+    aid3 = pending.items[-1].action_id
+    status, r = _call(app, "POST", f"/api/admin/inbox/{aid3}/decide", json={"approve": True})
+    assert status == 200 and r["existing"] is False and len(asyncio.run(dp["student_repo"].get_all())) == before + 1

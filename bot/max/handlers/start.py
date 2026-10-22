@@ -179,10 +179,14 @@ async def on_new_child_name(event: MessageCreated, context, max_uid, group_repo,
         return
     sender = event.message.sender
     who = f"{sender.first_name} {sender.last_name or ''}".strip()
-    action = await request_new_child(pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo,
-                                     group, name, max_addr(max_uid), who)
-    if action is None:
+    req = await request_new_child(pending_repo, tg_bot, user_repo, teacher_repo, teacher_group_repo,
+                                  group, name, max_addr(max_uid), who)
+    if req is None:
         await event.message.answer("Не получилось отправить заявку — напишите педагогу.")
+        return
+    if req.duplicate:
+        await event.message.answer(f"⏳ Заявка на {name} в группу «{group.name}» уже отправлена и ждёт решения. "
+                                   "Как только ребёнка добавят, вам придёт сообщение.")
         return
     await event.message.answer(f"⏳ Заявка отправлена: {name}, группа «{group.name}». "
                                "Как только ребёнка добавят, вам придёт сообщение и откроется кабинет.")
