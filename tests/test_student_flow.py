@@ -41,11 +41,11 @@ def test_month_flow_classifies_new_gone_and_moves():
     rows = [r for r in rows if r.student_id != "STU-0002"] + [
         StudentGroup("STU-0002", "GRP-0003", joined_period="2026-04")]                    # Петя остался в Средней
     r = month_flow(YM_, rows, events, STUDENTS, GROUPS)
-    assert [(x.name, x.groups, x.note, x.date) for x in r.new] == [                 # по дням
-        ("Новикова Аня", ["ВБ ХГ Младшая 🤸"], "", f"{YM_}-02"), ("Безгруппов Ваня", [], "без группы", f"{YM_}-03")]
+    assert [(x.name, x.groups, x.note, x.date) for x in r.new] == [                 # от свежих к старым (22.10.2026)
+        ("Безгруппов Ваня", [], "без группы", f"{YM_}-03"), ("Новикова Аня", ["ВБ ХГ Младшая 🤸"], "", f"{YM_}-02")]
     assert [(x.name, x.groups, x.note, x.date) for x in r.gone] == [
         ("Ушакова Лена", ["ВБ ХГ Младшая 🤸"], "с октября", "2026-09-28")]
-    assert r.as_dict()["new"][0]["date"] == f"{YM_}-02"
+    assert r.as_dict()["new"][0]["date"] == f"{YM_}-03"
     # удалённые карточки — отдельно и не в «ушли»: на проде это чистка дублей
     assert [(x.name, x.note) for x in r.deleted] == [("Дублёва Маша", ""), ("STU-0099", "имя не сохранилось")]
     assert [(x.name, x.groups, x.note) for x in r.moves] == [

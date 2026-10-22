@@ -160,6 +160,6 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
                                         date=gone_at.get(sid, "")))
         elif sid in created and sid in students:
             report.new.append(FlowItem(sid, sname(sid), [], "без группы", date=came_at.get(sid, "")))
-    for items in (report.new, report.gone):            # по дням; без даты — в конце
-        items.sort(key=lambda x: (not x.date, x.date, x.name.lower()))
+    for items in (report.new, report.gone):            # от сегодня к 1-му числу (решение владельца 22.10.2026); без даты — в конце
+        items.sort(key=lambda x: (not x.date, x.date and "".join(chr(255 - ord(c)) for c in x.date), x.name.lower()))
     return report
