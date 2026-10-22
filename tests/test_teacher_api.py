@@ -930,3 +930,34 @@ def test_teacher_telegram_buttons_have_no_overpay(api, monkeypatch):
     admin = asyncio.run(dp["user_repo"].get_by_tg_id(ADMIN_TG))
     _, buttons = press(admin, f"pact:{action.action_id}:9000:b")
     assert any("переплата" in b for b in buttons)
+
+
+def test_teacher_cabinet_decides_new_child_requests(api):
+    """«Заявки родителей на детей» в кабинете педагога (22.10.2026): свои группы, подсказка про тёзку, одобрение/отказ."""
+    from bot.services.new_child import KIND_NEWCHILD
+    from tests.fakes import FakeBot, mk_group
+    from tests.test_admin_inbox_api import PendingRepoFake
+    app, dp = api
+    pending = PendingRepoFake()
+    dp["pending_repo"] = pending
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Чужая"))
+    asyncio.run(pending.add(KIND_NEWCHILD, "", "Новикова Вера", "", 0, "", "555", "", "", "БП Джаз · Мама", "GRP-0001", ""))
+    asyncio.run(pending.add(KIND_NEWCHILD, "STU-0002", "Петрова Анна", "", 0, "", "m777", "", "", "БП Джаз · Папа", "GRP-0001", ""))
+    asyncio.run(pending.add(KIND_NEWCHILD, "", "Чужой Ребёнок", "", 0, "", "555", "", "", "Чужая · Мама", "GRP-0002", ""))
+    assert _call(app, "GET", "/api/teacher/home")[1]["newChild"] == 2
+    items = _call(app, "GET", "/api/teacher/newchild")[1]["items"]
+    assert [x["name"] for x in items] == ["Новикова Вера", "Петрова Анна"]
+    assert items[0]["existing"] is None and items[1]["existing"]["chosen"] and items[1]["existing"]["id"] == "STU-0002"
+    bot = FakeBot()
+    before = len(asyncio.run(dp["student_repo"].get_all()))
+    st, r = _call(app, "POST", f"/api/teacher/newchild/{items[1]['id']}/decide", bot=bot, json={"approve": True})
+    assert st == 200 and r["existing"] and r["studentId"] == "STU-0002"
+    assert len(asyncio.run(dp["student_repo"].get_all())) == before
+    assert 777 in asyncio.run(dp["student_repo"].get_by_id("STU-0002")).parent_max_ids
+    assert bot.sent and "одобрил заявку" in bot.sent[0][1] and "уже был в базе" in bot.sent[0][1]
+    st, r = _call(app, "POST", f"/api/teacher/newchild/{items[0]['id']}/decide", bot=bot, json={"approve": False})
+    assert st == 200 and r["rejected"] and pending.items[0].status == "rejected"
+    assert _call(app, "POST", f"/api/teacher/newchild/{items[0]['id']}/decide", json={"approve": True})[0] == 409  # уже решена
+    other = pending.items[2].action_id
+    assert _call(app, "POST", f"/api/teacher/newchild/{other}/decide", json={"approve": True})[0] == 404     # чужая группа
+    assert _call(app, "GET", "/api/teacher/home")[1]["newChild"] == 0

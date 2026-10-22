@@ -13,6 +13,7 @@ SCREENS['t.home'] = async () => {
   const attention = [
     h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
     h.heldCash ? cell({ lead: '💵', plain: true, t: 'Наличные у вас', s: 'передайте администратору — он зачтёт оплату', r: `<b>${fmt(h.heldCash)}</b>` }) : '',
+    h.newChild ? cell({ lead: '🆕', plain: true, t: 'Заявки родителей на детей', s: 'ребёнка нет в списке группы — добавить или отклонить', r: pill(h.newChild, 'warn'), go: 't.nchild' }) : '',
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
   ].filter(Boolean);
@@ -439,6 +440,22 @@ SCREENS['t.rating'] = async ({ ym }) => {
    Задание всей группе, нескольким ученикам или одному (из карточки ученика); за выполнение — оценка
    каждому по шкале педагога (1–5, у Яковлевой 1–10). Номер задания — по порядку у группы.
    Кабинет спортсмена не нужен: задание и оценка уходят родителям, видны в их «Дневнике». */
+/* Заявки родителей «ребёнка нет в списке» по своим группам — те же решения, что кнопками в Telegram (22.10.2026). */
+SCREENS['t.nchild'] = async () => {
+  const d = await api('/newchild');
+  return { title: 'Заявки на детей', html: d.items.length ? d.items.map(a => `<div class="card pad" style="margin-bottom:10px">
+      <div style="font-weight:800;font-size:16px">${esc(a.name)}</div>
+      <div class="hint">${esc(plainName(a.groupName))} · родитель ${a.parent}${a.sender ? ` · ${esc(a.sender)}` : ''} · ${fdate(a.createdAt.slice(0, 10))}</div>
+      ${a.existing ? `<div class="hint" style="margin-top:6px">${a.existing.chosen ? 'Родитель выбрал ребёнка из базы' : 'Ученик с таким именем уже есть'}: <b>${esc(a.existing.name)}</b>${a.existing.groups.length ? ` · ${esc(a.existing.groups.map(plainName).join(', '))}` : ''}. Новая карточка не нужна — добавим в группу и привяжем родителя.</div>` : '<div class="hint" style="margin-top:6px">В базе такого ребёнка нет — будет заведена новая карточка в вашей группе.</div>'}
+      <div style="margin-top:10px">${btn(a.existing ? '✅ Добавить в группу и привязать' : '✅ Завести и привязать', 'tNchildDo', { id: a.id, approve: true })}${btn('❌ Отклонить', 'tNchildDo', { id: a.id, approve: false }, 'ghost')}</div></div>`).join('')
+    : '<div class="calm">✓ Заявок нет</div>' };
+};
+ACT.tNchildDo = async ({ id, approve }) => {
+  try {
+    const r = await api(`/newchild/${id}/decide`, { method: 'POST', body: { approve } });
+    render(); toast(r.rejected ? 'Заявка отклонена' : r.existing ? `${r.name} добавлен в группу, родитель привязан` : `Заведён ученик ${r.name}, родитель привязан`);
+  } catch (e) { render(); toast(e.code === 'already_decided' ? 'Заявку уже решили' : errText(e)); }
+};
 SCREENS['t.hw'] = async ({ gid }) => {
   const d = await api(`/homework${gid ? `?gid=${gid}` : ''}`);
   const start = gid

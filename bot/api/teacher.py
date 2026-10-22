@@ -36,7 +36,9 @@ from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
-from bot.services.new_child import same_person
+from bot.services.new_child import (
+    KIND_NEWCHILD, approve_new_child, existing_for, group_of, may_decide, reject_new_child, same_person,
+)
 from bot.services.student_archive import archive_preview, archive_student
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
@@ -272,6 +274,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "bills": await _bills_summary(teacher, period) if can_bill else None,
             "inbox": await _queue_count(teacher, user),     # заявки об оплате (FULL_BILL_TEACHER_IDS)
             "heldCash": await _held_cash(teacher) if can_bill else 0,   # наличные на руках — передать админу
+            "newChild": len(await _new_child_open(teacher)),            # заявки родителей на детей в своих группах
             # «сегодня»: занятия дня целиком, чтобы сводка не ходила за ними вторым запросом
             "lessonsToday": len(today_lessons),
             "todayLessons": today_items,
@@ -1084,6 +1087,59 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return sum(1 for a in await pending_repo.get_open()
                    if a.kind in (KIND_CASH, KIND_RECEIPT) and a.student_id in members and not a.held_by)
 
+    async def _new_child_open(teacher) -> list:
+        """Открытые заявки «ребёнка нет в списке» по своим группам (решение владельца 22.10.2026: решать и в кабинете)."""
+        pending_repo = _dp_get(dp, "pending_repo")
+        if pending_repo is None:
+            return []
+        own = await _own_group_ids(teacher)
+        return sorted((a for a in await pending_repo.get_open() if a.kind == KIND_NEWCHILD and group_of(a) in own),
+                      key=lambda a: a.created_at)
+
+    async def newchild_list(request: web.Request, user, teacher) -> web.Response:
+        names = await _group_names()
+        groups_of: dict[str, list[str]] = {}
+        for m in await student_group_repo.get_all():
+            if m.is_active:
+                groups_of.setdefault(m.student_id, []).append(str(names.get(m.group_id, m.group_id)))
+        out = []
+        for a in await _new_child_open(teacher):
+            ex = await existing_for(student_repo, student_group_repo, a)
+            out.append({
+                "id": a.action_id, "name": a.student_name, "groupName": names.get(group_of(a), group_of(a)),
+                "parent": "MAX" if a.parent_addr.startswith("m") else "Telegram",
+                "sender": a.comment.split(" · ", 1)[1] if " · " in a.comment else "", "createdAt": a.created_at,
+                "existing": {"id": ex.student_id, "name": ex.name, "groups": groups_of.get(ex.student_id, []),
+                             "chosen": bool(a.student_id)} if ex else None,
+            })
+        return _json({"items": out})
+
+    async def newchild_decide(request: web.Request, user, teacher) -> web.Response:
+        """Та же заявка, что кнопками в Telegram: одобрить (карточка или привязка к существующему) / отклонить."""
+        pending_repo = _dp_get(dp, "pending_repo")
+        action = await pending_repo.get_by_id(request.match_info["aid"]) if pending_repo else None
+        if action is None or action.kind != KIND_NEWCHILD or not await may_decide(user, action, teacher_group_repo):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        notifier = _dp_get(dp, "notifier")
+        if bool((body or {}).get("approve")):
+            res = await approve_new_child(pending_repo, student_repo, student_group_repo, notifier, action, user.tg_id)
+            if res is None:
+                return _json({"error": "already_decided"}, status=409)
+            if bot is not None:
+                names = await _group_names()
+                await notify(bot, [u.tg_id for u in await user_repo.get_admins()],
+                             f"➕ Педагог {teacher.name} одобрил заявку родителя\nУченик: {res.student.name}"
+                             f"{' (уже был в базе)' if res.existing else ' (новая карточка)'}\n"
+                             f"Группа: {names.get(group_of(action), group_of(action))}")
+            return _json({"ok": True, "studentId": res.student.student_id, "name": res.student.name, "existing": res.existing})
+        if not await reject_new_child(pending_repo, notifier, action, user.tg_id):
+            return _json({"error": "already_decided"}, status=409)
+        return _json({"ok": True, "rejected": True})
+
     async def _held_cash(teacher) -> int:
         """Наличные у педагога, которые ещё не зачёл администратор (не переданы)."""
         pending_repo = _dp_get(dp, "pending_repo")
@@ -1561,6 +1617,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/students/{sid}/transfer", student_transfer),
         ("PUT", "/groups/{gid}/members/{sid}/leave", member_leave),
         ("GET", "/students/{sid}/archive", student_archive_preview), ("POST", "/students/{sid}/archive", student_archive),
+        ("GET", "/newchild", newchild_list), ("POST", "/newchild/{aid}/decide", newchild_decide),
         ("POST", "/groups/{gid}/members", member_add),
         ("GET", "/stats", stats), ("GET", "/submit", submit_preview), ("POST", "/submit", submit),
         ("GET", "/diary", diary), ("GET", "/diary/rating", diary_rating), ("GET", "/diary/{sid}", diary_student),
