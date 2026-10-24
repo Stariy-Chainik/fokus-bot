@@ -65,6 +65,8 @@ async def record_options(dp, teacher_id: str) -> dict:
             "durationFull": g.duration_full, "durationShort": g.duration_short,
             "roster": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value, "partnerId": s.partner_id} for s in roster],
         })
+    rshare_group = await group_repo.get_by_id(rshare) if rshare else None
+    rshare_price = rshare_group.price_full if rshare_group else 0
     mine = await visibility.students_for_teacher(teacher_id)
     mine_ids = {s.student_id for s in mine}
     pairs, seen = [], set()
@@ -80,6 +82,8 @@ async def record_options(dp, teacher_id: str) -> dict:
         "teacherId": teacher_id, "today": date.today().isoformat(),
         "kinds": ["group", "rshare"] if rshare else ["group", "pair", "shared", "soloist"],
         "durations": DURATIONS, "rshareDurations": RSHARE_DURATIONS, "rshareGroupId": rshare,
+        # цена по умолчанию в поле «сумма с ученицы»: техгруппа скрыта из groups, поэтому отдаём отдельно
+        "rsharePrice": rshare_price,
         "groups": groups, "pairs": pairs,
         "students": [{"id": s.student_id, "name": s.name, "partnerId": s.partner_id} for s in sorted(mine, key=lambda s: s.name)],
     }

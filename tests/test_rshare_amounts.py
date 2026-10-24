@@ -24,6 +24,7 @@ def test_custom_amount_and_outside_student(api, monkeypatch):  # noqa: F811
     _setup(dp, monkeypatch)
     opts = _call(app, "GET", "/api/teacher/record/options")[1]
     assert opts["rshareGroupId"] == "GRP-0020" and "rshare" in opts["kinds"]
+    assert opts["rsharePrice"] == 1800                                                        # цена в поле по умолчанию
     assert _call(app, "GET", "/api/teacher/students/STU-0009")[0] == 404                      # пока не видна
     body = {"kind": "rshare", "date": "2026-10-20", "durationMin": 60, "studentIds": ["STU-0002", "STU-0009"],
             "amounts": {"STU-0002": 2500, "STU-0009": ""}}
