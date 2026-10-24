@@ -577,7 +577,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                 "paidRows": [{"id": p.payment_id, "amount": p.total_amount, "date": (p.paid_at or "")[:10],
                               "method": p.payment_method or ""} for p in ledger.paid_rows],
                 "pending": {"id": ledger.pending.payment_id, "amount": ledger.pending.total_amount} if ledger.pending else None,
-                "unpaidLessons": sum(1 for m in payment_ledger.lesson_marks(ledger.items, ledger.paid) if not m["paid"]),
+                "unpaidLessons": sum(1 for m in payment_ledger.lesson_marks(
+                    ledger.items, ledger.paid, payment_ledger.linked_ids(ledger.paid_rows)) if not m["paid"]),
             })
         return _json({"student": {"id": sid, "name": student.name}, "period": period, "positions": positions})
 

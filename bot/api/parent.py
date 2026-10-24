@@ -440,7 +440,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         picked = set(lesson_ids)
         amount = 0
         for key, ledger in chosen.items():
-            marks = payment_ledger.lesson_marks(ledger.items, ledger.paid)
+            marks = payment_ledger.lesson_marks(ledger.items, ledger.paid, payment_ledger.linked_ids(ledger.paid_rows))
             mine = [m for m in marks if m["lesson_id"] in picked and not m["paid"]]
             if mine:
                 amount += sum(m["amount"] for m in mine)

@@ -82,8 +82,10 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
     paid_by_teacher: dict[str, int] = {}
     last_paid_at: dict[str, str] = {}
     has_pending: set[str] = set()
+    pinned: dict[str, set[str]] = {}                 # занятия, закреплённые за оплатами (24.10.2026)
     for p in payments:
         if p.status.value == "paid":
+            pinned.setdefault(p.teacher_id, set()).update(getattr(p, "lesson_id_list", []))
             paid_by_teacher[p.teacher_id] = paid_by_teacher.get(p.teacher_id, 0) + p.total_amount
             last_paid_at[p.teacher_id] = max(last_paid_at.get(p.teacher_id, ""), (p.paid_at or "")[:10])
         else:
@@ -106,7 +108,8 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
             status = f"⏳ Счёт не создан — {subtotal} руб."
         lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b> — {subtotal} руб. — {status}")
         items = sorted(agg.items, key=lambda b: (b.date, b.lesson_id))
-        marks = lesson_paid_marks([b.amount for b in items], paid)
+        marks = lesson_paid_marks([b.amount for b in items], paid,
+                                  [b.lesson_id in pinned.get(teacher_id, set()) for b in items])
         paid_items = [b for b, is_paid in zip(items, marks, strict=False) if is_paid]
         unpaid_items = [b for b, is_paid in zip(items, marks, strict=False) if not is_paid]
 

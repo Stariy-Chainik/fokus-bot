@@ -59,7 +59,9 @@ def render_bill_detail(
             else:
                 d.lines.append(f"<b>{'Группа' if ledger.group else 'Педагог'}: {ledger.name}</b>")
                 items = sorted(ledger.items, key=lambda b: (b.date, b.lesson_id))
-                marks = lesson_paid_marks([item.amount for item in items], ledger.paid)
+                pinned = {i for p in ledger.paid_rows for i in getattr(p, "lesson_id_list", [])}
+                marks = lesson_paid_marks([item.amount for item in items], ledger.paid,
+                                          [item.lesson_id in pinned for item in items])
                 paid_items = [item for item, paid in zip(items, marks, strict=False) if paid]
                 unpaid_items = [item for item, paid in zip(items, marks, strict=False) if not paid]
 

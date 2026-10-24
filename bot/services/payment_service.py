@@ -19,7 +19,7 @@ from .payment_ledger import (
 )
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
 
-from . import activity, payment_events
+from . import activity, payment_events, payment_ledger
 logger = logging.getLogger(__name__)
 
 # Ключ «педагога» для абонементного начисления в счетах/долгах: SUB:{group_id}.
@@ -669,12 +669,37 @@ class PaymentService:
             rows += 1
         logger.info("Оплата зачтена: student=%s period=%s сумма=%d строк=%d", student_id, period_month, credited, rows)
         if credited > 0:
+            await self.pin_paid_lessons(student_id, period_month, student_name)
+        if credited > 0:
             await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
                                   + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id,
                                   ref=f"{student_id} file:{receipt_file_id}" if receipt_file_id else student_id)
             payment_events.payment_received(student_id, period_month, credited, payment_method,
                                             confirmed_by_tg_id, student_name)
         return credited, rows
+
+    async def pin_paid_lessons(self, student_id: str, period_month: str, student_name: str = "") -> int:
+        """Закрепить за незакреплёнными оплатами месяца занятия, которые они закрыли на момент оплаты
+        (`payment_ledger.pin_unlinked_rows`). Возвращает число закреплённых строк. Ошибка — только в лог:
+        оплата уже зачтена, закрепление — вспомогательное."""
+        try:
+            student = Student(student_id=student_id, name=student_name)
+            ledgers = await self.ledger_for(student, period_month, sync=False)
+            recorded = {ls.lesson_id: ls.recorded_at
+                        for ls in await self._lesson_repo.get_by_student_and_period(student_id, period_month)}
+            pinned = 0
+            for ledger in ledgers.values():
+                if ledger.subscription or not ledger.items:
+                    continue
+                for pid, ids in payment_ledger.pin_unlinked_rows(ledger.items, ledger.paid_rows, recorded).items():
+                    await self._payment_repo.set_lesson_ids(pid, "|".join(ids), student_id=student_id)
+                    pinned += 1
+            if pinned:
+                logger.info("Оплаты закреплены за занятиями: %s %s — строк %d", student_id, period_month, pinned)
+            return pinned
+        except Exception as exc:                              # оплата уже записана — не мешаем сценарию
+            logger.warning("Закрепление оплат за занятиями не удалось (%s %s): %s", student_id, period_month, exc)
+            return 0
 
     async def _add_paid_row(
         self, student: Student, period_month: str, teacher_id: str, teacher_name: str,
@@ -921,6 +946,7 @@ class PaymentService:
                                   actor=confirmed_by_tg_id, ref=payment.student_id)
             payment_events.payment_received(payment.student_id, payment.period_month, payment.total_amount,
                                             payment_method, confirmed_by_tg_id)
+            await self.pin_paid_lessons(payment.student_id, payment.period_month, payment.student_name or "")
         return ok
 
     async def online_purpose(self, student_id: str, student_name: str, periods: list, keys: list | None) -> str:
@@ -1062,6 +1088,8 @@ class PaymentService:
             "Частичная оплата: student=%s period=%s педагоги=%s подтверждено=%d",
             student_id, period_month, ",".join(teacher_ids), count,
         )
+        if count:
+            await self.pin_paid_lessons(student_id, period_month)
         return count
 
     async def confirm_period(
@@ -1079,4 +1107,5 @@ class PaymentService:
         if count:
             await activity.record(activity.PAYMENT, f"Подтверждён период: {student_id} · {period_month}"
                                   f" · счетов {count} · {payment_method}", actor=confirmed_by_tg_id, ref=student_id)
+            await self.pin_paid_lessons(student_id, period_month)
         return count

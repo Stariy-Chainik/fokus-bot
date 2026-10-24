@@ -78,6 +78,64 @@ def lesson_paid_marks(amounts: list[int], paid: int, linked: list[bool] | None =
     return marks
 
 
+_TS_RE = None
+
+
+def norm_ts(value) -> str:
+    """«2026-10-02 8:22:44» → «2026-10-02 08:22:44»: в листах встречается час без нуля, а строки сравниваются."""
+    import re
+    global _TS_RE
+    if _TS_RE is None:
+        _TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?")
+    m = _TS_RE.match(str(value or "").strip())
+    if not m:
+        return ""
+    day, hh, mm, ss = m.groups()
+    return f"{day} {int(hh or 0):02d}:{mm or '00'}:{ss or '00'}"
+
+
+def pin_unlinked_rows(items: list, paid_rows: list, recorded_at: dict) -> dict[str, list[str]]:
+    """Какие занятия закрыла каждая оплата без явного списка занятий — на момент оплаты.
+
+    Решение владельца 24.10.2026 (случай Звырлифус Бианки): оплаченное занятие остаётся оплаченным навсегда.
+    Раньше незакреплённые оплаты закрывали занятия «с самых ранних» при каждом показе, и занятие, внесённое
+    педагогом задним числом, забирало деньги у уже оплаченного. Теперь оплаты идут по времени `paid_at`, каждая
+    закрывает самые ранние неоплаченные занятия, которые к моменту оплаты уже были записаны (`recorded_at` ≤
+    `paid_at`), и результат пишется в `lesson_ids` строки — дальше это обычная явная привязка.
+    Возвращает {payment_id: [lesson_id, …]} только для строк, которые что-то закрыли целиком."""
+    ordered = sorted((b for b in items if b.amount > 0), key=lambda b: (b.date, b.lesson_id))
+    amounts = {b.lesson_id: b.amount for b in ordered}
+    rows = sorted((p for p in paid_rows if getattr(p.status, "value", p.status) == "paid"),
+                  key=lambda p: (norm_ts(p.paid_at), p.payment_id))
+    covered = {i for p in rows for i in p.lesson_id_list if i in amounts}
+    credit, out = 0, {}
+    for p in rows:
+        if p.lesson_id_list:                       # уже привязана — излишек (или нехватка) идёт в общий зачёт
+            credit += int(p.total_amount) - sum(amounts.get(i, 0) for i in p.lesson_id_list if i in amounts)
+            continue
+        credit += int(p.total_amount)
+        paid_at, new = norm_ts(p.paid_at), []
+        for b in ordered:
+            if b.lesson_id in covered:
+                continue
+            rec = norm_ts(recorded_at.get(b.lesson_id, ""))
+            if rec and paid_at and rec > paid_at:  # занятия ещё не было — эта оплата не за него
+                continue
+            if credit < b.amount:
+                break
+            new.append(b.lesson_id)
+            covered.add(b.lesson_id)
+            credit -= b.amount
+        if new:
+            out[p.payment_id] = new
+    return out
+
+
+def linked_ids(paid_rows) -> set[str]:
+    """Занятия, прямо закрытые оплатами одного начисления (paid-строки TeacherLedger)."""
+    return {i for p in paid_rows for i in getattr(p, "lesson_id_list", [])}
+
+
 def paid_lesson_ids(rows) -> dict[str, set[str]]:
     """teacher_id → занятия, прямо закрытые оплатами (колонка lesson_ids у paid-строк)."""
     out: dict[str, set[str]] = {}
