@@ -10,10 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from datetime import date
 
 from bot.models.enums import GroupBillingMode, LessonType
-from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv
+from bot.utils.attendees import TRIAL_TIER, build_group_attendees_csv, parse_attendees, serialize_attendees
 from bot.services.lesson_service import SameDaySoloError
 from bot.utils.groups import hide_service_groups, merged_title
 from config.settings import settings
@@ -128,6 +129,8 @@ def _request_key(teacher_id: str, body: dict) -> tuple:
         return (teacher_id, "rid", rid)
     ids = body.get("studentIds") if isinstance(body.get("studentIds"), list) else []
     tiers = body.get("tiers") if isinstance(body.get("tiers"), dict) else {}
+    amounts = body.get("amounts") if isinstance(body.get("amounts"), dict) else {}
+    tiers = {**tiers, **{f"amt:{k}": v for k, v in amounts.items()}}        # своя сумма — другое сохранение
     return (teacher_id, body.get("kind"), body.get("date"), body.get("durationMin"), body.get("groupId") or "",
             tuple(sorted(str(i) for i in ids)), tuple(sorted((str(k), str(v)) for k, v in tiers.items())))
 
@@ -162,6 +165,40 @@ async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> di
         raise
     fut.set_result(result)
     return result
+
+
+RSHARE_MAX_AMOUNT = 100_000
+
+
+def _rshare_amounts(csv: str | None, amounts, duration: int) -> str | None:
+    """Индивидуальное в техгруппе REVENUE_SHARE (Яковлева): своя сумма с каждой ученицы вместо цены группы
+    (решение владельца 24.10.2026). Сумма — в снимке attendees, поэтому счёт родителю и 50 % педагогу
+    (`calc_earned` по сумме attendees) считаются от неё."""
+    if not csv or not isinstance(amounts, dict):
+        return csv
+    entries = parse_attendees(csv, default_duration=duration)
+    for i, e in enumerate(entries):
+        raw = amounts.get(e.student_id)
+        if raw is None or raw == "":
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise RecordError("bad_request", "Сумма — целое число рублей") from None
+        if not 0 <= value <= RSHARE_MAX_AMOUNT:
+            raise RecordError("bad_request", f"Сумма от 0 до {RSHARE_MAX_AMOUNT} ₽")
+        entries[i] = replace(e, amount=value)
+    return serialize_attendees(entries)
+
+
+async def _ensure_visible(dp, teacher_id: str, group_id: str, ids: list) -> None:
+    """Ученица не из групп педагога (нашли по фамилии во всей школе) — добавляем в его техгруппу индивидуальных,
+    чтобы он видел её счёт и мог отметить оплату (решение владельца 24.10.2026)."""
+    visibility, sg_repo = dp["visibility"], dp["student_group_repo"]
+    for sid in ids:
+        if not await visibility.is_visible(teacher_id, sid):
+            await sg_repo.add(sid, group_id)
+            logger.info("Индивидуальное: %s добавлена в %s педагога %s (не из его групп)", sid, group_id, teacher_id)
 
 
 async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> dict:
@@ -201,6 +238,9 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
                            if g.billing_mode == GroupBillingMode.PER_VISIT else tiers)
                 parts.append(build_group_attendees_csv(g, gids_, g_tiers) or "")
             csv = ",".join(p for p in parts if p) or None
+            if kind == "rshare":
+                csv = _rshare_amounts(csv, body.get("amounts"), duration)
+                await _ensure_visible(dp, teacher.teacher_id, group.group_id, ids)
             lesson = await lesson_service.create(
                 teacher=teacher, lesson_type=LessonType.GROUP, lesson_date=day, duration_min=duration,
                 attendees=csv, group_id=group.group_id, bypass_period_lock=bypass_period_lock,

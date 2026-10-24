@@ -1150,7 +1150,18 @@ SCREENS['a.record.w'] = async ({ tid, name }) => {
         return { title: 'Кто был?', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">${esc(rwTitle(o, w))}${pv ? ` · ${fmt(g.priceFull)} за посещение${hasShort ? ` · короткое ${g.durationShort} мин — ${fmt(g.priceShort)}` : ''}<br>Кнопка справа — тариф на это занятие, по кругу до «🆓 пробное» (0 ₽).` : ' · абонемент, отметка только для журнала'}</div>${mergeCard}<div class="chips"><button class="chip" data-act="rwAll" data-p='${esc(JSON.stringify({ ids: allIds }))}'>${w.ids.size === allIds.length ? 'Снять всех' : 'Отметить всех'}</button></div>${lists}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
       }
     }
-    if (w.kind === 'rshare') { const pool = []; const seen = new Set(); o.groups.filter(g => g.id !== o.rshareGroupId).forEach(g => g.roster.forEach(s => { if (!seen.has(s.id)) { seen.add(s.id); pool.push({ ...s, group: g.name }); } })); return { title: 'Участницы', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">Отметьте от 1 до 3 участниц. Отмечено: ${w.ids.size}</div>${list(pool.map(s => pick(s.id, w.ids.has(s.id), s.name, esc(s.group), 'rwToggle', { v: s.id, max: 3 })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` }; }
+    if (w.kind === 'rshare') {
+      // свои группы + найденные по фамилии во всей школе (решение владельца 24.10.2026: счёт любому ученику)
+      const pool = []; const seen = new Set();
+      o.groups.filter(g => g.id !== o.rshareGroupId).forEach(g => g.roster.forEach(s => { if (!seen.has(s.id)) { seen.add(s.id); pool.push({ ...s, group: g.name }); } }));
+      (w.extra || []).forEach(s => { if (!seen.has(s.id)) { seen.add(s.id); pool.unshift(s); } });
+      const found = (w.found || []).filter(s => !seen.has(s.id));
+      return { title: 'Участницы', html: stepBar(3, total) + rwHeader(w) + `<div class="hint" style="margin-bottom:8px">Отметьте от 1 до 3 участниц. Отмечено: ${w.ids.size}</div>
+        <div class="card pad" style="margin-bottom:10px"><div style="font-weight:700">🔎 Ученица из другой группы</div><div class="hint" style="margin:4px 0 8px">Найдите по фамилии во всей школе — она появится в списке, счёт за занятие увидите вы.</div>
+          <div style="display:flex;gap:8px"><input class="search" style="margin:0;flex:1" id="rw-find" placeholder="Фамилия" value="${esc(w.findQ || '')}" autocomplete="off">${btn('Найти', 'rwFind', {}, 'sec')}</div>
+          ${w.found ? (found.length ? `<div style="margin-top:8px">${list(found.map(s => actCell({ lead: '➕', t: esc(s.name), s: s.groups && s.groups.length ? esc(s.groups.map(plainName).join(', ')) : 'без группы', act: 'rwExtra', p: { id: s.id, name: s.name, group: (s.groups || []).map(plainName).join(', ') } })))}</div>` : '<div class="hint" style="margin-top:8px">Никого не нашли</div>') : ''}</div>
+        ${list(pool.map(s => pick(s.id, w.ids.has(s.id), s.name, esc(s.group || ''), 'rwToggle', { v: s.id, max: 3 })))}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` };
+    }
     if (w.kind === 'pair') {
       const shownPairs = rwFilterList(o, w, o.pairs, p => [p.aId, p.bId]);
       return { title: 'Пары', html: stepBar(3, total) + rwHeader(w) + (o.pairs.length ? `<div class="hint" style="margin-bottom:8px">Отметьте пары, которые занимались.</div>${rwGroupChips(o, w, o.pairs, p => [p.aId, p.bId])}${shownPairs.length ? list(shownPairs.map(p => pick(p.aId, w.ids.has(p.aId), `${p.aName} ↔ ${p.bName}`, '', 'rwToggle', { v: p.aId }))) : '<div class="empty">В этой группе пар нет</div>'}<div style="margin-top:12px">${btn(`Дальше (${w.ids.size})`, 'rwNext', {}, w.ids.size ? '' : 'sec')}</div>` : '<div class="empty">У педагога нет сформированных пар</div>') };
@@ -1163,6 +1174,17 @@ SCREENS['a.record.w'] = async ({ tid, name }) => {
   const g = w.gid ? o.groups.find(x => x.id === w.gid) : null;
   const names = w.kind === 'pair' ? o.pairs.filter(p => w.ids.has(p.aId)).map(p => `${p.aName} ↔ ${p.bName}`) : [...w.ids].map(id => { const all = [...o.students, ...o.groups.flatMap(x => x.roster)]; const s = all.find(x => x.id === id); return s ? s.name : id; });
   const merged = g ? rwMerged(o, w).slice(1).filter(x => x.roster.some(s => w.ids.has(s.id))) : [];
+  if (w.kind === 'rshare') {
+    // своя сумма с каждой участницы (решение владельца 24.10.2026): идёт в счёт родителю, педагогу — 50 %
+    const rg = o.groups.find(x => x.id === o.rshareGroupId), price = rg ? rg.priceFull : 0;
+    const all = [...o.groups.flatMap(x => x.roster), ...(w.extra || [])];
+    w.amounts = w.amounts || {};
+    const rows = [...w.ids].map(id => { const s = all.find(x => x.id === id); const v = w.amounts[id] ?? price; return `<div class="cell static"><span><div class="t">${esc(s ? s.name : id)}</div><div class="s">сумма с ученицы, ₽</div></span><span class="r"><input class="search" style="margin:0;width:96px;text-align:right" inputmode="numeric" id="rw-amt-${id}" value="${esc(String(v))}" data-amt="${id}"></span></div>`; }).join('');
+    return { title: 'Проверьте', html: stepBar(4, total) + `<div class="card pad"><div style="font-weight:800;font-size:16px">${KIND_LABEL[w.kind]}</div><div class="hint">${esc(w.name)} · ${fdate(w.date)} · ${w.dur} мин</div></div>
+      <div class="eyebrow">Ученицы · ${w.ids.size}</div><div class="list">${rows}</div>
+      <p class="hint" style="margin-top:6px">Сумма уходит в счёт родителю. Обычная цена — ${fmt(price)}; поменяйте, если договорились иначе. Зарплата педагога — половина суммы.</p>
+      <div style="margin-top:12px">${(w.saving ? '<button class="btn" disabled>⏳ Сохраняю…</button>' : btn('💾 Сохранить занятие', 'rwSave', {}))}${btn('Отмена', 'rwCancel', {}, 'ghost')}</div>` };
+  }
   return { title: 'Проверьте', html: stepBar(4, total) + `<div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g ? mergedTitle([g.name, ...merged.map(x => x.g.name)]) : KIND_LABEL[w.kind])}</div><div class="hint">${esc(w.name)} · ${fdate(w.date)} · ${w.dur} мин${merged.length ? '<br>🔗 Объединённое занятие: зарплата как за одно, каждый ребёнок платит по цене своей группы.' : ''}</div></div>${names.length ? `<div class="eyebrow">${w.kind === 'pair' ? 'Пары' : 'Ученики'} · ${names.length}</div>${list(names.map(n => cell({ t: esc(n) })))}` : g ? '<p class="hint" style="margin-top:8px">Без отметки посещаемости — ' + (g.mode === 'per_visit' ? 'счета никому не выставятся' : MODE[g.mode]) + '.</p>' : ''}<div style="margin-top:12px">${(w.saving ? '<button class="btn" disabled>⏳ Сохраняю…</button>' : btn('💾 Сохранить занятие', 'rwSave', {}))}${btn('Отмена', 'rwCancel', {}, 'ghost')}</div>` };
 };
 
@@ -1237,6 +1259,12 @@ Object.assign(ACT, {
   rwDur: ({ v }) => { const w = rw(); w.dur = v; w.step = 3; if (w.kind === 'group' && w.opts.groups.length === 1) { w.gid = w.opts.groups[0].id; } render(); },
   rwGroup: ({ v }) => { const w = rw(); w.gid = v; w.ask = null; w.ids = new Set(); w.merge = new Set(); const g = w.opts.groups.find(x => x.id === v); if (!g.attendance) { w.step = 4; } render(); },
   rwAsk: ({ v }) => { const w = rw(); w.ask = v; if (!v) { w.ids = new Set(); w.step = 4; } render(); },
+  rwFind: async () => {
+    const w = rw(); const q = val('rw-find').trim(); w.findQ = q;
+    if (q.length < 3) { toast('Введите фамилию, от 3 букв'); return; }
+    try { const d = await api(ROLE === 'teacher' ? `/students/search?q=${encodeURIComponent(q)}` : `/students?q=${encodeURIComponent(q)}`); w.found = d.students.slice(0, 10); render(); } catch (e) { toast(errText(e)); }
+  },
+  rwExtra: ({ id, name, group }) => { const w = rw(); w.extra = w.extra || []; if (!w.extra.some(x => x.id === id)) w.extra.push({ id, name, group: group || 'другая группа' }); if (w.ids.size < 3) w.ids.add(id); else toast('Не больше 3'); w.found = null; w.findQ = ''; render(); },
   rwToggle: ({ v, max }) => { const w = rw(); if (w.ids.has(v)) w.ids.delete(v); else if (!max || w.ids.size < max) w.ids.add(v); else toast(`Не больше ${max}`); render(); },
   rwAll: ({ ids }) => { const w = rw(); if (w.ids.size === ids.length) w.ids = new Set(); else w.ids = new Set(ids); render(); },
   rwMerge: ({ v }) => { const w = rw(); if (!w.merge) w.merge = new Set(); if (w.merge.has(v)) { w.merge.delete(v); const keep = new Set(rwMerged(w.opts, w).flatMap(x => x.roster.map(s => s.id))); w.ids = new Set([...w.ids].filter(id => keep.has(id))); } else w.merge.add(v); render(); },
@@ -1246,7 +1274,7 @@ Object.assign(ACT, {
   // кнопка заблокирована, пока идёт запрос: второе касание на iPhone отправляло второй «Сохранить» (10.10.2026)
   // requestId — номер нажатия: сервер отличает сетевой повтор от нового такого же занятия; второе соло в тот же день —
   // по подтверждению (решение владельца 10.10.2026)
-  rwSave: async ({ confirmSameDay } = {}) => { const w = rw(); if (w.saving) return; w.saving = true; render(); const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, mergeGroupIds: [...(w.merge || [])], studentIds: [...w.ids], tiers: w.tiers, requestId, confirmSameDay: !!confirmSameDay }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.repeat ? 'Уже сохранено — второй раз не записываю' : r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`); } catch (e) { w.saving = false; render(); if (e instanceof ApiError && e.code === 'same_day') { if (confirm(e.data && e.data.message ? e.data.message : 'В этот день уже есть такое занятие. Записать ещё одно?')) ACT.rwSave({ confirmSameDay: true }); return; } toast(e instanceof ApiError && e.code === 'conflict' ? (e.data && e.data.message) || 'Такое занятие уже записано' : errText(e)); } },
+  rwSave: async ({ confirmSameDay } = {}) => { const w = rw(); if (w.saving) return; const amounts = {}; if (w.kind === 'rshare') { document.querySelectorAll('[data-amt]').forEach(el => { const v = el.value.trim(); if (v !== '') { amounts[el.dataset.amt] = +v; w.amounts[el.dataset.amt] = +v; } }); } if (Object.values(amounts).some(v => !Number.isInteger(v) || v < 0)) { toast('Сумма — целое число рублей'); return; } w.saving = true; render(); const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, mergeGroupIds: [...(w.merge || [])], studentIds: [...w.ids], tiers: w.tiers, amounts, requestId, confirmSameDay: !!confirmSameDay }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.repeat ? 'Уже сохранено — второй раз не записываю' : r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`); } catch (e) { w.saving = false; render(); if (e instanceof ApiError && e.code === 'same_day') { if (confirm(e.data && e.data.message ? e.data.message : 'В этот день уже есть такое занятие. Записать ещё одно?')) ACT.rwSave({ confirmSameDay: true }); return; } toast(e instanceof ApiError && e.code === 'conflict' ? (e.data && e.data.message) || 'Такое занятие уже записано' : errText(e)); } },
 });
 
 /* ── рендер ─────────────────────────────────────────────────────────── */
