@@ -128,9 +128,10 @@ def _request_key(teacher_id: str, body: dict) -> tuple:
     if isinstance(rid, str) and 8 <= len(rid) <= 64:
         return (teacher_id, "rid", rid)
     ids = body.get("studentIds") if isinstance(body.get("studentIds"), list) else []
-    tiers = body.get("tiers") if isinstance(body.get("tiers"), dict) else {}
-    amounts = body.get("amounts") if isinstance(body.get("amounts"), dict) else {}
-    tiers = {**tiers, **{f"amt:{k}": v for k, v in amounts.items()}}        # своя сумма — другое сохранение
+    raw_tiers, raw_amounts = body.get("tiers"), body.get("amounts")
+    tiers: dict = dict(raw_tiers) if isinstance(raw_tiers, dict) else {}
+    if isinstance(raw_amounts, dict):                                          # своя сумма — другое сохранение
+        tiers.update({f"amt:{k}": v for k, v in raw_amounts.items()})
     return (teacher_id, body.get("kind"), body.get("date"), body.get("durationMin"), body.get("groupId") or "",
             tuple(sorted(str(i) for i in ids)), tuple(sorted((str(k), str(v)) for k, v in tiers.items())))
 
