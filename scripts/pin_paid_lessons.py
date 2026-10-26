@@ -29,7 +29,7 @@ from bot.models import Student  # noqa: E402
 from bot.services import rate_history  # noqa: E402
 from bot.services.payment_ledger import lesson_marks, linked_ids, pin_unlinked_rows  # noqa: E402
 
-WRITE_PAUSE_SEC = 3.0
+WRITE_PAUSE_SEC = 4.0
 
 
 async def main(since: str, only: str, apply: bool) -> None:
