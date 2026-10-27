@@ -96,3 +96,23 @@ def test_notification_reaches_teacher(admin_api, monkeypatch):  # noqa: F811
     ok = asyncio.run(hall_rent.notify_teacher(Bot(), dp["user_repo"], "TCH-0001", hall_rent.received_text(YM, 400, 600)))
     assert ok and sent[0][0] == 555 and "400 ₽" in sent[0][1] and "Остаток за месяц: 600 ₽" in sent[0][1]
     assert asyncio.run(hall_rent.notify_teacher(Bot(), dp["user_repo"], "TCH-0077", "x")) is False
+
+
+def test_student_rent_rate_starts_on_a_day(admin_api, monkeypatch):  # noqa: F811
+    """Ставка ученика с дня: занятия до него — по ставке педагога (Мадатова: 800 с 27.10.2026, раньше 500)."""
+    from bot.services.billing_service import student_rate
+    from bot.services.profit_service import lesson_rent
+    app, dp = admin_api
+    _direct(monkeypatch)
+    monkeypatch.setattr(settings, "hall_rent_student_rates", "TCH-0001:STU-0002:800:2026-10-27")
+    monkeypatch.setattr(settings, "student_lesson_rates", "TCH-0001:STU-0002:2600:2026-10-27")
+    teacher = dp["teacher_repo"].items[0]
+    before = mk_lesson("LES-B", teacher, "2026-10-20", students=[("STU-0002", "Петрова Анна")])
+    after = mk_lesson("LES-A", teacher, "2026-10-27", students=[("STU-0002", "Петрова Анна")])
+    assert (lesson_rent(before), lesson_rent(after)) == (500, 800)
+    assert student_rate("TCH-0001", "STU-0002", "2026-10-26", 2000) == 2000
+    assert student_rate("TCH-0001", "STU-0002", "2026-10-27", 2000) == 2600
+    # граница месяцем работает как раньше
+    monkeypatch.setattr(settings, "hall_rent_student_rates", "TCH-0001:STU-0002:800:2026-11")
+    november = mk_lesson("LES-N", teacher, "2026-11-01", students=[("STU-0002", "Петрова Анна")])
+    assert (lesson_rent(after), lesson_rent(november)) == (500, 800)

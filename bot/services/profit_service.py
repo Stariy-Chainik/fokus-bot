@@ -166,6 +166,11 @@ class TeacherProfitDetail:
         return round(self.profit / self.income * 100) if self.income else 0
 
 
+def rate_active(since: str, date: str) -> bool:
+    """Граница «с какого момента действует ставка»: месяц `YYYY-MM` или день `YYYY-MM-DD`; пусто — всегда."""
+    return not since or date[:len(since)] >= since
+
+
 def lesson_rent(lesson: Lesson) -> int:
     """Аренда зала за индивидуальное занятие педагога с прямой оплатой.
 
@@ -187,8 +192,9 @@ def lesson_rent(lesson: Lesson) -> int:
     base = settings.hall_rent_map.get(lesson.teacher_id, 0)
     personal = settings.hall_rent_student_map
     for sid in (lesson.student_1_id, lesson.student_2_id, lesson.student_3_id, lesson.student_4_id):
-        if sid and (lesson.teacher_id, sid) in personal:
-            base = max(base, personal[(lesson.teacher_id, sid)])
+        row = personal.get((lesson.teacher_id, sid)) if sid else None
+        if row and rate_active(row[1], lesson.date):      # ставка ученика — с указанного дня или месяца
+            base = max(base, row[0])
     return base * max(1, math.ceil((lesson.duration_min or 60) / 60))
 
 

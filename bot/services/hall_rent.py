@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from bot.repositories.hall_rent_repo import HallRentPayment
 from bot.services import activity
-from bot.services.profit_service import lesson_rent
+from bot.services.profit_service import lesson_rent, rate_active
 from bot.utils.dates import period_label
 from config.settings import settings
 
@@ -53,7 +53,8 @@ def rent_by_student(lessons: list) -> dict[str, RentStudent]:
         ids = [s for s in (ls.student_1_id, ls.student_2_id, ls.student_3_id, ls.student_4_id) if s]
         if not ids:
             continue
-        sid = next((s for s in ids if (ls.teacher_id, s) in personal), ids[0])
+        sid = next((s for s in ids if (ls.teacher_id, s) in personal and rate_active(personal[(ls.teacher_id, s)][1], ls.date)),
+                   ids[0])
         item = out.setdefault(sid, RentStudent(sid))
         item.lessons += 1
         item.amount += rent

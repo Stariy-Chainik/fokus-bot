@@ -62,17 +62,18 @@ def student_rate(teacher_id: str, student_id: str, date: str, default: int) -> i
     """Персональная цена ученика у педагога (STUDENT_LESSON_RATES) или обычная ставка.
 
     Ставка за 45 минут, как rate_for_student: 60-минутное занятие дороже
-    пропорционально. Действует с месяца, указанного в настройке (пусто — всегда),
-    поэтому уже оплаченные месяцы не пересчитываются. Зарплату не меняет.
+    пропорционально. Действует с месяца (`YYYY-MM`) или дня (`YYYY-MM-DD`), указанного в настройке
+    (пусто — всегда), поэтому уже оплаченные месяцы и занятия по старой цене не пересчитываются.
+    Зарплату не меняет.
     """
     from config.settings import settings
     row = settings.student_rate_map.get((teacher_id, student_id))
     if row is None:
         return default
     rate, since = row
-    if since and date[:7] < since:
-        return default
-    return rate
+    if not since or date[:len(since)] >= since:
+        return rate
+    return default
 
 
 def student_discount(student_id: str, date_or_period: str) -> int:

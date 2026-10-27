@@ -166,7 +166,7 @@ def test_hall_rent_personal_student_rate(monkeypatch):
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
     monkeypatch.setattr(settings, "hall_rent_per_lesson", "TCH-0001:500")
     monkeypatch.setattr(settings, "hall_rent_student_rates", "TCH-0001:STU-0306:800, TCH-0001:STU-0012:800")
-    assert settings.hall_rent_student_map == {("TCH-0001", "STU-0306"): 800, ("TCH-0001", "STU-0012"): 800}
+    assert settings.hall_rent_student_map == {("TCH-0001", "STU-0306"): (800, ""), ("TCH-0001", "STU-0012"): (800, "")}
     assert lesson_rent(_lesson("LES-1", "2026-10-01")) == 500                                   # STU-0001 — обычная
     assert lesson_rent(_lesson("LES-2", "2026-10-01", student_1_id="STU-0306")) == 800
     assert lesson_rent(_lesson("LES-3", "2026-10-01", student_1_id="STU-0306", duration_min=90)) == 1600

@@ -193,7 +193,9 @@ class Settings(BaseSettings):
     # Аренда считается только с этого месяца включительно (YYYY-MM); пусто — за всё время.
     hall_rent_since_period: str = Field(default="", alias="HALL_RENT_SINCE_PERIOD")
     # Аренда за занятие с конкретным учеником вместо ставки педагога (решение владельца 21.10.2026):
-    # TCH-0002:STU-0306:800,TCH-0002:STU-0012:800 — Клецова с Моргуновой и Мадатовой Ирой платит 800 за час
+    # TCH-0002:STU-0306:800,TCH-0002:STU-0012:800:2026-10-27 — Клецова с Моргуновой и Мадатовой Ирой платит 800 за час;
+    # четвёртая часть — с какого дня (YYYY-MM-DD) или месяца (YYYY-MM) действует ставка, раньше — ставка педагога
+    # (Мадатова: 2 600 и 800 с 27.10.2026, октябрьские занятия до этого дня — по старым, решение владельца 27.10.2026)
     hall_rent_student_rates: str = Field(default="", alias="HALL_RENT_STUDENT_RATES")
     # С этого месяца (YYYY-MM) аренда сводится помесячно (решение владельца 27.10.2026): педагог перечисляет
     # её школе одной суммой в конце месяца, администратор отмечает «аренда получена» (лист hall_rent_payments),
@@ -203,12 +205,12 @@ class Settings(BaseSettings):
 
     @property
     def hall_rent_student_map(self) -> dict:
-        """(teacher_id, student_id) → ставка за начатый час."""
+        """(teacher_id, student_id) → (ставка за начатый час, «с какого дня/месяца» или "")."""
         out = {}
         for chunk in self.hall_rent_student_rates.replace("|", ",").split(","):
             parts = [p.strip() for p in chunk.split(":")]
-            if len(parts) == 3 and parts[0] and parts[1] and parts[2].isdigit():
-                out[(parts[0], parts[1])] = int(parts[2])
+            if len(parts) >= 3 and parts[0] and parts[1] and parts[2].isdigit():
+                out[(parts[0], parts[1])] = (int(parts[2]), parts[3] if len(parts) > 3 else "")
         return out
 
     # Шкала оценки за домашнее задание группе по педагогам, по умолчанию 1–5:
