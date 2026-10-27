@@ -1051,6 +1051,37 @@ class ActivityRepoFake:
         return e
 
 
+class HallRentRepoFake:
+    """Лист hall_rent_payments в памяти: аренда зала, полученная от педагога (bot/services/hall_rent.py)."""
+
+    def __init__(self) -> None:
+        from bot.repositories.hall_rent_repo import HallRentPayment
+        self._cls = HallRentPayment
+        self.items: list = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_id(self, rent_id):
+        return next((r for r in self.items if r.rent_id == rent_id), None)
+
+    async def get_by_period(self, period):
+        return [r for r in self.items if r.period_month == period]
+
+    async def get_for_teacher_period(self, teacher_id, period):
+        return [r for r in self.items if r.teacher_id == teacher_id and r.period_month == period]
+
+    async def add(self, teacher_id, period, amount, paid_by, comment=""):
+        row = self._cls(f"HR-{len(self.items) + 1:06d}", teacher_id, period, amount, f"{period}-30 10:00:00", paid_by, comment)
+        self.items.append(row)
+        return row
+
+    async def delete(self, rent_id):
+        before = len(self.items)
+        self.items = [r for r in self.items if r.rent_id != rent_id]
+        return len(self.items) < before
+
+
 class BonusRepoFake:
     """Лист teacher_bonuses в памяти: премии педагогам (bot/services/bonuses.py)."""
 

@@ -13,6 +13,8 @@ SCREENS['t.home'] = async () => {
   const attention = [
     h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
     h.heldCash ? cell({ lead: '💵', plain: true, t: 'Наличные у вас', s: 'передайте администратору — он зачтёт оплату', r: `<b>${fmt(h.heldCash)}</b>` }) : '',
+    // аренда зала за прошлый месяц ещё не перечислена школе (прямая оплата, с месяца начала учёта)
+    h.rentDue ? cell({ lead: '🏠', plain: true, t: `Аренда зала за ${MON_NOM[+h.rentDue.period.slice(5) - 1].toLowerCase()}`, s: 'перечислите школе одной суммой', r: `<b>${fmt(h.rentDue.rest)}</b>`, go: 't.money', p: { ym: h.rentDue.period } }) : '',
     h.newChild ? cell({ lead: '🆕', plain: true, t: 'Заявки родителей на детей', s: 'ребёнка нет в списке группы — добавить или отклонить', r: pill(h.newChild, 'warn'), go: 't.nchild' }) : '',
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
@@ -40,6 +42,8 @@ SCREENS['t.home'] = async () => {
     ${list([
       cell({ lead: '💰', plain: true, t: 'Зарплата', s: monthLine, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
       ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
+      // две цифры рядом: зарплата от школы и аренда зала школе (решение владельца 27.10.2026)
+      ...(h.rentMonth ? [cell({ lead: '🏠', plain: true, t: 'Аренда зала школе', s: 'индивидуальные — перечисляете в конце месяца', r: `<b>${fmt(h.rentMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
     ])}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
@@ -333,6 +337,22 @@ SCREENS['t.student'] = async ({ id, ym }) => {
 
 /* ── Зарплата и сдача периода ────────────────────────────────────────── */
 const T_LINE_ICON = { shift: '🕒', override: '✍️', in_shift: '↳', in_share: '↳', share: '💯', lesson: '📘', bonus: '🎁' };
+/* Аренда зала школе (прямая оплата): сумма месяца и, с месяца начала учёта (HALL_RENT_SETTLE_SINCE_PERIOD),
+   статус — педагог перечисляет её школе одной суммой в конце месяца (решение владельца 27.10.2026). */
+const tRentBlock = (r, period) => {
+  if (!r || (!r.accrued && !r.paid)) return '';
+  const mon = MON_NOM[+period.slice(5) - 1].toLowerCase(), ended = period < lastPeriods(1)[0];
+  const status = !r.settle ? '' : r.status === 'paid' ? pill(`✅ получена${r.payments.length ? ' ' + fdate(r.payments[r.payments.length - 1].date) : ''}`, 'ok')
+    : r.status === 'partial' ? pill(`получено ${fmt(r.paid)} · остаток ${fmt(r.rest)}`, 'warn')
+      : pill(ended ? '⚠️ не оплачена' : 'к оплате в конце месяца', ended ? 'bad' : 'warn');
+  return `<div class="eyebrow">Аренда зала школе</div>
+    <div class="card">
+      <div class="total"><span>За ${mon} · ${plural(r.lessons, ['занятие', 'занятия', 'занятий'])}</span><span class="big">${fmt(r.accrued)}</span></div>
+      ${status ? `<div class="pad" style="padding-top:0">${status}</div>` : ''}
+      <div class="pad hint" style="padding-top:0">${r.settle ? 'Перечислите школе одной суммой в конце месяца — администратор отметит получение.' : 'Справочно: ставка за каждый начатый час индивидуального занятия.'}</div>
+    </div>
+    ${r.payments.length ? list(r.payments.map(p => cell({ lead: '🏠', plain: true, t: `получено ${fmt(p.amount)}`, s: `${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}` }))) : ''}`;
+};
 SCREENS['t.money'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const canSubmitPeriod = !!(state.me && state.me.periodSubmit);
@@ -366,13 +386,13 @@ SCREENS['t.money'] = async ({ ym }) => {
     ${d ? `<div class="eyebrow">Прямая оплата</div>
       <div class="card">
         <div class="total"><span>Родители платят вам за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</span><span class="big direct">${fmt(d.total)}</span></div>
-        ${d.rent ? `<div class="total"><span>Аренда зала школе${d.rentPerLesson ? ` · ${fmt(d.rentPerLesson)} за час, ${d.lessons} зан.` : ''}</span><span class="big">${fmt(d.rent)}</span></div>` : ''}
         <div class="pad hint" style="padding-top:0">Школа эти занятия не начисляет и оплату по ним не отслеживает — суммы справочные.</div>
       </div>
       ${d.students.length ? list(d.students.map(x => cell({
-        lead: initials(x.name), t: esc(x.name), s: plural(x.lessons, ['занятие', 'занятия', 'занятий']),
+        lead: initials(x.name), t: esc(x.name), s: `${plural(x.lessons, ['занятие', 'занятия', 'занятий'])}${x.rent ? ` · аренда ${fmt(x.rent)}` : ''}`,
         r: `<b class="direct">${fmt(x.amount)}</b>`, go: 't.student', p: { id: x.id, ym: period },
-      }))) : ''}` : ''}` };
+      }))) : ''}
+      ${tRentBlock(st.rent, period)}` : ''}` };
 };
 
 /* ── Дневники спортсменов ────────────────────────────────────────────── */

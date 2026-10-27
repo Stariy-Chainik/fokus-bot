@@ -15,6 +15,7 @@ from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
     BonusRepoFake,
+    HallRentRepoFake,
     BranchRepoFake, ClientRepoWritable, GroupRepoFake, LessonRepoFake, PaymentRepoFake, StudentGroupRepoWritable,
     StudentRepoWritable, SubOverrideRepoFake, SubmissionRepoFake, TeacherGroupRepoWritable, TeacherRepoFake, UserRepoWritable,
     mk_branch, mk_group, mk_lesson, mk_payment, mk_student, mk_submission, mk_teacher, mk_user,
@@ -140,7 +141,7 @@ def _dp():
     return {
         "lesson_service": LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service),
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
-        "bonus_repo": bonus_repo,
+        "bonus_repo": bonus_repo, "hall_rent_repo": HallRentRepoFake(),
         "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
         "notifier": NotifierFake(),
         "user_repo": UserRepoWritable([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),

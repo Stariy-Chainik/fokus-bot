@@ -42,6 +42,7 @@ from bot.services.new_child import (
 from bot.services.student_archive import archive_preview, archive_student
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
+from bot.services import hall_rent
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
 from bot.services.subscription_frequency import frequency_info, set_frequency
@@ -102,12 +103,16 @@ def _direct_summary(lessons: list, teacher, student_names: dict) -> dict | None:
             )
             item["lessons"] += 1
             item["amount"] += row.amount
-    rent = sum(lesson_rent(ls) for ls in direct)
+    rents = hall_rent.rent_by_student(direct)
+    for sid, r in rents.items():
+        by_student.setdefault(sid, {"id": sid, "name": student_names.get(sid, sid), "lessons": 0, "amount": 0})
+        by_student[sid]["rent"] = r.amount
+    for item in by_student.values():
+        item.setdefault("rent", 0)
     return {
         "lessons": len(direct),
         "total": sum(item["amount"] for item in by_student.values()),
-        "rent": rent,
-        "rentPerLesson": settings.hall_rent_map.get(teacher.teacher_id, 0),
+        "rent": hall_rent.month_rent(direct),               # аренда зала школе: ставка педагога или ученика за час
         "students": sorted(by_student.values(), key=lambda x: -x["amount"]),
     }
 
@@ -155,6 +160,15 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     client_repo = dp["client_repo"]
     diary_service = _dp_get(dp, "diary_service")
     notifier = _dp_get(dp, "notifier")
+    hall_rent_repo = _dp_get(dp, "hall_rent_repo")
+
+    async def _rent(teacher, period: str, lessons: list | None = None) -> dict | None:
+        """Аренда зала за месяц у педагога с прямой оплатой; у остальных None."""
+        if teacher.teacher_id not in settings.direct_pay_teacher_id_set:
+            return None
+        if lessons is None:
+            lessons = await lesson_repo.get_by_teacher_and_period(teacher.teacher_id, period)
+        return await hall_rent.status(hall_rent_repo, teacher.teacher_id, period, lessons)
 
     def teacher_only(handler):
         async def wrapped(request: web.Request) -> web.Response:
@@ -267,8 +281,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             athletes = await _athletes(teacher)
             unrated = sum((await diary_service.unrated_counts([a.student_id for a in athletes])).values())
         can_bill = teacher.teacher_id in settings.billing_teacher_id_set
+        rent = await _rent(teacher, period, month)
+        prev_rent = await _rent(teacher, prev) if rent is not None and hall_rent.settled(prev) else None
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
+            # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
+            "rentMonth": rent["accrued"] if rent else 0,
+            "rentDue": {"period": prev, "rest": prev_rent["rest"]} if prev_rent and prev_rent["rest"] else None,
             # «требует внимания»: записи спортсменов без оценки; у педагога со счетами — остаток в своих группах
             "unrated": unrated,
             "bills": await _bills_summary(teacher, period) if can_bill else None,
@@ -850,6 +869,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                        "direct": is_direct(by_id[ln.lesson_id], teacher) if ln.lesson_id in by_id else False}
                       for ln in lines],
             "direct": _direct_summary(rows, teacher, names),
+            "rent": await _rent(teacher, ym, rows),
         })
 
     async def submit_preview(request: web.Request, user, teacher) -> web.Response:

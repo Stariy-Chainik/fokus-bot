@@ -359,7 +359,7 @@ def test_stats_direct_block_sums_by_student(api, monkeypatch):
 
     st = _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]
     d = st["direct"]
-    assert d["lessons"] == 2 and d["rent"] == 1000 and d["rentPerLesson"] == 500
+    assert d["lessons"] == 2 and d["rent"] == 1000 and d["students"][0]["rent"] == 1000
     assert d["total"] == sum(x["amount"] for x in d["students"]) > 0
     assert [x["name"] for x in d["students"]] == ["Иванов Иван"]
     # строки прямой оплаты помечены — кабинет сворачивает их в одну

@@ -744,7 +744,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     from bot.api.admin_finance import register_finance_routes
     from bot.api.admin_lessons import register_lesson_routes
     from bot.api.admin_manage import register_manage_routes
-    register_finance_routes(app, dp, admin_only, PREFIX)
+    register_finance_routes(app, dp, admin_only, PREFIX, bot=bot)
     register_lesson_routes(app, dp, admin_only, PREFIX)
     register_manage_routes(app, dp, admin_only, PREFIX, bot)
     from bot.api.admin_inbox import register_inbox_routes

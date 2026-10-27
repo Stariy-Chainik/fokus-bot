@@ -195,6 +195,11 @@ class Settings(BaseSettings):
     # Аренда за занятие с конкретным учеником вместо ставки педагога (решение владельца 21.10.2026):
     # TCH-0002:STU-0306:800,TCH-0002:STU-0012:800 — Клецова с Моргуновой и Мадатовой Ирой платит 800 за час
     hall_rent_student_rates: str = Field(default="", alias="HALL_RENT_STUDENT_RATES")
+    # С этого месяца (YYYY-MM) аренда сводится помесячно (решение владельца 27.10.2026): педагог перечисляет
+    # её школе одной суммой в конце месяца, администратор отмечает «аренда получена» (лист hall_rent_payments),
+    # педагогу — статус и напоминание. Пусто — суммы только справочные. На проде: 2026-11.
+    hall_rent_settle_since_period: str = Field(default="", alias="HALL_RENT_SETTLE_SINCE_PERIOD")
+    sheet_hall_rent_payments: str = Field(default="hall_rent_payments", alias="SHEET_HALL_RENT_PAYMENTS")
 
     @property
     def hall_rent_student_map(self) -> dict:

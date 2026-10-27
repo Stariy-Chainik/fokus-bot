@@ -11,6 +11,7 @@ from aiohttp import web
 
 from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType, PaymentStatus
+from bot.services import hall_rent
 from bot.services.bonuses import grant_bonus, revoke_bonus
 from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
@@ -65,8 +66,10 @@ async def _read_json(request: web.Request) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
-def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> None:
+def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=None) -> None:
     teacher_repo = dp["teacher_repo"]
+    user_repo = dp["user_repo"]
+    hall_rent_repo = _dp_get(dp, "hall_rent_repo")
     student_repo = dp["student_repo"]
     group_repo = dp["group_repo"]
     lesson_repo = dp["lesson_repo"]
@@ -357,12 +360,17 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
                         "bonus": sum(ln.amount for ln in lines if ln.kind == "bonus"),
                         "isOwner": t.teacher_id in settings.owner_teacher_id_set,
                         "directPay": t.teacher_id in settings.direct_pay_teacher_id_set,
+                        "rent": await _rent_status(t.teacher_id, period),
                         "collection": _collection_totals(col, unpaid, sg, ledger, period)})
+        rents = [x["rent"] for x in out if x["rent"]]
         # итог — сбор месяца целиком (как плитка сводки): абонемент группы, которую вели двое,
         # у каждого педагога виден, но здесь считается один раз
         pc = period_collection(ledger, period)
         return _json({"period": period, "teachers": out, "total": sum(x["accrued"] for x in out),
                       "paid": sum(x["paid"] for x in out),
+                      # аренда зала от педагогов с прямой оплатой: к получению и получено за месяц
+                      "rent": {"accrued": sum(r["accrued"] for r in rents), "paid": sum(r["paid"] for r in rents),
+                               "settle": hall_rent.settled(period)} if rents else None,
                       "collection": {"accrued": pc.accrued, "paid": pc.paid, "rest": pc.rest,
                                      "unpaidLessons": sum(x["collection"]["unpaidLessons"] for x in out),
                                      "unpaidSubs": sum(x["collection"]["unpaidSubs"] for x in out)}})
@@ -413,6 +421,44 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
             out.append(d)
         return out
 
+    async def _rent_status(tid: str, period: str, students: bool = False) -> dict | None:
+        """Аренда зала педагога с прямой оплатой за месяц (bot/services/hall_rent.py); у остальных None."""
+        if tid not in settings.direct_pay_teacher_id_set:
+            return None
+        lessons = await lesson_repo.get_by_teacher_and_period(tid, period)
+        out = await hall_rent.status(hall_rent_repo, tid, period, lessons)
+        if students:
+            names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+            out["students"] = sorted(({"id": sid, "name": names.get(sid, sid), "lessons": r.lessons, "amount": r.amount}
+                                      for sid, r in hall_rent.rent_by_student(lessons).items()), key=lambda x: -x["amount"])
+        return out
+
+    async def rent_add(request: web.Request, user) -> web.Response:
+        """«✅ Аренда получена»: педагог перечислил школе аренду за месяц (частями — несколько строк)."""
+        body = await _read_json(request)
+        if body is None or hall_rent_repo is None:
+            return _json({"error": "bad_request"}, status=400)
+        tid = request.match_info["tid"]
+        period, amount, comment = body.get("periodMonth"), body.get("amount"), (body.get("comment") or "").strip()
+        if not isinstance(period, str) or len(period) != 7 or not isinstance(amount, int) or not 0 < amount <= 1_000_000:
+            return _json({"error": "bad_request"}, status=400)
+        t = await teacher_repo.get_by_id(tid)
+        if t is None or tid not in settings.direct_pay_teacher_id_set:
+            return _json({"error": "not_found"}, status=404)
+        row = await hall_rent.record_payment(hall_rent_repo, tid, period, amount, user.tg_id, comment)
+        st = await _rent_status(tid, period)
+        await hall_rent.notify_teacher(bot, user_repo, tid, hall_rent.received_text(period, amount, st["rest"] if st else 0))
+        logger.info("Mini App: аренда %s %s %d руб. (%s) — админ %s", tid, period, amount, comment, user.tg_id)
+        return _json({"id": row.rent_id, "rent": st})
+
+    async def rent_delete(request: web.Request, user) -> web.Response:
+        if hall_rent_repo is None:
+            return _json({"error": "bad_request"}, status=400)
+        row = await hall_rent.cancel_payment(hall_rent_repo, request.match_info["rid"], user.tg_id)
+        if row is None:
+            return _json({"error": "not_found"}, status=404)
+        return _json({"ok": True, "amount": row.amount})
+
     async def salary_teacher(request: web.Request, user) -> web.Response:
         tid = request.match_info["tid"]
         period = request.query.get("ym") or current_period()
@@ -429,6 +475,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
                       "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set,
                       "bonus": sum(ln["amount"] for ln in lines if ln["kind"] == "bonus"),
+                      "rent": await _rent_status(tid, period, students=True),
                       "collection": _collection_totals(col, unpaid, sg, ledger, period)})
 
     async def payouts(request: web.Request, user) -> web.Response:
@@ -570,6 +617,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str) -> Non
         ("POST", "/finance", finance_add), ("DELETE", "/finance/{eid}", finance_delete),
         ("GET", "/salaries", salaries), ("GET", "/salaries/{tid}", salary_teacher),
         ("GET", "/salaries/{tid}/collection", salary_collection),
+        ("POST", "/salaries/{tid}/rent", rent_add), ("DELETE", "/rent/{rid}", rent_delete),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),
         ("POST", "/bonuses", bonus_add), ("DELETE", "/bonuses/{bid}", bonus_delete),
         ("POST", "/salary-overrides", override_add), ("DELETE", "/salary-overrides/{oid}", override_delete),
