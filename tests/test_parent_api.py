@@ -218,6 +218,27 @@ def test_lessons_tab_has_no_money(api, monkeypatch):
     assert les["lessons"][0]["teacherId"]                  # по нему фильтруют чипы педагогов
 
 
+def test_short_tariff_shows_the_childs_own_minutes(api):
+    """Полищук 12.10.2026: в саду занятие на 60 мин, а девочка — по короткому тарифу 35 мин за 500 ₽.
+    Родитель должен видеть свои 35 минут везде: «Занятия», сводка месяца, счёт, карточка у администратора."""
+    from tests.fakes import mk_lesson
+    from tests.test_admin_api import _call as admin_call
+    from bot.models.enums import LessonType
+    app, dp = api
+    teacher = asyncio.run(dp["teacher_repo"].get_by_id("TCH-0001"))
+    dp["lesson_repo"].items.append(mk_lesson("LES-K", teacher, f"{YM}-12", duration=60, lesson_type=LessonType.GROUP,
+                                             attendees="STU-0001:35:500,STU-0002:60:800", group_id="GRP-0001"))
+    les = _call(app, "GET", f"/api/parent/lessons/STU-0001?ym={YM}")[1]["lessons"]
+    assert next(x for x in les if x["id"] == "LES-K")["durationMin"] == 35
+    assert next(x for x in les if x["id"] == "LES-3")["durationMin"] == 60          # снимок без укорочения — как занятие
+    home = _call(app, "GET", "/api/parent/home")[1]["children"][0]["lessons"]
+    assert home["minutes"] == sum(x["durationMin"] for x in les) and home["month"] == len(les)
+    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
+    assert next(x for r in bill["rows"] for x in r["lessons"] if x["id"] == "LES-K")["durationMin"] == 35
+    adm = admin_call(dp, "GET", f"/api/admin/students/STU-0001/lessons?ym={YM}")[1]["lessons"]
+    assert next(x for x in adm if x["id"] == "LES-K")["durationMin"] == 35
+
+
 def test_direct_pay_teacher_is_shown_in_the_bill_but_not_charged(api, monkeypatch):
     """Педагог с прямой оплатой виден в счёте как все, но в «К оплате» не входит."""
     app, _dp = api

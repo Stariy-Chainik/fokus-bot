@@ -44,6 +44,18 @@
   document.write(window.__isMax ? '<script src="vendor/max-web-app.js"><\/script>'
                                 : '<script src="vendor/telegram-web-app.js"><\/script>');
 })();</script>
+<script>/* Мост не загрузился целиком — качаем заново в обход кэша. Случай 29.10.2026 (родитель Виноградовой, iPhone):
+   telegram-web-app.js однажды оборвался на строке 509, телефон сохранил обрезок в кэш на неделю (vendor/ отдаётся с
+   max-age), и каждый запуск кончался «SyntaxError: Unexpected end of script» → без подписи Telegram → 401 «Нет доступа».
+   Адрес с меткой времени кэш не найдёт; document.write — чтобы скрипт выполнился до app.js. */
+(function () {
+  var ok = window.__isMax ? typeof window.WebApp !== 'undefined' : !!(window.Telegram && window.Telegram.WebApp);
+  if (ok) return;
+  var name = window.__isMax ? 'max-web-app.js' : 'telegram-web-app.js';
+  window.__bridgeRetried = name;
+  if (window.__clientLog) window.__clientLog('bridge-retry', name + ' не загрузился — качаем заново в обход кэша');
+  document.write('<script src="vendor/' + name + '?r=' + Date.now() + '"><\/script>');
+})();</script>
 <link rel="stylesheet" href="fonts/manrope.css">
 <style>
   :root {

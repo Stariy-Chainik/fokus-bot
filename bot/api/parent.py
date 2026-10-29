@@ -22,6 +22,7 @@ from datetime import date, timedelta
 from aiohttp import web
 from aiogram.types import BufferedInputFile
 
+from bot.utils.attendees import student_duration
 from bot.utils.groups import lesson_group_title
 from bot.api.admin import auth_max_id, auth_tg_id, max_user_name
 from bot.utils.bill_format import payment_purpose
@@ -210,9 +211,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                 "kindergarten": bool(kg[s.student_id]), "kgroup": s.kindergarten_group,
                 "lessons": {
                     "month": len(month_lessons),
-                    "minutes": sum(ls.duration_min for ls in month_lessons),
+                    "minutes": sum(student_duration(ls, s.student_id) for ls in month_lessons),   # своя длительность (сад: 35)
                     "last": max((ls.date for ls in month_lessons), default=None),
-                    "today": [{"type": ls.type.value, "durationMin": ls.duration_min,
+                    "today": [{"type": ls.type.value, "durationMin": student_duration(ls, s.student_id),
                                "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
                                "group": lesson_group_title(ls, groups)}
                               for ls in month_lessons if ls.date == today],
@@ -289,7 +290,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         out = []
         for ls in month.lessons:                      # экран «Занятия» — расписание, без денег
             out.append({
-                "id": ls.lesson_id, "date": ls.date, "durationMin": ls.duration_min,
+                "id": ls.lesson_id, "date": ls.date, "durationMin": student_duration(ls, student.student_id),
                 "type": ls.type.value, "teacherId": ls.teacher_id,
                 "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
                 "group": lesson_group_title(ls, groups),

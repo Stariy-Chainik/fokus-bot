@@ -60,6 +60,19 @@ def test_page_does_not_block_on_foreign_hosts() -> None:
                                                         for f in re.findall(r"url\(([^)]+)\)", css))
 
 
+def test_bridge_is_refetched_when_cached_copy_is_broken() -> None:
+    """29.10.2026, родитель Виноградовой (iPhone): telegram-web-app.js оборвался на строке 509 и остался в кэше на неделю —
+    каждый запуск кончался «Нет доступа» (401 без подписи). Страница проверяет мост после загрузки и качает его заново
+    по адресу с меткой времени; без моста app.js показывает «Обновить», а не «Нет доступа»."""
+    html = (MINIAPP / "index.html").read_text(encoding="utf-8")
+    first = html.index('vendor/telegram-web-app.js')
+    retry = html.index("'?r=' + Date.now()")
+    assert first < retry and "window.Telegram && window.Telegram.WebApp" in html[first:retry]   # проверка после загрузки
+    assert "typeof window.WebApp !== 'undefined'" in html                                        # и для моста MAX
+    app = (MINIAPP / "app.js").read_text(encoding="utf-8")
+    assert "if (!tg && !MAXAPP && !DEV && !DEV_MAX)" in app and "location.reload()" in app
+
+
 def test_static_serves_fonts_and_vendor_with_cache() -> None:
     import asyncio
     from aiohttp import web
@@ -73,7 +86,7 @@ def test_static_serves_fonts_and_vendor_with_cache() -> None:
         await client.start_server()
         try:
             font = await client.get("/app/fonts/manrope-cyrillic.woff2")
-            tg = await client.get("/app/vendor/telegram-web-app.js")
+            tg = await client.get("/app/vendor/telegram-web-app.js?r=1761750000000")    # повтор в обход кэша
             page = await client.get("/app/app.js")
             bad = await client.get("/app/fonts/..%2Fapp.js")
             return (font.status, font.headers.get("Cache-Control"), tg.status, page.headers.get("Cache-Control"),

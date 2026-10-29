@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from io import BytesIO
 
+from bot.utils.attendees import student_duration
 from bot.utils.bill_format import payment_purpose
 from bot.utils.dates import current_period, last_periods, period_label
 from bot.services.parent_notifier import fmt_addr
@@ -294,7 +295,7 @@ async def menu_summary(students: list, payment_service, pending_repo=None) -> li
         if not history_hidden(period):
             month = (await payment_service.student_lesson_marks(s.student_id, period)).lessons
             c.lessons = len(month)
-            c.minutes = sum(ls.duration_min for ls in month)
+            c.minutes = sum(student_duration(ls, s.student_id) for ls in month)
             c.last = max((ls.date for ls in month), default="")
         out.append(c)
     return out

@@ -66,6 +66,15 @@ def parse_attendees(raw: str | None, default_duration: int = 60) -> list[Attende
     return out
 
 
+def student_duration(lesson, student_id: str) -> int:
+    """Сколько минут занимался этот ученик: у группы по посещению — из снимка attendees (в саду короткий
+    тариф — 35 мин при занятии на 60, случай Полищук 12.10.2026), иначе длительность занятия."""
+    for e in parse_attendees(getattr(lesson, "attendees", None), default_duration=lesson.duration_min):
+        if e.student_id == student_id:
+            return e.duration_min or lesson.duration_min
+    return lesson.duration_min
+
+
 def serialize_attendees(entries: list[AttendeeEntry]) -> str:
     """Всегда пишем расширенный формат id:duration:amount."""
     return ",".join(f"{e.student_id}:{e.duration_min}:{e.amount}" for e in entries)

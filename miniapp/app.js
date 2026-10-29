@@ -1543,6 +1543,14 @@ ACT.switchRole = async ({ to }) => {
   render();
   function fail(e) {
     document.getElementById('tabs').innerHTML = '';
+    // моста нет (скрипт Telegram/MAX не загрузился даже со второй попытки, см. index.html) — это не права, а сеть:
+    // вместо «Нет доступа» просим открыть заново (29.10.2026, родитель Виноградовой)
+    if (!tg && !MAXAPP && !DEV && !DEV_MAX) {
+      if (window.__clientLog) window.__clientLog('no-bridge', 'кабинет без подписи: ' + (window.__bridgeRetried || 'мост не грузился'));
+      document.getElementById('content').innerHTML = `<div class="card pad" style="margin-top:20px"><div style="font-weight:800;font-size:16px">Кабинет не загрузился</div><div class="hint" style="margin-top:6px">Не удалось получить подпись ${window.__isMax ? 'MAX' : 'Telegram'} — обычно это плохая связь. Нажмите «Обновить» или закройте и откройте кабинет ещё раз.</div><button class="btn" id="bridgeReload" style="margin-top:12px">🔄 Обновить</button></div>`;
+      document.getElementById('bridgeReload').addEventListener('click', () => location.reload());
+      return;
+    }
     document.getElementById('content').innerHTML = `<div class="card pad" style="margin-top:20px"><div style="font-weight:800;font-size:16px">Нет доступа</div><div class="hint" style="margin-top:6px">${esc(errText(e))}</div></div>`;
   }
 })();
