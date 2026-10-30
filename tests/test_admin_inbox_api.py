@@ -38,6 +38,13 @@ class PendingRepoFake:
         self.items.append(a)
         return a
 
+    async def set_file(self, action_id, file_id, file_type):
+        for a in self.items:
+            if a.action_id == action_id and a.status == OPEN:
+                a.file_id, a.file_type = file_id, file_type
+                return True
+        return False
+
     async def set_held_by(self, action_id, teacher_id):
         a = await self.get_by_id(action_id)
         if a is None or a.status != OPEN:

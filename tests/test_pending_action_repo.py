@@ -60,3 +60,12 @@ def test_claim_credits_once_even_with_duplicates():
     assert run(repo.claim("ACT-000005", DONE, 1)) is True
     assert run(repo.claim("ACT-000005", DONE, 2)) is False         # второй админ опоздал
     assert [r[12] for r in ws.rows] == [DONE, DONE] and [r[14] for r in ws.rows] == [1, 1]
+
+
+def test_set_file_fills_receipt_columns_of_open_row():
+    """Чек из MAX: file_id дописывается в открытую заявку; закрытая не трогается."""
+    repo, ws = _repo([_row("ACT-000001", DONE), _row("ACT-000002")])
+    assert run(repo.set_file("ACT-000002", "AgAC-big", "photo")) is True
+    assert (ws.rows[1][8], ws.rows[1][9]) == ("AgAC-big", "photo")
+    assert run(repo.set_file("ACT-000001", "x", "photo")) is False
+    assert (ws.rows[0][8], ws.rows[0][9]) == ("", "")

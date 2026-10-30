@@ -45,3 +45,31 @@ def test_unbound_max_receipt_is_queued(monkeypatch):
 def test_unbound_max_receipt_without_queue_still_reaches_admins(monkeypatch):
     ok, sent, _ = _run(monkeypatch, None)
     assert ok and sent
+
+
+def test_unbound_max_receipt_stores_file_id_for_cabinet(monkeypatch):
+    """30.10.2026, чек Игнатовой: пересланный в Telegram чек пишется в заявку file_id — кабинет показывает картинку."""
+    dp, _ = make_api(monkeypatch)
+    pending = PendingRepoFake()
+
+    async def notify(tg_bot, user_repo, caption, rows, **kw):
+        assert "photo" in kw
+        return SimpleNamespace(photo=[SimpleNamespace(file_id="AgAC-small"), SimpleNamespace(file_id="AgAC-big")])
+
+    async def download(url):
+        return b"img"
+
+    monkeypatch.setattr(mx, "_notify_admins_tg", notify)
+    student = asyncio.run(dp["student_repo"].get_by_id("STU-0001"))
+    ok = asyncio.run(mx._forward_unbound(SimpleNamespace(download_bytes=download), None, dp["user_repo"],
+                                         dp["payment_service"], student, YM, 4800, "image", "http://x", "r.jpg", 777, pending))
+    assert ok and len(pending.items) == 1
+    a = pending.items[0]
+    assert (a.file_id, a.file_type) == ("AgAC-big", "photo")
+    assert a.comment == "чек пришёл в MAX"
+
+
+def test_file_ref_handles_document_and_missing_message():
+    assert mx._file_ref(None) == ("", "")
+    assert mx._file_ref(SimpleNamespace(photo=None, document=SimpleNamespace(file_id="BQAC-doc"))) == ("BQAC-doc", "document")
+    assert mx._file_ref(SimpleNamespace(photo=[], document=None)) == ("", "")

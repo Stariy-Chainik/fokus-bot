@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 # action_id | kind | student_id | student_name | period_month | amount | method |
 # parent_addr | file_id | file_type | comment | created_at | status | decided_at | decided_by_tg_id |
 # teacher_keys | held_by
+_FILE_ID_COL = 9
+_FILE_TYPE_COL = 10
 _STATUS_COL = 13
 _DECIDED_AT_COL = 14
 _DECIDED_BY_COL = 15
@@ -128,6 +130,15 @@ class PendingActionRepository(BaseRepository):
         return PendingAction(action_id, kind, student_id, student_name, period_month, amount,
                              method, parent_addr, file_id, file_type, comment, now,
                              teacher_keys=teacher_keys, held_by=held_by)
+
+    async def set_file(self, action_id: str, file_id: str, file_type: str) -> bool:
+        """Чек, пересланный администраторам в Telegram уже после создания заявки (MAX): записать file_id,
+        чтобы кабинет показал его картинкой, как чеки из Telegram и кабинета (30.10.2026, чек Игнатовой)."""
+        async with self._locked_row(action_id=action_id, status=OPEN) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cells(row_idx, {_FILE_ID_COL: file_id, _FILE_TYPE_COL: file_type})
+            return True
 
     async def set_held_by(self, action_id: str, teacher_id: str) -> bool:
         """Педагог подтвердил, что наличные у него: заявка остаётся открытой — ждёт администратора."""

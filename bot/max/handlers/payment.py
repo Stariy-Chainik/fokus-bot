@@ -6,7 +6,7 @@
 from __future__ import annotations
 import logging
 
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, Message
 from aiogram.exceptions import TelegramAPIError
 from maxapi import F
 from maxapi.types import MessageCallback, MessageCreated, InputMediaBuffer
@@ -158,18 +158,52 @@ async def on_method(event: MessageCallback, context, max_uid, student_repo, paym
 
 
 async def _notify_admins_tg(tg_bot, user_repo, text: str, rows, *, photo: bytes | None = None,
-                            document: tuple[bytes, str] | None = None) -> None:
+                            document: tuple[bytes, str] | None = None) -> Message | None:
+    """Администраторам в Telegram; возвращает первое доставленное сообщение (у чека в нём file_id)."""
     kb = to_aiogram_markup(rows)
+    first = None
     for admin in await user_repo.get_admins():
         try:
             if photo is not None:
-                await tg_bot.send_photo(admin.tg_id, BufferedInputFile(photo, filename="receipt.jpg"), caption=text, reply_markup=kb)
+                msg = await tg_bot.send_photo(admin.tg_id, BufferedInputFile(photo, filename="receipt.jpg"), caption=text, reply_markup=kb)
             elif document is not None:
-                await tg_bot.send_document(admin.tg_id, BufferedInputFile(document[0], filename=document[1]), caption=text, reply_markup=kb)
+                msg = await tg_bot.send_document(admin.tg_id, BufferedInputFile(document[0], filename=document[1]),
+                                                 caption=text, reply_markup=kb)
             else:
-                await tg_bot.send_message(admin.tg_id, text, reply_markup=kb)
+                msg = await tg_bot.send_message(admin.tg_id, text, reply_markup=kb)
+            first = first or msg
         except TelegramAPIError as exc:
             logger.warning("Не удалось уведомить админа tg_id=%s: %s", admin.tg_id, exc)
+    return first
+
+
+def _file_ref(msg) -> tuple[str, str]:
+    """(file_id, photo|document) из отправленного сообщения Telegram — пусто, если сообщения или файла нет."""
+    photo = getattr(msg, "photo", None)
+    if photo:
+        return str(photo[-1].file_id), "photo"
+    document = getattr(msg, "document", None)
+    if document is not None and document.file_id:
+        return str(document.file_id), "document"
+    return "", ""
+
+
+async def _forward_receipt(tg_bot, user_repo, pending_repo, action, caption: str, rows, kind: str, blob: bytes,
+                           filename: str) -> None:
+    """Чек из MAX — администраторам в Telegram (фото или файл), а file_id первого сообщения — в заявку очереди:
+    так кабинет показывает его картинкой, как чеки из Telegram и кабинета (30.10.2026: чек Игнатовой в «Ждут решения»
+    был только пометкой «смотрите в чате бота»)."""
+    if kind == "image":
+        msg = await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
+    else:
+        msg = await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+    file_id, file_type = _file_ref(msg)
+    if action is None or pending_repo is None or not file_id:
+        return
+    try:
+        await pending_repo.set_file(action.action_id, file_id, file_type)
+    except Exception as exc:
+        logger.warning("MAX: file_id чека не записан в заявку %s: %s", action.action_id, exc)
 
 
 @router.message_callback(F.callback.payload.startswith("cash_notify:"))
@@ -405,13 +439,10 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
             caption = receipt_caption(method, student_name, ym, total,
                                       "\n".join(breakdown_lines(bills_map, list(bills_map), ledgers=ledgers)))
             action = await queue_action(pending_repo, KIND_RECEIPT, student, ym, amount=total, method=method,
-                                        parent_addr=f"m{max_uid}", comment="чек пришёл в MAX — смотрите в чате бота")
+                                        parent_addr=f"m{max_uid}", comment="чек пришёл в MAX")
             rows = admin_confirm_rows(student_id, ym, "", False, max_addr(max_uid), total, method,
                                       action_id=action.action_id if action else "")
-            if kind == "image":
-                await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
-            else:
-                await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+            await _forward_receipt(tg_bot, user_repo, pending_repo, action, caption, rows, kind, blob, filename)
             sent += 1
         logger.info("MAX: чек за %d мес. — %s, заявок %d", len(periods), student_id, sent)
         screen = receipt_sent_screen if sent else receipt_duplicate_screen
@@ -436,7 +467,7 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
     action = await queue_action(pending_repo, KIND_RECEIPT, student, period_month,   # очередь решений
                                 amount=total, method=method, parent_addr=f"m{max_uid}",
                                 student_id=student_id, student_name=student_name,
-                                comment="чек пришёл в MAX — смотрите в чате бота",
+                                comment="чек пришёл в MAX",
                                 teacher_keys=list(sel_tids) if sel_partial else None)
     rows = admin_confirm_rows(
         student_id, period_month, sel_pids, sel_partial,
@@ -450,10 +481,7 @@ async def on_receipt_message(event: MessageCreated, context, max_uid, student_re
         logger.error("MAX: не удалось скачать чек: %s", exc)
         await event.message.answer("Не удалось получить файл. Попробуйте ещё раз.")
         return
-    if kind == "image":
-        await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
-    else:
-        await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+    await _forward_receipt(tg_bot, user_repo, pending_repo, action, caption, rows, kind, blob, filename)
     text, back_rows = receipt_sent_screen(student_id, period_month)
     await send_screen(event.bot, max_uid, text, back_rows)
 
@@ -484,16 +512,13 @@ async def _forward_unbound(event_bot, tg_bot, user_repo, payment_service, studen
         return False
     action = await queue_action(pending_repo, KIND_RECEIPT, student, period_month,   # очередь решений
                                 amount=total, method=RECEIPT_UNKNOWN, parent_addr=f"m{max_uid}",
-                                comment="чек пришёл в MAX — смотрите в чате бота")
+                                comment="чек пришёл в MAX")
     rows = admin_confirm_rows(
         student.student_id, period_month, "", False,
         max_addr(max_uid), total, RECEIPT_UNKNOWN,
         action_id=action.action_id if action else "",
     )
-    if kind == "image":
-        await _notify_admins_tg(tg_bot, user_repo, caption, rows, photo=blob)
-    else:
-        await _notify_admins_tg(tg_bot, user_repo, caption, rows, document=(blob, filename))
+    await _forward_receipt(tg_bot, user_repo, pending_repo, action, caption, rows, kind, blob, filename)
     logger.info("MAX: чек без шага «Прикрепить»: max_id=%s → %s %s", max_uid, student.student_id, period_month)
     return True
 
