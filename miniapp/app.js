@@ -759,24 +759,56 @@ SCREENS['a.profit.teacher'] = async ({ period, tid }) => {
 /* Строки зарплаты: у педагога с прямой оплатой (Клецова) индивидуальные идут нулями — 60 строк из 70,
    и групповые занятия в них терялись (решение владельца 06.10.2026). Нули сворачиваем в одну строку
    «прямая оплата», как в кабинете самого педагога; остальное — как есть. */
-const salaryLines = (lines, tid, ym) => {
+/* Строки зарплаты журналом. Нулевые строки «в смене» / «в проценте» в журнале не показываются —
+   их группы и минуты подписаны под строкой смены того дня / процента группы (решение владельца
+   31.10.2026: три строки по 0 ₽ на каждый день Боброво только путали). */
+const foldSalaryLines = lines => {
+  const inShift = {}, inShare = {};
+  lines.forEach(x => {
+    if (x.kind === 'in_shift') (inShift[x.date] = inShift[x.date] || []).push(`${x.label}${x.minutes ? ` ${x.minutes} мин` : ''}`);
+    if (x.kind === 'in_share') inShare[x.groupId || ''] = (inShare[x.groupId || ''] || 0) + 1;
+  });
+  Object.values(inShift).forEach(a => a.sort());
+  // журнал по датам: SalaryService отдаёт смены после всех занятий месяца
+  const rest = lines.filter(x => x.kind !== 'in_shift' && x.kind !== 'in_share').map((x, i) => [x, i]).sort((a, b) => (a[0].date < b[0].date ? -1 : a[0].date > b[0].date ? 1 : a[1] - b[1])).map(x => x[0]);
+  return { rest, inShift, inShare };
+};
+const salaryLineSub = (x, f) => x.kind === 'bonus' ? 'премия · выплачена сразу'
+  : x.kind === 'shift' ? (f.inShift[x.date] || []).join(' · ') || 'смена'
+  : x.kind === 'share' ? `за месяц · от начисленных абонементов группы${f.inShare[x.groupId || ''] ? ` · ${plural(f.inShare[x.groupId || ''], ['занятие', 'занятия', 'занятий'])}` : ''}`
+  : `${x.minutes ? `${x.minutes} мин` : ''}${x.type === 'group' && x.students && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}`;
+const salaryCells = (lines, tid, ym) => {
   const direct = lines.filter(x => x.kind === 'lesson' && x.type === 'individual' && !x.amount);
-  const rest = direct.length ? lines.filter(x => !direct.includes(x)) : lines;
-  if (!lines.length) return '<div class="empty">Начислений нет</div>';
-  return list([...rest.map(salaryLineCell), ...(direct.length ? [cell({
+  const f = foldSalaryLines(lines.filter(x => !direct.includes(x)));
+  return [...f.rest.map(x => salaryLineCell(x, f)), ...(direct.length ? [cell({
     lead: '🤝', plain: true, t: 'Индивидуальные — прямая оплата',
     s: `${plural(direct.length, ['занятие', 'занятия', 'занятий'])} · родители платят педагогу, школа не начисляет`,
     r: '<b>0 ₽</b>', go: 'a.lessons.day', p: { ym, tid },
-  })] : [])]);
+  })] : [])];
 };
-const salaryLineCell = x => cell({
-  lead: x.kind === 'bonus' ? '🎁' : x.kind === 'shift' ? '🕒' : x.kind === 'share' ? '💯' : x.kind === 'override' ? '✍️' : x.kind === 'in_shift' || x.kind === 'in_share' ? '↳' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
-  t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
-  s: x.kind === 'bonus' ? 'премия · выплачена сразу' : x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается'
-    : x.kind === 'in_share' ? 'входит в % от абонементов — отдельно не оплачивается' : x.kind === 'share' ? 'за месяц · от начисленных абонементов группы'
-    : `${x.minutes ? `${x.minutes} мин` : ''}${x.type === 'group' && x.students && x.students.length ? ` · ${plural(x.students.length, ['ученик', 'ученика', 'учеников'])}` : ''}`,
+const salaryLines = (lines, tid, ym) => lines.length ? list(salaryCells(lines, tid, ym)) : '<div class="empty">Начислений нет</div>';
+const salaryLineCell = (x, f) => cell({
+  lead: x.kind === 'bonus' ? '🎁' : x.kind === 'shift' ? '🕒' : x.kind === 'share' ? '💯' : x.kind === 'override' ? '✍️' : x.type === 'group' ? '👥' : x.type === 'individual' ? '👤' : '📘', plain: true,
+  t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`, s: salaryLineSub(x, f), cls: x.kind === 'shift' ? 'wrap' : '',
   r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 'a.lesson', p: { id: x.lessonId } } : {}),
 });
+/* «По ставкам» (решение владельца 31.10.2026): одна строка на правило начисления — смена, группа, индивидуальные,
+   процент от сбора, премии; в заголовке число занятий и правило словами («ставка группы 1400 ₽/ч», «50 % от сбора
+   23 400 ₽»), внутри — занятия по датам. Данные — summary из API (bot/services/salary_summary.py); go — карточка
+   занятия: a.lesson у администратора, t.lesson у педагога. */
+const SUM_ICON = { shift: '🕒', group: '👥', individual: '👤', revenue_share: '💯', sub_share: '💯', direct: '🤝', override: '✍️', bonus: '🎁' };
+const hoursText = m => `${Math.floor(m / 60)} ч${m % 60 ? ` ${m % 60} мин` : ''}`;
+const sumCount = r => r.kind === 'shift' || r.kind === 'override' ? `${plural(r.count, ['день', 'дня', 'дней'])} · ${hoursText(r.minutes)}`
+  : r.kind === 'bonus' ? plural(r.count, ['премия', 'премии', 'премий'])
+  : `${plural(r.count, ['занятие', 'занятия', 'занятий'])}${r.free ? `, ${r.free} без оплаты` : ''}${r.merged ? ` · ${r.merged} объединённых` : ''}`;
+const salarySummary = (rows, go) => !rows || !rows.length ? '' : `<div class="eyebrow">По ставкам</div>${rows.map(r => `<details class="acc">
+  <summary><span><span class="chev">›</span>${SUM_ICON[r.kind] || '📘'} ${esc(r.title)}<div class="hint" style="font-weight:500;margin-top:2px;white-space:normal">${sumCount(r)} · ${esc(r.rule)}</div></span><span class="r">${fmt(r.amount)}</span></summary>
+  <div class="accbody">${r.items.map(it => cell({ t: `${fdate(it.date)} · ${esc(it.label)}`, cls: r.kind === 'shift' ? 'wrap' : '',
+    s: [it.note, it.minutes && r.kind !== 'shift' ? `${it.minutes} мин` : ''].filter(Boolean).join(' · '),
+    r: `<b>${fmt(it.amount)}</b>`, ...(it.lessonId ? { go, p: { id: it.lessonId } } : {}) })).join('')}</div></details>`).join('')}`;
+const salaryJournal = (lines, tid, ym) => `<details class="acc" style="margin-top:10px">
+  <summary><span><span class="chev">›</span>📅 По дням <span class="hint">· ${plural(foldSalaryLines(lines).rest.length, ['строка', 'строки', 'строк'])}</span></span></summary>
+  <div class="accbody">${salaryCells(lines, tid, ym).join('')}</div></details>`;
 SCREENS['a.salaries'] = async ({ ym }) => {
   ym = ym || lastPeriods(1)[0];
   const s = await api(`/salaries?ym=${ym}`);
@@ -812,7 +844,7 @@ SCREENS['a.salary.t'] = async ({ tid, ym }) => {
     ${c.accrued ? `<div class="kpis" style="margin-top:8px">${kpi(c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons || 0}${c.unpaidSubs ? ` + ${c.unpaidSubs} аб.` : ''}` : '✓', c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons ? plural(c.unpaidLessons, ['занятие', 'занятия', 'занятий']) : ''}${c.unpaidLessons && c.unpaidSubs ? ' и ' : ''}${c.unpaidSubs ? plural(c.unpaidSubs, ['абонемент', 'абонемента', 'абонементов']) : ''} не оплачено` : 'родители всё оплатили', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `долг · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : 'долга нет', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}</div>` : ''}
     <div style="margin:10px 0">${goBtn(rest ? `💸 Выплатить остаток ${fmt(rest)}` : '💸 Выплаты и аванс', 'a.payout', { tid, ym }, rest ? '' : 'ghost')}</div>
     ${rentBlock(t.rent, tid, ym, t.name)}
-    ${salaryLines(t.lines, tid, ym)}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
+    ${salarySummary(t.summary, 'a.lesson')}${t.lines.length ? salaryJournal(t.lines, tid, ym) : '<div class="empty">Начислений нет</div>'}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
 };
 /* Сбор с родителей по педагогу: кто из его учеников не оплатил месяц. Тап — счёт ученика. */
 SCREENS['a.salary.col'] = async ({ tid, ym, lessons }) => {

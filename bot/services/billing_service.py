@@ -5,12 +5,68 @@ Billing-строки больше не хранятся: счёт ученика
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from bot.models import Lesson, Billing, Teacher
 from bot.models.enums import LessonType
 from bot.utils import parse_attendees
 from bot.utils.constants import MINUTES_PER_UNIT
 from bot.services.rate_history import effective_rates
+
+
+@dataclass(frozen=True)
+class SalaryRule:
+    """Как посчитана зарплата за занятие (`salary_rule`): правило, ставка и минуты.
+
+    Из него считает `calc_earned`, а сводка «по ставкам» на экранах зарплаты
+    (bot/services/salary_summary.py) пишет правило словами — одна точка истины.
+    """
+    kind: str                 # rate | share | sub_share | shift | direct
+    amount: int
+    rate: int = 0             # ₽ за 45 мин (kind=rate)
+    minutes: int = 0          # зарплатные минуты (kind=rate; SALARY_DURATION_GROUPS может отличаться от занятия)
+    fixed: bool = False       # минуты заданы SALARY_DURATION_GROUPS
+    group_rate: bool = False  # ставка группы (GROUP_SALARY_RATES), а не карточки педагога
+    percent: int = 0          # kind=share — процент от сбора
+    revenue: int = 0          # kind=share — сбор с посетивших
+
+
+def salary_rule(
+    lesson_type: LessonType, duration_min: int, teacher: Teacher,
+    group_id: str = "", attendees: str | None = None, period: str | None = None,
+) -> SalaryRule:
+    """Правило зарплаты за занятие — см. `calc_earned` (та же логика, но с расшифровкой)."""
+    from config.settings import settings
+    is_group = lesson_type == LessonType.GROUP
+    share = settings.revenue_share_group_map.get(group_id) if group_id else None
+    if share is not None and is_group:
+        revenue = sum(
+            e.amount for e in parse_attendees(attendees or "", default_duration=duration_min)
+        )
+        return SalaryRule("share", round(revenue * share / 100), percent=share, revenue=revenue)
+    # Процент от абонементов группы (SUBSCRIPTION_SHARE_GROUPS): зарплата за месяц целиком (salary_service).
+    if group_id and is_group and period and settings.subscription_share(group_id, period) is not None:
+        return SalaryRule("sub_share", 0)
+    # Группы смены (SHIFT_GROUPS): зарплата считается за день целиком (salary_service).
+    if group_id and is_group and group_id in settings.shift_group_map:
+        return SalaryRule("shift", 0)
+    # Фиксированная зарплатная длительность группы (SALARY_DURATION_GROUPS):
+    # пересекающиеся по времени группы (ВБ ХГ Средняя/Старшая) считаются по 90 мин.
+    fixed = False
+    if group_id and is_group and group_id in settings.salary_duration_group_map:
+        duration_min, fixed = settings.salary_duration_group_map[group_id], True
+    # Прямая оплата педагогу (DIRECT_PAY_TEACHER_IDS): школа зарплату не платит.
+    if lesson_type == LessonType.INDIVIDUAL and teacher.teacher_id in settings.direct_pay_teacher_id_set:
+        return SalaryRule("direct", 0)
+    # Ставки на период занятия (история ставок: старые цены для прошлых месяцев)
+    rate_group, rate_for_teacher, _ = effective_rates(teacher, period)
+    rate = rate_group if is_group else rate_for_teacher
+    # Своя ставка группы (GROUP_SALARY_RATES) — вместо ставки из карточки педагога.
+    own = settings.group_salary_rate(group_id, period) if group_id and is_group else None
+    if own is not None:
+        rate = own
+    return SalaryRule("rate", round(rate * duration_min / MINUTES_PER_UNIT), rate=rate, minutes=duration_min,
+                      fixed=fixed, group_rate=own is not None)
 
 
 def calc_earned(
@@ -25,37 +81,9 @@ def calc_earned(
     GROUP_SALARY_RATES своя (напр. «БП Джаз» 1500 ₽/45 мин → 2000 ₽ за час).
     Исключение — группы из REVENUE_SHARE_GROUPS (например, индивидуальные
     Яковлевой): педагог получает процент от сбора с посетивших занятие,
-    длительность на зарплату не влияет.
+    длительность на зарплату не влияет. Расшифровка правила — `salary_rule`.
     """
-    from config.settings import settings
-    share = settings.revenue_share_group_map.get(group_id) if group_id else None
-    if share is not None and lesson_type == LessonType.GROUP:
-        revenue = sum(
-            e.amount for e in parse_attendees(attendees or "", default_duration=duration_min)
-        )
-        return round(revenue * share / 100)
-    # Процент от абонементов группы (SUBSCRIPTION_SHARE_GROUPS): зарплата за месяц целиком (salary_service).
-    if group_id and lesson_type == LessonType.GROUP and period and settings.subscription_share(group_id, period) is not None:
-        return 0
-    # Группы смены (SHIFT_GROUPS): зарплата считается за день целиком (salary_service).
-    if group_id and lesson_type == LessonType.GROUP and group_id in settings.shift_group_map:
-        return 0
-    # Фиксированная зарплатная длительность группы (SALARY_DURATION_GROUPS):
-    # пересекающиеся по времени группы (ВБ ХГ Средняя/Старшая) считаются по 90 мин.
-    if group_id and lesson_type == LessonType.GROUP:
-        duration_min = settings.salary_duration_group_map.get(group_id, duration_min)
-    # Прямая оплата педагогу (DIRECT_PAY_TEACHER_IDS): школа зарплату не платит.
-    if lesson_type == LessonType.INDIVIDUAL and teacher.teacher_id in settings.direct_pay_teacher_id_set:
-        return 0
-    # Ставки на период занятия (история ставок: старые цены для прошлых месяцев)
-    rate_group, rate_for_teacher, _ = effective_rates(teacher, period)
-    rate = rate_group if lesson_type == LessonType.GROUP else rate_for_teacher
-    # Своя ставка группы (GROUP_SALARY_RATES) — вместо ставки из карточки педагога.
-    if group_id and lesson_type == LessonType.GROUP:
-        own = settings.group_salary_rate(group_id, period)
-        if own is not None:
-            rate = own
-    return round(rate * duration_min / MINUTES_PER_UNIT)
+    return salary_rule(lesson_type, duration_min, teacher, group_id, attendees, period).amount
 
 
 def student_rate(teacher_id: str, student_id: str, date: str, default: int) -> int:

@@ -187,6 +187,7 @@ def test_stats_and_submit_period(api):
     assert status == 200 and st["total"] == 4333 and (st["groupLessons"], st["individualLessons"]) == (1, 2)
     # у строк-занятий свой label пустой — подставляем, кто занимался
     assert [ln["label"] for ln in st["lines"]] == ["Иванов Иван", "Иванов Иван", "БП Джаз"]
+    assert [(r["kind"], r["count"], r["amount"]) for r in st["summary"]] == [("individual", 2, 3000), ("group", 1, 1333)]
 
     status, pre = _call(app, "GET", f"/api/teacher/submit?ym={YM}")
     assert status == 200 and pre["lessons"] == 3 and pre["submitted"] is False

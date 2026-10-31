@@ -17,6 +17,7 @@ from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
 from bot.services.profit_service import calculate_profit_lesson
+from bot.services.salary_summary import summarize, summary_dicts
 from bot.utils.attendees import parse_attendees
 from bot.utils.dates import current_period, display_period
 from bot.utils.locks import InProgressGuard
@@ -421,6 +422,15 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
             out.append(d)
         return out
 
+    async def _salary_summary(t, period: str) -> list[dict]:
+        """Те же строки, сложенные по правилу начисления: смена / группа / индивидуальные / процент
+        (bot/services/salary_summary.py) — блок «По ставкам» над журналом по дням."""
+        lines = await salary_service.lines_for(t, period)
+        by_id = {ls.lesson_id: ls for ls in await lesson_repo.get_by_teacher_and_period(t.teacher_id, period)}
+        groups = {g.group_id: g.name for g in await group_repo.get_all(include_archived=True)}
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        return summary_dicts(summarize(lines, by_id, t, groups, names))
+
     async def _rent_status(tid: str, period: str, students: bool = False) -> dict | None:
         """Аренда зала педагога с прямой оплатой за месяц (bot/services/hall_rent.py); у остальных None."""
         if tid not in settings.direct_pay_teacher_id_set:
@@ -473,7 +483,8 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
         col = teacher_collection(ledger, period, tid, sg)
         unpaid = await _unpaid_lessons(period, tid, col, {})
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
-                      "lines": lines, "total": total, "isOwner": tid in settings.owner_teacher_id_set,
+                      "lines": lines, "summary": await _salary_summary(t, period), "total": total,
+                      "isOwner": tid in settings.owner_teacher_id_set,
                       "bonus": sum(ln["amount"] for ln in lines if ln["kind"] == "bonus"),
                       "rent": await _rent_status(tid, period, students=True),
                       "collection": _collection_totals(col, unpaid, sg, ledger, period)})
@@ -509,7 +520,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
             # премии месяца — отдельным списком с отменой; в accrued, paid и lines они уже учтены
             "bonuses": [{"id": b.bonus_id, "amount": b.amount, "date": b.created_at[:10], "comment": b.comment}
                         for b in await bonus_repo.get_for_teacher_period(tid, period)],
-            "lines": lines,
+            "lines": lines, "summary": await _salary_summary(t, period),
             "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment} for o in overrides],
             "isOwner": tid in settings.owner_teacher_id_set,
         })

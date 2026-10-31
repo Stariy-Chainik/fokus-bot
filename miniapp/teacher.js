@@ -337,6 +337,16 @@ SCREENS['t.student'] = async ({ id, ym }) => {
 
 /* ── Зарплата и сдача периода ────────────────────────────────────────── */
 const T_LINE_ICON = { shift: '🕒', override: '✍️', in_shift: '↳', in_share: '↳', share: '💯', lesson: '📘', bonus: '🎁' };
+/* Журнал зарплаты по дням: строки «в смене» / «в проценте» схлопнуты в строку смены / процента (foldSalaryLines в app.js). */
+const tSalaryCells = lines => {
+  const f = foldSalaryLines(lines);
+  return f.rest.map(x => cell({
+    lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`, cls: x.kind === 'shift' ? 'wrap' : '',
+    s: x.kind === 'bonus' ? 'премия сверх зарплаты' : x.kind === 'shift' ? (f.inShift[x.date] || []).join(' · ') || 'смена'
+      : x.kind === 'share' ? `оплата группы за месяц${f.inShare[x.groupId || ''] ? ` · ${plural(f.inShare[x.groupId || ''], ['занятие', 'занятия', 'занятий'])}` : ''}` : x.minutes ? `${x.minutes} мин` : '',
+    r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
+  }));
+};
 /* Аренда зала школе (прямая оплата): сумма месяца и, с месяца начала учёта (HALL_RENT_SETTLE_SINCE_PERIOD),
    статус — педагог перечисляет её школе одной суммой в конце месяца (решение владельца 27.10.2026). */
 const tRentBlock = (r, period) => {
@@ -369,20 +379,14 @@ SCREENS['t.money'] = async ({ ym }) => {
       ? '<div class="card pad hint">Период сдан: занятия этого месяца больше не редактируются. Открыть его может администратор.</div>'
       : btn(sub.canSubmit ? `📤 Сдать ${MON_NOM[+period.slice(5) - 1].toLowerCase()} (${plural(sub.lessons, ['занятие', 'занятия', 'занятий'])}, ${fmt(sub.total)})` : `Сдать период можно с 25 ${MON_SHORT[+period.slice(5) - 1]}`,
         'tSubmitAsk', { ym: period, lessons: sub.lessons, total: sub.total }, sub.canSubmit ? '' : 'ghost')}</div>`}
-    <div class="eyebrow">Начисления</div>
-    ${paid.length || d ? list([
-      ...paid.map(x => cell({
-        lead: T_LINE_ICON[x.kind] || '📘', plain: true, t: `${fdate(x.date)}${x.label ? ` · ${esc(x.label)}` : ''}`,
-        s: x.kind === 'bonus' ? 'премия сверх зарплаты' : x.kind === 'in_shift' ? 'в смене — отдельно не оплачивается' : x.kind === 'in_share' ? 'входит в оплату группы за месяц — отдельно не оплачивается' : x.kind === 'share' ? 'оплата группы за месяц' : x.minutes ? `${x.minutes} мин` : '',
-        r: `<b>${fmt(x.amount)}</b>`, ...(x.lessonId ? { go: 't.lesson', p: { id: x.lessonId } } : {}),
-      })),
-      // Занятия прямой оплаты одной строкой: их 59 из 63, нулями список не засыпаем
-      ...(d && d.lessons ? [cell({
+    ${salarySummary((st.summary || []).filter(r => r.kind !== 'direct'), 't.lesson')}
+    ${paid.length ? `<details class="acc" style="margin-top:10px">
+      <summary><span><span class="chev">›</span>📅 По дням <span class="hint">· ${plural(foldSalaryLines(paid).rest.length, ['строка', 'строки', 'строк'])}</span></span></summary>
+      <div class="accbody">${tSalaryCells(paid).join('')}${d && d.lessons ? cell({
         lead: '🤝', plain: true, t: 'Индивидуальные — прямая оплата',
         s: `${plural(d.lessons, ['занятие', 'занятия', 'занятий'])} · школа не начисляет`,
         r: '<b>0 ₽</b>', go: 't.lessons', p: { key: period },
-      })] : []),
-    ]) : empty('Начислений нет', '<p class="hint" style="margin:0">Отметьте занятия — они появятся здесь</p>')}
+      }) : ''}</div></details>` : d ? '' : empty('Начислений нет', '<p class="hint" style="margin:0">Отметьте занятия — они появятся здесь</p>')}
     ${d ? `<div class="eyebrow">Прямая оплата</div>
       <div class="card">
         <div class="total"><span>Родители платят вам за ${MON_NOM[+period.slice(5) - 1].toLowerCase()}</span><span class="big direct">${fmt(d.total)}</span></div>

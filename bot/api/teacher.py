@@ -45,6 +45,7 @@ from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services import hall_rent
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
+from bot.services.salary_summary import summarize, summary_dicts
 from bot.services.subscription_frequency import frequency_info, set_frequency
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
@@ -864,10 +865,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "groupLessons": sum(1 for ls in rows if ls.type == LessonType.GROUP),
             "individualLessons": sum(1 for ls in rows if ls.type != LessonType.GROUP),
             "submitted": ym in submitted,
-            "lines": [{"date": ln.date, "kind": ln.kind, "label": label_for(ln),
+            "lines": [{"date": ln.date, "kind": ln.kind, "label": label_for(ln), "groupId": ln.group_id,
                        "minutes": ln.minutes, "amount": ln.amount, "lessonId": ln.lesson_id,
                        "direct": is_direct(by_id[ln.lesson_id], teacher) if ln.lesson_id in by_id else False}
                       for ln in lines],
+            # по ставкам: смена / группа / индивидуальные / процент — одна строка на правило, внутри занятия
+            "summary": summary_dicts(summarize(lines, by_id, teacher, groups, names, for_teacher=True)),
             "direct": _direct_summary(rows, teacher, names),
             "rent": await _rent(teacher, ym, rows),
         })

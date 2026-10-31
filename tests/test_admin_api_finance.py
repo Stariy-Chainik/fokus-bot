@@ -53,6 +53,11 @@ def test_salaries_and_lines(api):
     assert [ln["label"] for ln in t["lines"]] == ["Иванов Иван", "Иванов Иван", "БП Джаз"]
     assert [ln["type"] for ln in t["lines"]] == ["individual", "individual", "group"]
     assert t["lines"][2]["students"] == ["Иванов Иван", "Петрова Анна"] and all(ln["lessonId"] for ln in t["lines"])
+    # «По ставкам»: одна строка на правило — индивидуальные и группа, внутри занятия (решение владельца 31.10.2026)
+    assert [(r["kind"], r["title"], r["count"], r["amount"]) for r in t["summary"]] == [
+        ("individual", "Индивидуальные и парные", 2, 3000), ("group", "БП Джаз", 1, 1333)]
+    assert t["summary"][0]["rule"] == "ставка педагога 2 000 ₽/ч = 1 500 ₽ за 45 мин"
+    assert [i["lessonId"] for i in t["summary"][1]["items"]] == [t["lines"][2]["lessonId"]]
     p = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]
     assert [ln["label"] for ln in p["lines"]] == ["Иванов Иван", "Иванов Иван", "БП Джаз"] and p["accrued"] == 4333
 
