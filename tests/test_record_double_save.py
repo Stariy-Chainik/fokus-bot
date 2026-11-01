@@ -128,7 +128,7 @@ def test_same_press_sent_twice_is_saved_once(monkeypatch):
     """Сетевой повтор того же нажатия (тот же requestId) — один результат, даже для подтверждённого соло."""
     dp = _api_with_teacher(monkeypatch)
     before = len(dp["lesson_repo"].items)
-    body = {"kind": "soloist", "date": f"{YM}-07", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0100"}
+    body = {"kind": "soloist", "date": f"{YM}-01", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0100"}
     first, second = _post_all(dp, [body, body], concurrent=True)
     assert first[0] == second[0] == 200 and sorted([bool(first[1].get("repeat")), bool(second[1].get("repeat"))]) == [False, True]
     assert len(dp["lesson_repo"].items) == before + 1
@@ -137,9 +137,9 @@ def test_same_press_sent_twice_is_saved_once(monkeypatch):
 def test_soloist_batch_is_not_saved_partially(monkeypatch):
     """Несколько солистов разом: если у одного уже есть соло в этот день — ничего не записывается до подтверждения."""
     dp = _api_with_teacher(monkeypatch)
-    _post_all(dp, [{"kind": "soloist", "date": f"{YM}-08", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0200"}])
+    _post_all(dp, [{"kind": "soloist", "date": f"{YM}-01", "durationMin": 45, "studentIds": ["STU-0002"], "requestId": "press-0200"}])
     before = len(dp["lesson_repo"].items)
-    batch = {"kind": "soloist", "date": f"{YM}-08", "durationMin": 45, "studentIds": ["STU-0001", "STU-0002"]}
+    batch = {"kind": "soloist", "date": f"{YM}-01", "durationMin": 45, "studentIds": ["STU-0001", "STU-0002"]}
     (status, r), = _post_all(dp, [{**batch, "requestId": "press-0201"}])
     assert status == 409 and r["error"] == "same_day" and "Петрова Анна" in r["message"] and "Иванов" not in r["message"]
     assert len(dp["lesson_repo"].items) == before
