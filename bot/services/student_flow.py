@@ -93,6 +93,12 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
     created: set = set()
     came_at: dict[str, str] = {}        # ученик → день прихода (первое «добавлен в группу» / «Новый ученик» месяца)
     gone_at: dict[str, str] = {}        # ученик → день ухода (последнее «уходит / убран / переведён» не позже месяца)
+    # номер удалённой карточки раньше выдавался заново (STU-0283: Андреева удалена 05.10, Молярова заведена 06.10):
+    # события до удаления принадлежат прежнему владельцу номера и дату прихода нового не определяют
+    deleted_ts: dict[str, str] = {}
+    for e in events:
+        if m := _DELETED.search(getattr(e, "text", "") or ""):
+            deleted_ts[m.group(1)] = max(deleted_ts.get(m.group(1), ""), getattr(e, "ts", "") or "")
     for e in events:
         ts = getattr(e, "ts", "") or ""
         if ts[:7] > period:
@@ -109,7 +115,7 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
             if in_month:
                 deleted[m.group(1)] = (m.group(2) or "").strip()
         elif (m := _CREATED.search(text)) or (m := _ADDED.search(text)):
-            if in_month:
+            if in_month and ts > deleted_ts.get(m.group(1), ""):
                 if text.startswith("Новый ученик"):
                     created.add(m.group(1))
                 came_at[m.group(1)] = min(came_at.get(m.group(1), "9999"), day)
@@ -117,6 +123,10 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
     joined: dict[str, list] = {}         # ученик → группы, куда пришёл в этом месяце
     left: dict[str, list] = {}           # ученик → группы, откуда ушёл с этого месяца (абонемент)
     for r in rows:
+        if r.joined_period == period and r.left_period == period:
+            # добавлен и снят в один месяц (Гюласарян 10.2026): абонемент не начислялся, в школе не был —
+            # ни «пришёл», ни «ушёл»
+            continue
         if r.joined_period == period:
             joined.setdefault(r.student_id, []).append(r.group_id)
         if r.left_period == period:
