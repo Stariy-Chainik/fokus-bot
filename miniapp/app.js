@@ -335,8 +335,8 @@ SCREENS['a.money'] = async () => {
       cell({ lead: '➖', plain: true, t: 'Записать расход', s: 'аренда, реклама, костюмы, инвентарь…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'expense' } }),
     ])}
     <div class="eyebrow">Педагоги</div>${list([
-      cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено педагогам, строки', go: 'a.salaries', p: {} }),
-      cell({ lead: '💸', plain: true, t: 'Выплатить зарплату', s: 'остаток, аванс, нестандартный день', go: 'a.payouts', p: {} }),
+      // один вход (решение владельца 01.11.2026): выплата остатка, аванс, премия и нестандартный день — в карточке педагога
+      cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено, выплаты, аванс, премии', go: 'a.salaries', p: {} }),
     ])}
     <p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` };
 };
@@ -842,8 +842,9 @@ SCREENS['a.salary.t'] = async ({ tid, ym }) => {
   return { title: `${t.name} · ${MON_NOM[+ym.slice(5) - 1]}`, html: `
     <div class="kpis">${kpi(fmt(t.total), 'начислено')}${kpi(fmt(t.paid || 0), t.isOwner ? '👑 остаётся в прибыли' : rest ? `выплачено · остаток ${fmt(rest)}` : 'выплачено полностью', rest ? 'warn' : 'ok')}</div>
     ${c.accrued ? `<div class="kpis" style="margin-top:8px">${kpi(c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons || 0}${c.unpaidSubs ? ` + ${c.unpaidSubs} аб.` : ''}` : '✓', c.unpaidLessons || c.unpaidSubs ? `${c.unpaidLessons ? plural(c.unpaidLessons, ['занятие', 'занятия', 'занятий']) : ''}${c.unpaidLessons && c.unpaidSubs ? ' и ' : ''}${c.unpaidSubs ? plural(c.unpaidSubs, ['абонемент', 'абонемента', 'абонементов']) : ''} не оплачено` : 'родители всё оплатили', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}${kpi(c.rest ? fmt(c.rest) : '✓', c.rest ? `долг · ${plural(c.unpaidStudents || 0, ['ученик', 'ученика', 'учеников'])}` : 'долга нет', c.rest ? 'bad' : 'ok', 'a.salary.col', { tid, ym })}</div>` : ''}
-    <div style="margin:10px 0">${goBtn(rest ? `💸 Выплатить остаток ${fmt(rest)}` : '💸 Выплаты и аванс', 'a.payout', { tid, ym }, rest ? '' : 'ghost')}</div>
+    <div style="margin:10px 0">${btn(`💸 Выплатить остаток ${fmt(rest)}`, 'payoutRest', { tid, ym, amount: rest, name: t.name }, rest ? '' : 'sec')}${btn('Произвольная сумма (аванс)', 'payoutForm', { tid, ym, name: t.name }, 'ghost')}${btn('🎁 Премия', 'bonusForm', { tid, ym, name: t.name }, 'ghost')}${btn('🕒 Нестандартный день', 'ovForm', { tid, ym, name: t.name }, 'ghost')}</div>
     ${rentBlock(t.rent, tid, ym, t.name)}
+    ${payoutLists(t)}
     ${salarySummary(t.summary, 'a.lesson')}${t.lines.length ? salaryJournal(t.lines, tid, ym) : '<div class="empty">Начислений нет</div>'}<div class="card" style="margin-top:10px"><div class="total"><span>Начислено</span><span class="big">${fmt(t.total)}</span></div></div>` };
 };
 /* Сбор с родителей по педагогу: кто из его учеников не оплатил месяц. Тап — счёт ученика. */
@@ -855,23 +856,12 @@ SCREENS['a.salary.col'] = async ({ tid, ym, lessons }) => {
     <p class="hint" style="margin:8px 0">${lessons ? 'Только занятия педагога — без абонементов.' : 'Занятия педагога и абонементы групп, где он вёл занятия в этом месяце.'} Прямая оплата педагогу не учитывается.</p>
     ${d.students.length ? list(d.students.map(s => cell({ lead: st(s), plain: true, t: esc(s.name), s: (s.unpaidLessons ? `${plural(s.unpaidLessons, ['занятие', 'занятия', 'занятий'])} не оплачено · ` : '') + (s.status === 'partial' ? `оплачено ${fmt(s.paid)} из ${fmt(s.accrued)}` : s.status === 'paid' ? `оплачено ${fmt(s.accrued)}` : `начислено ${fmt(s.accrued)}`), r: s.rest ? `<b class="money bad">${fmt(s.rest)}</b>` : pill('✓', 'ok'), go: 'a.pay.student', p: { sid: s.id, ym } }))) : '<div class="empty">Начислений родителям нет</div>'}` };
 };
-SCREENS['a.payouts'] = async ({ ym }) => {
-  ym = ym || lastPeriods(1)[0];
-  const p = await api(`/payouts?ym=${ym}`);
-  const icon = { paid: '🟢', partial: '🟡', none: '🔴' };
-  return { title: 'Выплатить зарплату', html: `${monthChips('a.payouts', ym, {})}<div class="hint" style="margin-bottom:10px">начислено ${fmt(p.accrued)} · выплачено ${fmt(p.paid)} · остаток ${fmt(p.accrued - p.paid)}</div>${p.teachers.length ? list(p.teachers.map(t => cell({ lead: icon[t.status], plain: true, t: esc(t.name), s: `выплачено ${fmt(t.paid)} из ${fmt(t.accrued)}`, r: t.accrued - t.paid > 0 ? pill(`остаток ${fmt(t.accrued - t.paid)}`, 'warn') : pill('✓', 'ok'), go: 'a.payout', p: { tid: t.id, ym } }))) : '<div class="empty">Начислений нет</div>'}` };
-};
-SCREENS['a.payout'] = async ({ tid, ym }) => {
-  const t = await api(`/payouts/${tid}?ym=${ym}`);
-  const rest = Math.max(t.accrued - t.paid, 0);
-  return { title: t.name, html: `
-    <div class="kpis">${kpi(fmt(t.accrued), `начислено за ${MON_NOM[+ym.slice(5) - 1].toLowerCase()}`)}${kpi(fmt(t.paid), 'уже выплачено', t.paid >= t.accrued && t.accrued ? 'ok' : '')}</div>
-    <div style="margin-top:12px">${btn(`✅ Выплатить остаток ${fmt(rest)}`, 'payoutRest', { tid, ym, amount: rest, name: t.name }, rest ? '' : 'sec')}${btn('Произвольная сумма (аванс)', 'payoutForm', { tid, ym, name: t.name }, 'ghost')}${btn('🎁 Премия', 'bonusForm', { tid, ym, name: t.name }, 'ghost')}${btn('🕒 Нестандартный день', 'ovForm', { tid, ym, name: t.name }, 'ghost')}</div>
-    ${t.payouts.length ? `<div class="eyebrow">Выплаты</div>${list(t.payouts.map(p => `<div class="cell static"><span class="lead plain">💸</span><span><div class="t">${fmt(p.amount)}</div><div class="s">${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}${p.bonus ? ' · премия, отменяется ниже' : ''}</div></span><span class="r">${p.bonus ? '' : `<button class="chip" style="padding:2px 8px" data-act="delPayoutAsk" data-p='${esc(JSON.stringify({ id: p.id, amount: p.amount, date: p.date, comment: p.comment }))}' aria-label="Убрать выплату">🗑</button>`}</span></div>`))}` : ''}
+/* Выплаты, премии и нестандартные дни педагога за месяц с 🗑 — в карточке «Зарплаты → педагог»
+   (решение владельца 01.11.2026; раньше — отдельный экран «Выплатить зарплату»). */
+const payoutLists = t => `
+    ${(t.payouts || []).length ? `<div class="eyebrow">Выплаты</div>${list(t.payouts.map(p => `<div class="cell static"><span class="lead plain">💸</span><span><div class="t">${fmt(p.amount)}</div><div class="s">${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}${p.bonus ? ' · премия, отменяется ниже' : ''}</div></span><span class="r">${p.bonus ? '' : `<button class="chip" style="padding:2px 8px" data-act="delPayoutAsk" data-p='${esc(JSON.stringify({ id: p.id, amount: p.amount, date: p.date, comment: p.comment }))}' aria-label="Убрать выплату">🗑</button>`}</span></div>`))}` : ''}
     ${(t.bonuses || []).length ? `<div class="eyebrow">Премии</div>${list(t.bonuses.map(b => `<div class="cell static"><span class="lead plain">🎁</span><span><div class="t">${fmt(b.amount)} · ${fdate(b.date)}</div>${b.comment ? `<div class="s">${esc(b.comment)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="delBonusAsk" data-p='${esc(JSON.stringify({ id: b.id, amount: b.amount }))}' aria-label="Отменить премию">🗑</button></span></div>`))}` : ''}
-    ${t.overrides.length ? `<div class="eyebrow">Нестандартные дни</div>${list(t.overrides.map(o => `<div class="cell static"><span class="lead plain">✍️</span><span><div class="t">${fdate(o.date)} · ${o.minutes} мин</div>${o.comment ? `<div class="s">${esc(o.comment)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="delOverride" data-p='${esc(JSON.stringify({ id: o.id }))}' aria-label="Удалить">🗑</button></span></div>`))}` : ''}
-    <div class="eyebrow">Строки начисления</div>${salaryLines(t.lines, tid, ym)}` };
-};
+    ${(t.overrides || []).length ? `<div class="eyebrow">Нестандартные дни</div>${list(t.overrides.map(o => `<div class="cell static"><span class="lead plain">✍️</span><span><div class="t">${fdate(o.date)} · ${o.minutes} мин</div>${o.comment ? `<div class="s">${esc(o.comment)}</div>` : ''}</span><span class="r"><button class="chip" style="padding:2px 8px" data-act="delOverride" data-p='${esc(JSON.stringify({ id: o.id }))}' aria-label="Удалить">🗑</button></span></div>`))}` : ''}`;
 SCREENS['a.payhist.search'] = async () => {
   const q = state.ui.q2 || '';
   const d = await api(`/payhist?q=${encodeURIComponent(q)}`);

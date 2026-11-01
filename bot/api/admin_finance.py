@@ -483,10 +483,21 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
         sg = (await _sub_groups_by_teacher(period)).get(tid, set())
         col = teacher_collection(ledger, period, tid, sg)
         unpaid = await _unpaid_lessons(period, tid, col, {})
+        # действия с деньгами (выплата остатка, аванс, премия, нестандартный день) живут в этой же карточке
+        # (решение владельца 01.11.2026: отдельный вход «Выплатить зарплату» убран — один экран на педагога)
+        rows = await payout_repo.get_by_teacher_period(tid, period)
+        bonuses = await bonus_repo.get_for_teacher_period(tid, period)
+        bonus_payouts = {b.payout_id for b in bonuses if b.payout_id}
         return _json({"teacherId": tid, "name": t.name, "period": period, "paid": paid,
                       "lines": lines, "summary": await _salary_summary(t, period), "total": total,
                       "isOwner": tid in settings.owner_teacher_id_set,
                       "bonus": sum(ln["amount"] for ln in lines if ln["kind"] == "bonus"),
+                      "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment,
+                                   "bonus": p.payout_id in bonus_payouts} for p in rows],
+                      "bonuses": [{"id": b.bonus_id, "amount": b.amount, "date": b.created_at[:10], "comment": b.comment}
+                                  for b in bonuses],
+                      "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment}
+                                    for o in await override_repo.get_for_teacher_period(tid, period)],
                       "rent": await _rent_status(tid, period, students=True),
                       "collection": _collection_totals(col, unpaid, sg, ledger, period)})
 

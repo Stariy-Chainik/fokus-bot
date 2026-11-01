@@ -77,3 +77,19 @@ def test_home_and_flow_api(monkeypatch):
     assert len(d["months"]) == 6 and d["months"][0] == {"ym": YM, "new": 1, "gone": 0, "deleted": 0, "net": 1}
     assert all(m["new"] == 0 for m in d["months"][1:])      # прошлые месяцы — без движения
     assert _call(dp, "GET", "/api/admin/flow?ym=2020-01", tg_id=ADMIN_TG)[1]["counts"]["net"] == 0
+
+
+def test_card_created_this_month_with_earlier_membership_is_not_new_twice():
+    """Шималян 01.11.2026: карточка заведена в ноябре, но месяц вступления поставлен октябрём задним числом —
+    в «пришли» она за октябрь, а в ноябре не должна висеть «без группы»."""
+    rows = [StudentGroup("STU-0321", "GRP-0002", joined_period="2026-10")]
+    events = [_ev("2026-11-01 17:24:23", "Новый ученик: STU-0321 Шималян Мария"),
+              _ev("2026-11-01 17:24:24", "Ученик STU-0321 добавлен в группу GRP-0002 с 2026-11")]
+    names = {"STU-0321": "Шималян Мария"}
+    nov = month_flow("2026-11", rows, events, names, GROUPS)
+    assert nov.new == [] and nov.as_dict()["counts"]["new"] == 0
+    octo = month_flow("2026-10", rows, events, names, GROUPS)
+    assert [(x.name, x.groups, x.note) for x in octo.new] == [("Шималян Мария", ["ВБ ХГ Младшая 🤸"], "")]
+    # карточка без единой группы — по-прежнему «пришёл, без группы» в месяц создания
+    alone = month_flow("2026-11", [], events[:1], names, GROUPS)
+    assert [(x.name, x.note, x.date) for x in alone.new] == [("Шималян Мария", "без группы", "2026-11-01")]

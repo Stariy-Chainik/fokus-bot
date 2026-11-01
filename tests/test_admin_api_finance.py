@@ -74,6 +74,9 @@ def test_payouts_overrides_flow(api):
     status, t = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")
     assert t["paid"] == 2000 and t["payouts"][0]["comment"] == "аванс" and len(t["lines"]) == 3
     assert t["payouts"][0]["bonus"] is False
+    # карточка «Зарплаты → педагог» отдаёт то же: выплаты, премии, нестандартные дни (один вход, 01.11.2026)
+    sal = _call(app, "GET", f"/api/admin/salaries/TCH-0001?ym={YM}")[1]
+    assert (sal["paid"], sal["payouts"], sal["bonuses"], sal["overrides"]) == (2000, t["payouts"], [], [])
     # 🗑 у выплаты (решение владельца 01.11.2026): строка удаляется, остаток снова растёт; повтор — 404
     from bot.services import activity
     from tests.fakes import ActivityRepoFake

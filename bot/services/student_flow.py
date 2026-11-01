@@ -158,7 +158,9 @@ def month_flow(period: str, rows: list, events: list, students: dict[str, str], 
         elif went:
             report.gone.append(FlowItem(sid, sname(sid), [gname(g) for g in went], f"с {_month_word(period)}",
                                         date=gone_at.get(sid, "")))
-        elif sid in created and sid in students:
+        elif sid in created and sid in students and not by_student.get(sid):
+            # карточка заведена в этом месяце и группы нет вовсе; если членство есть, но началось раньше
+            # (месяц вступления поставлен задним числом — Шималян 01.11.2026), ученик уже в «пришли» того месяца
             report.new.append(FlowItem(sid, sname(sid), [], "без группы", date=came_at.get(sid, "")))
     for items in (report.new, report.gone):            # от сегодня к 1-му числу (решение владельца 22.10.2026); без даты — в конце
         items.sort(key=lambda x: (not x.date, x.date and "".join(chr(255 - ord(c)) for c in x.date), x.name.lower()))
