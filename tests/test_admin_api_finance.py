@@ -84,8 +84,8 @@ def test_payouts_overrides_flow(api):
     assert _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]["paid"] == 0
     assert _call(app, "DELETE", "/api/admin/payouts/PO-000001")[0] == 404
     assert [e.text for e in log.items] == [f"Выплата отменена 2000 ₽: TCH-0001 · {YM} · аванс"]
-    status, r = _call(app, "POST", "/api/admin/payouts", json=body)
-    assert status == 200 and r["id"] == "PO-000002"
+    status, r = _call(app, "POST", "/api/admin/payouts", json=body)        # после удаления аванс можно записать заново
+    assert status == 200 and _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]["paid"] == 2000
     assert _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0001", "periodMonth": YM, "amount": 0})[0] == 400
     assert _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0404", "periodMonth": YM, "amount": 10})[0] == 404
 
