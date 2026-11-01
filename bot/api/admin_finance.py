@@ -13,6 +13,7 @@ from bot.utils.groups import lesson_group_title
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services import hall_rent
 from bot.services.bonuses import grant_bonus, revoke_bonus
+from bot.services.payouts import BonusPayoutError, cancel_payout
 from bot.services.payment_ledger import StudentMonthLessons
 from bot.services.payment_service import build_debtor_rows, period_collection, teacher_collection
 from bot.services.pending_queue import awaiting_periods
@@ -512,14 +513,18 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
         lines = await _described_lines(t, period)          # те же подписи, что на экране «Зарплаты»
         rows = await payout_repo.get_by_teacher_period(tid, period)
         overrides = await override_repo.get_for_teacher_period(tid, period)
+        bonuses = await bonus_repo.get_for_teacher_period(tid, period)
+        bonus_payouts = {b.payout_id for b in bonuses if b.payout_id}
         return _json({
             "teacherId": tid, "name": t.name, "period": period,
             "accrued": sum(ln["amount"] for ln in lines),
             "paid": _owner_paid(tid, sum(ln["amount"] for ln in lines), sum(p.amount for p in rows)),
-            "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment} for p in rows],
+            # у парной выплаты премии bonus=True — её 🗑 нет, отменяется премия целиком
+            "payouts": [{"id": p.payout_id, "amount": p.amount, "date": p.paid_at[:10], "comment": p.comment,
+                         "bonus": p.payout_id in bonus_payouts} for p in rows],
             # премии месяца — отдельным списком с отменой; в accrued, paid и lines они уже учтены
             "bonuses": [{"id": b.bonus_id, "amount": b.amount, "date": b.created_at[:10], "comment": b.comment}
-                        for b in await bonus_repo.get_for_teacher_period(tid, period)],
+                        for b in bonuses],
             "lines": lines, "summary": await _salary_summary(t, period),
             "overrides": [{"id": o.override_id, "date": o.date, "minutes": o.minutes, "comment": o.comment} for o in overrides],
             "isOwner": tid in settings.owner_teacher_id_set,
@@ -538,6 +543,18 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
         p = await payout_repo.add(tid, period, amount, user.tg_id, comment=comment)
         logger.info("Mini App: выплата %s %s %d руб. (%s) — админ %s", tid, period, amount, comment, user.tg_id)
         return _json({"id": p.payout_id})
+
+    async def payout_delete(request: web.Request, user) -> web.Response:
+        """🗑 у выплаты: ошибочный аванс или остаток (решение владельца 01.11.2026). Выплата премии — 409 bonus."""
+        pid = request.match_info["pid"]
+        try:
+            p = await cancel_payout(payout_repo, bonus_repo, pid, user.tg_id)
+        except BonusPayoutError:
+            return _json({"error": "bonus", "message": "Это выплата премии — отмените премию"}, status=409)
+        if p is None:
+            return _json({"error": "not_found"}, status=404)
+        logger.info("Mini App: выплата %s (%s %s %d руб.) удалена — админ %s", pid, p.teacher_id, p.period_month, p.amount, user.tg_id)
+        return _json({"ok": True, "amount": p.amount, "teacherId": p.teacher_id, "periodMonth": p.period_month})
 
     async def bonus_add(request: web.Request, user) -> web.Response:
         """🎁 Премия: начисление сверх зарплаты месяца и сразу парная выплата (bot/services/bonuses.py)."""
@@ -630,6 +647,7 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
         ("GET", "/salaries/{tid}/collection", salary_collection),
         ("POST", "/salaries/{tid}/rent", rent_add), ("DELETE", "/rent/{rid}", rent_delete),
         ("GET", "/payouts", payouts), ("GET", "/payouts/{tid}", payout_teacher), ("POST", "/payouts", payout_add),
+        ("DELETE", "/payouts/{pid}", payout_delete),
         ("POST", "/bonuses", bonus_add), ("DELETE", "/bonuses/{bid}", bonus_delete),
         ("POST", "/salary-overrides", override_add), ("DELETE", "/salary-overrides/{oid}", override_delete),
         ("GET", "/payhist", payhist_search), ("GET", "/payhist/{sid}", payhist_months), ("GET", "/payhist/{sid}/{ym}", payhist_month),

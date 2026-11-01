@@ -73,6 +73,19 @@ def test_payouts_overrides_flow(api):
     assert p["teachers"][0]["status"] == "partial" and p["paid"] == 2000
     status, t = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")
     assert t["paid"] == 2000 and t["payouts"][0]["comment"] == "аванс" and len(t["lines"]) == 3
+    assert t["payouts"][0]["bonus"] is False
+    # 🗑 у выплаты (решение владельца 01.11.2026): строка удаляется, остаток снова растёт; повтор — 404
+    from bot.services import activity
+    from tests.fakes import ActivityRepoFake
+    log = ActivityRepoFake()
+    activity.setup(log)                                     # conftest сбрасывает после теста
+    status, r = _call(app, "DELETE", "/api/admin/payouts/PO-000001")
+    assert status == 200 and r["amount"] == 2000
+    assert _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]["paid"] == 0
+    assert _call(app, "DELETE", "/api/admin/payouts/PO-000001")[0] == 404
+    assert [e.text for e in log.items] == [f"Выплата отменена 2000 ₽: TCH-0001 · {YM} · аванс"]
+    status, r = _call(app, "POST", "/api/admin/payouts", json=body)
+    assert status == 200 and r["id"] == "PO-000002"
     assert _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0001", "periodMonth": YM, "amount": 0})[0] == 400
     assert _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0404", "periodMonth": YM, "amount": 10})[0] == 404
 
@@ -231,7 +244,9 @@ def test_bonus_accrues_and_pays_at_once(api):
     assert status == 200 and r == {"id": "BN-000001", "payoutId": "PO-000001"}
     t = _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]
     assert t["accrued"] == 4333 + 5000 and t["paid"] == 5000
-    assert t["payouts"] == [{"id": "PO-000001", "amount": 5000, "date": "2026-09-18", "comment": "премия: турнир"}]
+    assert t["payouts"] == [{"id": "PO-000001", "amount": 5000, "date": "2026-09-18", "comment": "премия: турнир", "bonus": True}]
+    # парную выплату премии снять нельзя — отменяется премия целиком
+    assert _call(app, "DELETE", "/api/admin/payouts/PO-000001")[0] == 409
     assert t["bonuses"] == [{"id": "BN-000001", "amount": 5000, "date": f"{YM}-18", "comment": "турнир"}]
     assert (t["lines"][-1]["kind"], t["lines"][-1]["label"], t["lines"][-1]["amount"]) == ("bonus", "Премия: турнир", 5000)
     s = _call(app, "GET", f"/api/admin/salaries?ym={YM}")[1]

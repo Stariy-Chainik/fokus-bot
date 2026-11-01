@@ -55,7 +55,7 @@ def test_same_record_request_twice_creates_lessons_once(monkeypatch):
     dp, _ = make_api(monkeypatch)
     asyncio.run(dp["user_repo"].add(TEACHER_TG, teacher_id="TCH-0001"))
     before = len(dp["lesson_repo"].items)
-    body = {"kind": "pair", "date": f"{YM}-05", "durationMin": 60, "studentIds": ["STU-0001"]}
+    body = {"kind": "pair", "date": f"{YM}-01", "durationMin": 60, "studentIds": ["STU-0001"]}
     dp["student_repo"].items[0].partner_id, dp["student_repo"].items[1].partner_id = "STU-0002", "STU-0001"
 
     async def run():
@@ -113,7 +113,7 @@ def test_second_solo_same_day_needs_confirmation(monkeypatch):
     после подтверждения; каждое нажатие — свой requestId, поэтому повтором не считается."""
     dp = _api_with_teacher(monkeypatch)
     before = len(dp["lesson_repo"].items)
-    solo = {"kind": "soloist", "date": f"{YM}-06", "durationMin": 45, "studentIds": ["STU-0002"]}
+    solo = {"kind": "soloist", "date": f"{YM}-01", "durationMin": 45, "studentIds": ["STU-0002"]}
     r1, r2, r3, r4 = _post_all(dp, [{**solo, "requestId": "press-0001"}, {**solo, "requestId": "press-0002"},
                                     {**solo, "requestId": "press-0003", "confirmSameDay": True},
                                     {**solo, "requestId": "press-0004", "confirmSameDay": True}])
@@ -121,7 +121,7 @@ def test_second_solo_same_day_needs_confirmation(monkeypatch):
     assert r2[0] == 409 and r2[1]["error"] == "same_day" and "Петрова Анна" in r2[1]["message"]
     assert r3[0] == 200 and r4[0] == 200 and not r3[1].get("repeat") and not r4[1].get("repeat")
     new = dp["lesson_repo"].items[before:]
-    assert [(x.date, x.student_1_id) for x in new] == [(f"{YM}-06", "STU-0002")] * 3 and len({x.lesson_id for x in new}) == 3
+    assert [(x.date, x.student_1_id) for x in new] == [(f"{YM}-01", "STU-0002")] * 3 and len({x.lesson_id for x in new}) == 3
 
 
 def test_same_press_sent_twice_is_saved_once(monkeypatch):
