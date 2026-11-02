@@ -167,3 +167,22 @@ def test_teacher_sees_videos_and_gets_them_resent_to_telegram(api):  # noqa: F81
                         video_ids="video:Z")
     dp["task_repo"].items.append(other)
     assert _call(app, "POST", "/api/teacher/homework/tasks/TK-X/video/send", bot=bot)[0] == 404
+
+
+def test_diary_tasks_show_videos_only_resendable_for_own_tasks(api):  # noqa: F811
+    """Задания из дневника спортсмена (без выдачи группе): у ученика в кабинете педагога «📹 видео: N»,
+    кнопка пересылки — только у своих заданий; чужое задание с видео пересылать нельзя (404)."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    mine = asyncio.run(dp["task_repo"].add("STU-0001", "TCH-0001", "Правый поворот", 10))
+    asyncio.run(dp["task_repo"].add_video(mine.task_id, "video:V1"))
+    other = asyncio.run(dp["task_repo"].add("STU-0001", "TCH-0009", "Чужое", 10))
+    asyncio.run(dp["task_repo"].add_video(other.task_id, "video:V2"))
+    st, d = _call(app, "GET", "/api/teacher/diary/STU-0001/tasks")
+    rows = {t["id"]: (t["videos"], t["mine"]) for t in d["tasks"]}
+    assert st == 200 and rows[mine.task_id] == (1, True) and rows[other.task_id] == (1, False)
+    st, home = _call(app, "GET", "/api/teacher/diary/STU-0001")
+    assert st == 200 and {t["id"]: t["videos"] for t in home["openTasks"]}[mine.task_id] == 1
+    bot = FakeBot()
+    assert _call(app, "POST", f"/api/teacher/homework/tasks/{mine.task_id}/video/send", bot=bot)[1]["count"] == 1
+    assert _call(app, "POST", f"/api/teacher/homework/tasks/{other.task_id}/video/send", bot=bot)[0] == 404

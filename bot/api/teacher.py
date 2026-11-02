@@ -967,7 +967,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                       "graded": st.graded, "avgGrade": st.avg_grade, "byTopic": st.by_topic},
             "place": row.place if row else None, "placeIcon": place_icon(row.place) if row else "",
             "entries": [_entry(e, tasks) for e in sorted(entries, key=lambda e: e.date, reverse=True)],
-            "openTasks": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment}
+            "openTasks": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
+                           "videos": len(t.videos), "mine": t.teacher_id == teacher.teacher_id}
                           for t in await diary_service.open_tasks(sid)],
         })
 
@@ -1019,7 +1020,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "student": {"id": sid, "name": athletes[sid].name},
             "tasks": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
                        "status": t.status, "doneTimes": usage.get(t.task_id, (0, ""))[0],
-                       "lastDone": usage.get(t.task_id, (0, ""))[1]}
+                       "lastDone": usage.get(t.task_id, (0, ""))[1],
+                       # видео выполнения (02.11.2026): переслать в Telegram можно только своё задание
+                       "videos": len(t.videos), "mine": t.teacher_id == teacher.teacher_id}
                       for t in sorted(rows, key=lambda t: (t.status != "open", t.created_at), reverse=False)],
             "recent": await diary_service.recent_exercises(teacher.teacher_id),
         })

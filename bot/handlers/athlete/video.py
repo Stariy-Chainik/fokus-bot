@@ -57,7 +57,7 @@ async def _attach(reply, student, task, ref: str, diary_service: DiaryService,
         total = len(updated.videos)
         await notify_safely(
             send_ref(bot, teacher.tg_id, ref, task_caption(student.name, title, task.exercise, total, total),
-                     open_task_markup(task.batch_id)),
+                     open_task_markup(task.batch_id, task.student_id)),
             "Видео к заданию педагогу не отправлено: %s")
     logger.info("Видео к заданию %s от %s (%d-е)", task.task_id, student.student_id, len(updated.videos))
     who = f" педагогу {escape(teacher.name)}" if teacher is not None else ""

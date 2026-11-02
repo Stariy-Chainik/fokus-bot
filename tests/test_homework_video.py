@@ -57,7 +57,9 @@ def test_single_open_task_gets_the_video_and_teacher_is_notified(dp):
     assert task.videos == ["video:V1"]
     chat, caption, markup, media = msg.bot.sent[0]
     assert chat == TEACHER_CHAT and media == ("video", "V1")
-    assert "Иванов Иван" in caption and "Ритм в самбе" in caption and markup is None    # задание без выдачи — без кнопки
+    assert "Иванов Иван" in caption and "Ритм в самбе" in caption
+    # задание из дневника (без выдачи группе) — кнопка ведёт в дневник ученика
+    assert markup.inline_keyboard[0][0].web_app.url.endswith("?open=diary&sid=STU-0001")
     text, kb = msg.screens[-1]
     assert text.startswith("✅ Видео отправлено педагогу Река Станислав") and "ещё один" not in text
 

@@ -431,7 +431,7 @@ SCREENS['t.diary.s'] = async ({ id, ym }) => {
     <div class="eyebrow">Записи</div>
     ${d.entries.length ? list(d.entries.map(e => tEntryCell(e, id))) : '<div class="empty">В этом месяце записей нет</div>'}
     <div class="eyebrow">Задания</div>
-    ${d.openTasks.length ? list(d.openTasks.map(t => cell({ lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise), s: [t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ') }))) : '<div class="empty">Открытых заданий нет</div>'}
+    ${d.openTasks.length ? list(d.openTasks.map(t => cell({ lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise), s: [t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : '', t.videos ? `📹 видео: ${t.videos}` : ''].filter(Boolean).join(' · '), r: t.videos && t.mine ? `<button class="chip" data-act="hwVideoOpen" data-p='${esc(JSON.stringify({ tid: t.id }))}'>📹 Видео</button>` : '' }))) : '<div class="empty">Открытых заданий нет</div>'}
     <div style="margin-top:12px">${btn('➕ Выдать задание', 'tTaskForm', { sid: id })}${goBtn('📋 Все задания', 't.diary.tasks', { sid: id }, 'sec')}</div>` };
 };
 
@@ -441,9 +441,10 @@ SCREENS['t.diary.tasks'] = async ({ sid }) => {
     <div class="h2">${esc(d.student.name)}</div>
     ${d.tasks.length ? list(d.tasks.map(t => cell({
       lead: t.status === 'open' ? '📋' : '✅', plain: true, cls: 'wrap', t: esc(t.exercise),
-      s: [t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : '', t.doneTimes ? `сделано ${t.doneTimes} раз${t.lastDone ? `, последний ${fdate(t.lastDone)}` : ''}` : ''].filter(Boolean).join(' · '),
-      r: t.status === 'open' ? `<button class="chip" data-act="tTaskClose" data-p='${esc(JSON.stringify({ id: t.id, sid }))}'>Закрыть</button>` : pill('закрыто', 'mute'),
+      s: [t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : '', t.doneTimes ? `сделано ${t.doneTimes} раз${t.lastDone ? `, последний ${fdate(t.lastDone)}` : ''}` : '', t.videos ? `📹 видео: ${t.videos}` : ''].filter(Boolean).join(' · '),
+      r: `${t.videos && t.mine ? `<button class="chip" data-act="hwVideoOpen" data-p='${esc(JSON.stringify({ tid: t.id }))}'>📹 Видео</button> ` : ''}${t.status === 'open' ? `<button class="chip" data-act="tTaskClose" data-p='${esc(JSON.stringify({ id: t.id, sid }))}'>Закрыть</button>` : pill('закрыто', 'mute')}`,
     }))) : '<div class="empty">Заданий нет</div>'}
+    ${d.tasks.some(t => t.videos) ? '<p class="hint" style="margin-top:8px">📹 — ученик прислал видео выполнения: оно пришло вам в чат с ботом, «📹 Видео» присылает его снова.</p>' : ''}
     <div style="margin-top:12px">${btn('➕ Выдать задание', 'tTaskForm', { sid })}</div>` };
 };
 

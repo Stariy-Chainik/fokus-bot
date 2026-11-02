@@ -66,12 +66,19 @@ async def bot_username(bot) -> str:
         return ""
 
 
-def open_task_markup(batch_id: str) -> InlineKeyboardMarkup | None:
-    """Кнопка «📒 Открыть задание» — кабинет педагога сразу на выдаче (`?open=hw&bid=`)."""
-    if not settings.miniapp_url or not batch_id:
+def open_task_markup(batch_id: str, student_id: str = "") -> InlineKeyboardMarkup | None:
+    """Кнопка в кабинет педагога: выдача группе — «📒 Открыть задание» (`?open=hw&bid=`), задание из дневника
+    спортсмена — «📓 Открыть дневник» (`?open=diary&sid=`, экран заданий ученика)."""
+    if not settings.miniapp_url:
+        return None
+    if batch_id:
+        text, query = "📒 Открыть задание", f"open=hw&bid={batch_id}"
+    elif student_id:
+        text, query = "📓 Открыть дневник", f"open=diary&sid={student_id}"
+    else:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="📒 Открыть задание", web_app=WebAppInfo(url=f"{settings.miniapp_url}?open=hw&bid={batch_id}"))]])
+        text=text, web_app=WebAppInfo(url=f"{settings.miniapp_url}?{query}"))]])
 
 
 def task_caption(student_name: str, title: str, exercise: str, index: int = 1, total: int = 1,

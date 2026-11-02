@@ -1571,6 +1571,8 @@ ACT.switchRole = async ({ to }) => {
   }
   // «📒 Открыть задание» из сообщения с видео ученика (02.11.2026): ?open=hw&bid=HW-…
   if (ROLE === 'teacher' && q.get('open') === 'hw' && /^HW-\d+$/.test(q.get('bid') || '')) state.stack.push({ n: 't.hw.b', p: { id: q.get('bid') } });
+  // «📓 Открыть дневник» из сообщения с видео к заданию из дневника: ?open=diary&sid=STU-…
+  if (ROLE === 'teacher' && q.get('open') === 'diary' && /^STU-\d+$/.test(q.get('sid') || '')) state.stack.push({ n: 't.diary.tasks', p: { sid: q.get('sid') } });
   render();
   function fail(e) {
     document.getElementById('tabs').innerHTML = '';
