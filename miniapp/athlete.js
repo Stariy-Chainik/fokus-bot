@@ -101,15 +101,37 @@ SCREENS['s.entries'] = async ({ ym }) => {
 };
 
 /* ── Задания педагога ────────────────────────────────────────────────── */
+/* Видео выполнения (решение владельца 02.11.2026): ролик уходит в чат бота Telegram, файл хранит Telegram —
+   кнопка просит бота написать в чат, какое задание ждёт видео, и открывает чат. В MAX кнопки нет. */
+const sCanVideo = () => !!(tg && tg.initData) || DEV;
 SCREENS['s.tasks'] = async () => {
   const d = await api('/tasks');
+  const taskCell = t => cell({
+    lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise),
+    s: `${[t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ') || 'задание педагога'}${t.done ? `<br>сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : '<br>ещё не отрабатывали'}${t.videos ? `<br>📹 отправлено видео: ${t.videos}` : ''}`,
+  });
+  const videoCell = t => sCanVideo() ? cell({
+    lead: '📹', plain: true, t: t.videos ? 'Отправить ещё видео' : 'Отправить видео педагогу',
+    s: 'ролик уйдёт в чат бота, педагог увидит его сразу',
+    act: 'sVideoAsk', p: { tid: t.id, title: t.title || 'Задание', exercise: t.exercise },
+  }) : '';
   return { title: 'Мои задания', html: `
-    ${d.tasks.length ? list(d.tasks.map(t => cell({
-      lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise),
-      s: `${[t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ') || 'задание педагога'}${t.done ? `<br>сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : '<br>ещё не отрабатывали'}`,
-    }))) : empty('Открытых заданий нет', '<p class="hint" style="margin:0">Задания выдаёт педагог после тренировки</p>')}
+    ${d.tasks.length ? d.tasks.map(t => `<div class="list" style="margin-bottom:8px">${taskCell(t)}${videoCell(t)}</div>`).join('')
+      : empty('Открытых заданий нет', '<p class="hint" style="margin:0">Задания выдаёт педагог после тренировки</p>')}
     ${d.tasks.length ? `<div style="margin-top:12px">${btn('➕ Записать тренировку', 'sLogForm', {}, 'sec')}</div>
       <p class="hint" style="margin-top:8px">Отметьте задание в записи — педагог увидит, что вы его отработали. Закрывает задание педагог.</p>` : ''}` };
+};
+ACT.sVideoAsk = ({ tid, title, exercise }) => sheet(`<h3>📹 Видео к заданию</h3>
+  <div class="hint">${esc(title)} «${esc(exercise)}»</div>
+  <p class="hint" style="margin-top:8px">Откроется чат с ботом — отправьте туда ролик как обычное видео (можно несколько подряд). Педагог получит его сразу. Лучше снимать не дольше 1–2 минут.</p>
+  <div style="margin-top:12px">${btn('📹 Перейти в чат', 'sVideoGo', { tid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+ACT.sVideoGo = async ({ tid }) => {
+  try {
+    const r = await api(`/tasks/${tid}/video`, { method: 'POST' });
+    closeSheet();
+    if (tg && r.bot && tg.openTelegramLink) tg.openTelegramLink(`https://t.me/${r.bot}`);
+    else toast('Бот написал вам в чат — отправьте видео туда');
+  } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 
 /* ── Рейтинг ─────────────────────────────────────────────────────────── */

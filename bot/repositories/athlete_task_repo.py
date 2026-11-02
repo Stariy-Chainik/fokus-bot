@@ -1,9 +1,11 @@
 """Лист athlete_tasks: задания педагога спортсмену (упражнение + минуты).
 
 Колонки: task_id | student_id | teacher_id | exercise | minutes | comment |
-source | created_at | status | closed_at | batch_id | group_id | grade | grade_comment | graded_at.
+source | created_at | status | closed_at | batch_id | group_id | grade | grade_comment | graded_at | video_file_ids.
 Задание открыто до закрытия педагогом. Домашнее задание группе — строка на каждую ученицу с общим
 batch_id (HW-…); оценка за выполнение закрывает задание (`scripts/setup_homework.py` — колонки 11–15).
+video_file_ids (колонка 16, `scripts/setup_homework_video.py`) — видео выполнения от спортсмена: ссылки на файлы
+Telegram через `|` (`AthleteTask.videos`), сам ролик хранит Telegram.
 """
 from __future__ import annotations
 import logging
@@ -41,6 +43,7 @@ def _row_to_task(row: dict) -> AthleteTask:
         grade=_int(row.get("grade")),
         grade_comment=str(row.get("grade_comment") or ""),
         graded_at=str(row.get("graded_at") or ""),
+        video_ids=str(row.get("video_file_ids") or ""),
     )
 
 
@@ -48,8 +51,11 @@ def _task_to_row(t: AthleteTask) -> list:
     return [
         t.task_id, t.student_id, t.teacher_id, t.exercise, t.minutes,
         t.comment, t.source, t.created_at, t.status, t.closed_at,
-        t.batch_id, t.group_id, t.grade or "", t.grade_comment, t.graded_at,
+        t.batch_id, t.group_id, t.grade or "", t.grade_comment, t.graded_at, t.video_ids,
     ]
+
+
+VIDEO_COL = 16      # video_file_ids
 
 
 class AthleteTaskRepository(BaseRepository):
@@ -121,6 +127,20 @@ class AthleteTaskRepository(BaseRepository):
             if task.status != "closed":
                 task.status, task.closed_at = "closed", now
             await self._update_row(row_idx, _task_to_row(task))
+            return task
+
+    async def add_video(self, task_id: str, ref: str) -> Optional[AthleteTask]:
+        """Видео выполнения: дописать ссылку на файл Telegram (колонка 16, одна ячейка); None — задания нет.
+
+        Читается под замком листа: два ролика подряд не затирают друг друга."""
+        async with self._locked_row(task_id=task_id) as row_idx:
+            if row_idx is None:
+                return None
+            task = await self.get_by_id(task_id)
+            if task is None:
+                return None
+            task.video_ids = "|".join([*task.videos, ref])
+            await self._update_cells(row_idx, {VIDEO_COL: task.video_ids})
             return task
 
     async def close(self, task_id: str) -> Optional[AthleteTask]:

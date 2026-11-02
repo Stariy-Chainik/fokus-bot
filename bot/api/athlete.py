@@ -20,8 +20,13 @@ import logging
 
 from aiohttp import web
 
+from aiogram.exceptions import TelegramAPIError
+
 from bot.api.admin import auth_max_id, auth_tg_id, max_user_name
+from bot.api.homework import homework_title, short
+from bot.services.homework_video import bot_username
 from bot.services.parent_notifier import resolve_notifier
+from bot.states import HomeworkVideoStates
 from bot.utils.notify import notify
 from config.settings import settings
 from bot.services.diary_service import place_icon
@@ -106,12 +111,25 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
 
     async def _open_tasks(student) -> list[dict]:
         usage = await diary_service.task_usage(student.student_id)
+        numbers = await diary_service.homework_numbers()
         out = []
         for t in await diary_service.open_tasks(student.student_id):
             done, last = usage.get(t.task_id, (0, ""))
             out.append({"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes,
-                        "comment": t.comment, "done": done, "last": last})
+                        "comment": t.comment, "done": done, "last": last,
+                        # видео выполнения (02.11.2026): сколько уже отправлено и как задание называют в чате
+                        "videos": len(t.videos), "title": homework_title(numbers.get(t.batch_id, 0), t.created_at)})
         return out
+
+    def _fsm(tg_id: int):
+        """FSM-контекст чата спортсмена — чтобы бот знал, к какому заданию ждёт видео (в тестах dp без fsm)."""
+        fsm = getattr(dp, "fsm", None)
+        if fsm is None or bot is None:
+            return None
+        try:
+            return fsm.get_context(bot=bot, chat_id=tg_id, user_id=tg_id)
+        except Exception:
+            return None
 
     # ── профиль и сводка ─────────────────────────────────────────────────
     async def me(request: web.Request, tg_id, student) -> web.Response:
@@ -170,6 +188,32 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
     # ── задания и рейтинг ────────────────────────────────────────────────
     async def tasks(request: web.Request, tg_id, student) -> web.Response:
         return _json({"tasks": await _open_tasks(student)})
+
+    async def task_video_prompt(request: web.Request, tg_id, student) -> web.Response:
+        """«📹 Отправить видео» (решение владельца 02.11.2026): бот пишет в чат спортсмена, какое задание ждёт ролик,
+        и запоминает его; кабинет затем открывает чат (`bot` в ответе). Только Telegram: в MAX ролик слать некуда."""
+        if auth_tg_id(request) is None:
+            return _json({"error": "tg_only", "message": "Видео отправляется из Telegram"}, status=409)
+        task = await diary_service.task(request.match_info["tid"])
+        if task is None or task.student_id != student.student_id or task.status != "open":
+            return _json({"error": "not_found"}, status=404)
+        if bot is None:
+            return _json({"error": "unavailable"}, status=503)
+        title = homework_title((await diary_service.homework_numbers()).get(task.batch_id, 0), task.created_at)
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="hwv:cancel")]])
+        text = (f"📹 Пришлите видео для задания\n<b>{html.escape(title)}</b> «{html.escape(short(task.exercise))}»\n\n"
+                "Можно отправить несколько роликов подряд. Педагог получит каждый сразу.")
+        try:
+            await bot.send_message(tg_id, text, reply_markup=kb)
+        except TelegramAPIError as exc:
+            logger.warning("Видео к заданию: бот не смог написать спортсмену %s: %s", tg_id, exc)
+            return _json({"error": "bot_blocked", "message": "Откройте чат с ботом и отправьте /start"}, status=409)
+        ctx = _fsm(tg_id)
+        if ctx is not None:
+            await ctx.set_state(HomeworkVideoStates.waiting_video)
+            await ctx.update_data(hwv_task=task.task_id, hwv_file=None)
+        return _json({"ok": True, "bot": await bot_username(bot)})
 
     async def rating(request: web.Request, tg_id, student) -> web.Response:
         period = request.query.get("ym") or current_period()
@@ -258,7 +302,7 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/entries", entries), ("POST", "/entries", entry_create),
         ("DELETE", "/entries/{eid}", entry_delete),
-        ("GET", "/tasks", tasks), ("GET", "/rating", rating),
+        ("GET", "/tasks", tasks), ("POST", "/tasks/{tid}/video", task_video_prompt), ("GET", "/rating", rating),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, athlete_only(handler))

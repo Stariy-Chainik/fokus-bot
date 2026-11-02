@@ -336,7 +336,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             "homework": [{"id": t.task_id, "exercise": t.exercise, "minutes": t.minutes, "comment": t.comment,
                           "teacher": teachers.get(t.teacher_id, ""), "createdAt": t.created_at, "status": t.status,
                           "grade": t.grade, "gradeComment": t.grade_comment, "gradedAt": t.graded_at,
-                          "number": hw_numbers.get(t.batch_id, 0), "scale": settings.homework_scale(t.teacher_id)}
+                          "number": hw_numbers.get(t.batch_id, 0), "scale": settings.homework_scale(t.teacher_id),
+                          "videos": len(t.videos)}            # видео выполнения от спортсмена (02.11.2026)
                          for t in (await diary_service.student_tasks(student.student_id))[:30]],
         })
 

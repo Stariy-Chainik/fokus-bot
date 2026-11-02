@@ -45,7 +45,7 @@ def short(text: str, limit: int = 60) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> list[tuple]:
+def homework_routes(dp, diary_service, notifier, own_group_ids, group_names, bot=None) -> list[tuple]:
     """Маршруты `/api/teacher/homework*` (обёртку авторизации педагога ставит teacher.py)."""
     student_repo = dp["student_repo"]
     student_group_repo = dp["student_group_repo"]
@@ -73,6 +73,7 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
                 "minutes": t0.minutes, "comment": t0.comment, "groupId": t0.group_id,
                 "groupName": names.get(t0.group_id, ""), "createdAt": t0.created_at,
                 "total": len(tasks), "graded": sum(1 for t in tasks if t.grade),
+                "withVideo": sum(1 for t in tasks if t.videos),         # от скольких учеников есть видео
                 # индивидуальное задание (один ученик) — в списке видно, кому
                 "single": students.get(t0.student_id, t0.student_id) if len(tasks) == 1 else ""}
 
@@ -108,7 +109,8 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
             "scale": settings.homework_scale(teacher.teacher_id),
             "students": sorted(({"taskId": t.task_id, "studentId": t.student_id,
                                  "name": students.get(t.student_id, t.student_id), "grade": t.grade,
-                                 "gradeComment": t.grade_comment, "status": t.status} for t in tasks),
+                                 "gradeComment": t.grade_comment, "status": t.status,
+                                 "videos": len(t.videos)} for t in tasks),
                                key=lambda r: r["name"]),
         })
 
@@ -184,7 +186,35 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names) -> 
         logger.info("Mini App: педагог %s оценил задание %s на %s/%s", teacher.teacher_id, task.task_id, grade, scale)
         return _json({"ok": True, "grade": updated.grade, "gradeComment": updated.grade_comment, "scale": scale})
 
+    async def hw_video_send(request: web.Request, user, teacher) -> web.Response:
+        """«📹 Видео в Telegram» (решение владельца 02.11.2026): ролики ученика к заданию — педагогу в чат с ботом.
+        Файлы хранит Telegram, пересылка по file_id, сервер ничего не качает."""
+        if diary_service is None:
+            return _unavailable()
+        task = await diary_service.task(request.match_info["tid"])
+        if task is None or task.teacher_id != teacher.teacher_id:
+            return _json({"error": "not_found"}, status=404)
+        if not task.videos:
+            return _json({"error": "no_video", "message": "Видео к этому заданию нет"}, status=404)
+        if bot is None or not user.tg_id:
+            return _unavailable()
+        from aiogram.exceptions import TelegramAPIError
+
+        from bot.services.homework_video import bot_username, send_ref, task_caption
+        s = await student_repo.get_by_id(task.student_id)
+        name = s.name if s is not None else task.student_id
+        title = homework_title((await diary_service.homework_numbers()).get(task.batch_id, 0), task.created_at)
+        total, sent = len(task.videos), 0
+        for i, ref in enumerate(task.videos, start=1):
+            try:
+                await send_ref(bot, user.tg_id, ref, task_caption(name, title, task.exercise, i, total, head="📹"))
+                sent += 1
+            except TelegramAPIError as exc:
+                logger.warning("Видео к заданию %s педагогу не отправлено: %s", task.task_id, exc)
+        return _json({"ok": True, "count": sent, "total": total, "bot": await bot_username(bot)})
+
     return [
         ("GET", "/homework", hw_list), ("POST", "/homework", hw_create),
         ("GET", "/homework/{bid}", hw_batch), ("POST", "/homework/tasks/{tid}/grade", hw_grade),
+        ("POST", "/homework/tasks/{tid}/video/send", hw_video_send),
     ]

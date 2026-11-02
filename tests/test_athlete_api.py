@@ -101,3 +101,34 @@ def test_entries_and_rating_of_the_month(api):
     assert status == 200 and r["me"]["place"] == 1 and r["me"]["me"] is True
     status, r = _call(app, "GET", f"/api/athlete/rating?ym={YM}&topic=Самба")
     assert status == 200 and r["topic"] == "Самба" and r["me"]["minutes"] == 45
+
+
+def test_video_prompt_writes_to_chat_and_tasks_show_videos(api):
+    """«📹 Отправить видео» (02.11.2026): бот пишет спортсмену, какое задание ждёт ролик; в списке заданий —
+    сколько видео уже отправлено и название задания; чужое или закрытое задание — 404, из MAX — 409."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    task = dp["task_repo"].items[0]
+    asyncio.run(dp["task_repo"].add_video(task.task_id, "video:AAA"))
+    st, d = _call(app, "GET", "/api/athlete/tasks")
+    assert st == 200 and (d["tasks"][0]["videos"], d["tasks"][0]["title"]) == (1, "Задание")
+
+    bot = FakeBot()
+
+    async def run():
+        app_ = web.Application()
+        register_athlete_api(app_, dp, bot)
+        client = TestClient(TestServer(app_))
+        await client.start_server()
+        try:
+            h = {"Authorization": f"tma {make_init_data(user_id=ATHLETE_TG)}"}
+            r = await client.request("POST", f"/api/athlete/tasks/{task.task_id}/video", headers=h)
+            r404 = await client.request("POST", "/api/athlete/tasks/TK-404/video", headers=h)
+            return r.status, await r.json(), r404.status
+        finally:
+            await client.close()
+    st, out, st404 = asyncio.run(run())
+    assert st == 200 and out["ok"] and st404 == 404
+    chat_id, text, kb = bot.sent[0][:3]
+    assert chat_id == ATHLETE_TG and "Пришлите видео" in text and "Ритм в самбе" in text
+    assert kb.inline_keyboard[0][0].callback_data == "hwv:cancel"

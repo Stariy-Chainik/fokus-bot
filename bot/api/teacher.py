@@ -1655,7 +1655,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("POST", "/bills/student/{sid}/receipt", bills_receipt),
         ("DELETE", "/payments/{pid}", bills_cancel),
         ("PUT", "/bills/student/{sid}/subscription", bills_sub_amount),
-        *homework_routes(dp, diary_service, notifier, _own_group_ids, _group_names),    # задания группе (15.10.2026)
+        *homework_routes(dp, diary_service, notifier, _own_group_ids, _group_names, bot),   # задания группе (15.10.2026)
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, teacher_only(handler))

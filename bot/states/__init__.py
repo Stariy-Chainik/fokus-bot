@@ -23,7 +23,7 @@ from .teacher_states import (
     GradeEntryStates,
     AssignTaskStates,
 )
-from .athlete_states import AthleteRegStates, LogTrainingStates
+from .athlete_states import AthleteRegStates, HomeworkVideoStates, LogTrainingStates
 
 __all__ = [
     "RecordLessonStates",
@@ -50,4 +50,5 @@ __all__ = [
     "AssignTaskStates",
     "AthleteRegStates",
     "LogTrainingStates",
+    "HomeworkVideoStates",
 ]

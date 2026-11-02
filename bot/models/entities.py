@@ -300,3 +300,10 @@ class AthleteTask:
     grade: int = 0             # оценка педагога за выполнение, 1–5; 0 — не оценено
     grade_comment: str = ""
     graded_at: str = ""
+    # видео выполнения от спортсмена (решение владельца 02.11.2026): ссылки на файлы Telegram через `|` —
+    # `video:<file_id>` / `note:<file_id>` (кружок) / `doc:<file_id>` (файлом); хранит Telegram, сервер не качает
+    video_ids: str = ""
+
+    @property
+    def videos(self) -> list[str]:
+        return [v for v in self.video_ids.split("|") if v]

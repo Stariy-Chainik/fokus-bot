@@ -12,6 +12,8 @@ from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
+from bot.services.homework_video import is_video_document
+
 logger = logging.getLogger(__name__)
 
 BLOCKED_CALLBACKS = (
@@ -39,7 +41,8 @@ class ParentCabinetOnlyMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery) and is_blocked_callback(event.data):
             await _redirect(event.message, event.answer, HINT_ALERT, alert=True)
             return None
-        if isinstance(event, Message) and (event.photo or event.document):
+        # видео файлом — это ролик спортсмена к домашнему заданию, не чек (bot/handlers/athlete/video.py)
+        if isinstance(event, Message) and (event.photo or (event.document and not is_video_document(event.document))):
             await _redirect(event, None, HINT_FILE)
             return None
         return await handler(event, data)

@@ -491,7 +491,7 @@ SCREENS['t.hw'] = async ({ gid }) => {
     ${d.batches.length ? list(d.batches.map(b => cell({
       lead: b.graded === b.total ? '✅' : '📋', plain: true, cls: 'wrap', t: `${b.number ? `<b>№${b.number}</b> · ` : ''}${esc(b.exercise)}`,
       s: `${gid ? '' : `${esc(b.groupName)} · `}${fdate(b.createdAt.slice(0, 10))} · ${b.single ? `👤 ${esc(b.single)}` : plural(b.total, ['ученик', 'ученика', 'учеников'])}`,
-      r: pill(b.graded === b.total ? 'оценено' : `оценено ${b.graded}/${b.total}`, b.graded === b.total ? 'ok' : b.graded ? 'warn' : 'mute'),
+      r: `${b.withVideo ? `<span class="hint">📹 ${b.withVideo}</span> ` : ''}${pill(b.graded === b.total ? 'оценено' : `оценено ${b.graded}/${b.total}`, b.graded === b.total ? 'ok' : b.graded ? 'warn' : 'mute')}`,
       go: 't.hw.b', p: { id: b.id },
     }))) : '<div class="empty">Заданий пока нет</div>'}
     ${gid ? '' : start}` };
@@ -552,18 +552,27 @@ SCREENS['t.hw.b'] = async ({ id }) => {
     <div class="eyebrow">Оценено ${d.graded} из ${d.total}</div>
     ${list(d.students.map(s => cell({
       lead: s.grade ? '⭐' : '📋', plain: true, cls: 'wrap', t: esc(s.name),
-      s: s.grade ? (s.gradeComment ? `📝 ${esc(s.gradeComment)}` : 'оценено') : s.status === 'closed' ? 'закрыто без оценки' : 'не оценено',
+      s: `${s.grade ? (s.gradeComment ? `📝 ${esc(s.gradeComment)}` : 'оценено') : s.status === 'closed' ? 'закрыто без оценки' : 'не оценено'}${s.videos ? ` · 📹 видео: ${s.videos}` : ''}`,
       r: s.grade ? `<b>${s.grade}/${d.scale}</b>` : pill('оценить', 'warn'),
-      act: 'hwGradeAsk', p: { tid: s.taskId, name: s.name, grade: s.grade || 0, comment: s.gradeComment || '', scale: d.scale, number: d.number },
+      act: 'hwGradeAsk', p: { tid: s.taskId, name: s.name, grade: s.grade || 0, comment: s.gradeComment || '', scale: d.scale, number: d.number, videos: s.videos || 0 },
     })))}
-    <p class="hint" style="margin-top:8px">Тап по ученику — оценка за выполнение от 1 до ${d.scale}. Она сразу уходит родителям; поставленную оценку можно поменять.</p>` };
+    <p class="hint" style="margin-top:8px">Тап по ученику — оценка за выполнение от 1 до ${d.scale}. Она сразу уходит родителям; поставленную оценку можно поменять.${d.students.some(s => s.videos) ? ' 📹 — ученик прислал видео выполнения: оно пришло вам в чат с ботом, из листа оценки его можно получить снова.' : ''}</p>` };
 };
-ACT.hwGradeAsk = ({ tid, name, grade, comment, scale = 5, number }) => {
+ACT.hwGradeAsk = ({ tid, name, grade, comment, scale = 5, number, videos = 0 }) => {
   state.ui.tGrade = grade;
   sheet(`<h3>Оценка за задание${number ? ` №${number}` : ''}</h3><div class="hint">${esc(name)}${grade ? ` · сейчас ${grade}/${scale}` : ''} · от 1 до ${scale}</div>
+  ${videos ? `<div style="margin-top:10px">${btn(`📹 Видео в Telegram (${videos})`, 'hwVideoOpen', { tid }, 'sec')}</div>` : ''}
   <div class="chips" style="margin-top:12px">${Array.from({ length: scale }, (_, i) => i + 1).map(g => `<button class="chip" data-act="tGradePick" data-p='${esc(JSON.stringify({ g }))}' id="grade-${g}" aria-pressed="${g === grade}">${g}</button>`).join('')}</div>
   ${field('hw-gc', 'Комментарий (необязательно)', comment, 'placeholder="Что получилось, что подтянуть" maxlength="300"')}
   <div style="margin-top:12px">${btn('⭐ Сохранить оценку', 'hwGradeDo', { tid, scale })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+};
+/* Видео выполнения (02.11.2026): бот пересылает ролики ученика педагогу в чат — файлы хранит Telegram. */
+ACT.hwVideoOpen = async ({ tid }) => {
+  try {
+    const r = await api(`/homework/tasks/${tid}/video/send`, { method: 'POST' });
+    toast(`Отправлено в чат с ботом: ${plural(r.count, ['видео', 'видео', 'видео'])}`);
+    if (tg && r.bot && tg.openTelegramLink) tg.openTelegramLink(`https://t.me/${r.bot}`);
+  } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
 };
 ACT.hwGradeDo = async ({ tid, scale = 5 }) => {
   const grade = state.ui.tGrade;

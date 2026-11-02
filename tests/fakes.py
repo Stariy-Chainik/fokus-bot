@@ -43,8 +43,10 @@ class FakeUser:
 class FakeMessage:
     """Message: запоминает всё, что хендлер показал (edit_text и answer — по порядку)."""
 
-    def __init__(self, text: str | None = None, user_id: int = 1, message_id: int = 10) -> None:
+    def __init__(self, text: str | None = None, user_id: int = 1, message_id: int = 10,
+                 video=None, video_note=None, document=None) -> None:
         self.text = text
+        self.video, self.video_note, self.document = video, video_note, document    # медиа как в aiogram
         self.message_id = message_id
         self.from_user = FakeUser(user_id)
         self.chat = SimpleNamespace(id=user_id)
@@ -92,6 +94,16 @@ class FakeBot:
 
     async def send_photo(self, chat_id, photo, caption=None, reply_markup=None, **_):
         self.sent.append((chat_id, caption, reply_markup))
+
+    # видео к домашнему заданию (bot/services/homework_video.py): пересылка по file_id
+    async def send_video(self, chat_id, video, caption=None, reply_markup=None, **_):
+        self.sent.append((chat_id, caption, reply_markup, ("video", video)))
+
+    async def send_video_note(self, chat_id, video_note, reply_markup=None, **_):
+        self.sent.append((chat_id, None, reply_markup, ("note", video_note)))
+
+    async def send_document(self, chat_id, document, caption=None, reply_markup=None, **_):
+        self.sent.append((chat_id, caption, reply_markup, ("doc", document)))
 
 
 class FakeCallbackQuery:
@@ -1021,6 +1033,12 @@ class AthleteTaskRepoFake:
         if task is not None:
             task.grade, task.grade_comment, task.graded_at = grade, comment, "2026-10-16 12:00:00"
             task.status, task.closed_at = "closed", task.closed_at or "2026-10-16 12:00:00"
+        return task
+
+    async def add_video(self, task_id, ref):
+        task = await self.get_by_id(task_id)
+        if task is not None:
+            task.video_ids = "|".join([*task.videos, ref])
         return task
 
 

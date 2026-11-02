@@ -11,10 +11,10 @@ from bot.models.entities import AthleteTask
 from bot.repositories.athlete_task_repo import _row_to_task, _task_to_row
 from tests.test_admin_api import PARENT_TG
 from tests.test_telegram_auth import make_init_data
-from tests.test_teacher_api import _call, api  # noqa: F401 — фикстура педагога с дневником
+from tests.test_teacher_api import TEACHER_TG, _call, api  # noqa: F401 — фикстура педагога с дневником
 
 HEADERS = ["task_id", "student_id", "teacher_id", "exercise", "minutes", "comment", "source", "created_at",
-           "status", "closed_at", "batch_id", "group_id", "grade", "grade_comment", "graded_at"]
+           "status", "closed_at", "batch_id", "group_id", "grade", "grade_comment", "graded_at", "video_file_ids"]
 
 
 def _parent(dp, method, path):
@@ -33,12 +33,15 @@ def _parent(dp, method, path):
 
 def test_row_roundtrip_keeps_homework_fields():
     t = AthleteTask(task_id="TK-000001", student_id="STU-0001", teacher_id="TCH-0001", exercise="Шпагат", minutes=0,
-                    batch_id="HW-000001", group_id="GRP-0001", grade=5, grade_comment="молодец", graded_at="2026-10-16")
+                    batch_id="HW-000001", group_id="GRP-0001", grade=5, grade_comment="молодец", graded_at="2026-10-16",
+                    video_ids="video:AAA|note:BBB")
     row = _task_to_row(t)
     assert len(row) == len(HEADERS)
     back = _row_to_task(dict(zip(HEADERS, row, strict=True)))
     assert (back.batch_id, back.group_id, back.grade, back.grade_comment, back.minutes) == (
         "HW-000001", "GRP-0001", 5, "молодец", 0)
+    assert back.videos == ["video:AAA", "note:BBB"] and AthleteTask(task_id="x", student_id="", teacher_id="",
+                                                                   exercise="", minutes=0).videos == []
     # старая строка без новых колонок читается как раньше
     old = _row_to_task(dict(zip(HEADERS[:10], _task_to_row(t)[:10], strict=True)))
     assert (old.batch_id, old.grade) == ("", 0)
@@ -121,3 +124,46 @@ def test_grade_out_of_range_rejected_by_service(api, grade):  # noqa: F811
     _app, dp = api
     with pytest.raises(ValueError):
         asyncio.run(dp["diary_service"].grade_task("TK-000001", grade))
+
+
+def test_video_column_is_appended_under_sheet_lock():
+    """Колонка 16 `video_file_ids`: ролики дописываются через `|`, остальные ячейки не трогаются."""
+    from bot.repositories.athlete_task_repo import AthleteTaskRepository
+    from tests.fakes import FakeSheetsClient, FakeWorksheet, run
+    ws = FakeWorksheet(HEADERS, [["TK-000001", "STU-0001", "TCH-0001", "Шпагат", 0, "", "teacher", "2026-10-15 12:00:00",
+                                  "open", "", "HW-000001", "GRP-0001", "", "", "", ""]])
+    repo = AthleteTaskRepository(FakeSheetsClient(ws), "athlete_tasks")
+    assert run(repo.add_video("TK-000001", "video:AAA")).videos == ["video:AAA"]
+    assert run(repo.add_video("TK-000001", "doc:BBB")).videos == ["video:AAA", "doc:BBB"]
+    assert run(repo.add_video("TK-404", "video:CCC")) is None
+    assert ws.rows[0][15] == "video:AAA|doc:BBB" and ws.rows[0][3] == "Шпагат"
+
+
+def test_teacher_sees_videos_and_gets_them_resent_to_telegram(api):  # noqa: F811
+    """Видео ученика (02.11.2026): в выдаче у ученика «📹 видео: N», «📹 Видео в Telegram» пересылает ролики
+    педагогу по file_id; чужое задание и задание без видео — 404."""
+    from tests.fakes import FakeBot
+    app, dp = api
+    st, r = _call(app, "POST", "/api/teacher/homework",
+                  json={"groupId": "GRP-0001", "studentIds": ["STU-0001", "STU-0002"], "exercise": "Шпагат"})
+    assert st == 200
+    t1, t2 = dp["task_repo"].items
+    asyncio.run(dp["task_repo"].add_video(t1.task_id, "video:FILE1"))
+    asyncio.run(dp["task_repo"].add_video(t1.task_id, "note:FILE2"))
+    st, b = _call(app, "GET", f"/api/teacher/homework/{r['id']}")
+    rows = {s["studentId"]: s["videos"] for s in b["students"]}
+    assert st == 200 and rows == {"STU-0001": 2, "STU-0002": 0} and b["withVideo"] == 1
+    st, lst = _call(app, "GET", "/api/teacher/homework")
+    assert st == 200 and lst["batches"][0]["withVideo"] == 1
+
+    bot = FakeBot()
+    st, out = _call(app, "POST", f"/api/teacher/homework/tasks/{t1.task_id}/video/send", bot=bot)
+    assert st == 200 and (out["count"], out["total"]) == (2, 2)
+    kinds = [x[3] for x in bot.sent if len(x) > 3]
+    assert kinds == [("video", "FILE1"), ("note", "FILE2")]
+    assert bot.sent[0][0] == TEACHER_TG and "Иванов Иван" in bot.sent[0][1] and "Задание №1" in bot.sent[0][1]
+    assert _call(app, "POST", f"/api/teacher/homework/tasks/{t2.task_id}/video/send", bot=bot)[0] == 404   # видео нет
+    other = AthleteTask(task_id="TK-X", student_id="STU-0001", teacher_id="TCH-0009", exercise="чужое", minutes=0,
+                        video_ids="video:Z")
+    dp["task_repo"].items.append(other)
+    assert _call(app, "POST", "/api/teacher/homework/tasks/TK-X/video/send", bot=bot)[0] == 404

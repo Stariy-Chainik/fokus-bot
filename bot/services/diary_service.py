@@ -261,6 +261,13 @@ class DiaryService:
     async def close_task(self, task_id: str) -> Optional[AthleteTask]:
         return await self._tasks.close(task_id)
 
+    async def add_task_video(self, task_id: str, student_id: str, ref: str) -> Optional[AthleteTask]:
+        """Видео выполнения от спортсмена (решение владельца 02.11.2026): только к своему открытому заданию."""
+        task = await self._tasks.get_by_id(task_id)
+        if task is None or task.student_id != student_id or task.status != "open":
+            return None
+        return await self._tasks.add_video(task_id, ref)
+
     # ─── Домашние задания группе (решение владельца 15.10.2026) ──────────
 
     async def create_homework(
