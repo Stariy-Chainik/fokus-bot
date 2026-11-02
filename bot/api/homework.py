@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 EXERCISE_MAX = 300
 _background: set = set()          # ссылки на фоновые рассылки — иначе задачу может собрать GC
+_create_lock = asyncio.Lock()     # выдача группе: два одинаковых запроса подряд — второй видит первую выдачу
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -137,7 +138,14 @@ def homework_routes(dp, diary_service, notifier, own_group_ids, group_names, bot
         ids = [sid for sid in dict.fromkeys(wanted) if sid in members]
         if not ids:
             return _json({"error": "bad_request", "message": "Отметьте хотя бы одного ученика"}, status=400)
-        tasks = await diary_service.create_homework(teacher.teacher_id, gid, ids, exercise, minutes, comment)
+        async with _create_lock:
+            # повтор той же выдачи за минуту (двойное нажатие, повтор запроса сетью) — второй раз не выдаём
+            dup = await diary_service.recent_homework_duplicate(teacher.teacher_id, gid, ids, exercise, minutes, comment)
+            if dup is not None:
+                number = (await diary_service.homework_numbers()).get(dup, 0)
+                logger.info("Mini App: педагог %s повторно выдал задание %s группе %s — повтор", teacher.teacher_id, dup, gid)
+                return _json({"ok": True, "id": dup, "number": number, "count": len(ids), "repeat": True})
+            tasks = await diary_service.create_homework(teacher.teacher_id, gid, ids, exercise, minutes, comment)
         number = (await diary_service.homework_numbers()).get(tasks[0].batch_id, 0)
         title = homework_title(number, tasks[0].created_at)
         group = (await group_names()).get(gid, "")

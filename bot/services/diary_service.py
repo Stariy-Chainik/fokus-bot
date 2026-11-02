@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Optional
 
 from bot.models import Student, TrainingEntry, AthleteTask
@@ -128,6 +128,17 @@ def period_of(d: date) -> str:
 
 
 # ─── Сервис ───────────────────────────────────────────────────────────────────
+
+REPEAT_WINDOW_SEC = 60      # повтор выдачи задания в это окно считается двойным нажатием
+
+
+def _age_sec(created_at: str) -> float:
+    """Сколько секунд назад создана запись (created_at — `now_str`, YYYY-MM-DD HH:MM:SS); не разобрать — очень давно."""
+    try:
+        return (datetime.now() - datetime.strptime(str(created_at)[:19], "%Y-%m-%d %H:%M:%S")).total_seconds()
+    except ValueError:
+        return float("inf")
+
 
 class DiaryService:
     def __init__(
@@ -247,6 +258,35 @@ class DiaryService:
         self, student_id: str, teacher_id: str, exercise: str, minutes: int, comment: str = "",
     ) -> AthleteTask:
         return await self._tasks.add(student_id, teacher_id, exercise, minutes, comment)
+
+    async def recent_task_duplicate(
+        self, student_id: str, teacher_id: str, exercise: str, minutes: int, comment: str = "",
+        within_sec: int = REPEAT_WINDOW_SEC,
+    ) -> Optional[AthleteTask]:
+        """Такое же открытое задание этого педагога, выданное только что (двойное нажатие «Выдать задание»,
+        случай Лобачева 02.11.2026: TK-000052 и TK-000053 через 1,8 с). None — повтора нет."""
+        for t in await self._tasks.get_for_student(student_id, only_open=True):
+            if (t.teacher_id == teacher_id and t.exercise == exercise and t.minutes == minutes
+                    and t.comment == comment and not t.batch_id and _age_sec(t.created_at) <= within_sec):
+                return t
+        return None
+
+    async def recent_homework_duplicate(
+        self, teacher_id: str, group_id: str, student_ids: list[str], exercise: str, minutes: int,
+        comment: str = "", within_sec: int = REPEAT_WINDOW_SEC,
+    ) -> Optional[str]:
+        """Та же выдача группе (педагог, группа, текст, минуты, комментарий, те же ученики) за последнюю минуту —
+        её batch_id; None — повтора нет."""
+        batches: dict[str, list[AthleteTask]] = {}
+        for t in await self._tasks.get_all():
+            if (t.batch_id and t.teacher_id == teacher_id and t.group_id == group_id and t.exercise == exercise
+                    and t.minutes == minutes and t.comment == comment and _age_sec(t.created_at) <= within_sec):
+                batches.setdefault(t.batch_id, []).append(t)
+        wanted = set(student_ids)
+        for bid, tasks in batches.items():
+            if {t.student_id for t in tasks} == wanted:
+                return bid
+        return None
 
     async def task(self, task_id: str) -> Optional[AthleteTask]:
         return await self._tasks.get_by_id(task_id)

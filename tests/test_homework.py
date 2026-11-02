@@ -186,3 +186,38 @@ def test_diary_tasks_show_videos_only_resendable_for_own_tasks(api):  # noqa: F8
     bot = FakeBot()
     assert _call(app, "POST", f"/api/teacher/homework/tasks/{mine.task_id}/video/send", bot=bot)[1]["count"] == 1
     assert _call(app, "POST", f"/api/teacher/homework/tasks/{other.task_id}/video/send", bot=bot)[0] == 404
+
+
+def test_double_tap_does_not_duplicate_diary_task(api):  # noqa: F811
+    """Двойное нажатие «Выдать задание» (случай Лобачева 02.11.2026): то же задание за минуту — второй раз не
+    создаётся и спортсмену не шлётся (`repeat`); другое упражнение или давнее такое же — новое задание."""
+    from bot.utils import now_str
+    app, dp = api
+    body = {"exercise": "Правый открытый поворот", "minutes": 10, "comment": "каждый день"}
+    st, r1 = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks", json=body)
+    assert st == 200 and not r1.get("repeat")
+    dp["task_repo"].items[-1].created_at = now_str()           # фейк ставит старую дату — делаем «только что»
+    st, r2 = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks", json=body)
+    assert st == 200 and r2["repeat"] is True and r2["id"] == r1["id"]
+    assert len(dp["task_repo"].items) == 1
+    assert sum(1 for addrs, text in dp["notifier"].sent if "Новое задание" in text) == 1
+    st, r3 = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks", json={**body, "exercise": "Левый поворот"})
+    assert st == 200 and not r3.get("repeat") and len(dp["task_repo"].items) == 2
+    dp["task_repo"].items[0].created_at = "2026-10-01 12:00:00"  # то же задание, но выдано давно — это не повтор
+    st, r4 = _call(app, "POST", "/api/teacher/diary/STU-0001/tasks", json=body)
+    assert st == 200 and not r4.get("repeat") and len(dp["task_repo"].items) == 3
+
+
+def test_double_tap_does_not_duplicate_homework_batch(api):  # noqa: F811
+    from bot.utils import now_str
+    app, dp = api
+    body = {"groupId": "GRP-0001", "studentIds": ["STU-0001", "STU-0002"], "exercise": "Шпагат", "minutes": 5}
+    st, r1 = _call(app, "POST", "/api/teacher/homework", json=body)
+    assert st == 200 and r1["count"] == 2
+    for t in dp["task_repo"].items:
+        t.created_at = now_str()
+    st, r2 = _call(app, "POST", "/api/teacher/homework", json=body)
+    assert st == 200 and r2["repeat"] is True and (r2["id"], r2["number"]) == (r1["id"], r1["number"])
+    assert len(dp["task_repo"].items) == 2
+    st, r3 = _call(app, "POST", "/api/teacher/homework", json={**body, "studentIds": ["STU-0001"]})
+    assert st == 200 and not r3.get("repeat") and r3["id"] != r1["id"] and len(dp["task_repo"].items) == 3

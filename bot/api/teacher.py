@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import time
 import uuid
@@ -1027,6 +1029,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "recent": await diary_service.recent_exercises(teacher.teacher_id),
         })
 
+    _task_locks: dict[str, asyncio.Lock] = {}
+
+    def _task_lock(sid: str) -> asyncio.Lock:
+        """Два одинаковых запроса в одну секунду — второй ждёт первого и видит его задание."""
+        return _task_locks.setdefault(sid, asyncio.Lock())
+
     @diary_only
     async def diary_task_add(request: web.Request, user, teacher) -> web.Response:
         sid = request.match_info["sid"]
@@ -1041,7 +1049,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         if not exercise or not isinstance(minutes, int) or minutes <= 0:
             return _json({"error": "bad_request", "message": "Нужно упражнение и минуты"}, status=400)
-        task = await diary_service.create_task(sid, teacher.teacher_id, exercise, minutes, comment)
+        async with _task_lock(sid):
+            # двойное нажатие «Выдать задание» (02.11.2026): то же задание за минуту — отдаём первое, второго нет
+            dup = await diary_service.recent_task_duplicate(sid, teacher.teacher_id, exercise, minutes, comment)
+            if dup is not None:
+                logger.info("Mini App: педагог %s повторно выдал задание %s ученику %s — повтор", teacher.teacher_id, dup.task_id, sid)
+                return _json({"ok": True, "id": dup.task_id, "repeat": True})
+            task = await diary_service.create_task(sid, teacher.teacher_id, exercise, minutes, comment)
         note = f"\n💬 {comment}" if comment else ""
         if bot is not None or notifier is not None:
             await notify_athlete(athletes[sid], f"📋 <b>Новое задание от {teacher.name}</b>\n\n<b>{task.exercise}</b> — "

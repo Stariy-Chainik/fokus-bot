@@ -540,7 +540,7 @@ ACT.hwSend = async ({ gid }) => {
     state.ui.hwSel = null;
     state.stack.pop();
     go('t.hw.b', { id: r.id });
-    toast(`Задание №${r.number} выдано: ${plural(r.count, ['ученик', 'ученика', 'учеников'])}, родителям отправлено`);
+    toast(r.repeat ? `Задание №${r.number} уже выдано` : `Задание №${r.number} выдано: ${plural(r.count, ['ученик', 'ученика', 'учеников'])}, родителям отправлено`);
   } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
   finally { hwSending = false; }
 };
@@ -716,11 +716,20 @@ ACT.tGradeDo = async ({ id }) => {
 ACT.tTaskForm = ({ sid }) => sheet(`<h3>➕ Задание</h3><div class="hint">Спортсмен увидит его при записи тренировки.</div>
   ${field('task-e', 'Упражнение', '', 'placeholder="Махи у станка, растяжка…"')}${field('task-m', 'Минут', '15', 'inputmode="numeric"')}${field('task-c', 'Комментарий (необязательно)', '')}
   <div style="margin-top:12px">${btn('💾 Выдать задание', 'tTaskAdd', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+/* Двойное нажатие «Выдать задание» (случай Лобачева 02.11.2026: два одинаковых задания через 1,8 с): кнопки листа
+   блокируются на время запроса, а сервер повтор того же задания за минуту второй раз не создаёт (`repeat`). */
+let taskAdding = false;
 ACT.tTaskAdd = async ({ sid }) => {
   const exercise = val('task-e').trim(); const minutes = +val('task-m');
   if (!exercise || !minutes) { toast('Нужно упражнение и минуты'); return; }
-  try { await api(`/diary/${sid}/tasks`, { method: 'POST', body: { exercise, minutes, comment: val('task-c').trim() } }); closeSheet(); render(); toast('Задание отправлено спортсмену'); }
-  catch (e) { toast(errText(e)); }
+  if (taskAdding) return;
+  taskAdding = true;
+  document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = true; });
+  try {
+    const r = await api(`/diary/${sid}/tasks`, { method: 'POST', body: { exercise, minutes, comment: val('task-c').trim() } });
+    closeSheet(); render(); toast(r.repeat ? 'Это задание уже выдано' : 'Задание отправлено спортсмену');
+  } catch (e) { toast(errText(e)); document.querySelectorAll('.sheet .btn').forEach(b => { b.disabled = false; }); }
+  finally { taskAdding = false; }
 };
 ACT.tTaskClose = async ({ id }) => { try { await api(`/diary/tasks/${id}/close`, { method: 'POST' }); render(); toast('Задание закрыто'); } catch (e) { toast(errText(e)); } };
 ACT.tPayAsk = ({ sid, ym, key, name, rest, student, picked }) => {
