@@ -205,6 +205,27 @@ def test_group_salary_rate_overrides_teacher_card_rate(monkeypatch):
     assert calc_earned(LessonType.INDIVIDUAL, 45, teacher, "GRP-0019") == teacher.rate_for_teacher
 
 
+def test_group_headcount_rate_from_min_children(monkeypatch):
+    """GROUP_HEADCOUNT_RATES: сад ЮБ у Яковлевой — 2000 ₽ за занятие от 12 детей, меньше — 1700 (02.11.2026)."""
+    from config.settings import settings
+    from bot.services.billing_service import salary_rule
+    teacher = _teacher(rate_group=1275)
+    monkeypatch.setattr(settings, "group_headcount_rates", "GRP-0008:12:1500:2026-11,GRP-0028:12:1500:2026-11")
+    kids = lambda n: ",".join(f"STU-{i:04d}:60:850" for i in range(1, n + 1))  # noqa: E731
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0008", kids(12), "2026-11-03") == 2000
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0008", kids(11), "2026-11-03") == 1700
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0028", kids(15), "2026-11-07") == 2000
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0008", kids(15), "2026-10-09") == 1700   # до ноября — как было
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0001", kids(20), "2026-11-03") == 1700   # другая группа
+    assert calc_earned(LessonType.GROUP, 60, teacher, "GRP-0008", "STU-1,STU-2", "2026-11-03") == 1700  # старый формат — 2 детей
+    rule = salary_rule(LessonType.GROUP, 60, teacher, "GRP-0008", kids(12), "2026-11-03")
+    assert (rule.rate, rule.headcount, rule.headcount_min, rule.headcount_rate, rule.group_rate) == (1500, 12, 12, 1500, False)
+    assert salary_rule(LessonType.GROUP, 60, teacher, "GRP-0008", kids(8), "2026-11-03").headcount == 8
+    assert settings.group_headcount_rate("GRP-0008") == (12, 1500)
+    assert settings.group_headcount_rate("GRP-0008", "2026-10-30") is None
+    assert settings.group_headcount_rate("GRP-0009", "2026-11-03") is None
+
+
 def test_rate_history_supports_mid_month_price_change():
     """Цена выросла 4 сентября: занятия 1–3 считаются по старой, с 4-го — по новой."""
     from bot.services import rate_history

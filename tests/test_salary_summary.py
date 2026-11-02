@@ -87,6 +87,28 @@ def test_group_rows_with_free_and_merged_lessons(monkeypatch):
     assert rows["g:GRP-0028"].amount == 1700
 
 
+def test_headcount_rate_rows_and_notes(monkeypatch):
+    """Сад ЮБ с ноября 2026: от 12 детей — 2000 ₽/ч, меньше — 1700; в строке правило словами, у занятия — сколько детей."""
+    monkeypatch.setattr(settings, "group_headcount_rates", "GRP-0008:12:1500:2026-11,GRP-0028:12:1500:2026-11")
+    kids = lambda n: ",".join(f"STU-{i}:60:850" for i in range(1, n + 1))  # noqa: E731
+    lessons = [_lesson("L1", "2026-11-03", "GRP-0008", att=kids(12)),
+               _lesson("L2", "2026-11-06", "GRP-0008", att=kids(8)),
+               _lesson("L3", "2026-11-10", "GRP-0008", att=kids(15), merged="GRP-0028"),
+               _lesson("L4", "2026-11-03", "GRP-0028", att=kids(6))]
+    rows = {r.key: r for r in _summary(lessons)}
+    g8 = rows["g:GRP-0008"]
+    assert (g8.count, g8.amount, g8.merged) == (3, 5700, 1)
+    assert g8.rule == "ставка педагога 1 700 ₽/ч · от 12 детей — 2 000 ₽/ч (2 занятия)"
+    assert [(i.amount, i.note) for i in g8.items] == [
+        (2000, "12 детей — 2 000 ₽/ч"), (1700, "8 детей"), (2000, "две группы одним занятием · 15 детей — 2 000 ₽/ч")]
+    g28 = rows["g:GRP-0028"]
+    assert (g28.amount, g28.rule) == (1700, "ставка педагога 1 700 ₽/ч · от 12 детей — 2 000 ₽/ч")
+    assert g28.items[0].note == "6 детей"
+    # до ноября правило не действует — как было
+    old = {r.key: r for r in _summary([_lesson("L5", "2026-10-09", "GRP-0008", att=kids(15))])}
+    assert (old["g:GRP-0008"].amount, old["g:GRP-0008"].rule, old["g:GRP-0008"].items[0].note) == (1700, "ставка педагога 1 700 ₽/ч", "")
+
+
 def test_revenue_share_individual_direct_and_fixed_duration(monkeypatch):
     monkeypatch.setattr(settings, "revenue_share_groups", "GRP-0020:50")
     monkeypatch.setattr(settings, "salary_duration_groups", "GRP-0025:45")

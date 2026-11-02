@@ -50,6 +50,9 @@ class SummaryRow:
     _fixed_minutes: int | None = None
     _percent: int = 0
     _revenue: int = 0
+    _headcount_min: int = 0     # GROUP_HEADCOUNT_RATES: от скольких детей повышенная ставка
+    _headcount_rate: int = 0
+    _headcount_hits: int = 0    # занятий по повышенной ставке
 
     def add(self, item: SummaryItem) -> None:
         self.items.append(item)
@@ -68,6 +71,19 @@ def rate_text(rate45: int) -> str:
     if per_hour % MINUTES_PER_UNIT == 0:
         return f"{_fmt(per_hour // MINUTES_PER_UNIT)} ₽/ч"
     return f"{_fmt(rate45)} ₽ за 45 мин"
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """12 детей, 21 ребёнок, 3 ребёнка."""
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} {one}"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} {few}"
+    return f"{n} {many}"
+
+
+def kids_text(n: int) -> str:
+    return plural(n, "ребёнок", "ребёнка", "детей")
 
 
 def hours_text(minutes: int) -> str:
@@ -94,6 +110,13 @@ def _rate_rule(row: SummaryRow) -> str:
         return "в зарплату не идёт"
     if not rates:
         return NO_PAY
+    if row._headcount_min:
+        base = [r for r in rates if r != row._headcount_rate]
+        boost = f"от {row._headcount_min} детей — {rate_text(row._headcount_rate)}"
+        if not base:
+            return f"{boost} · все занятия"
+        hits = f" ({plural(row._headcount_hits, 'занятие', 'занятия', 'занятий')})" if row._headcount_hits else ""
+        return f"{who} {' / '.join(rate_text(r) for r in base)} · {boost}{hits}"
     if row._fixed_minutes:
         per_lesson = " / ".join(_fmt(round(r * row._fixed_minutes / MINUTES_PER_UNIT)) for r in rates)
         return f"{per_lesson} ₽ за занятие любой длительности · {who} {' / '.join(rate_text(r) for r in rates)}"
@@ -217,6 +240,11 @@ def _add_lesson(row, ln, ls, teacher, group_names: dict, student_names: dict) ->
     if ls.merged_groups:
         r.merged += 1
         notes.append(MERGED_NOTE)
+    if rule.headcount_min:
+        r._headcount_min, r._headcount_rate = rule.headcount_min, rule.headcount_rate
+        boosted = rule.headcount >= rule.headcount_min and ln.amount > 0
+        r._headcount_hits += boosted
+        notes.append(kids_text(rule.headcount) + (f" — {rate_text(rule.headcount_rate)}" if boosted else ""))
     r.add(SummaryItem(ln.date, label, ls.duration_min, ln.amount, ls.lesson_id, " · ".join(notes)))
 
 

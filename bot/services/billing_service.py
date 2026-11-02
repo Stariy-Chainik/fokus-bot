@@ -29,6 +29,9 @@ class SalaryRule:
     group_rate: bool = False  # ставка группы (GROUP_SALARY_RATES), а не карточки педагога
     percent: int = 0          # kind=share — процент от сбора
     revenue: int = 0          # kind=share — сбор с посетивших
+    headcount: int = 0        # детей на занятии (kind=rate, у группы с GROUP_HEADCOUNT_RATES)
+    headcount_min: int = 0    # от скольких детей действует повышенная ставка (0 — правила нет)
+    headcount_rate: int = 0   # повышенная ставка за 45 мин
 
 
 def salary_rule(
@@ -65,8 +68,18 @@ def salary_rule(
     own = settings.group_salary_rate(group_id, period) if group_id and is_group else None
     if own is not None:
         rate = own
+    # Ставка по числу пришедших детей (GROUP_HEADCOUNT_RATES): от N детей — повышенная ставка,
+    # меньше — обычная (сад ЮБ у Яковлевой: от 12 детей 2000 ₽ вместо 1700, решение владельца 02.11.2026).
+    headcount = headcount_min = headcount_rate = 0
+    hc = settings.group_headcount_rate(group_id, period) if group_id and is_group else None
+    if hc is not None:
+        headcount_min, headcount_rate = hc
+        headcount = len(parse_attendees(attendees or "", default_duration=duration_min))
+        if headcount >= headcount_min:
+            rate = headcount_rate
     return SalaryRule("rate", round(rate * duration_min / MINUTES_PER_UNIT), rate=rate, minutes=duration_min,
-                      fixed=fixed, group_rate=own is not None)
+                      fixed=fixed, group_rate=own is not None,
+                      headcount=headcount, headcount_min=headcount_min, headcount_rate=headcount_rate)
 
 
 def calc_earned(

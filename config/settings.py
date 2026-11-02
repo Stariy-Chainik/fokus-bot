@@ -327,6 +327,32 @@ class Settings(BaseSettings):
         hit = [rate for since, rate in rows if not since or since <= period[:7]]
         return hit[-1] if hit else None
 
+    # Ставка по числу пришедших детей (решение владельца 02.11.2026: Яковлева в саду ЮБ — 2000 ₽ за занятие,
+    # когда в группе 12 и больше детей, меньше — 1700 как обычно). Формат: GRP-XXXX:мин_детей:ставка[:с месяца],
+    # ставка — ₽ за 45 мин, как rate_group (1500 = 2000 ₽/ч); у группы может быть несколько строк по месяцам.
+    # Дети считаются по attendees занятия, у объединённого занятия двух групп — обеих.
+    group_headcount_rates: str = Field(default="", alias="GROUP_HEADCOUNT_RATES")
+
+    @property
+    def group_headcount_rate_rows(self) -> dict:
+        """group_id → [(с какого месяца или "", минимум детей, ставка)] по возрастанию месяца."""
+        out: dict[str, list[tuple[str, int, int]]] = {}
+        for chunk in self.group_headcount_rates.replace("|", ",").split(","):
+            parts = [p.strip() for p in chunk.split(":")]
+            if len(parts) >= 3 and parts[0] and parts[1].isdigit() and parts[2].isdigit():
+                out.setdefault(parts[0], []).append((parts[3] if len(parts) > 3 else "", int(parts[1]), int(parts[2])))
+        return {gid: sorted(rows) for gid, rows in out.items()}
+
+    def group_headcount_rate(self, group_id: str, period: str | None = None) -> tuple[int, int] | None:
+        """(минимум детей, ставка) на дату/месяц `period` — последняя строка, чей месяц ≤ period; None — правила нет."""
+        rows = self.group_headcount_rate_rows.get(group_id) if group_id else None
+        if not rows:
+            return None
+        if period is None:
+            return rows[-1][1], rows[-1][2]
+        hit = [(n, rate) for since, n, rate in rows if not since or since <= period[:7]]
+        return hit[-1] if hit else None
+
     # Абонемент «2 раза в неделю» (цена ниже, чем за 3): GRP-XXXX:цена,... На проде — ХГ Боброво по сайту:
     # Начальная 5000, Средняя и Спортивная 6000 (цена группы = 3 раза). Переключатель — в карточке ученика.
     subscription_twice_prices: str = Field(default="", alias="SUBSCRIPTION_TWICE_PRICES")
