@@ -27,14 +27,20 @@ def build(token: str, deps: dict, tg_bot):
 
 
 async def run_max(bot, dp, *, retry_delay: int = 15, token_retry_delay: int = 120) -> None:
-    """Polling с перезапуском: сбой MAX не должен ронять Telegram-бота."""
+    """Polling с перезапуском: сбой MAX не должен ронять Telegram-бота.
+
+    `skip_updates=False` (решение владельца 02.11.2026): MAX хранит события, пока бот не подтвердит их маркером
+    следующего запроса `get_updates`, поэтому после перезапуска (деплой, сбой) бот получает всё, что родители
+    нажали, пока он не работал, и обрабатывает. Раньше стояло `True` — такие события читались и молча
+    выбрасывались как «старые». Повтор возможен только у последней пачки перед остановкой (её маркер не успел
+    уйти на сервер) — окно в доли секунды."""
     while True:
         try:
             me = await bot.get_me()
             from .render import ME
             ME.update(id=getattr(me, "user_id", None), username=getattr(me, "username", None))
             logger.info("MAX: запуск polling для @%s", getattr(me, "username", "?"))
-            await dp.start_polling(bot, skip_updates=True)
+            await dp.start_polling(bot, skip_updates=False)
             return
         except asyncio.CancelledError:
             raise

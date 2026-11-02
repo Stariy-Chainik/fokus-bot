@@ -53,3 +53,27 @@ def test_build_max_registers_handlers():
     from bot.max.app import build
     bot, dp = build("1:fake-token", {"student_repo": object()}, tg_bot=object())
     assert bot is not None and dp is not None
+
+
+def test_run_max_processes_updates_that_arrived_while_bot_was_down():
+    """Перезапуск не теряет нажатия в MAX (02.11.2026): polling стартует без skip_updates — MAX отдаёт события,
+    не подтверждённые маркером до остановки, и бот их обрабатывает, а не выбрасывает как старые."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from bot.max.app import run_max
+    from bot.max import render
+
+    calls = []
+
+    class Bot:
+        async def get_me(self):
+            return SimpleNamespace(user_id=7, username="fokus_bot")
+
+    class Dp:
+        async def start_polling(self, bot, *, skip_updates=True):
+            calls.append(skip_updates)
+
+    asyncio.run(run_max(Bot(), Dp()))
+    assert calls == [False]
+    assert render.ME.get("username") == "fokus_bot"
