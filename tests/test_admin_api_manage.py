@@ -37,6 +37,9 @@ def test_group_card_teachers_members_periods(api):
     status, g = _call(app, "GET", "/api/admin/groups/GRP-0001")
     assert status == 200 and [t["assigned"] for t in g["teachers"]] == [True]
     assert [(m["name"], m["joined"], m["left"]) for m in g["members"]] == [("Иванов Иван", "", ""), ("Петрова Анна", "", "")]
+    # кто оплатил месяц по группе — в составе (решение владельца 06.11.2026): занятие 800 ни у кого не оплачено
+    assert (g["pay"]["billed"], g["pay"]["paidCount"]) == (2, 0)
+    assert {sid: p["status"] for sid, p in g["pay"]["students"].items()} == {"STU-0001": "unpaid", "STU-0002": "unpaid"}
 
     assert _call(app, "PUT", "/api/admin/groups/GRP-0001/teachers", json={"teacherId": "TCH-0001", "assigned": False})[0] == 200
     assert _call(app, "GET", "/api/admin/groups/GRP-0001")[1]["teachers"][0]["assigned"] is False

@@ -12,7 +12,9 @@
 """
 from __future__ import annotations
 
+from bot.models.enums import GroupBillingMode
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
+from bot.utils.dates import current_period, prev_period
 
 NO_GROUP = "NOGROUP"      # ученик без групп: раздел вместо филиала
 PARTS = ("sub", "group", "ind")      # абонемент / групповые / индивидуальные
@@ -132,3 +134,64 @@ async def month_breakdown(dp, period: str) -> dict:
     return {"period": period, "branches": result,
             "accrued": sum(b["accrued"] for b in result), "paid": sum(b["paid"] for b in result),
             "rest": sum(b["rest"] for b in result)}
+
+
+# ── «Кто оплатил» в составе группы (решение владельца 06.11.2026) ─────────────────────────────────────────
+
+def _status_cell(accrued: int, paid: int) -> dict:
+    rest = max(accrued - paid, 0)
+    return {"accrued": accrued, "paid": paid, "rest": rest,
+            "status": "none" if accrued <= 0 else "paid" if not rest else "partial" if paid else "unpaid"}
+
+
+async def group_pay_status(dp, group, period: str, student_ids) -> dict[str, dict]:
+    """Кто из учеников оплатил месяц **по этой группе** — для состава группы в кабинетах администратора и
+    педагога. Абонемент — ключ `SUB:gid` карты начислений; группа по посещению — занятия группы за месяц с той
+    же отметкой ✓, что в счёте (`student_lesson_marks`, объединённое занятие считается обеим группам); бесплатная
+    группа — начислений нет. Только эта группа: индивидуальные и чужие направления ученика сюда не входят, так
+    что педагог без полного счёта видит ровно то, что и так видит в своей группе.
+    → {sid: {accrued, paid, rest, status}}, status — paid / partial / unpaid / none (начислений нет)."""
+    ids = list(student_ids)
+    out: dict[str, dict] = {}
+    if not ids:
+        return out
+    payment_service = dp["payment_service"]
+    if group.billing_mode == GroupBillingMode.SUBSCRIPTION:
+        ledger = await payment_service.compute_ledger_map(since_period=period, until_period=period)
+        key = f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"
+        for sid in ids:
+            accrued, paid = ledger.get((sid, key, period), (0, 0))
+            out[sid] = _status_cell(accrued, min(paid, accrued))
+    elif group.billing_mode == GroupBillingMode.PER_VISIT:
+        for sid in ids:
+            month = await payment_service.student_lesson_marks(sid, period)
+            accrued = paid = 0
+            for ls in month.lessons:
+                if group.group_id not in ls.group_ids:
+                    continue
+                m = month.mark(ls.lesson_id)
+                if m.amount <= 0:
+                    continue
+                accrued += m.amount
+                paid += m.amount if m.paid else 0
+            out[sid] = _status_cell(accrued, paid)
+    else:
+        for sid in ids:
+            out[sid] = _status_cell(0, 0)
+    return out
+
+
+async def group_pay_block(dp, group, student_ids, period: str | None = None) -> dict:
+    """Блок «кто оплатил» карточки группы: статус текущего месяца у каждого ученика и долг за прошлый месяц
+    по этой же группе; `billed`/`paidCount` — для строки «оплатили N из M» в шапке."""
+    period = period or current_period()
+    prev = prev_period(period)
+    ids = list(student_ids)
+    cur = await group_pay_status(dp, group, period, ids)
+    before = await group_pay_status(dp, group, prev, ids)
+    students = {sid: {**(cur.get(sid) or _status_cell(0, 0)), "prevRest": (before.get(sid) or {}).get("rest", 0)}
+                for sid in ids}
+    billed = [c for c in students.values() if c["status"] != "none"]
+    return {"period": period, "prev": prev, "students": students, "billed": len(billed),
+            "paidCount": sum(1 for c in billed if c["status"] == "paid"),
+            "prevUnpaid": sum(1 for c in students.values() if c["prevRest"])}

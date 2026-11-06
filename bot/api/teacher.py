@@ -477,10 +477,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             if key not in seen:
                 seen.add(key)
                 pairs.append({"aId": s.student_id, "aName": s.name, "bId": partner.student_id, "bName": partner.name})
+        from bot.services.payment_breakdown import group_pay_block
         return _json({
             "id": g.group_id, "name": g.name, "mode": g.billing_mode.value,
             "priceFull": g.price_full, "priceShort": g.price_short,
             "kindergarten": is_kindergarten_group(g),            # у садовой группы в составе — группа в саду
+            # кто оплатил месяц по этой группе ✅/🟡/⬜ и долг за прошлый (решение владельца 06.11.2026)
+            "pay": await group_pay_block(dp, g, [s.student_id for s in members]),
             "students": [{"id": s.student_id, "name": s.name, "tier": s.group_tier.value,
                           "partnerId": s.partner_id or "", "kgroup": s.kindergarten_group} for s in members],
             # «Ушёл из группы»: с какого месяца не начислять абонемент (решение владельца 02.10.2026)

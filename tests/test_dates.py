@@ -35,6 +35,11 @@ def test_period_label_words():
     assert period_label("2025-01") == "Январь 2025"
 
 
+def test_prev_period():
+    from bot.utils.dates import prev_period
+    assert prev_period("2026-11") == "2026-10" and prev_period("2026-01") == "2025-12"
+
+
 def test_periods_since_is_inclusive_and_ordered():
     from bot.utils.dates import periods_since
     assert periods_since("2026-09", "2026-11") == ["2026-09", "2026-10", "2026-11"]

@@ -168,7 +168,7 @@ SCREENS['t.groups'] = async () => {
 
 /* Строка состава: имя ведёт в карточку, «✖» — «Ушёл из группы» (только без долгов; решение владельца 02.10.2026).
    Это div: кнопка внутри кнопки-cell ломает разметку. */
-const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead">${initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${g.kindergarten ? (s.kgroup ? `🏫 гр. ${esc(s.kgroup)}` : '🏫 группа в саду не указана') : s.partnerId ? 'в паре' : 'солист'}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
+const tMemberRow = (g, gid, s) => `<div class="cell"><span class="lead${payRosterLead(g.pay, s.id) ? ' plain' : ''}">${payRosterLead(g.pay, s.id) || initials(s.name)}</span><span data-go="t.student" data-p='${esc(JSON.stringify({ id: s.id }))}'><div class="t">${esc(s.name)}</div><div class="s">${[payRosterNote(g.pay, s.id), g.kindergarten ? (s.kgroup ? `🏫 гр. ${esc(s.kgroup)}` : '🏫 группа в саду не указана') : s.partnerId ? 'в паре' : 'солист'].filter(Boolean).join(' · ')}</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="tLeaveAsk" data-p='${esc(JSON.stringify({ gid, sid: s.id, name: s.name, group: g.name, options: g.leaveOptions || [], mode: g.mode }))}' aria-label="Ушёл из группы">✖</button></span></div>`;
 /* «Добавить ученика»: сначала поиск по базе (чтобы не завести дубль), затем существующий или новая карточка. */
 ACT.tAddAsk = ({ gid, group }) => sheet(`<h3>Добавить ученика</h3><div class="hint">${esc(plainName(group))}. Введите фамилию и имя — сначала проверим, нет ли ученика в базе. Администратор получит сообщение.</div>
   ${field('add-n', 'Фамилия и имя', '', 'placeholder="Иванова Мария" autocomplete="off"')}
@@ -288,7 +288,7 @@ SCREENS['t.group'] = async ({ id, ym }) => {
       : (g.students.length ? list(g.students.map(s => tMemberRow(g, id, s))) : '<div class="empty">В группе никого нет</div>')
         + `<div style="margin-top:12px">${btn('🔗 Пригласить родителей', 'inviteOpen', { gid: id })}${goBtn('📋 Домашнее задание', 't.hw.new', { gid: id }, 'sec')}${goBtn('📒 Домашние задания и оценки', 't.hw', { gid: id }, 'sec')}${btn('➕ Добавить ученика', 'tAddAsk', { gid: id, group: g.name }, 'sec')}</div>`;
   return { title: g.name, html: `
-    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div></div>
+    <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(g.name)}</div><div class="hint">${MODE[g.mode] || g.mode}${g.mode === 'per_visit' ? ` · ${fmt(g.priceFull)} за посещение` : g.mode === 'subscription' ? ` · ${fmt(g.priceFull)} в месяц` : ''}</div>${payRosterLine(g.pay) ? `<div class="hint" style="margin-top:4px">${payRosterLine(g.pay)}</div>` : ''}</div>
     ${chipsAct('tGroupTab', tab, [['all', `Состав (${g.students.length})`], ['pairs', `Пары (${g.pairs.length})`], ['solo', `Солисты (${g.soloists.length})`],
       ...(state.me.canBill ? [['pay', '💳 Оплата']] : [])])}
     ${rows}` };

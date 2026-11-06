@@ -146,8 +146,11 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
                       "studentName": students[o.student_id].name if o.student_id in students else None, "amount": o.amount}
                      for o in await override_repo.get_for_group(gid)]
         overrides.sort(key=lambda o: (o["periodMonth"] != "*", o["periodMonth"], o["studentName"] or ""))
+        from bot.services.payment_breakdown import group_pay_block
+        pay = await group_pay_block(dp, g, [m["id"] for m in members if not m["left"]])   # кто оплатил ✅/🟡/⬜
         return _json({
             **_group_dto(g, sum(1 for m in members if not m["left"])), "branchName": branch.name if branch else g.branch_id,
+            "pay": pay,
             "teachers": [{"id": t.teacher_id, "name": t.name, "assigned": t.teacher_id in assigned}
                          for t in sorted(await teacher_repo.get_all(), key=lambda t: t.name)],
             "members": members, "overrides": overrides, "kindergarten": is_kindergarten_group(g),

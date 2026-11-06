@@ -81,6 +81,12 @@ def period_label(period_month: str) -> str:
     return f"{month_name_ru(int(month))} {year}"
 
 
+def prev_period(period: str) -> str:
+    """Месяц перед `period` (YYYY-MM): «2026-11» → «2026-10», «2026-01» → «2025-12»."""
+    y, m = int(period[:4]), int(period[5:7])
+    return f"{y - 1}-12" if m == 1 else f"{y}-{m - 1:02d}"
+
+
 def periods_since(start: str, end: str | None = None) -> list[str]:
     """Месяцы YYYY-MM от `start` по `end` (по умолчанию текущий) включительно, по порядку.
 

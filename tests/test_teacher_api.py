@@ -12,7 +12,7 @@ from bot.services.diary_service import DiaryService
 from config.settings import settings
 from tests.fakes import (
     AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake,
-    mk_entry, mk_lesson, mk_payment, mk_student, mk_submission, mk_user,
+    mk_entry, mk_group, mk_lesson, mk_payment, mk_student, mk_submission, mk_user,
 )
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, await_teacher, make_api
 from tests.test_telegram_auth import make_init_data
@@ -984,3 +984,29 @@ def test_teacher_cabinet_decides_new_child_requests(api):
     other = pending.items[2].action_id
     assert _call(app, "POST", f"/api/teacher/newchild/{other}/decide", json={"approve": True})[0] == 404     # чужая группа
     assert _call(app, "GET", "/api/teacher/home")[1]["newChild"] == 0
+
+
+def test_group_roster_shows_who_paid_this_month(api):
+    """Состав группы: у каждого ученика статус оплаты месяца по этой группе ✅/🟡/⬜ и долг за прошлый месяц
+    (решение владельца 06.11.2026). Абонемент — по ключу SUB:gid, посещения — по занятиям группы."""
+    from bot.utils.dates import prev_period
+
+    app, dp = api
+    dp["payment_repo"].rows.append(mk_payment("PAY-1", "STU-0001", YM, "TCH-0001", 4800, status=PaymentStatus.PAID))
+    pay = _call(app, "GET", "/api/teacher/groups/GRP-0001")[1]["pay"]
+    assert (pay["period"], pay["prev"], pay["billed"], pay["paidCount"], pay["prevUnpaid"]) == (YM, prev_period(YM), 2, 1, 0)
+    assert pay["students"]["STU-0001"] == {"accrued": 800, "paid": 800, "rest": 0, "status": "paid", "prevRest": 0}
+    assert pay["students"]["STU-0002"] == {"accrued": 800, "paid": 0, "rest": 800, "status": "unpaid", "prevRest": 0}
+
+    # абонементная группа: долг за прошлый месяц виден в составе, текущий — частично оплачен
+    prev = prev_period(YM)
+    teacher = dp["teacher_repo"].items[0]
+    dp["group_repo"].items.append(mk_group("GRP-0002", "Абонемент", billing_mode=GroupBillingMode.SUBSCRIPTION, price_full=5000))
+    dp["teacher_group_repo"]._t2g["TCH-0001"].append("GRP-0002")
+    asyncio.run(dp["student_group_repo"].add("STU-0002", "GRP-0002", prev))
+    for lid, day in (("LES-S1", f"{prev}-10"), ("LES-S2", f"{YM}-03")):
+        dp["lesson_repo"].items.append(mk_lesson(lid, teacher, day, duration=60, lesson_type=LessonType.GROUP, group_id="GRP-0002"))
+    dp["payment_repo"].rows.append(mk_payment("PAY-S", "STU-0002", YM, "SUB:GRP-0002", 2000, status=PaymentStatus.PAID))
+    pay = _call(app, "GET", "/api/teacher/groups/GRP-0002")[1]["pay"]
+    assert pay["students"]["STU-0002"] == {"accrued": 5000, "paid": 2000, "rest": 3000, "status": "partial", "prevRest": 5000}
+    assert (pay["billed"], pay["paidCount"], pay["prevUnpaid"]) == (1, 0, 1)
