@@ -142,6 +142,15 @@ class Settings(BaseSettings):
     def attendance_group_id_set(self) -> set:
         return {g.strip() for g in self.attendance_group_ids.replace("|", ",").split(",") if g.strip()}
 
+    # Группы по посещению с одной ценой за занятие (решение владельца 06.11.2026, «БП БТ Спортивная — Никишин»):
+    # в мастере записи у ученика нет кнопки тарифа «60 мин ↕ / 🆓 пробное» — каждый отмеченный идёт по полной
+    # цене группы, тариф из запроса сервер не учитывает.
+    fixed_price_groups: str = Field(default="", alias="FIXED_PRICE_GROUPS")
+
+    @property
+    def fixed_price_group_id_set(self) -> set:
+        return {g.strip() for g in self.fixed_price_groups.replace("|", ",").split(",") if g.strip()}
+
     # Зарплата педагога — процент от начисленных абонементов группы за месяц (решение владельца 11.10.2026:
     # Яковлева в Боброво, ВБ ХГ — 30 % с октября 2026): `GRP-XXXX:процент:с месяца,...`. С этого месяца
     # занятия группы в зарплату не идут (ни по ставке, ни сменой) — SalaryService добавляет строку «share».

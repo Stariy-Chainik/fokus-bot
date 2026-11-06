@@ -60,6 +60,8 @@ async def record_options(dp, teacher_id: str) -> dict:
             "id": g.group_id, "name": g.name, "branchId": g.branch_id, "branchName": branches.get(g.branch_id, ""),
             "mode": g.billing_mode.value, "priceFull": g.price_full, "priceShort": g.price_short,
             "attendance": attendance,
+            # FIXED_PRICE_GROUPS: кнопки тарифа у ученика нет, все по полной цене (группа Никишина, 06.11.2026)
+            "fixedPrice": g.group_id in settings.fixed_price_group_id_set,
             # с какими своими группами можно объединить занятие (MERGEABLE_GROUPS; нужна отметка посещения)
             "mergeWith": sorted(settings.mergeable_group_map.get(g.group_id, set()) & gids) if attendance else [],
             "durationFull": g.duration_full, "durationShort": g.duration_short,
@@ -239,7 +241,8 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
                              *[(g, [i for i in ids if i in m]) for g, m in merged]]:
                 if not gids_ and g is not group:
                     continue
-                g_tiers = ({sid: tiers.get(sid, students[sid].group_tier.value) for sid in gids_}
+                fixed = g.group_id in settings.fixed_price_group_id_set   # тариф не выбирается — все по полной цене
+                g_tiers = ({sid: "full" if fixed else tiers.get(sid, students[sid].group_tier.value) for sid in gids_}
                            if g.billing_mode == GroupBillingMode.PER_VISIT else tiers)
                 parts.append(build_group_attendees_csv(g, gids_, g_tiers) or "")
             csv = ",".join(p for p in parts if p) or None

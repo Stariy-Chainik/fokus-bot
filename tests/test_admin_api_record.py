@@ -86,3 +86,23 @@ def test_record_group_marks_trial_visit_free(api):
     status, r = _call(app, "POST", "/api/admin/record", json=body)
     assert status == 200 and r["attendees"] == 2
     assert dp["lesson_repo"].items[-1].attendees == "STU-0001:60:800,STU-0002:60:0"
+
+
+def test_fixed_price_group_has_no_tariff_choice(api, monkeypatch):
+    """FIXED_PRICE_GROUPS (решение владельца 06.11.2026, группа Никишина): кнопки «60 мин ↕ / 🆓 пробное» нет,
+    тариф из запроса не учитывается — каждый отмеченный идёт по полной цене группы."""
+    from config.settings import settings
+
+    app, dp = api
+    monkeypatch.setattr(settings, "fixed_price_groups", "GRP-0001")
+    dp["student_repo"].items[1].group_tier = StudentGroupTier.SHORT
+    dp["group_repo"].items[0].price_short = 500
+    assert _call(app, "GET", "/api/admin/record/options?teacher=TCH-0001")[1]["groups"][0]["fixedPrice"] is True
+    body = {"teacherId": "TCH-0001", "kind": "group", "date": TODAY, "durationMin": 60, "groupId": "GRP-0001",
+            "studentIds": ["STU-0001", "STU-0002"], "tiers": {"STU-0001": "trial"}}
+    status, r = _call(app, "POST", "/api/admin/record", json=body)
+    assert status == 200 and r["attendees"] == 2
+    assert dp["lesson_repo"].items[-1].attendees == "STU-0001:60:800,STU-0002:60:800"
+
+    monkeypatch.setattr(settings, "fixed_price_groups", "")
+    assert _call(app, "GET", "/api/admin/record/options?teacher=TCH-0001")[1]["groups"][0]["fixedPrice"] is False
