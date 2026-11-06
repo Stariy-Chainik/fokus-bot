@@ -52,7 +52,7 @@ from bot.services.subscription_frequency import frequency_info, set_frequency
 from bot.utils.dates import format_date_display
 from bot.utils.notify import notify
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
-from bot.utils.dates import current_period, last_periods, now_str, period_label
+from bot.utils.dates import current_period, last_periods, now_str, period_label, periods_since
 from bot.utils.groups import hide_service_groups
 from bot.utils.ids import generate_submission_id
 from bot.utils.locks import InProgressGuard
@@ -332,6 +332,21 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             if ym == period and sid in members and (sid in full or tid in keys) and accrued > paid:
                 rest_by_student[sid] = rest_by_student.get(sid, 0) + accrued - paid
         return {"students": len(rest_by_student), "rest": sum(rest_by_student.values())}
+
+    async def _student_debt(teacher, sid: str) -> dict:
+        """«Сколько должен ученик всего» в карточке у педагога со счетами (решение владельца 06.11.2026).
+
+        Остаток по месяцам с PARENT_BILLS_SINCE_PERIOD по текущий, свежие сверху, и итог. Цифры — те же, что
+        в счёте месяца (`_bill_rows`: свои направления, у FULL_BILL_* полный счёт), поэтому тап по месяцу
+        открывает счёт с той же суммой. Месяцы без начислений не показываются.
+        """
+        months = []
+        for ym in periods_since(settings.parent_bills_since_period):
+            _visible, summary, _rows = await _bill_rows(sid, ym, teacher)
+            if summary["total"] or summary["paid"]:
+                months.append({"ym": ym, **summary})
+        months.reverse()
+        return {"total": sum(m["rest"] for m in months), "months": months}
 
     # ── занятия ──────────────────────────────────────────────────────────
     async def lessons(request: web.Request, user, teacher) -> web.Response:
@@ -823,8 +838,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                     subscriptions.append({"groupId": gid, "name": groups_map.get(gid, gid),
                                           "total": led.accrued, "paid": led.paid})
         all_groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        # «сколько должен всего» — только у педагога со счетами (деньги ученика другим педагогам не показываем)
+        debt = await _student_debt(teacher, sid) if teacher.teacher_id in settings.billing_teacher_id_set else None
         return _json({
-            "id": s.student_id, "name": s.name, "tier": s.group_tier.value,
+            "id": s.student_id, "name": s.name, "tier": s.group_tier.value, "debt": debt,
             "kindergarten": any(is_kindergarten_group(all_groups.get(g)) for g in gids), "kgroup": s.kindergarten_group,
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
@@ -1234,7 +1251,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                                             "paid": m["paid"]} for m in payment_ledger.lesson_marks(agg.items, paid)]
             else:
                 total = sum(m["amount"] for m in marks)
-                paid = sum(m["amount"] for m in marks if m["paid"])
+                # видны все занятия начисления — оплачено по деньгам (как у родителя и администратора: частичная
+                # оплата 500 ₽ за урок в 2000 ₽ даёт остаток 1500, а не 2000); видна часть — по целым занятиям
+                paid = (min(paid_map.get(key, 0), total) if len(marks) == len(agg.items)
+                        else sum(m["amount"] for m in marks if m["paid"]))
                 items = [{"lessonId": m["lesson_id"], "date": m["date"], "durationMin": m["duration_min"],
                           "amount": m["amount"], "paid": m["paid"]} for m in marks]
             rows.append({"key": key, "name": agg.name, "subscription": agg.subscription, "total": total,

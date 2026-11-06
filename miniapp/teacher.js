@@ -317,6 +317,12 @@ async function tGroupPay(g, id, ym) {
     <div style="margin-top:12px">${btn(`📨 Отправить счета всей группе (${toSend})`, 'tBillGroupAsk', { gid: id, ym: period, count: toSend, name: g.name }, toSend ? '' : 'ghost')}</div>` };
 }
 
+/* «Сколько должен ученик всего» (педагог со счетами, решение владельца 06.11.2026): итог и остаток по месяцам
+   с начала истории родителя, свежие сверху; тап по месяцу — счёт с той же суммой. */
+const tDebtBlock = (d, sid) => `<div class="eyebrow">Оплата</div>
+  <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="font-weight:700">${d.total ? 'Не оплачено всего' : 'Всё оплачено'}</div><div class="money ${d.total ? 'bad' : ''}" style="font-size:20px;font-weight:800">${d.total ? fmt(d.total) : '✓'}</div></div>
+  <div class="hint">по вашим направлениям за все месяцы · тап по месяцу — счёт</div></div>
+  ${d.months.length ? list(d.months.map(m => cell({ lead: m.rest ? (m.paid ? '🟡' : '⬜') : '✅', plain: true, t: monthLabel(m.ym), s: `начислено ${fmt(m.total)}${m.paid ? ` · оплачено ${fmt(m.paid)}` : ''}`, r: m.rest ? `<b class="money bad">${fmt(m.rest)}</b>` : '', go: 't.bill', p: { sid, ym: m.ym } }))) : '<div class="empty">Начислений ещё нет</div>'}`;
 SCREENS['t.student'] = async ({ id, ym }) => {
   const s = await api(`/students/${id}${ym ? `?ym=${ym}` : ''}`);
   return { title: s.name, html: `
@@ -324,6 +330,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
       <div class="hint">${s.groups.length ? esc(s.groups.join(', ')) : 'без группы'}${s.partner ? ` · пара: ${esc(s.partner.name)}` : ''}</div>
       ${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="tKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}</div>
       <button class="chip" style="padding:4px 10px;white-space:nowrap" data-act="tRenameAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name }))}'>✏️ Имя</button></div></div>
+    ${s.debt ? tDebtBlock(s.debt, id) : ''}
     ${(s.tariffs || []).length ? `<div class="eyebrow">Абонемент</div>${list(s.tariffs.map(g => `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)} в месяц${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>`))}` : ''}
     ${(s.subscriptions || []).length ? `<div class="eyebrow">Абонемент за ${MON_NOM[+s.period.slice(5) - 1].toLowerCase()}</div>${list(s.subscriptions.map(x => `<div class="cell static"><span class="lead plain">💳</span><span><div class="t">${esc(x.name)}</div><div class="s">начислено ${fmt(x.total)}${x.paid ? ` · оплачено ${fmt(x.paid)}` : ''}</div></span><span class="r"><button class="chip" style="padding:4px 10px" data-act="tSubAsk" data-p='${esc(JSON.stringify({ sid: id, ym: s.period, gid: x.groupId, total: x.total, paid: x.paid, student: s.name }))}' aria-label="Абонемент за этот месяц">✏️</button></span></div>`))}<p class="hint" style="margin-top:6px">Пришёл не с начала месяца — поставьте сумму за этот месяц. Месяц меняется чипами ниже.</p>` : ''}

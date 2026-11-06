@@ -79,3 +79,21 @@ def period_label(period_month: str) -> str:
     """«Сентябрь 2026» — подпись месяца словами (экраны родителя, история оплат, списки занятий)."""
     year, month = period_month.split("-")
     return f"{month_name_ru(int(month))} {year}"
+
+
+def periods_since(start: str, end: str | None = None) -> list[str]:
+    """Месяцы YYYY-MM от `start` по `end` (по умолчанию текущий) включительно, по порядку.
+
+    Пустой или кривой `start`, как и `start` позже `end`, — только `end`. Для «сколько должен всего»:
+    остаток по месяцам с PARENT_BILLS_SINCE_PERIOD по текущий.
+    """
+    end = end or current_period()
+    try:
+        y, m = (int(x) for x in start.split("-")[:2])
+    except (ValueError, AttributeError):
+        return [end]
+    out: list[str] = []
+    while f"{y:04d}-{m:02d}" <= end and len(out) < 240:
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out or [end]

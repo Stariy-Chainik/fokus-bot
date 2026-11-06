@@ -14,7 +14,7 @@ from tests.fakes import (
     AthleteTaskRepoFake, FakeBot, TrainingEntryRepoFake,
     mk_entry, mk_lesson, mk_payment, mk_student, mk_submission, mk_user,
 )
-from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, make_api
+from tests.test_admin_api import ADMIN_TG, PARENT_TG, YM, NotifierFake, await_teacher, make_api
 from tests.test_telegram_auth import make_init_data
 
 TEACHER_TG, ATHLETE_TG = 4242, 777001
@@ -278,6 +278,28 @@ def test_bills_only_for_billing_teachers(api, monkeypatch):
     status, b = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={YM}")
     assert status == 200 and b["total"] == 4800 and b["rest"] == 4800
     assert _call(app, "GET", "/api/teacher/bills/group/GRP-0404")[0] == 404
+
+
+def test_student_card_shows_debt_by_months_for_billing_teacher(api, monkeypatch):
+    """«Сколько должен ученик всего» (решение владельца 06.11.2026): у педагога со счетами в карточке ученика —
+    остаток по месяцам с PARENT_BILLS_SINCE_PERIOD (свежие сверху) и итог; цифры те же, что в счёте месяца.
+    Без права счетов блока нет."""
+    from dateutil.relativedelta import relativedelta
+    app, dp = api
+    prev = (date.today() - relativedelta(months=1)).strftime("%Y-%m")
+    monkeypatch.setattr(settings, "parent_bills_since_period", prev)
+    teacher = await_teacher(dp)
+    dp["lesson_repo"].items.append(mk_lesson("LES-P", teacher, f"{prev}-10", students=[("STU-0001", "Иванов Иван")]))  # 2000
+    dp["payment_repo"].rows.append(mk_payment("PAY-P", "STU-0001", prev, "TCH-0001", 500, status=PaymentStatus.PAID))
+    assert _call(app, "GET", "/api/teacher/students/STU-0001")[1]["debt"] is None
+
+    monkeypatch.setattr(settings, "billing_teacher_ids", "TCH-0001")
+    card = _call(app, "GET", "/api/teacher/students/STU-0001")[1]
+    assert card["debt"]["total"] == 4800 + 1500
+    assert [(m["ym"], m["total"], m["paid"], m["rest"]) for m in card["debt"]["months"]] == [
+        (YM, 4800, 0, 4800), (prev, 2000, 500, 1500)]
+    bill = _call(app, "GET", f"/api/teacher/bills/student/STU-0001?ym={prev}")[1]
+    assert (bill["total"], bill["paid"], bill["rest"]) == (2000, 500, 1500)        # тап по месяцу — тот же счёт
 
 
 def test_bills_send_needs_bot(api, monkeypatch):
