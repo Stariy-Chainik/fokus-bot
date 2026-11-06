@@ -12,7 +12,7 @@ from bot.repositories.pending_action_repo import (
     DONE, KIND_CASH, KIND_CHILD, KIND_RECEIPT, OPEN, REJECTED,
 )
 from bot.models.enums import PaymentStatus
-from bot.services import activity, payment_events
+from bot.services import activity, payment_events, receipt_check
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ async def queue_action(
         await activity.record(activity.QUEUE, f"Заявка от родителя ({kind}): {sid} · {period_month}"
                               + (f" · {amount} ₽ · {method}" if amount else ""), ref=action.action_id)
         payment_events.request_created(action)       # копия с кнопками педагогу, который решает сам
+        receipt_check.schedule(action)               # сумма в чеке против заявки — сообщение только при расхождении
         return action
     except Exception as exc:                      # очередь — вспомогательная, платёж важнее
         logger.error("Очередь решений: не записали %s для %s: %s", kind, sid, exc)

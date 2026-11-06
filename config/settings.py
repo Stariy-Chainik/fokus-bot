@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     # Бот в мессенджере MAX (кабинет родителя). Пусто — MAX не запускается.
     max_bot_token: str = Field(default="", alias="MAX_BOT_TOKEN")
 
+    # Сверка суммы в чеке с заявкой родителя (bot/services/receipt_check.py, решение владельца 06.11.2026):
+    # чек читает Claude API, сообщение только при расхождении. Пусто — сверка выключена.
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    receipt_check_model: str = Field(default="claude-opus-5-5", alias="RECEIPT_CHECK_MODEL")
+
+    @property
+    def receipt_check_enabled(self) -> bool:
+        return bool(self.anthropic_api_key)
+
     # Кабинет спортсмена: дневник тренировок и задания педагога
     sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
     sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")

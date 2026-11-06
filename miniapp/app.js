@@ -369,11 +369,14 @@ SCREENS['a.inbox'] = async () => {
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
       <div><div style="font-weight:700">${esc(a.title)}</div>
         <div class="hint">${esc(a.student)}${a.periodLabel ? ` · ${esc(a.periodLabel)}` : ''}${a.method ? ` · ${esc(a.method)}` : ''}${a.comment ? ` · ${esc(a.comment)}` : ''}</div>
-        <div class="hint">${esc(a.createdAt)}${a.rest != null ? ` · остаток по счёту ${fmt(a.rest)}` : ''}</div></div>
+        <div class="hint">${esc(a.createdAt)}${a.rest != null ? ` · остаток по счёту ${fmt(a.rest)}` : ''}</div>
+        ${a.receiptMatch === false ? `<div class="hint" style="color:var(--bad);font-weight:600;margin-top:4px">⚠️ В чеке ${fmt(a.receiptAmount)}${a.receiptGroup ? ' за несколько заявок' : ''}, в заявке ${fmt(a.amount)}</div>` : a.receiptMatch === true ? `<div class="hint" style="color:var(--ok);margin-top:4px">✓ сумма совпадает с чеком${a.receiptGroup ? ` (чек на ${fmt(a.receiptAmount)} за несколько месяцев)` : ''}</div>` : ''}</div>
       ${a.amount ? `<div class="money" style="font-weight:800;white-space:nowrap">${fmt(a.amount)}</div>` : ''}
     </div>
     ${a.hasFile ? `<img data-file="/inbox/${a.id}/file" alt="Чек" style="display:block;width:100%;max-height:320px;object-fit:contain;border-radius:10px;margin-top:10px;background:var(--bg)">` : ''}
-    ${a.note ? `<div class="calm" style="margin-top:10px">${esc(a.note)}</div>` : `<div style="margin-top:10px">${btn(a.approveLabel || (a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`), 'inboxDecide', { id: a.id, approve: true })}${btn(a.rejectLabel || '❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>`}
+    ${a.note ? `<div class="calm" style="margin-top:10px">${esc(a.note)}</div>` : `<div style="margin-top:10px">${a.receiptMatch === false && !a.receiptGroup && a.receiptAmount
+      ? btn(`✅ Зачесть ${fmt(a.receiptAmount)} — как в чеке`, 'inboxDecide', { id: a.id, approve: true, amount: a.receiptAmount }) + btn(`Зачесть ${fmt(a.amount)} — как в заявке`, 'inboxDecide', { id: a.id, approve: true }, 'ghost')
+      : btn(a.approveLabel || (a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`), 'inboxDecide', { id: a.id, approve: true })}${btn(a.rejectLabel || '❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>`}
   </div>`;
   // наличные на руках у педагогов — контроль администратора: у кого и сколько ещё не передано
   const held = (d.held || []).length ? `<div class="card pad" style="margin-bottom:10px"><div style="font-weight:700">💵 Наличные у педагогов</div>${d.held.map(h => `<div style="display:flex;justify-content:space-between;margin-top:6px"><span>${esc(h.name)} · ${plural(h.count, ['заявка', 'заявки', 'заявок'])}</span><b class="money">${fmt(h.amount)}</b></div>`).join('')}<div class="hint" style="margin-top:6px">Зачтите оплату, когда педагог передаст деньги.</div></div>` : '';

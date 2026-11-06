@@ -10,3 +10,6 @@ redis==5.2.0
 yookassa
 qrcode[pil]
 maxapi==1.2.2
+
+# Сверка суммы в чеке с заявкой родителя (bot/services/receipt_check.py) — Claude API
+anthropic==1.17.0

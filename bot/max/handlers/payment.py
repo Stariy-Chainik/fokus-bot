@@ -204,6 +204,9 @@ async def _forward_receipt(tg_bot, user_repo, pending_repo, action, caption: str
         await pending_repo.set_file(action.action_id, file_id, file_type)
     except Exception as exc:
         logger.warning("MAX: file_id чека не записан в заявку %s: %s", action.action_id, exc)
+        return
+    from bot.services import receipt_check
+    receipt_check.schedule(action, file_id=file_id, file_type=file_type)   # сумма в чеке против заявки
 
 
 @router.message_callback(F.callback.payload.startswith("cash_notify:"))

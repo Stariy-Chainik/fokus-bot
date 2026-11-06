@@ -86,6 +86,8 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             "amount": a.amount, "method": METHOD_LABELS.get(a.method, a.method),
             "comment": a.comment, "createdAt": a.created_at,
             "hasFile": bool(a.file_id), "fileType": a.file_type, "rest": rest,
+            # сверка суммы в чеке (receipt_check): None — не сверяли или не прочли
+            "receiptAmount": a.receipt_amount, "receiptMatch": a.receipt_match, "receiptGroup": a.receipt_group,
         }
 
     async def _allowed(user, action) -> bool:

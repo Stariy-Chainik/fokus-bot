@@ -142,6 +142,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     from bot.services import payment_events    # педагогам с полным счётом — об оплатах их учеников
     payment_events.setup(tg_bot, user_repo, teacher_group_repo, student_group_repo, student_repo,
                          teacher_repo)
+    from bot.services import receipt_check     # сумма в чеке против заявки родителя — сообщение при расхождении
+    receipt_check.setup(tg_bot, pending_repo, user_repo)
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
         settings.cloudkassir_api_secret,

@@ -23,8 +23,9 @@ HEADER = [
 ]
 
 
-# добавлены позже: за каких педагогов платил родитель; у какого педагога наличные (ждут администратора)
-EXTRA_COLUMNS = ["teacher_keys", "held_by"]
+# добавлены позже: за каких педагогов платил родитель; у какого педагога наличные (ждут администратора);
+# результат сверки суммы в чеке с заявкой (bot/services/receipt_check.py)
+EXTRA_COLUMNS = ["teacher_keys", "held_by", "receipt_check"]
 
 
 def ensure_columns(sh) -> None:

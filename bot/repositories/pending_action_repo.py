@@ -21,13 +21,14 @@ logger = logging.getLogger(__name__)
 # Колонки листа `pending_actions` (1-based):
 # action_id | kind | student_id | student_name | period_month | amount | method |
 # parent_addr | file_id | file_type | comment | created_at | status | decided_at | decided_by_tg_id |
-# teacher_keys | held_by
+# teacher_keys | held_by | receipt_check
 _FILE_ID_COL = 9
 _FILE_TYPE_COL = 10
 _STATUS_COL = 13
 _DECIDED_AT_COL = 14
 _DECIDED_BY_COL = 15
 _HELD_BY_COL = 17
+_RECEIPT_CHECK_COL = 18
 
 KIND_CASH = "cash"          # родитель сообщил об оплате наличными
 KIND_RECEIPT = "receipt"    # родитель прислал чек о переводе
@@ -58,6 +59,21 @@ class PendingAction:
     teacher_keys: str = ""    # за кого платили: ключи начислений через «|» (пусто — за всё по порядку имён);
                               # с 05.10.2026 — снимок остатков на момент заявки: `TCH-0013=2600|SUB:GRP-0019=800`
     held_by: str = ""         # наличные у педагога (teacher_id): зачтёт администратор, когда получит деньги
+    receipt_check: str = ""   # сверка суммы в чеке (bot/services/receipt_check.py): `ok:7650` / `diff:4250` /
+                              # `unread`; `:g` — чек на несколько заявок («Оплатить всё»), сумма сверена с их суммой
+
+    @property
+    def receipt_amount(self) -> Optional[int]:
+        parts = self.receipt_check.split(":")
+        return int(parts[1]) if parts[0] in ("ok", "diff") and len(parts) > 1 and parts[1].isdigit() else None
+
+    @property
+    def receipt_match(self) -> Optional[bool]:
+        return {"ok": True, "diff": False}.get(self.receipt_check.split(":")[0])
+
+    @property
+    def receipt_group(self) -> bool:
+        return self.receipt_check.endswith(":g")
 
     @property
     def keys(self) -> list[str]:
@@ -96,6 +112,7 @@ def _row_to_action(row: dict) -> PendingAction:
         decided_by_tg_id=int(row.get("decided_by_tg_id") or 0),
         teacher_keys=str(row.get("teacher_keys") or ""),
         held_by=str(row.get("held_by") or ""),
+        receipt_check=str(row.get("receipt_check") or ""),
     )
 
 
@@ -125,7 +142,7 @@ class PendingActionRepository(BaseRepository):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             await self._append_row([
                 action_id, kind, student_id, student_name, period_month, amount, method,
-                parent_addr, file_id, file_type, comment, now, OPEN, "", "", teacher_keys, held_by,
+                parent_addr, file_id, file_type, comment, now, OPEN, "", "", teacher_keys, held_by, "",
             ])
         return PendingAction(action_id, kind, student_id, student_name, period_month, amount,
                              method, parent_addr, file_id, file_type, comment, now,
@@ -138,6 +155,14 @@ class PendingActionRepository(BaseRepository):
             if row_idx is None:
                 return False
             await self._update_cells(row_idx, {_FILE_ID_COL: file_id, _FILE_TYPE_COL: file_type})
+            return True
+
+    async def set_receipt_check(self, action_id: str, value: str) -> bool:
+        """Результат сверки суммы в чеке с заявкой (`receipt_check`); только у открытой строки."""
+        async with self._locked_row(action_id=action_id, status=OPEN) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cell(row_idx, _RECEIPT_CHECK_COL, value)
             return True
 
     async def set_held_by(self, action_id: str, teacher_id: str) -> bool:

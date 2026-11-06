@@ -52,6 +52,13 @@ class PendingRepoFake:
         a.held_by = teacher_id
         return True
 
+    async def set_receipt_check(self, action_id, value):
+        a = await self.get_by_id(action_id)
+        if a is None or a.status != OPEN:
+            return False
+        a.receipt_check = value
+        return True
+
     async def claim(self, action_id, status, decided_by_tg_id=0):
         a = await self.get_by_id(action_id)
         if a is None or a.status != OPEN:
