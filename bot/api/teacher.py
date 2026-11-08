@@ -36,6 +36,7 @@ from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
+from bot.services import dance_rank
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
 from bot.services.new_child import (
@@ -607,6 +608,23 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ok = await student_repo.update_kindergarten_group(sid, value, actor=user.tg_id, who=f"педагог {teacher.name}")
         return _json({"ok": ok, "value": value}, status=200 if ok else 404)
 
+    async def student_dance(request: web.Request, user, teacher) -> web.Response:
+        """Танцевальный класс и спортивный разряд ученика своих бальных групп (решение владельца 08.11.2026)."""
+        sid = request.match_info["sid"]
+        s = await student_repo.get_by_id(sid)
+        if s is None or not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        if not (await dance_rank.in_ballroom_group(sid, student_group_repo, groups) or dance_rank.has_profile(s)):
+            return _json({"error": "not_ballroom", "message": "Ученик не в группе бальных танцев"}, status=400)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        status, payload = await dance_rank.apply_update(student_repo, s, body or {}, actor=user.tg_id,
+                                                        who=f"педагог {teacher.name}")
+        return _json(payload, status=status)
+
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
         сумма пишется в сообщение администраторам, у ушедшего из школы в должниках не считается (16.10.2026). Абонементная группа — пометка
@@ -846,6 +864,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value, "debt": debt,
             "kindergarten": any(is_kindergarten_group(all_groups.get(g)) for g in gids), "kgroup": s.kindergarten_group,
+            # класс и разряд бальника (решение владельца 08.11.2026) — правит педагог своих групп
+            "dance": dance_rank.profile(s, any(dance_rank.is_ballroom_group(all_groups.get(g)) for g in gids)),
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
@@ -1674,6 +1694,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
         ("GET", "/students/{sid}", student), ("PATCH", "/students/{sid}", student_rename),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
+        ("PUT", "/students/{sid}/dance", student_dance),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/students/{sid}/transfer", student_transfer_options),   # «Перевести в другую группу» (16.10.2026)

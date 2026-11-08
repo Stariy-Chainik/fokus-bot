@@ -776,6 +776,12 @@ class StudentRepoWritable(StudentRepoFake):
         if s: s.kindergarten_group = value  # noqa: E701
         return s is not None
 
+    async def update_dance_profile(self, sid, dance_class=None, sport_rank=None, actor=0, who=""):
+        s = self._find(sid)
+        if s and dance_class is not None: s.dance_class = dance_class  # noqa: E701
+        if s and sport_rank is not None: s.sport_rank = sport_rank  # noqa: E701
+        return s is not None
+
     async def update_tier(self, sid, tier):
         s = self._find(sid)
         if s: s.group_tier = tier  # noqa: E701

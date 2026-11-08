@@ -30,6 +30,7 @@ from bot.states import HomeworkVideoStates
 from bot.utils.notify import notify
 from config.settings import settings
 from bot.services.diary_service import place_icon
+from bot.services import dance_rank
 from bot.utils.dates import current_period
 from bot.utils.diary_topics import ALL_TOPICS
 
@@ -150,7 +151,13 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
             "stats": _stats(st), "place": place, "placeIcon": icon,
             "recent": rows[:3], "unrated": sum(1 for r in rows if not r["grade"]),
             "openTasks": await _open_tasks(student),
+            "dance": await _dance(student),           # класс и разряд бальника — цель спортсмена (08.11.2026)
         })
+
+    async def _dance(student) -> dict:
+        groups = {g.group_id: g for g in await dp["group_repo"].get_all(include_archived=True)}
+        return dance_rank.profile(student, await dance_rank.in_ballroom_group(student.student_id,
+                                                                              dp["student_group_repo"], groups))
 
     # ── записи тренировок ────────────────────────────────────────────────
     async def entries(request: web.Request, tg_id, student) -> web.Response:

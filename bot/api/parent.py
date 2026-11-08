@@ -30,6 +30,7 @@ from bot.services import activity, payment_ledger
 from bot.api.homework import homework_title, short
 from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, kindergarten_group_names
+from bot.services import dance_rank
 from bot.services import parent_unlink
 from bot.services.parent_notifier import MAX, TG, fmt_addr
 from bot.screens.adapters import to_aiogram_markup
@@ -318,9 +319,13 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         row = next((r for r in board if r.student_id == student.student_id), None)
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         hw_numbers = await diary_service.homework_numbers()
+        all_groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         return _json({
             "student": {"id": student.student_id, "name": student.name}, "period": period,
             "athlete": student.is_athlete,      # кабинет спортсмена заведён — дневник ведётся
+            # класс и разряд бальника — цель ребёнка-спортсмена (решение владельца 08.11.2026)
+            "dance": dance_rank.profile(student, await dance_rank.in_ballroom_group(
+                student.student_id, dp["student_group_repo"], all_groups)),
             "stats": {"sessions": st.sessions, "minutes": st.total_minutes, "points": st.points,
                       "avgGrade": st.avg_grade, "byTopic": st.by_topic},
             "place": row.place if row else None, "placeIcon": place_icon(row.place) if row else "",

@@ -439,6 +439,8 @@ SCREENS['p.diary'] = async ({ ym }) => {
   catch (e) { return { title: 'Дневник', html: empty('Дневник недоступен', `<p class="hint" style="margin:0">${esc(errText(e))}</p>`) }; }
   // задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — у всех детей (15.10.2026)
   const hw = d.homework || [];
+  // класс и разряд бальника — цель ребёнка-спортсмена (решение владельца 08.11.2026), присваивает педагог
+  const danceBlock = danceLine(d.dance) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${danceLine(d.dance)}</div></div>` : '';
   const hwBlock = hw.length ? `<div class="eyebrow">Задания педагога</div>${list(hw.map(t => cell({
     lead: t.grade ? '⭐' : t.status === 'open' ? '📋' : '✔️', plain: true, cls: 'wrap', t: `${t.number ? `<b>Задание №${t.number}</b> · ` : ''}${esc(t.exercise)}`,
     s: [fdate(t.createdAt.slice(0, 10)), t.teacher ? esc(t.teacher) : '', t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : '', t.videos ? `📹 видео: ${t.videos}` : ''].filter(Boolean).join(' · ')
@@ -446,13 +448,13 @@ SCREENS['p.diary'] = async ({ ym }) => {
     r: t.grade ? `<b>${t.grade}/${t.scale || 5}</b>` : t.status === 'open' ? pill('задано', 'acc') : pill('закрыто', 'mute'),
   })))}` : '';
   if (!d.athlete && !d.entries.length) {
-    return { title: 'Дневник', html: `${kidChips('p.diary', { ym: period })}
+    return { title: 'Дневник', html: `${kidChips('p.diary', { ym: period })}${danceBlock}
       ${hwBlock || empty('Заданий пока нет', '<p class="hint" style="margin:0">Здесь появятся домашние задания педагога и оценки за их выполнение. Дневник тренировок ведут ученики спортивных групп в кабинете спортсмена.</p>')}` };
   }
   const st = d.stats;
   const topics = Object.entries(st.byTopic || {}).sort((a, b) => b[1] - a[1]);
   return { title: 'Дневник', html: `
-    ${kidChips('p.diary', { ym: period })}
+    ${kidChips('p.diary', { ym: period })}${danceBlock}
     ${pMonthChips('p.diary', period, {})}
     <div class="kpis">${kpi(st.sessions, 'тренировок')}${kpi(st.minutes + ' мин', 'всего')}</div>
     <div class="kpis" style="margin-top:10px">${kpi(st.avgGrade ? st.avgGrade.toFixed(1) : '—', 'средняя оценка', 'ok')}${kpi(st.points, `очки${d.place ? ` · ${d.place <= 3 ? `${d.placeIcon} ` : ''}${d.place} место` : ''}`)}</div>

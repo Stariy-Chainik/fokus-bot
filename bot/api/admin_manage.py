@@ -14,6 +14,7 @@ from aiohttp import web
 from bot.models.enums import GroupBillingMode, StudentGroupTier
 from bot.services.group_invite import group_invite
 from bot.services.kindergarten import clean_value, is_kindergarten_group
+from bot.services import dance_rank
 from bot.services.membership import leave_group
 from bot.services.student_archive import archive_preview, archive_student, unarchive_student
 from bot.services.student_service import TierToggleError
@@ -368,6 +369,20 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
                                                           who="администратор")
         return _json({"ok": ok, "value": value}, status=200 if ok else 404)
 
+    async def student_dance(request: web.Request, user) -> web.Response:
+        """Танцевальный класс и спортивный разряд бальника (решение владельца 08.11.2026): только у ученика бальной
+        группы (или с уже присвоенным значением — чтобы можно было стереть); значения из списков."""
+        sid = request.match_info["sid"]
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        if not (await dance_rank.in_ballroom_group(sid, student_group_repo, groups) or dance_rank.has_profile(s)):
+            return _json({"error": "not_ballroom", "message": "Ученик не в группе бальных танцев"}, status=400)
+        status, payload = await dance_rank.apply_update(student_repo, s, await _body(request) or {}, actor=user.tg_id,
+                                                        who="администратор")
+        return _json(payload, status=status)
+
     async def student_delete(request: web.Request, user) -> web.Response:
         """Стереть карточку совсем — кнопки в кабинете больше нет (решение владельца 21.10.2026: «Удалить
         ученика» = архив, `student_archive`); маршрут оставлен для скриптов и чистки дублей."""
@@ -585,6 +600,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         ("GET", "/students/{sid}/archive", student_archive_preview), ("POST", "/students/{sid}/archive", student_archive),
         ("POST", "/students/{sid}/unarchive", student_unarchive),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
+        ("PUT", "/students/{sid}/dance", student_dance),
         ("GET", "/students/{sid}/partner-candidates", partner_candidates), ("PUT", "/students/{sid}/partner", partner_put),
         ("PUT", "/students/{sid}/groups", student_groups), ("POST", "/students/{sid}/tier", student_tier),
         ("GET", "/clients", clients), ("PUT", "/students/{sid}/client", student_client),

@@ -21,6 +21,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
+from bot.services.dance_rank import is_ballroom_group, profile as dance_profile
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import (
     debtors_summary, lesson_collection, payment_lock, period_collection, subscription_collection,
@@ -456,6 +457,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             # группа в детском саду — у детей садовых групп школы (решение владельца 10.10.2026)
             "kindergarten": any(g.group is not None and is_kindergarten_group(g.group) for g in card.groups),
             "kgroup": s.kindergarten_group,
+            # класс и разряд — у учеников бальных групп (решение владельца 08.11.2026)
+            "dance": dance_profile(s, any(g.group is not None and is_ballroom_group(g.group) for g in card.groups)),
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
                         "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,
