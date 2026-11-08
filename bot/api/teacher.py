@@ -36,7 +36,7 @@ from bot.repositories.pending_action_repo import KIND_CASH, KIND_RECEIPT
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.diary_service import place_icon
 from bot.services.kindergarten import clean_value, is_kindergarten_group, kindergarten_group_names
-from bot.services import dance_rank
+from bot.services import birthdays, dance_rank
 from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.membership import leave_group, leave_options
 from bot.services.new_child import (
@@ -625,6 +625,24 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                                                         who=f"педагог {teacher.name}")
         return _json(payload, status=status)
 
+    async def student_birth(request: web.Request, user, teacher) -> web.Response:
+        """Дата рождения ученика своих групп (решение владельца 08.11.2026): «ДД.ММ.ГГГГ», пусто — стереть."""
+        sid = request.match_info["sid"]
+        s = await student_repo.get_by_id(sid)
+        if s is None or not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        value = birthdays.parse_birth_date((body or {}).get("birthDate"))
+        if value is None:
+            return _json({"error": "bad_date", "message": "Дата рождения — в формате ДД.ММ.ГГГГ, не в будущем"}, status=400)
+        await student_repo.update_birth_date(sid, value, actor=user.tg_id, who=f"педагог {teacher.name}")
+        s.birth_date = value
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        return _json({"ok": True, **birthdays.view(s, await dance_rank.in_ballroom_group(sid, student_group_repo, groups))})
+
     async def member_leave(request: web.Request, user, teacher) -> web.Response:
         """«Ушёл из группы» у педагога: только своя группа; долг не мешает (решение владельца 03.10.2026) —
         сумма пишется в сообщение администраторам, у ушедшего из школы в должниках не считается (16.10.2026). Абонементная группа — пометка
@@ -861,11 +879,13 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         all_groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         # «сколько должен всего» — только у педагога со счетами (деньги ученика другим педагогам не показываем)
         debt = await _student_debt(teacher, sid) if teacher.teacher_id in settings.billing_teacher_id_set else None
+        ballroom = any(dance_rank.is_ballroom_group(all_groups.get(g)) for g in gids)
         return _json({
             "id": s.student_id, "name": s.name, "tier": s.group_tier.value, "debt": debt,
             "kindergarten": any(is_kindergarten_group(all_groups.get(g)) for g in gids), "kgroup": s.kindergarten_group,
             # класс и разряд бальника (решение владельца 08.11.2026) — правит педагог своих групп
-            "dance": dance_rank.profile(s, any(dance_rank.is_ballroom_group(all_groups.get(g)) for g in gids)),
+            "dance": dance_rank.profile(s, ballroom),
+            "birth": birthdays.view(s, ballroom),      # дата рождения, возраст, возрастная группа (08.11.2026)
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,
@@ -1695,6 +1715,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/students/{sid}", student), ("PATCH", "/students/{sid}", student_rename),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("PUT", "/students/{sid}/dance", student_dance),
+        ("PUT", "/students/{sid}/birth", student_birth),
         ("GET", "/students/{sid}/lessons", student_lessons),
         ("PUT", "/students/{sid}/frequency", student_frequency),
         ("GET", "/students/{sid}/transfer", student_transfer_options),   # «Перевести в другую группу» (16.10.2026)

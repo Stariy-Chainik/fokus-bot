@@ -440,7 +440,7 @@ SCREENS['p.diary'] = async ({ ym }) => {
   // задания педагогов (домашние группе и спортсмену) с оценкой за выполнение — у всех детей (15.10.2026)
   const hw = d.homework || [];
   // класс и разряд бальника — цель ребёнка-спортсмена (решение владельца 08.11.2026), присваивает педагог
-  const danceBlock = danceLine(d.dance) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${danceLine(d.dance)}</div></div>` : '';
+  const danceBlock = danceLine(d.dance) || birthLine(d.birth) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${[birthLine(d.birth), danceLine(d.dance)].filter(Boolean).join('<br>')}</div></div>` : '';
   const hwBlock = hw.length ? `<div class="eyebrow">Задания педагога</div>${list(hw.map(t => cell({
     lead: t.grade ? '⭐' : t.status === 'open' ? '📋' : '✔️', plain: true, cls: 'wrap', t: `${t.number ? `<b>Задание №${t.number}</b> · ` : ''}${esc(t.exercise)}`,
     s: [fdate(t.createdAt.slice(0, 10)), t.teacher ? esc(t.teacher) : '', t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : '', t.videos ? `📹 видео: ${t.videos}` : ''].filter(Boolean).join(' · ')

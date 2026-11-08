@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # 12 archived (YYYY-MM-DD — ушёл из школы, карточка в архиве; scripts/setup_student_archive.py)
 # 13 class_st | 14 class_la | 15 class_solo_st | 16 class_solo_la | 17 sport_rank | 18 ftsarr_id — бальные танцы:
 #   парные и соло классы ФТСАРР, разряд, № книжки (scripts/setup_dance_rank.py, bot/services/dance_rank.py)
+# 19 birth_date (YYYY-MM-DD — дата рождения; scripts/setup_birth_date.py, bot/services/birthdays.py)
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
@@ -24,6 +25,7 @@ _PARENT_MAX_IDS_COL = 10
 _ATHLETE_MAX_ID_COL = 11
 _ARCHIVED_COL = 12
 DANCE_COLS = {"class_st": 13, "class_la": 14, "class_solo_st": 15, "class_solo_la": 16, "sport_rank": 17, "ftsarr_id": 18}
+_BIRTH_DATE_COL = 19
 
 
 def _parse_id_list(raw) -> list[int]:
@@ -74,6 +76,7 @@ def _row_to_student(row: dict) -> Student:
         athlete_max_id=_parse_tg_id(row.get("athlete_max_id")),
         archived=str(row.get("archived") or "").strip(),
         **{f: str(row.get(f) or "").strip() for f in DANCE_COLS},
+        birth_date=str(row.get("birth_date") or "").strip(),
     )
 
 
@@ -182,6 +185,19 @@ class StudentRepository(BaseRepository):
                   "sport_rank": "разряд", "ftsarr_id": "№ ФТСАРР"}
         parts = [f"{labels[n]} {v or '—'}" for n, v in fields.items() if n in DANCE_COLS and v is not None]
         await activity.record(activity.STUDENT, f"Бальные танцы: {student_id} · " + " · ".join(parts)
+                              + (f" · {who}" if who else ""), actor=actor, ref=student_id)
+        return True
+
+    async def update_birth_date(self, student_id: str, value: str, actor: int = 0, who: str = "") -> bool:
+        """Дата рождения `YYYY-MM-DD` (решение владельца 08.11.2026), пусто — стереть; пишется raw, чтобы таблица не
+        превратила её в своё число-дату. Нужен заголовок `birth_date` в 19-й колонке (scripts/setup_birth_date.py)."""
+        async with self._locked_row(student_id=student_id) as row_idx:
+            if row_idx is None:
+                return False
+            await self._update_cells(row_idx, {_BIRTH_DATE_COL: value}, raw=True)
+        from bot.services import activity
+        from bot.services.birthdays import display
+        await activity.record(activity.STUDENT, f"Дата рождения: {student_id} · {display(value) or 'стёрта'}"
                               + (f" · {who}" if who else ""), actor=actor, ref=student_id)
         return True
 

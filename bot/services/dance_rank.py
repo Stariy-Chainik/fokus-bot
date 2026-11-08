@@ -26,7 +26,8 @@ SPORT_RANKS: list[str] = ["3 юношеский", "2 юношеский", "1 ю�
 CLASS_FIELDS = {"classSt": "class_st", "classLa": "class_la", "classSoloSt": "class_solo_st", "classSoloLa": "class_solo_la"}
 FIELDS = {**CLASS_FIELDS, "sportRank": "sport_rank", "ftsarrId": "ftsarr_id"}
 
-_LATIN = str.maketrans("АВСЕМНавсемн", "ABCEMHabcemh")   # кириллица, похожая на латиницу, — в латиницу
+# кириллица, похожая на латиницу, — в латиницу; латинская N → H, чтобы «N-3» из ИС «Начинающие» совпало с «Н-3»
+_LATIN = str.maketrans("АВСЕМНавсемнNn", "ABCEMHabcemhHh")
 
 
 def is_ballroom_group(group) -> bool:

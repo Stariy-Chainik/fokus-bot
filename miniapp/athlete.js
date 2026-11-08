@@ -22,7 +22,7 @@ SCREENS['s.home'] = async () => {
   const st = h.stats;
   return { title: 'Мой дневник', html: `
     ${hero(`${esc(h.student.name)} · ${fmon(h.period)}`)}
-    ${danceLine(h.dance) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${danceLine(h.dance)}</div></div>` : ''}
+    ${danceLine(h.dance) || birthLine(h.birth) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${[birthLine(h.birth), danceLine(h.dance)].filter(Boolean).join('<br>')}</div></div>` : ''}
     <div class="kpis">
       ${kpi(st.sessions, 'тренировок', '', 's.entries', { ym: h.period })}
       ${kpi(st.minutes + ' мин', 'всего')}

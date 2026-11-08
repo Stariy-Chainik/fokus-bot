@@ -30,7 +30,7 @@ from bot.states import HomeworkVideoStates
 from bot.utils.notify import notify
 from config.settings import settings
 from bot.services.diary_service import place_icon
-from bot.services import dance_rank
+from bot.services import birthdays, dance_rank
 from bot.utils.dates import current_period
 from bot.utils.diary_topics import ALL_TOPICS
 
@@ -146,12 +146,14 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
         st = await diary_service.stats(student.student_id, period)
         place, icon = await _place(student, period)
         rows = await _entry_rows(student, period)
+        dance = await _dance(student)
         return _json({
             "period": period, "student": {"id": student.student_id, "name": student.name},
             "stats": _stats(st), "place": place, "placeIcon": icon,
             "recent": rows[:3], "unrated": sum(1 for r in rows if not r["grade"]),
             "openTasks": await _open_tasks(student),
-            "dance": await _dance(student),           # класс и разряд бальника — цель спортсмена (08.11.2026)
+            "dance": dance,                           # класс и разряд бальника — цель спортсмена (08.11.2026)
+            "birth": birthdays.view(student, dance["ballroom"]),   # возраст и возрастная группа
         })
 
     async def _dance(student) -> dict:

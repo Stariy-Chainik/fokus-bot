@@ -21,6 +21,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
+from bot.services import birthdays
 from bot.services.dance_rank import is_ballroom_group, profile as dance_profile
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import (
@@ -447,6 +448,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
                    "teacherName": p.teacher_name or p.teacher_id, "amount": p.total_amount, "paidAt": p.paid_at,
                    "method": p.payment_method or "", "comment": p.comment or "", "byTgId": p.confirmed_by_tg_id}
                   for p in paid_rows[:5]]
+        ballroom = any(g.group is not None and is_ballroom_group(g.group) for g in card.groups)
         return _json({
             "id": s.student_id, "name": s.name, "tier": getattr(s.group_tier, "value", str(s.group_tier)),
             "partner": {"id": card.partner.student_id, "name": card.partner.name} if card.partner else None,
@@ -458,7 +460,9 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "kindergarten": any(g.group is not None and is_kindergarten_group(g.group) for g in card.groups),
             "kgroup": s.kindergarten_group,
             # класс и разряд — у учеников бальных групп (решение владельца 08.11.2026)
-            "dance": dance_profile(s, any(g.group is not None and is_ballroom_group(g.group) for g in card.groups)),
+            "dance": dance_profile(s, ballroom),
+            # дата рождения — возраст и возрастная группа ФТСАРР у бальников (решение владельца 08.11.2026)
+            "birth": birthdays.view(s, ballroom),
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
                         "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,

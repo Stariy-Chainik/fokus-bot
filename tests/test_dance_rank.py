@@ -26,6 +26,7 @@ def test_ballroom_detection_and_values():
     assert not is_ballroom_group(mk_group(name="ВБ ХГ Старшая")) and not is_ballroom_group(mk_group(name="БП Джаз"))
     assert not is_ballroom_group(None)
     assert clean_class("e") == "E" and clean_class("Е") == "E" and clean_class(" н-3 ") == "Н-3" and clean_class("H-6") == "Н-6"
+    assert clean_class("N-3") == "Н-3" and clean_class("n-5") == "Н-5"  # латинская N — так пишет ИС «Начинающие»
     assert clean_class("") == "" and clean_class(None) == "" and clean_class("X") is None and clean_class("Н-7") is None
     assert clean_rank("кмс") == "КМС" and clean_rank("1 юношеский") == "1 юношеский" and clean_rank("мастер") is None
     assert clean_ftsarr_id(" 221 098 ") == "221098" and clean_ftsarr_id("") == "" and clean_ftsarr_id("22-1") is None

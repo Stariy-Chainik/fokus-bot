@@ -561,7 +561,7 @@ SCREENS['a.student'] = async ({ id }) => {
   const s = await api(`/students/${id}`);
   const cur = s.months.find(m => m.period === lastPeriods(1)[0]) || { total: 0, paid: 0, rest: 0 };
   return { title: s.name, html: `
-    <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><button class="name-edit" data-act="studentRename" data-p='${esc(JSON.stringify({ id, name: s.name }))}' aria-label="Изменить фамилию и имя">${esc(s.name)}<span class="pen" aria-hidden="true">✏️</span></button><div class="hint">${s.client ? 'Родитель: ' + esc(s.client.name) : s.parents.length ? 'Родитель в ' + s.parents.map(p => p.platform === 'tg' ? 'Telegram' : 'MAX').join(', ') : 'Родитель не привязан'}${s.isAthlete ? ' · 🏃 спортсмен' : ''}${s.partner ? ' · пара с ' + esc(s.partner.name) : ''}</div>${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="aKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}${danceRow(id, s.name, s.dance)}</div>${s.archived ? pill(`📦 в архиве с ${fdate(s.archived)}`, 'bad') : s.debt ? pill(`долг ${fmt(s.debt)}`, 'bad') : cur.rest ? pill(`к оплате ${fmt(cur.rest)}`, 'warn') : cur.total ? pill('оплачено', 'ok') : ''}</div></div>
+    <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><button class="name-edit" data-act="studentRename" data-p='${esc(JSON.stringify({ id, name: s.name }))}' aria-label="Изменить фамилию и имя">${esc(s.name)}<span class="pen" aria-hidden="true">✏️</span></button><div class="hint">${s.client ? 'Родитель: ' + esc(s.client.name) : s.parents.length ? 'Родитель в ' + s.parents.map(p => p.platform === 'tg' ? 'Telegram' : 'MAX').join(', ') : 'Родитель не привязан'}${s.isAthlete ? ' · 🏃 спортсмен' : ''}${s.partner ? ' · пара с ' + esc(s.partner.name) : ''}</div>${s.kindergarten ? `<div class="hint" style="margin-top:4px">🏫 Группа в саду: <b>${s.kgroup ? esc(s.kgroup) : 'не указана'}</b> <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="aKgAsk" data-p='${esc(JSON.stringify({ sid: id, name: s.name, value: s.kgroup || '' }))}' aria-label="Группа в саду">✏️</button></div>` : ''}${birthRow(id, s.name, s.birth)}${danceRow(id, s.name, s.dance)}</div>${s.archived ? pill(`📦 в архиве с ${fdate(s.archived)}`, 'bad') : s.debt ? pill(`долг ${fmt(s.debt)}`, 'bad') : cur.rest ? pill(`к оплате ${fmt(cur.rest)}`, 'warn') : cur.total ? pill('оплачено', 'ok') : ''}</div></div>
     <div class="eyebrow">Группы</div>${s.groups.length ? list(s.groups.map(g => g.freq ? `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${esc(g.branch)} · абонемент ${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)}${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>` : cell({ lead: '💃', plain: true, t: esc(g.name), s: `${esc(g.branch)}${g.mode ? ' · ' + MODE[g.mode] : ''}` }))) : (s.left || []).length ? '' : '<div class="empty">Не состоит в группах</div>'}
     ${(s.left || []).length ? list(s.left.map(g => cell({ lead: '👋', plain: true, t: esc(g.name), s: `ушёл с ${monthLabel(g.leftPeriod).toLowerCase()}` }))) : ''}
@@ -1023,6 +1023,22 @@ Object.assign(ACT, {
     try {
       const r = await api(`/students/${sid}/dance`, { method: 'PUT', body: { ..._danceSel, ftsarrId: val('dance-id').trim() } });
       closeSheet(); render(); toast(`Пара ${r.classSt || '—'} / ${r.classLa || '—'}${r.classSoloSt || r.classSoloLa ? ` · соло ${r.classSoloSt || '—'} / ${r.classSoloLa || '—'}` : ''} · разряд ${r.sportRank || 'нет'}`);
+    } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  },
+});
+/* Дата рождения (решение владельца 08.11.2026): возраст словами и у бальников возрастная группа ФТСАРР; правят
+   администратор и педагог (один и тот же PUT /students/{sid}/birth), спортсмен и родитель видят в дневнике. */
+const birthLine = b => b && b.birthDate ? `🎂 ${esc(b.display)} · <b>${esc(b.ageLabel)}</b>${b.ageGroup ? ` · ${esc(b.ageGroup)}` : ''}` : '';
+const birthRow = (sid, name, b) => b ? `<div class="hint" style="margin-top:4px">${birthLine(b) || '🎂 Дата рождения не указана'} <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="birthAsk" data-p='${esc(JSON.stringify({ sid, name, value: b.birthDate || '' }))}' aria-label="Дата рождения">✏️</button></div>` : '';
+Object.assign(ACT, {
+  birthAsk: ({ sid, name, value }) => sheet(`<h3>Дата рождения</h3><div class="hint">${esc(name)}</div>
+    ${field('birth-date', 'Дата рождения', value, `type="date" max="${new Date().toISOString().slice(0, 10)}"`)}
+    <div class="hint" style="margin-top:6px">Чтобы знать возраст и возрастную группу на турнирах и не забыть день рождения.</div>
+    <div style="margin-top:12px">${btn('💾 Сохранить', 'birthDo', { sid })}${value ? btn('Стереть', 'birthDo', { sid, clear: true }, 'ghost') : ''}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`),
+  birthDo: async ({ sid, clear }) => {
+    try {
+      const r = await api(`/students/${sid}/birth`, { method: 'PUT', body: { birthDate: clear ? '' : val('birth-date') } });
+      closeSheet(); render(); toast(r.birthDate ? `${r.display} · ${r.ageLabel}` : 'Дата рождения стёрта');
     } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
   },
 });

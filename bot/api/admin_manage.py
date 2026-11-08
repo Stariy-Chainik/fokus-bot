@@ -14,7 +14,7 @@ from aiohttp import web
 from bot.models.enums import GroupBillingMode, StudentGroupTier
 from bot.services.group_invite import group_invite
 from bot.services.kindergarten import clean_value, is_kindergarten_group
-from bot.services import dance_rank
+from bot.services import birthdays, dance_rank
 from bot.services.membership import leave_group
 from bot.services.student_archive import archive_preview, archive_student, unarchive_student
 from bot.services.student_service import TierToggleError
@@ -383,6 +383,20 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
                                                         who="администратор")
         return _json(payload, status=status)
 
+    async def student_birth(request: web.Request, user) -> web.Response:
+        """Дата рождения ученика (решение владельца 08.11.2026): «ДД.ММ.ГГГГ» или «ГГГГ-ММ-ДД», пусто — стереть."""
+        sid = request.match_info["sid"]
+        s = await student_repo.get_by_id(sid)
+        if s is None:
+            return _json({"error": "not_found"}, status=404)
+        value = birthdays.parse_birth_date((await _body(request) or {}).get("birthDate"))
+        if value is None:
+            return _json({"error": "bad_date", "message": "Дата рождения — в формате ДД.ММ.ГГГГ, не в будущем"}, status=400)
+        await student_repo.update_birth_date(sid, value, actor=user.tg_id, who="администратор")
+        s.birth_date = value
+        groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
+        return _json({"ok": True, **birthdays.view(s, await dance_rank.in_ballroom_group(sid, student_group_repo, groups))})
+
     async def student_delete(request: web.Request, user) -> web.Response:
         """Стереть карточку совсем — кнопки в кабинете больше нет (решение владельца 21.10.2026: «Удалить
         ученика» = архив, `student_archive`); маршрут оставлен для скриптов и чистки дублей."""
@@ -601,6 +615,7 @@ def register_manage_routes(app: web.Application, dp, guard, prefix: str, bot=Non
         ("POST", "/students/{sid}/unarchive", student_unarchive),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),
         ("PUT", "/students/{sid}/dance", student_dance),
+        ("PUT", "/students/{sid}/birth", student_birth),
         ("GET", "/students/{sid}/partner-candidates", partner_candidates), ("PUT", "/students/{sid}/partner", partner_put),
         ("PUT", "/students/{sid}/groups", student_groups), ("POST", "/students/{sid}/tier", student_tier),
         ("GET", "/clients", clients), ("PUT", "/students/{sid}/client", student_client),
