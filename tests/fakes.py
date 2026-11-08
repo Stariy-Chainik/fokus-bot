@@ -776,10 +776,10 @@ class StudentRepoWritable(StudentRepoFake):
         if s: s.kindergarten_group = value  # noqa: E701
         return s is not None
 
-    async def update_dance_profile(self, sid, dance_class=None, sport_rank=None, actor=0, who=""):
+    async def update_dance_profile(self, sid, actor=0, who="", **fields):
         s = self._find(sid)
-        if s and dance_class is not None: s.dance_class = dance_class  # noqa: E701
-        if s and sport_rank is not None: s.sport_rank = sport_rank  # noqa: E701
+        for name, value in fields.items():
+            if s and value is not None: setattr(s, name, value)  # noqa: E701
         return s is not None
 
     async def update_tier(self, sid, tier):

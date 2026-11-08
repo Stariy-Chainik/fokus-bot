@@ -992,16 +992,39 @@ SCREENS['a.lesson'] = async ({ id }) => {
 Object.assign(ACT, {
   subGroupOpen: ({ id, ym }) => { state.ui.aGroupTab = 'pay'; go('a.group', { id, ym }); },
 });
-/* Танцевальный класс и спортивный разряд бальника (решение владельца 08.11.2026): блок в карточке ученика у
-   администратора и педагога (общий лист, один и тот же PUT /students/{sid}/dance), у спортсмена и родителя — только чтение. */
-const danceLine = d => d && d.ballroom ? `💃 Класс: <b>${d.danceClass ? esc(d.danceClass) : 'не присвоен'}</b> · разряд: <b>${d.sportRank ? esc(d.sportRank) : 'не присвоен'}</b>` : '';
-const danceRow = (sid, name, d) => danceLine(d) ? `<div class="hint" style="margin-top:4px">${danceLine(d)} <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="danceAsk" data-p='${esc(JSON.stringify({ sid, name, dance: d }))}' aria-label="Класс и разряд">✏️</button></div>` : '';
+/* Бальные танцы (решение владельца 08.11.2026): парные классы St / La, классы соло ST / LA (у солисток), разряд и № книжки
+   ФТСАРР — блок в карточке ученика у администратора и педагога (общий лист, один и тот же PUT /students/{sid}/dance),
+   у спортсмена и родителя — только чтение. */
+const danceLine = d => {
+  if (!d || !d.ballroom) return '';
+  const cls = v => v ? esc(v) : '—';
+  const parts = [`Пара: <b>${cls(d.classSt)} / ${cls(d.classLa)}</b>`];
+  if (d.classSoloSt || d.classSoloLa) parts.push(`Соло: <b>${cls(d.classSoloSt)} / ${cls(d.classSoloLa)}</b>`);
+  parts.push(`разряд: <b>${d.sportRank ? esc(d.sportRank) : 'нет'}</b>`);
+  if (d.ftsarrId) parts.push(`№ ФТСАРР ${esc(d.ftsarrId)}`);
+  return '💃 ' + parts.join(' · ');
+};
+const danceRow = (sid, name, d) => danceLine(d) ? `<div class="hint" style="margin-top:4px">${danceLine(d)} <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="danceAsk" data-p='${esc(JSON.stringify({ sid, name, dance: d }))}' aria-label="Классы и разряд">✏️</button></div>` : '';
 const _danceSel = {};
-const _danceChips = (k, options, cur) => `<div class="chips" data-dance="${k}" style="margin-top:6px">${['', ...options].map(v => `<button class="chip" aria-pressed="${v === cur}" data-act="danceSel" data-p='${esc(JSON.stringify({ k, v }))}'>${v ? esc(v) : 'не присвоен'}</button>`).join('')}</div>`;
+const _danceChips = (k, options, cur) => `<div class="chips" data-dance="${k}" style="margin-top:6px">${['', ...options].map(v => `<button class="chip" aria-pressed="${v === cur}" data-act="danceSel" data-p='${esc(JSON.stringify({ k, v }))}'>${v ? esc(v) : 'нет'}</button>`).join('')}</div>`;
 Object.assign(ACT, {
-  danceAsk: ({ sid, name, dance }) => { _danceSel.cls = dance.danceClass || ''; _danceSel.rank = dance.sportRank || ''; sheet(`<h3>Класс и разряд</h3><div class="hint">${esc(name)} · бальные танцы</div><div class="eyebrow">Танцевальный класс</div>${_danceChips('cls', dance.classes || [], _danceSel.cls)}<div class="eyebrow">Спортивный разряд</div>${_danceChips('rank', dance.ranks || [], _danceSel.rank)}<div style="margin-top:12px">${btn('💾 Сохранить', 'danceDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`); },
+  danceAsk: ({ sid, name, dance }) => {
+    Object.assign(_danceSel, { classSt: dance.classSt || '', classLa: dance.classLa || '', classSoloSt: dance.classSoloSt || '', classSoloLa: dance.classSoloLa || '', sportRank: dance.sportRank || '' });
+    const row = (k, label) => `<div class="eyebrow">${label}</div>${_danceChips(k, dance.classes || [], _danceSel[k])}`;
+    sheet(`<h3>Классы и разряд</h3><div class="hint">${esc(name)} · бальные танцы, как в базе ФТСАРР</div>
+      ${row('classSt', 'Парный класс · стандарт')}${row('classLa', 'Парный класс · латина')}
+      ${row('classSoloSt', 'Соло · стандарт')}${row('classSoloLa', 'Соло · латина')}
+      <div class="eyebrow">Спортивный разряд</div>${_danceChips('sportRank', dance.ranks || [], _danceSel.sportRank)}
+      ${field('dance-id', '№ классификационной книжки ФТСАРР', dance.ftsarrId || '', 'inputmode="numeric" maxlength="8" autocomplete="off" placeholder="например, 221098"')}
+      <div style="margin-top:12px">${btn('💾 Сохранить', 'danceDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+  },
   danceSel: ({ k, v }) => { _danceSel[k] = v; document.querySelectorAll(`[data-dance="${k}"] .chip`).forEach(b => b.setAttribute('aria-pressed', String(JSON.parse(b.dataset.p).v === v))); },
-  danceDo: async ({ sid }) => { try { const r = await api(`/students/${sid}/dance`, { method: 'PUT', body: { danceClass: _danceSel.cls, sportRank: _danceSel.rank } }); closeSheet(); render(); toast(`Класс ${r.danceClass || '—'} · разряд ${r.sportRank || '—'}`); } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); } },
+  danceDo: async ({ sid }) => {
+    try {
+      const r = await api(`/students/${sid}/dance`, { method: 'PUT', body: { ..._danceSel, ftsarrId: val('dance-id').trim() } });
+      closeSheet(); render(); toast(`Пара ${r.classSt || '—'} / ${r.classLa || '—'}${r.classSoloSt || r.classSoloLa ? ` · соло ${r.classSoloSt || '—'} / ${r.classSoloLa || '—'}` : ''} · разряд ${r.sportRank || 'нет'}`);
+    } catch (e) { toast(e.data && e.data.message ? e.data.message : errText(e)); }
+  },
 });
 /* Группа ребёнка в детском саду — номер или название (решение владельца 10.10.2026). */
 Object.assign(ACT, {

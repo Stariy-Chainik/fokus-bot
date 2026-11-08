@@ -1,13 +1,15 @@
-"""Танцевальный класс и спортивный разряд ученика бальных танцев (решение владельца 08.11.2026).
+"""Классы ФТСАРР, спортивный разряд и номер книжки ученика бальных танцев (решение владельца 08.11.2026).
 
-У спортсмена-бальника есть цели — следующий класс, разряд, — поэтому в карточке хранятся текущий
-танцевальный класс (Н-2 … M) и спортивный разряд (юношеские и взрослые, КМС, МС, МСМК, ЗМС):
-`students.dance_class` (кол. 13) и `students.sport_rank` (кол. 14), `scripts/setup_dance_rank.py`.
+У спортсмена-бальника есть цели — следующий класс, разряд, — поэтому в карточке хранится то же, что в базе ФТСАРР:
+**парный** класс по стандарту и латине (`class_st`, `class_la` — в открытом поиске базы это «St / La»), **класс соло**
+по стандарту и латине (`class_solo_st`, `class_solo_la` — у солисток, виден только в кабинете клуба; у Бущук Златы
+парный D / D, соло C / C), спортивный разряд или звание (`sport_rank`) и номер классификационной книжки
+(`ftsarr_id` — по нему потом сверка с базой). Колонки 13–18 листа `students`, `scripts/setup_dance_rank.py`.
 Поля есть только у учеников бальных направлений — групп с «БТ» в названии (`bill_format.direction_of`
 → «бальные танцы»); у гимнасток и современных танцев блока нет. Ученик ушёл из бальной группы с уже
-присвоенным классом — блок остаётся, чтобы его было видно и можно было стереть. Значения — только из списков
-ниже, пусто — «не присвоен»: по ним потом можно фильтровать состав и считать статистику. Правят администратор
-и педагог своих групп, видят спортсмен (дневник) и родитель (дневник ребёнка).
+присвоенным классом — блок остаётся, чтобы его было видно и можно было стереть. Классы и разряды — только из
+списков ниже, пусто — «не присвоен»: по ним потом можно фильтровать состав и считать статистику. Правят
+администратор и педагог своих групп, видят спортсмен (дневник) и родитель (дневник ребёнка).
 """
 from __future__ import annotations
 
@@ -20,6 +22,9 @@ DANCE_CLASSES: list[str] = ["Н-2", "Н-3", "Н-4", "Н-5", "Н-6", "E", "D", "C
 # Разряды ЕВСК по танцевальному спорту.
 SPORT_RANKS: list[str] = ["3 юношеский", "2 юношеский", "1 юношеский", "3 взрослый", "2 взрослый", "1 взрослый",
                           "КМС", "МС", "МСМК", "ЗМС"]
+# поле API (camelCase) → поле модели/колонка листа
+CLASS_FIELDS = {"classSt": "class_st", "classLa": "class_la", "classSoloSt": "class_solo_st", "classSoloLa": "class_solo_la"}
+FIELDS = {**CLASS_FIELDS, "sportRank": "sport_rank", "ftsarrId": "ftsarr_id"}
 
 _LATIN = str.maketrans("АВСЕМНавсемн", "ABCEMHabcemh")   # кириллица, похожая на латиницу, — в латиницу
 
@@ -35,13 +40,14 @@ async def in_ballroom_group(student_id: str, student_group_repo, groups: dict) -
 
 
 def has_profile(student) -> bool:
-    return bool(student.dance_class or student.sport_rank)
+    return any(getattr(student, f, "") for f in FIELDS.values())
 
 
 def profile(student, ballroom: bool) -> dict:
-    """Блок карточки: у бальников и у тех, кому класс или разряд уже присвоен."""
-    return {"ballroom": ballroom or has_profile(student), "danceClass": student.dance_class,
-            "sportRank": student.sport_rank, "classes": DANCE_CLASSES, "ranks": SPORT_RANKS}
+    """Блок карточки: у бальников и у тех, кому класс, разряд или номер книжки уже присвоены."""
+    return {"ballroom": ballroom or has_profile(student),
+            **{api: getattr(student, attr, "") for api, attr in FIELDS.items()},
+            "classes": DANCE_CLASSES, "ranks": SPORT_RANKS}
 
 
 def clean_class(raw) -> str | None:
@@ -51,6 +57,12 @@ def clean_class(raw) -> str | None:
 
 def clean_rank(raw) -> str | None:
     return _pick(raw, SPORT_RANKS)
+
+
+def clean_ftsarr_id(raw) -> str | None:
+    """Номер книжки ФТСАРР — только цифры (в базе шестизначный); пусто — нет; иное — None."""
+    value = "".join(str(raw or "").split())
+    return value if value == "" or (value.isdigit() and len(value) <= 8) else None
 
 
 def _pick(raw, options: list[str]) -> str | None:
@@ -66,14 +78,19 @@ def _norm(s: str) -> str:
 
 
 async def apply_update(student_repo, student, body: dict, actor: int, who: str) -> tuple[int, dict]:
-    """PUT {danceClass?, sportRank?} → (статус, ответ). Поле, которого нет в запросе, не меняется."""
-    dance_class = clean_class(body.get("danceClass")) if "danceClass" in body else None
-    sport_rank = clean_rank(body.get("sportRank")) if "sportRank" in body else None
-    if ("danceClass" in body and dance_class is None) or ("sportRank" in body and sport_rank is None):
-        return 400, {"error": "bad_value", "message": "Выберите класс и разряд из списка"}
-    ok = await student_repo.update_dance_profile(student.student_id, dance_class=dance_class, sport_rank=sport_rank,
-                                                 actor=actor, who=who)
+    """PUT {classSt?, classLa?, classSoloSt?, classSoloLa?, sportRank?, ftsarrId?} → (статус, ответ).
+    Поле, которого нет в запросе, не меняется; значение не из списка — 400 `bad_value`."""
+    cleaned: dict[str, str] = {}
+    for api, attr in FIELDS.items():
+        if api not in body:
+            continue
+        clean = clean_rank if api == "sportRank" else clean_ftsarr_id if api == "ftsarrId" else clean_class
+        value = clean(body.get(api))
+        if value is None:
+            return 400, {"error": "bad_value", "field": api,
+                         "message": "Номер книжки — только цифры" if api == "ftsarrId" else "Выберите класс и разряд из списка"}
+        cleaned[attr] = value
+    ok = await student_repo.update_dance_profile(student.student_id, actor=actor, who=who, **cleaned)
     if not ok:
         return 404, {"error": "not_found"}
-    return 200, {"ok": True, "danceClass": student.dance_class if dance_class is None else dance_class,
-                 "sportRank": student.sport_rank if sport_rank is None else sport_rank}
+    return 200, {"ok": True, **{api: cleaned.get(attr, getattr(student, attr, "")) for api, attr in FIELDS.items()}}

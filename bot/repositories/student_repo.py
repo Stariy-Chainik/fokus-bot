@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 # 8 kindergarten_group (группа в детском саду: номер или название) | 9 athlete_tg_id (свой Telegram спортсмена)
 # 10 parent_max_ids | 11 athlete_max_id (свой MAX спортсмена; scripts/setup_athlete_max.py)
 # 12 archived (YYYY-MM-DD — ушёл из школы, карточка в архиве; scripts/setup_student_archive.py)
-# 13 dance_class | 14 sport_rank (класс и разряд бальника; scripts/setup_dance_rank.py, bot/services/dance_rank.py)
+# 13 class_st | 14 class_la | 15 class_solo_st | 16 class_solo_la | 17 sport_rank | 18 ftsarr_id — бальные танцы:
+#   парные и соло классы ФТСАРР, разряд, № книжки (scripts/setup_dance_rank.py, bot/services/dance_rank.py)
 _PARTNER_COL = 3
 _TIER_COL = 5
 _CLIENT_ID_COL = 6
@@ -22,8 +23,7 @@ _ATHLETE_TG_ID_COL = 9
 _PARENT_MAX_IDS_COL = 10
 _ATHLETE_MAX_ID_COL = 11
 _ARCHIVED_COL = 12
-_DANCE_CLASS_COL = 13
-_SPORT_RANK_COL = 14
+DANCE_COLS = {"class_st": 13, "class_la": 14, "class_solo_st": 15, "class_solo_la": 16, "sport_rank": 17, "ftsarr_id": 18}
 
 
 def _parse_id_list(raw) -> list[int]:
@@ -73,8 +73,7 @@ def _row_to_student(row: dict) -> Student:
         kindergarten_group=str(row.get("kindergarten_group") or "").strip(),
         athlete_max_id=_parse_tg_id(row.get("athlete_max_id")),
         archived=str(row.get("archived") or "").strip(),
-        dance_class=str(row.get("dance_class") or "").strip(),
-        sport_rank=str(row.get("sport_rank") or "").strip(),
+        **{f: str(row.get(f) or "").strip() for f in DANCE_COLS},
     )
 
 
@@ -168,12 +167,10 @@ class StudentRepository(BaseRepository):
                               + (f" · {who}" if who else ""), actor=actor, ref=student_id)
         return True
 
-    async def update_dance_profile(self, student_id: str, dance_class: Optional[str] = None,
-                                   sport_rank: Optional[str] = None, actor: int = 0, who: str = "") -> bool:
-        """Танцевальный класс и спортивный разряд бальника (решение владельца 08.11.2026); None — поле не трогать,
-        пусто — стереть. Нужны заголовки `dance_class`/`sport_rank` в 13–14-й колонках (scripts/setup_dance_rank.py)."""
-        cells = {col: value for col, value in ((_DANCE_CLASS_COL, dance_class), (_SPORT_RANK_COL, sport_rank))
-                 if value is not None}
+    async def update_dance_profile(self, student_id: str, actor: int = 0, who: str = "", **fields: Optional[str]) -> bool:
+        """Классы, разряд и № книжки ФТСАРР бальника (решение владельца 08.11.2026): поля из `DANCE_COLS`,
+        None или не передано — не трогать, пусто — стереть. Нужны заголовки в 13–18-й колонках (scripts/setup_dance_rank.py)."""
+        cells = {DANCE_COLS[name]: value for name, value in fields.items() if name in DANCE_COLS and value is not None}
         if not cells:
             return True
         async with self._locked_row(student_id=student_id) as row_idx:
@@ -181,8 +178,9 @@ class StudentRepository(BaseRepository):
                 return False
             await self._update_cells(row_idx, cells, raw=True)
         from bot.services import activity
-        parts = ([f"класс {dance_class or '—'}"] if dance_class is not None else []) + \
-                ([f"разряд {sport_rank or '—'}"] if sport_rank is not None else [])
+        labels = {"class_st": "St", "class_la": "La", "class_solo_st": "соло ST", "class_solo_la": "соло LA",
+                  "sport_rank": "разряд", "ftsarr_id": "№ ФТСАРР"}
+        parts = [f"{labels[n]} {v or '—'}" for n, v in fields.items() if n in DANCE_COLS and v is not None]
         await activity.record(activity.STUDENT, f"Бальные танцы: {student_id} · " + " · ".join(parts)
                               + (f" · {who}" if who else ""), actor=actor, ref=student_id)
         return True
