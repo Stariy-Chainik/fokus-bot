@@ -16,6 +16,7 @@ DI_KEYS = {
     "diagnostics_service", "visibility", "student_service", "student_request_service",
     "cloudkassir_service", "notifier", "training_entry_repo", "athlete_task_repo", "diary_service",
     "pending_repo", "activity_repo", "group_schedule_repo", "bonus_repo", "hall_rent_repo",
+    "competition_result_repo", "competition_scan_repo",
 }
 
 

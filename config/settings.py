@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     def receipt_check_enabled(self) -> bool:
         return bool(self.anthropic_api_key)
 
+    # Турниры ФТСАРР (решение владельца 10.11.2026, bot/services/competition_results.py): раз в день в
+    # FTSARR_SYNC_TIME (МСК) обход результатов турниров текущего и прошлого месяца по регионам FTSARR_REGIONS
+    # (коды ФТСАРР: 50 — Московская область, 77 — Москва; «all» — все), находки — в лист competition_results.
+    sheet_competition_results: str = Field(default="competition_results", alias="SHEET_COMPETITION_RESULTS")
+    sheet_competition_scans: str = Field(default="competition_scans", alias="SHEET_COMPETITION_SCANS")
+    ftsarr_sync_enabled: bool = Field(default=True, alias="FTSARR_SYNC_ENABLED")
+    ftsarr_sync_time: str = Field(default="07:30", alias="FTSARR_SYNC_TIME")
+    ftsarr_regions: str = Field(default="50,77", alias="FTSARR_REGIONS")
+    ftsarr_lookback_months: int = Field(default=2, alias="FTSARR_LOOKBACK_MONTHS")
+
     # Кабинет спортсмена: дневник тренировок и задания педагога
     sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
     sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")

@@ -294,7 +294,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
-    <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' })])}</div>
+    <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' }), cell({ lead: '🏆', plain: true, t: 'Турниры', s: h.competitions && h.competitions.count ? `${fmon(h.period).toLowerCase()}: ${plural(h.competitions.count, ['турнир', 'турнира', 'турниров'])} · ${plural(h.competitions.pairs, ['выступление', 'выступления', 'выступлений'])}` : 'результаты наших пар из базы ФТСАРР', go: 'a.competitions', p: { ym: h.period } })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
@@ -567,6 +567,7 @@ SCREENS['a.student'] = async ({ id }) => {
     ${(s.left || []).length ? list(s.left.map(g => cell({ lead: '👋', plain: true, t: esc(g.name), s: `ушёл с ${monthLabel(g.leftPeriod).toLowerCase()}` }))) : ''}
     ${s.teachers.length ? `<div class="eyebrow">Педагоги</div><div class="card pad">${esc(s.teachers.join(', '))}</div>` : ''}
     <div class="eyebrow">Занятия</div>${list([cell({ lead: '📅', plain: true, t: 'Занятия ученика', s: 'по месяцам: педагог, группа, сумма, оплата', go: 'a.student.lessons', p: { id, name: s.name } })])}
+    ${compBlock(s.competitions)}
     <div class="eyebrow">Счета</div>${list(s.months.map(m => cell({ lead: m.total ? (m.rest ? '⏳' : '✅') : '—', plain: true, t: fmon(m.period), s: m.total ? `начислено ${fmt(m.total)} · оплачено ${fmt(m.paid)}` : 'начислений нет', r: m.rest ? pill(fmt(m.rest), m.period < lastPeriods(1)[0] ? 'bad' : 'warn') : '', go: 'a.bill', p: { ym: m.period, sid: id } })))}
     <div style="margin-top:12px">${goBtn('💾 Подтвердить оплату', 'a.pay.student', { ym: lastPeriods(1)[0], sid: id }, 'sec')}</div>
     ${(s.recentPayments || []).length ? `<details class="acc" style="margin-top:12px"><summary><span><span class="chev">›</span>История оплат <span class="hint">· ${s.paymentsTotal}</span></span><span class="r hint">${s.recentPayments[0].paidAt ? 'последняя ' + fdate(s.recentPayments[0].paidAt.slice(0, 10)) : ''}</span></summary>
@@ -576,6 +577,15 @@ SCREENS['a.student'] = async ({ id }) => {
     <div style="margin-top:12px">${btn('✏️ Переименовать', 'studentRename', { id, name: s.name }, 'ghost')}${s.archived ? btn('↩ Вернуть из архива', 'studentUnarchive', { id, name: s.name }, 'sec') : btn('🗑 Удалить ученика', 'studentArchiveAsk', { id, name: s.name }, 'danger')}</div>` };
 };
 
+/* Турниры ФТСАРР за месяц: наши пары с местами; «Обновить» запускает обход базы фоном (решение владельца 10.11.2026). */
+SCREENS['a.competitions'] = async ({ ym } = {}) => {
+  const d = await api(`/competitions${ym ? `?ym=${ym}` : ''}`);
+  const comps = d.competitions || [];
+  return { title: 'Турниры', html: `${monthChips('a.competitions', d.period, {})}
+    ${comps.length ? comps.map(c => `<div class="eyebrow">${esc(c.name)}</div><p class="hint" style="margin:0 0 6px">${esc(c.city)} · ${fdate(c.date)} · ${plural(c.pairs.length, ['выступление', 'выступления', 'выступлений'])}</p>${list(c.pairs.map(p => { const first = p.members.find(m => m.id); return cell({ lead: medal(p.place), plain: true, cls: 'wrap', t: p.members.map(m => esc(m.name)).join(' / '), s: `${esc(p.group)}${p.members.filter(m => m.class && m.classTotal).map(m => ` · ${p.members.length > 1 ? esc(m.name.split(' ')[0]) + ' ' : 'класс '}${esc(m.class)}: ${m.classPosition} из ${m.classTotal}`).join('')}`, r: `<b>${p.place}</b> <span class="hint">из ${p.total}</span>`, go: first ? 'a.student' : undefined, p: first ? { id: first.id } : undefined }); }))}`).join('') : empty('Турниров за месяц нет', '<p class="hint" style="margin:0">Результаты берутся из открытой базы ФТСАРР раз в день — только по ученикам, которые есть в боте.</p>')}
+    <div style="margin-top:12px">${d.scanning ? '<p class="hint">⏳ Обход базы идёт — обновите экран через пару минут</p>' : btn('🔄 Обновить из базы ФТСАРР', 'compSync', { ym: d.period }, 'ghost')}</div>
+    ${d.lastScan ? `<p class="hint">Последний обход: ${esc(d.lastScan.slice(0, 16))}</p>` : ''}` };
+};
 /* Занятия ученика по месяцам: кто вёл, группа, длительность, доля ученика и ✅/⬜ оплаты (как в счёте). */
 SCREENS['a.student.lessons'] = async ({ id, name, ym }) => {
   const period = ym || lastPeriods(1)[0];
@@ -1004,6 +1014,14 @@ const danceLine = d => {
   if (d.ftsarrId) parts.push(`№ ФТСАРР ${esc(d.ftsarrId)}`);
   return '💃 ' + parts.join(' · ');
 };
+/* Турниры ФТСАРР (решение владельца 10.11.2026): результаты наших пар — в карточках ученика, спортсмена, у родителя
+   и на экране «Турниры» администратора. Данные — лист competition_results, обход базы раз в день. */
+const medal = p => p === 1 ? '🥇' : p === 2 ? '🥈' : p === 3 ? '🥉' : '🏆';
+const compCell = r => cell({ lead: medal(r.place), plain: true, cls: 'wrap', t: `<b>${r.place} из ${r.total}</b> · ${esc(r.group)}`, s: `${fdate(r.date)} · ${esc(r.competition)}${r.partner ? ` · пара: ${esc(r.partner)}` : ''}${r.class && r.classTotal ? ` · класс ${esc(r.class)}: ${r.classPosition} из ${r.classTotal}` : ''}` });
+const compBlock = (rows, title = 'Турниры') => rows && rows.length ? `<div class="eyebrow">🏆 ${title}</div>${list(rows.map(compCell))}` : '';
+Object.assign(ACT, {
+  compSync: async ({ ym }) => { try { await api(`/competitions/sync?ym=${ym}`, { method: 'POST' }); toast('Обход запущен — результаты появятся через несколько минут'); } catch (e) { toast(errText(e)); } },
+});
 const danceRow = (sid, name, d) => danceLine(d) ? `<div class="hint" style="margin-top:4px">${danceLine(d)} <button class="chip" style="padding:1px 8px;margin-left:4px" data-act="danceAsk" data-p='${esc(JSON.stringify({ sid, name, dance: d }))}' aria-label="Классы и разряд">✏️</button></div>` : '';
 const _danceSel = {};
 const _danceChips = (k, options, cur) => `<div class="chips" data-dance="${k}" style="margin-top:6px">${['', ...options].map(v => `<button class="chip" aria-pressed="${v === cur}" data-act="danceSel" data-p='${esc(JSON.stringify({ k, v }))}'>${v ? esc(v) : 'нет'}</button>`).join('')}</div>`;
@@ -1632,6 +1650,8 @@ ACT.switchRole = async ({ to }) => {
     state.ui.kid = q.get('sid');
     state.stack.push({ n: 'p.bill', p: { ym: q.get('ym') } });
   }
+  // «📱 Открыть кабинет» из сообщения о результатах турнира (10.11.2026): ?open=comp&ym=YYYY-MM — экран «Турниры»
+  if (ROLE === 'admin' && q.get('open') === 'comp') state.stack.push({ n: 'a.competitions', p: { ym: /^\d{4}-\d{2}$/.test(q.get('ym') || '') ? q.get('ym') : undefined } });
   // «📒 Открыть задание» из сообщения с видео ученика (02.11.2026): ?open=hw&bid=HW-…
   if (ROLE === 'teacher' && q.get('open') === 'hw' && /^HW-\d+$/.test(q.get('bid') || '')) state.stack.push({ n: 't.hw.b', p: { id: q.get('bid') } });
   // «📓 Открыть дневник» из сообщения с видео к заданию из дневника: ?open=diary&sid=STU-…

@@ -113,6 +113,9 @@ def _mode(group) -> str:
     return getattr(group.billing_mode, "value", str(group.billing_mode))
 
 
+_background: set = set()          # фоновые задачи API (обход турниров) — ссылка, чтобы сборщик не отменил
+
+
 def register_admin_api(app: web.Application, dp, bot=None) -> None:
     user_repo = dp["user_repo"]
     student_repo = dp["student_repo"]
@@ -209,6 +212,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "studentsCount": len(await student_repo.get_all()),
             "flow": (await _flow(period)).counts,                   # плитки «пришли / ушли» (16.10.2026)
             "activityToday": await _activity_count(today),
+            "competitions": await _competition_month(period),       # плитка «🏆 Турниры» (10.11.2026)
             # колокольчик «События»: новые с последнего просмотра (?seen= — ts последнего просмотренного события)
             "activityNew": await _activity_count(request.query.get("seen") or today, strict=bool(request.query.get("seen"))),
         })
@@ -427,6 +431,49 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         d = await month_lessons(dp, sid, request.query.get("ym") or current_period())
         return _json({"student": {"id": sid, "name": student.name}, **d})
 
+    async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
+        """Результаты турниров ФТСАРР ученика — свежие первыми (лист competition_results)."""
+        from bot.services import competition_results
+        repo = _dp_get(dp, "competition_result_repo")
+        if repo is None:
+            return []
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        return competition_results.view(await repo.get_for_student(student_id), names)[:limit]
+
+    async def _competition_month(period: str) -> dict:
+        """Плитка сводки: сколько турниров и наших пар за месяц."""
+        from bot.services import competition_results
+        repo = _dp_get(dp, "competition_result_repo")
+        rows = await repo.get_by_period(period) if repo is not None else []
+        comps = competition_results.competitions_view(rows)
+        return {"count": len(comps), "pairs": sum(len(c["pairs"]) for c in comps), "results": len(rows)}
+
+    async def competitions(request: web.Request, user) -> web.Response:
+        """Экран «🏆 Турниры»: турниры месяца с нашими парами (решение владельца 10.11.2026)."""
+        from bot.services import competition_results
+        ym = request.query.get("ym") or ""
+        period = ym if re.fullmatch(r"\d{4}-\d{2}", ym) else current_period()
+        repo, scans = _dp_get(dp, "competition_result_repo"), _dp_get(dp, "competition_scan_repo")
+        rows = await repo.get_by_period(period) if repo is not None else []
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        last = max((sc.scanned_at for sc in await scans.get_all()), default="") if scans is not None else ""
+        return _json({"period": period, "scanning": competition_results.sync_running(), "lastScan": last,
+                      "competitions": competition_results.competitions_view(rows, names)})
+
+    async def competitions_sync(request: web.Request, user) -> web.Response:
+        """«🔄 Обновить»: обход турниров месяца (`?ym=`, иначе текущий и прошлый) фоном; идёт другой — 409 busy."""
+        import asyncio
+        from bot.services import competition_results
+        ym = request.query.get("ym") or ""
+        months = [ym] if re.fullmatch(r"\d{4}-\d{2}", ym) else competition_results.months_back(settings.ftsarr_lookback_months)
+        if competition_results.sync_running():
+            return _json({"error": "busy"}, status=409)
+        task = asyncio.create_task(competition_results.sync(dp, months, bot=bot, force=bool(request.query.get("force"))))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+        logger.info("Обход турниров ФТСАРР запущен администратором %s: %s", user.tg_id, months)
+        return _json({"ok": True, "months": months})
+
     async def student_card(request: web.Request, user) -> web.Response:
         sid = request.match_info["sid"]
         card = await student_service.get_student_card(sid)
@@ -463,6 +510,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
             "dance": dance_profile(s, ballroom),
             # дата рождения — возраст и возрастная группа ФТСАРР у бальников (решение владельца 08.11.2026)
             "birth": birthdays.view(s, ballroom),
+            "competitions": await _competitions(sid),   # результаты турниров ФТСАРР (решение владельца 10.11.2026)
             "teachers": card.teacher_names,
             "groups": [{"id": g.group_id, "name": g.group.name if g.group else g.group_id,
                         "branch": g.branch_name, "mode": _mode(g.group) if g.group else None,
@@ -745,6 +793,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         ("DELETE", "/payments/{pid}", pay_cancel),
         ("GET", "/bill/{sid}", bill), ("POST", "/bill/{sid}/send", bill_send),
         ("GET", "/debtors", debtors),
+        ("GET", "/competitions", competitions), ("POST", "/competitions/sync", competitions_sync),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, admin_only(handler))

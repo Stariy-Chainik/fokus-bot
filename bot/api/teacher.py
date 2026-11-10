@@ -166,6 +166,15 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     notifier = _dp_get(dp, "notifier")
     hall_rent_repo = _dp_get(dp, "hall_rent_repo")
 
+    async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
+        """Результаты турниров ФТСАРР ученика — свежие первыми (лист competition_results)."""
+        from bot.services import competition_results
+        repo = _dp_get(dp, "competition_result_repo")
+        if repo is None:
+            return []
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        return competition_results.view(await repo.get_for_student(student_id), names)[:limit]
+
     async def _rent(teacher, period: str, lessons: list | None = None) -> dict | None:
         """Аренда зала за месяц у педагога с прямой оплатой; у остальных None."""
         if teacher.teacher_id not in settings.direct_pay_teacher_id_set:
@@ -886,6 +895,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             # класс и разряд бальника (решение владельца 08.11.2026) — правит педагог своих групп
             "dance": dance_rank.profile(s, ballroom),
             "birth": birthdays.view(s, ballroom),      # дата рождения, возраст, возрастная группа (08.11.2026)
+            "competitions": await _competitions(sid),  # результаты турниров ФТСАРР (10.11.2026)
             "partner": {"id": partner.student_id, "name": partner.name} if partner else None,
             # в карточке — только свои группы: чужие направления педагогу не показываем
             "groups": [groups_map.get(g, g) for g in gids if g in own_visible], "tariffs": tariffs,

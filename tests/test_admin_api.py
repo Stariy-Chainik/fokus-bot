@@ -14,6 +14,7 @@ from bot.services import LessonService, PaymentService, ProfitService, StudentSe
 from bot.services.salary_service import SalaryService
 from config.settings import settings
 from tests.fakes import (
+    CompetitionResultRepoFake, CompetitionScanRepoFake,
     BonusRepoFake,
     HallRentRepoFake,
     BranchRepoFake, ClientRepoWritable, GroupRepoFake, LessonRepoFake, PaymentRepoFake, StudentGroupRepoWritable,
@@ -142,6 +143,7 @@ def _dp():
         "lesson_service": LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service),
         "finance_entry_repo": finance_repo, "payout_repo": PayoutRepoFake(), "salary_override_repo": SalaryOverrideRepoFake(),
         "bonus_repo": bonus_repo, "hall_rent_repo": HallRentRepoFake(),
+        "competition_result_repo": CompetitionResultRepoFake(), "competition_scan_repo": CompetitionScanRepoFake(),
         "profit_service": ProfitService(teacher_repo, lesson_repo, payment_service, finance_repo, salary_service=salary_service),
         "notifier": NotifierFake(),
         "user_repo": UserRepoWritable([mk_user(ADMIN_TG, is_admin=True), mk_user(PARENT_TG)]),

@@ -301,6 +301,14 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             "lessons": out,
         })
 
+    async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
+        from bot.services import competition_results
+        repo = _dp_get(dp, "competition_result_repo")
+        if repo is None:
+            return []
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        return competition_results.view(await repo.get_for_student(student_id), names)[:limit]
+
     async def diary(request: web.Request, addr, children) -> web.Response:
         if diary_service is None:
             return _json({"error": "unavailable"}, status=503)
@@ -327,6 +335,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             "athlete": student.is_athlete,      # кабинет спортсмена заведён — дневник ведётся
             # класс и разряд бальника — цель ребёнка-спортсмена (решение владельца 08.11.2026)
             "dance": dance, "birth": birthdays.view(student, dance["ballroom"]),
+            "competitions": await _competitions(student.student_id),   # результаты турниров ФТСАРР (10.11.2026)
             "stats": {"sessions": st.sessions, "minutes": st.total_minutes, "points": st.points,
                       "avgGrade": st.avg_grade, "byTopic": st.by_topic},
             "place": row.place if row else None, "placeIcon": place_icon(row.place) if row else "",

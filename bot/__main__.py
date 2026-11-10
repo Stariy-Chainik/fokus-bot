@@ -106,6 +106,9 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     activity.setup(activity_repo)          # лента изменений: пишут сервисы и репозитории
     from bot.repositories.group_schedule_repo import GroupScheduleRepository
     group_schedule_repo = GroupScheduleRepository(sheets_client, settings.sheet_group_schedule)
+    from bot.repositories.competition_repo import CompetitionResultRepository, CompetitionScanRepository
+    competition_result_repo = CompetitionResultRepository(sheets_client, settings.sheet_competition_results)
+    competition_scan_repo = CompetitionScanRepository(sheets_client, settings.sheet_competition_scans)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
@@ -184,6 +187,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["pending_repo"] = pending_repo
     dp["activity_repo"] = activity_repo
     dp["group_schedule_repo"] = group_schedule_repo
+    dp["competition_result_repo"] = competition_result_repo      # турниры ФТСАРР (10.11.2026)
+    dp["competition_scan_repo"] = competition_scan_repo
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
@@ -239,7 +244,7 @@ _WARM_REPOS = (
     "student_group_repo", "teacher_group_repo", "branch_repo", "user_repo",
     "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
     "finance_entry_repo", "payout_repo", "salary_override_repo", "bonus_repo", "hall_rent_repo", "pending_repo",
-    "training_entry_repo", "athlete_task_repo", "activity_repo", "group_schedule_repo",
+    "training_entry_repo", "athlete_task_repo", "activity_repo", "group_schedule_repo", "competition_result_repo",
 )
 
 
@@ -368,6 +373,8 @@ async def main() -> None:
     warmer = asyncio.create_task(_cache_warmer(dp))      # кеш листов держим горячим
     from bot.services import lesson_reminders
     reminders = asyncio.create_task(lesson_reminders.run(dp, bot))   # напоминания педагогам по расписанию
+    from bot.services import competition_results
+    competitions = asyncio.create_task(competition_results.run(dp, bot))   # результаты турниров ФТСАРР раз в день
     await asyncio.sleep(0)  # дать задаче выполнить первую загрузку
 
     # Бот в MAX (кабинет родителя) — в том же процессе, на тех же репозиториях
@@ -393,6 +400,7 @@ async def main() -> None:
         refresher.cancel()
         warmer.cancel()
         reminders.cancel()
+        competitions.cancel()
         if max_task is not None:
             max_task.cancel()
 

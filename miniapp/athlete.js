@@ -23,6 +23,7 @@ SCREENS['s.home'] = async () => {
   return { title: 'Мой дневник', html: `
     ${hero(`${esc(h.student.name)} · ${fmon(h.period)}`)}
     ${danceLine(h.dance) || birthLine(h.birth) ? `<div class="card pad" style="margin-bottom:10px"><div class="hint">${[birthLine(h.birth), danceLine(h.dance)].filter(Boolean).join('<br>')}</div></div>` : ''}
+    ${compBlock(h.competitions, 'Мои турниры')}
     <div class="kpis">
       ${kpi(st.sessions, 'тренировок', '', 's.entries', { ym: h.period })}
       ${kpi(st.minutes + ' мин', 'всего')}

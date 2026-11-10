@@ -154,7 +154,16 @@ def register_athlete_api(app: web.Application, dp, bot=None) -> None:
             "openTasks": await _open_tasks(student),
             "dance": dance,                           # класс и разряд бальника — цель спортсмена (08.11.2026)
             "birth": birthdays.view(student, dance["ballroom"]),   # возраст и возрастная группа
+            "competitions": await _competitions(student.student_id),   # результаты турниров ФТСАРР (10.11.2026)
         })
+
+    async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
+        from bot.services import competition_results
+        repo = _dp_get(dp, "competition_result_repo")
+        if repo is None:
+            return []
+        names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
+        return competition_results.view(await repo.get_for_student(student_id), names)[:limit]
 
     async def _dance(student) -> dict:
         groups = {g.group_id: g for g in await dp["group_repo"].get_all(include_archived=True)}

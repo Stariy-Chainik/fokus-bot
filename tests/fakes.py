@@ -659,6 +659,10 @@ class FakeWorksheet:
         self.calls.append(("append_row", list(values)))
         self.rows.append(list(values))
 
+    def append_rows(self, rows, value_input_option=None):
+        self.calls.append(("append_rows", [list(r) for r in rows]))
+        self.rows.extend(list(r) for r in rows)
+
     def insert_row(self, values, index: int):
         """Внешняя правка листа (руками / скриптом) — кеш репозитория об этом не знает."""
         self.rows.insert(index - 2, list(values))
@@ -1139,3 +1143,53 @@ class BonusRepoFake:
         before = len(self.items)
         self.items = [b for b in self.items if b.bonus_id != bonus_id]
         return len(self.items) < before
+
+
+class CompetitionResultRepoFake:
+    """Лист competition_results в памяти (bot/repositories/competition_repo.py)."""
+
+    def __init__(self, items: list | None = None) -> None:
+        self.items: list = list(items or [])
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_for_student(self, student_id):
+        return sorted((r for r in self.items if r.student_id == student_id),
+                      key=lambda r: (r.date, r.competition_id, r.group_name), reverse=True)
+
+    async def get_by_period(self, period):
+        return [r for r in self.items if r.date.startswith(period)]
+
+    async def upsert_many(self, rows):
+        from bot.repositories.competition_repo import CompetitionResult
+        existing = {r.key: r for r in self.items}
+        added, updated = [], 0
+        for r in rows:
+            old = existing.get(r.key)
+            if old is None:
+                new = CompetitionResult(**{**r.__dict__, "result_id": f"CR-{len(self.items) + 1:06d}",
+                                           "fetched_at": "2026-11-10 07:30:00"})
+                self.items.append(new)
+                existing[new.key] = new
+                added.append(new)
+            elif (old.place, old.total) != (r.place, r.total):
+                self.items[self.items.index(old)] = CompetitionResult(**{**r.__dict__, "result_id": old.result_id})
+                updated += 1
+        return added, updated
+
+
+class CompetitionScanRepoFake:
+    def __init__(self) -> None:
+        self.items: list = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def scanned_ids(self):
+        return {s.competition_id for s in self.items}
+
+    async def mark(self, competition_id, name, date, city, groups, hits):
+        from bot.repositories.competition_repo import CompetitionScan
+        self.items = [s for s in self.items if s.competition_id != competition_id]
+        self.items.append(CompetitionScan(competition_id, name, date, city, "2026-11-10 07:30:00", groups, hits))
