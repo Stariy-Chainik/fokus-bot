@@ -136,15 +136,21 @@ class ClientStub:
 
     async def calendar_ids(self, year, month, regions=None):
         self.calls.append(("calendar", year, month, list(regions or [])))
-        return [26877, 26878]
+        return [26877, 26878, 26879]
 
     async def competition(self, cid):
+        from datetime import date, timedelta
         self.calls.append(("competition", cid))
         if cid == 26877:
             return COMP
+        if cid == 26879:                                 # закончился вчера, результаты ещё не выложены
+            y = (date.today() - timedelta(days=1)).isoformat()
+            return Competition(26879, "Кубок без результатов", "Видное", "", y, y, True)
         return Competition(26878, "Невинномысск", "Невинномысск", "", "2099-11-05", "2099-11-08", False)
 
     async def schedule(self, cid):
+        if cid == 26879:
+            return []
         return [(7, "ВС. Юниоры-1, ST", 3), (8, "ВС. Юниоры-1, LA", 0)]
 
     async def group_results(self, cid, gid, name=""):
@@ -181,11 +187,11 @@ def dp(monkeypatch):
 def test_sync_writes_rows_marks_scans_and_notifies_once(dp):
     client, bot = ClientStub(), BotStub()
     stats = asyncio.run(cr.sync(dp, ["2026-10"], [], client=client, bot=bot))
-    assert (stats.competitions, stats.scanned, stats.pending, stats.skipped, stats.rows, stats.added) == (2, 1, 1, 0, 2, 2)
+    assert (stats.competitions, stats.scanned, stats.pending, stats.skipped, stats.rows, stats.added) == (3, 1, 2, 0, 2, 2)
     assert ("calendar", 2026, 10, []) in client.calls and client.closed is False       # чужую сессию не закрываем
     rows = dp["competition_result_repo"].items
     assert {r.student_id for r in rows} == {"STU-0001", "STU-0002"} and rows[0].competition_id == 26877
-    assert asyncio.run(dp["competition_scan_repo"].scanned_ids()) == {26877}
+    assert asyncio.run(dp["competition_scan_repo"].scanned_ids()) == {26877}       # без групп — не отмечен, проверим завтра
     # администратору и педагогу Река (тренер пары) — по одному сообщению
     assert sorted(chat for chat, _ in bot.sent) == sorted([ADMIN_TG, TEACHER_TG])
     assert "🏆 Результаты турнира «RUSSIAN OPEN»" in bot.sent[0][1] and "Иванов Иван / Петрова Анна" in bot.sent[0][1]

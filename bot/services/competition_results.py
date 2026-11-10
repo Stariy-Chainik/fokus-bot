@@ -199,6 +199,7 @@ class SyncStats:
 
 
 _sync_lock = asyncio.Lock()
+GIVE_UP_DAYS = 30            # турнир без групп в результатах перестаём проверять через месяц после окончания
 
 
 def sync_running() -> bool:
@@ -239,6 +240,10 @@ async def sync(dp, months: list[str], regions: list[str] | None = None, *, clien
                     stats.pending += 1                                       # ещё идёт — вернёмся завтра
                     continue
                 outcome = await scan_competition(client, comp, index, teachers)
+                if outcome.groups == 0 and comp.end_date >= (date.today() - timedelta(days=GIVE_UP_DAYS)).isoformat():
+                    stats.pending += 1                                       # результаты ещё не выложили — не отмечаем
+                    say(f"Турнир {cid} «{comp.name}»: групп в результатах нет, вернёмся позже")
+                    continue
                 outcome.added, outcome.updated = await result_repo.upsert_many(outcome.rows)
                 await scan_repo.mark(cid, comp.name, comp.start_date, comp.city, outcome.groups, len(outcome.rows))
                 stats.scanned += 1
