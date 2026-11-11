@@ -40,7 +40,7 @@ SCREENS['t.home'] = async () => {
     <div style="margin-top:10px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
     <div class="eyebrow">${mon}</div>
     ${list([
-      cell({ lead: '💰', plain: true, t: 'Зарплата', s: monthLine, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
+      cell({ lead: '💰', plain: true, t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
       ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
       // две цифры рядом: зарплата от школы и аренда зала школе (решение владельца 27.10.2026)
       ...(h.rentMonth ? [cell({ lead: '🏠', plain: true, t: 'Аренда зала школе', s: 'индивидуальные — перечисляете в конце месяца', r: `<b>${fmt(h.rentMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
@@ -371,6 +371,25 @@ const tRentBlock = (r, period) => {
     </div>
     ${r.payments.length ? list(r.payments.map(p => cell({ lead: '🏠', plain: true, t: `получено ${fmt(p.amount)}`, s: `${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}` }))) : ''}`;
 };
+// Выплаты школы за месяц (решение владельца 11.11.2026): сколько уже выплачено — аванс, остаток, премии.
+// Подпись «Аванс», пока сумма выплат меньше начисленного, дальше «Выплата»; парная выплата премии — «Премия».
+const tPayoutsBlock = (po, period, total) => {
+  if (!po) return '';
+  const mon = MON_NOM[+period.slice(5) - 1].toLowerCase();
+  let run = 0;
+  const rows = po.items.map(p => {
+    run += p.amount;
+    const t = p.bonus ? 'Премия' : run < total ? 'Аванс' : 'Выплата';
+    return cell({ lead: p.bonus ? '🎁' : '💸', plain: true, t, s: fdate(p.date), r: `<b>${fmt(p.amount)}</b>` });
+  });
+  return `<div class="eyebrow">Выплаты школы</div>
+    <div class="card">
+      <div class="total"><span>Выплачено за ${mon}</span><span class="big">${fmt(po.paid)}</span></div>
+      ${po.paid && po.rest ? `<div class="total"><span>Остаток к выплате</span><span class="big">${fmt(po.rest)}</span></div>` : ''}
+      ${!po.paid ? `<div class="pad hint" style="padding-top:0">Выплат за ${mon} ещё не было.</div>` : ''}
+    </div>
+    ${rows.length ? list(rows) : ''}`;
+};
 SCREENS['t.money'] = async ({ ym }) => {
   const period = ym || lastPeriods(1)[0];
   const canSubmitPeriod = !!(state.me && state.me.periodSubmit);
@@ -383,6 +402,7 @@ SCREENS['t.money'] = async ({ ym }) => {
     <div class="card pad"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em">${fmt(st.total)}</div>
       <div class="hint">${MON_NOM[+period.slice(5) - 1]} · ${plural(st.groupLessons + st.individualLessons, ['занятие', 'занятия', 'занятий'])}${st.groupLessons ? ` · 👥 ${st.groupLessons}` : ''}${st.individualLessons ? ` · 👤 ${st.individualLessons}` : ''}</div>
       ${state_ ? `<div style="margin-top:8px">${state_}</div>` : ''}</div>
+    ${tPayoutsBlock(st.payouts, period, st.total)}
     ${!canSubmitPeriod ? '' : `<div style="margin-top:12px">${sub.submitted
       ? '<div class="card pad hint">Период сдан: занятия этого месяца больше не редактируются. Открыть его может администратор.</div>'
       : btn(sub.canSubmit ? `📤 Сдать ${MON_NOM[+period.slice(5) - 1].toLowerCase()} (${plural(sub.lessons, ['занятие', 'занятия', 'занятий'])}, ${fmt(sub.total)})` : `Сдать период можно с 25 ${MON_SHORT[+period.slice(5) - 1]}`,

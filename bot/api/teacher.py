@@ -296,6 +296,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         can_bill = teacher.teacher_id in settings.billing_teacher_id_set
         rent = await _rent(teacher, period, month)
         prev_rent = await _rent(teacher, prev) if rent is not None and hall_rent.settled(prev) else None
+        earned_month = await salary_service.total_for(teacher, period)
+        payouts = await _payouts(teacher, period, earned_month)
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
             # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
@@ -315,7 +317,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "lessonsMonth": len(month),
             "groupLessonsMonth": sum(1 for ls in month if ls.type == LessonType.GROUP),
             "individualLessonsMonth": sum(1 for ls in month if ls.type != LessonType.GROUP),
-            "earnedMonth": await salary_service.total_for(teacher, period),
+            "earnedMonth": earned_month,
+            "paidMonth": (payouts or {}).get("paid", 0),         # выплачено за месяц (аванс) — в строке «Зарплата»
             # прямая оплата: школа не начисляет, но на сводке это не должно выглядеть нулём
             "directMonth": sum(direct_amount(ls, teacher) for ls in month),
             "directToday": sum(direct_amount(ls, teacher) for ls in today_lessons),
@@ -907,6 +910,21 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         })
 
     # ── деньги и сдача периода ───────────────────────────────────────────
+    async def _payouts(teacher, period: str, total: int) -> dict | None:
+        """Сколько школа уже выплатила педагогу за месяц: аванс, остаток, премии (решение владельца 11.11.2026 —
+        Контаревой платят авансом, а в кабинете этого видно не было). Те же строки `teacher_payouts`, что в карточке
+        педагога у администратора. Руководителю (OWNER_TEACHER_IDS) не показываем — его зарплата остаётся в прибыли."""
+        payout_repo, bonus_repo = dp.get("payout_repo"), dp.get("bonus_repo")
+        if payout_repo is None or teacher.teacher_id in settings.owner_teacher_id_set:
+            return None
+        rows = sorted(await payout_repo.get_by_teacher_period(teacher.teacher_id, period), key=lambda p: p.paid_at)
+        bonus_ids = ({b.payout_id for b in await bonus_repo.get_for_teacher_period(teacher.teacher_id, period)
+                      if b.payout_id} if bonus_repo is not None else set())
+        paid = sum(p.amount for p in rows)
+        return {"paid": paid, "rest": max(total - paid, 0),
+                "items": [{"amount": p.amount, "date": p.paid_at[:10], "bonus": p.payout_id in bonus_ids}
+                          for p in rows]}
+
     async def stats(request: web.Request, user, teacher) -> web.Response:
         ym = request.query.get("ym") or current_period()
         lines = await salary_service.lines_for(teacher, ym)
@@ -932,8 +950,10 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             who = [n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n]
             return " + ".join(who) or names.get(ls.student_1_id or "", "Занятие")
 
+        total = sum(ln.amount for ln in lines)
         return _json({
-            "period": ym, "total": sum(ln.amount for ln in lines),
+            "period": ym, "total": total,
+            "payouts": await _payouts(teacher, ym, total),     # выплачено школой за месяц и остаток
             "groupLessons": sum(1 for ls in rows if ls.type == LessonType.GROUP),
             "individualLessons": sum(1 for ls in rows if ls.type != LessonType.GROUP),
             "submitted": ym in submitted,

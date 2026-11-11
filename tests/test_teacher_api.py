@@ -207,6 +207,25 @@ def test_submit_rejects_already_submitted_month(api):
     assert _call(app, "POST", "/api/teacher/submit", json={"ym": "bad"})[0] == 400
 
 
+def test_teacher_sees_school_payouts_for_month(api, monkeypatch):
+    """Контаревой платят авансом (решение владельца 11.11.2026): в «Зарплате» — сколько школа выплатила за месяц,
+    остаток и выплаты по датам; на сводке — «выплачено» в строке зарплаты. Руководителю блока нет."""
+    from bot.utils.dates import current_period
+    app, dp = api
+    assert _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]["payouts"] == {"paid": 0, "rest": 4333, "items": []}
+    payouts = dp["payout_repo"]
+    asyncio.run(payouts.add("TCH-0001", YM, 2000, ADMIN_TG, comment="аванс"))
+    asyncio.run(payouts.add("TCH-0002", YM, 999, ADMIN_TG))            # чужая выплата не видна
+    asyncio.run(payouts.add("TCH-0001", "2026-01", 500, ADMIN_TG))     # другой месяц
+    st = _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]
+    assert st["payouts"] == {"paid": 2000, "rest": 2333, "items": [{"amount": 2000, "date": "2026-09-18", "bonus": False}]}
+    asyncio.run(payouts.add("TCH-0001", current_period(), 700, ADMIN_TG))
+    assert _call(app, "GET", "/api/teacher/home")[1]["paidMonth"] == (700 if current_period() != YM else 2700)
+    monkeypatch.setattr(settings, "owner_teacher_ids", "TCH-0001")    # руководитель: зарплата в прибыли
+    assert _call(app, "GET", f"/api/teacher/stats?ym={YM}")[1]["payouts"] is None
+    assert _call(app, "GET", "/api/teacher/home")[1]["paidMonth"] == 0
+
+
 def test_lesson_types_are_reported(api):
     app, dp = api
     status, d = _call(app, "GET", f"/api/teacher/lessons?ym={YM}")
