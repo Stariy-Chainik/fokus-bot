@@ -309,6 +309,34 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         names = {s.student_id: s.name for s in await student_repo.get_all(include_archived=True)}
         return competition_results.view(await repo.get_for_student(student_id), names)[:limit]
 
+    # ── «💬 Написать руководителю» (решение владельца 11.11.2026) ─────────────
+    async def feedback_list(request: web.Request, addr, children) -> web.Response:
+        from bot.services import parent_feedback
+        repo = _dp_get(dp, "feedback_repo")
+        rows = await repo.get_for_parent(fmt_addr(addr)) if repo is not None else []
+        return _json({"kinds": parent_feedback.kinds_view(), "maxLen": parent_feedback.MAX_LEN,
+                      "items": parent_feedback.view(rows)})
+
+    async def feedback_send(request: web.Request, addr, children) -> web.Response:
+        from bot.services import parent_feedback
+        repo = _dp_get(dp, "feedback_repo")
+        if repo is None:
+            return _json({"error": "unavailable"}, status=503)
+        body = await request.json()
+        student = _child(children, str(body.get("studentId") or (children[0].student_id if len(children) == 1 else "")))
+        if student is None:
+            return _json({"error": "not_found"}, status=404)
+        try:
+            row = await parent_feedback.submit(
+                feedback_repo=repo, user_repo=user_repo, student_repo=student_repo,
+                student_group_repo=_dp_get(dp, "student_group_repo"), group_repo=group_repo, client_repo=client_repo,
+                bot=bot, addr=addr, student=student, kind=str(body.get("kind") or ""), text=body.get("text"))
+        except parent_feedback.RateLimited:
+            return _json({"error": "rate_limited"}, status=429)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, status=400)
+        return _json({"ok": True, "id": row.feedback_id})
+
     async def diary(request: web.Request, addr, children) -> web.Response:
         if diary_service is None:
             return _json({"error": "unavailable"}, status=503)
@@ -718,6 +746,7 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/bills", bills), ("GET", "/bill/{sid}/{ym}", bill),
         ("GET", "/lessons/{sid}", lessons), ("GET", "/diary/{sid}", diary),
         ("POST", "/pay", pay), ("POST", "/receipt", receipt),
+        ("GET", "/feedback", feedback_list), ("POST", "/feedback", feedback_send),
     ]
     for method, path, handler in routes:
         app.router.add_route(method, PREFIX + path, parent_only(handler))

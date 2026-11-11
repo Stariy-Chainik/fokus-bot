@@ -81,7 +81,38 @@ SCREENS['p.home'] = async () => {
       s: many ? h.children.map(c => `${esc(firstName(c.name))}: ${c.parents}`).join(' · ') : (h.children[0].parents > 1 ? plural(h.children[0].parents, ['родитель', 'родителя', 'родителей']) + ' · лишних можно отвязать' : 'только вы'),
       go: 'p.family', p: {},
     })])}
+    <div class="eyebrow">Руководитель студии</div>
+    ${list([cell({ lead: '💬', plain: true, t: 'Написать руководителю', s: 'пожелание, замечание, благодарность или вопрос — лично руководителю', go: 'p.feedback', p: {} })])}
     <div style="margin-top:14px">${h.children.map(c => btn(`↩️ ${many ? esc(firstName(c.name)) + ' — ' : ''}это не мой ребёнок`, 'pUnlinkAsk', { id: c.id, name: c.name }, 'ghost')).join('')}</div>` };
+};
+/* «💬 Написать руководителю» (решение владельца 11.11.2026): вид обращения чипом, текст, при нескольких детях —
+   о ком. Уходит лично руководителю студии, ответ приходит в чат бота и виден здесь же, в «Моих обращениях». */
+SCREENS['p.feedback'] = async () => {
+  const d = await api('/feedback');
+  const kids = (state.me && state.me.children) || [];
+  const ui = state.ui.fb = state.ui.fb || { kind: 'wish', sid: kids[0] ? kids[0].id : '' };
+  if (!kids.some(c => c.id === ui.sid)) ui.sid = kids[0] ? kids[0].id : '';
+  const names = Object.fromEntries(kids.map(c => [c.id, c.name]));
+  return { title: 'Написать руководителю', html: `
+    <div class="card pad"><div class="hint">Сообщение уйдёт лично руководителю студии — педагоги и администраторы его не увидят. Ответ придёт в чат бота и появится ниже.</div>
+      ${kids.length > 1 ? `<div class="eyebrow">О ком</div><div class="chips">${kids.map(c => `<button class="chip" aria-pressed="${c.id === ui.sid}" data-act="pFbSet" data-p='${esc(JSON.stringify({ sid: c.id }))}'>${esc(firstName(c.name))}</button>`).join('')}</div>` : ''}
+      <div class="eyebrow">О чём</div><div class="chips">${d.kinds.map(k => `<button class="chip" aria-pressed="${k.id === ui.kind}" data-act="pFbSet" data-p='${esc(JSON.stringify({ kind: k.id }))}'>${k.icon} ${esc(k.label)}</button>`).join('')}</div>
+      <textarea id="fb-text" class="search" rows="5" maxlength="${d.maxLen}" placeholder="Напишите, что хотите передать руководителю" style="margin-top:10px;width:100%;resize:vertical">${esc(ui.text || '')}</textarea>
+      <div style="margin-top:10px">${btn('📨 Отправить руководителю', 'pFbSend', {})}</div></div>
+    ${d.items.length ? `<div class="eyebrow">Мои обращения</div>${list(d.items.map(x => cell({
+      lead: x.icon, plain: true, cls: 'wrap', t: `${esc(x.kindLabel)}${kids.length > 1 && names[x.studentId] ? ` · ${esc(firstName(names[x.studentId]))}` : ''} · ${fdate(x.ts.slice(0, 10))}`,
+      s: `${esc(x.text)}${x.answered ? `<br><b>Ответ руководителя${x.repliedAt ? ' · ' + fdate(x.repliedAt.slice(0, 10)) : ''}:</b> ${esc(x.reply)}` : ''}`,
+      r: x.answered ? pill('✓ ответ', 'ok') : pill('отправлено', 'mute'),
+    })))}` : ''}` };
+};
+ACT.pFbSet = p => { const ui = state.ui.fb || {}; ui.text = val('fb-text'); Object.assign(ui, p); state.ui.fb = ui; render(); };
+ACT.pFbSend = async () => {
+  const ui = state.ui.fb || {}; const text = val('fb-text').trim();
+  if (!text) { toast('Напишите текст обращения'); return; }
+  try {
+    await api('/feedback', { method: 'POST', body: { studentId: ui.sid, kind: ui.kind || 'wish', text } });
+    state.ui.fb = { kind: ui.kind, sid: ui.sid }; toast('Отправлено руководителю'); render();
+  } catch (e) { toast(e && e.status === 429 ? 'Вы писали меньше десяти минут назад — подождите' : errText(e)); }
 };
 /* Ошибочная привязка: родитель снимает её сам, администратору уходит сообщение. */
 ACT.pUnlinkAsk = ({ id, name }) => sheet(`<h3>Отвязаться от ученика?</h3><div class="hint">${esc(name)}. Вы перестанете видеть его счета и занятия. Если привязались по ошибке — после этого откройте ссылку своей группы ещё раз и выберите правильного ребёнка. Администратор получит сообщение.</div>

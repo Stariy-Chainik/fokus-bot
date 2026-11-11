@@ -52,7 +52,8 @@ def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
               max_app: bool = False, max_cabinet_only: bool = False) -> list:
     if platform == "max" and max_cabinet_only:
         # MAX — только кабинет (MAX_PARENT_CABINET_ONLY): счета, оплата, занятия, «кто привязан» внутри него
-        return [[maxapp("📱 Открыть кабинет", "parent")], [cb("➕ Добавить ребёнка", "client:add_child")]]
+        return [[maxapp("📱 Открыть кабинет", "parent")], [cb("➕ Добавить ребёнка", "client:add_child")],
+                [cb("💬 Написать руководителю", "client:feedback")]]
     if platform == "max":
         # MAX: занятия (расписание без денег), счета и оплата; дневник/email — позже.
         # max_app — кабинет родителя мини-приложением MAX (MAX_MINIAPP_ENABLED, решение владельца 14.10.2026)
@@ -63,6 +64,7 @@ def menu_rows(can_switch_athlete: bool = False, platform: str = "tg",
             *([[cb("🏫 Группа в саду", "client:kgroup")]] if kindergarten else []),   # дети садовых групп
             [cb("➕ Добавить ребёнка", "client:add_child")],
             [cb("👥 Кто привязан", "client:family")],
+            [cb("💬 Написать руководителю", "client:feedback")],   # лично руководителю студии (11.11.2026)
             [cb("↩️ Это не мой ребёнок", "client:unlink")],
         ]
     if cabinet_url:      # родитель в Telegram — только кабинет: счета, оплата, занятия, дневник внутри него

@@ -78,7 +78,7 @@ def test_max_menu_gets_cabinet_button_when_enabled():
 def test_max_cabinet_only_menu(monkeypatch):
     rows = menu_rows(platform="max", max_app=True, max_cabinet_only=True)
     assert [[(b.kind, b.label) for b in row] for row in rows] == [
-        [("maxapp", "📱 Открыть кабинет")], [("cb", "➕ Добавить ребёнка")]]
+        [("maxapp", "📱 Открыть кабинет")], [("cb", "➕ Добавить ребёнка")], [("cb", "💬 Написать руководителю")]]
     monkeypatch.setattr(settings, "max_parent_cabinet_only", True)
     monkeypatch.setattr(settings, "max_miniapp_enabled", False)
     assert settings.max_cabinet_only is False                       # без мини-приложения — кнопки бота остаются

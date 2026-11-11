@@ -1193,3 +1193,35 @@ class CompetitionScanRepoFake:
         from bot.repositories.competition_repo import CompetitionScan
         self.items = [s for s in self.items if s.competition_id != competition_id]
         self.items.append(CompetitionScan(competition_id, name, date, city, "2026-11-10 07:30:00", groups, hits))
+
+
+class FeedbackRepoFake:
+    """Лист parent_feedback в памяти (bot/repositories/parent_feedback_repo.py)."""
+
+    def __init__(self) -> None:
+        self.items: list = []
+
+    async def get_all(self):
+        return list(self.items)
+
+    async def get_by_id(self, feedback_id):
+        return next((r for r in self.items if r.feedback_id == feedback_id), None)
+
+    async def get_for_parent(self, parent_addr):
+        return sorted((r for r in self.items if r.parent_addr == parent_addr), key=lambda r: r.ts, reverse=True)
+
+    async def add(self, student_id, parent_addr, parent_name, kind, text):
+        from bot.repositories.parent_feedback_repo import ParentFeedback
+        from bot.utils import now_str
+        row = ParentFeedback(f"FB-{len(self.items) + 1:06d}", now_str(), student_id, parent_addr, parent_name, kind, text)
+        self.items.append(row)
+        return row
+
+    async def set_reply(self, feedback_id, reply, replied_by):
+        from bot.repositories.parent_feedback_repo import STATUS_ANSWERED
+        from bot.utils import now_str
+        for i, r in enumerate(self.items):
+            if r.feedback_id == feedback_id:
+                self.items[i] = replace(r, status=STATUS_ANSWERED, reply=reply, replied_at=now_str(), replied_by=replied_by)
+                return True
+        return False

@@ -12,6 +12,7 @@ from .profit import router as profit_router
 from .debtors import router as debtors_router
 from .payouts import router as payouts_router
 from .payment_history import router as payment_history_router
+from .feedback import router as feedback_router
 
 router = Router(name="admin")
 router.include_routers(
@@ -28,4 +29,5 @@ router.include_routers(
     debtors_router,
     payouts_router,
     payment_history_router,
+    feedback_router,
 )

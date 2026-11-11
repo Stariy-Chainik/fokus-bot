@@ -31,6 +31,11 @@ class PaymentHistoryStates(StatesGroup):
     searching = State()
 
 
+class FeedbackReplyStates(StatesGroup):
+    """Ответ руководителя на обращение родителя («💬 Написать руководителю»): один текст."""
+    waiting_reply = State()
+
+
 class PartnerAssignStates(StatesGroup):
     choosing_partner = State()
     confirming = State()

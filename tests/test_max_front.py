@@ -22,6 +22,7 @@ EXPECTED = [
     "client_payall:", "payall:", "receipt_upload_all:", "client:unlink", "client_unlink:", "client_unlink_do:",
     "client:family", "client_family:", "famunl:", "famunl_why:", "famunl_do:",
     "client:kgroup", "client_kgroup:", "kgroup_clear:",
+    "client:feedback", "client_fb:", "client_fbk:",
 ]
 
 

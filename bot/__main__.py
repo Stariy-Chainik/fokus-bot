@@ -109,6 +109,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     from bot.repositories.competition_repo import CompetitionResultRepository, CompetitionScanRepository
     competition_result_repo = CompetitionResultRepository(sheets_client, settings.sheet_competition_results)
     competition_scan_repo = CompetitionScanRepository(sheets_client, settings.sheet_competition_scans)
+    from bot.repositories.parent_feedback_repo import ParentFeedbackRepository
+    feedback_repo = ParentFeedbackRepository(sheets_client, settings.sheet_parent_feedback)
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
@@ -189,6 +191,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["group_schedule_repo"] = group_schedule_repo
     dp["competition_result_repo"] = competition_result_repo      # турниры ФТСАРР (10.11.2026)
     dp["competition_scan_repo"] = competition_scan_repo
+    dp["feedback_repo"] = feedback_repo                           # обращения родителей руководителю (11.11.2026)
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
@@ -245,6 +248,7 @@ _WARM_REPOS = (
     "submission_repo", "student_request_repo", "client_repo", "subscription_override_repo",
     "finance_entry_repo", "payout_repo", "salary_override_repo", "bonus_repo", "hall_rent_repo", "pending_repo",
     "training_entry_repo", "athlete_task_repo", "activity_repo", "group_schedule_repo", "competition_result_repo",
+    "feedback_repo",
 )
 
 

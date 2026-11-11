@@ -16,7 +16,7 @@ DI_KEYS = {
     "diagnostics_service", "visibility", "student_service", "student_request_service",
     "cloudkassir_service", "notifier", "training_entry_repo", "athlete_task_repo", "diary_service",
     "pending_repo", "activity_repo", "group_schedule_repo", "bonus_repo", "hall_rent_repo",
-    "competition_result_repo", "competition_scan_repo",
+    "competition_result_repo", "competition_scan_repo", "feedback_repo",
 }
 
 
@@ -37,7 +37,7 @@ def test_dispatcher_wiring_snapshot():
     assert set(dp.workflow_data) - DI_KEYS == set(), set(dp.workflow_data) - DI_KEYS
     assert [r.name for r in dp.sub_routers] == ["common", "admin", "teacher", "athlete", "client"]
     by_name = {r.name: r for r in dp.sub_routers}
-    assert len(by_name["admin"].sub_routers) == 13
+    assert len(by_name["admin"].sub_routers) == 14
     assert len(by_name["teacher"].sub_routers) == 8
     assert len(by_name["client"].sub_routers) == 7
     # aiogram добавляет свои служебные middleware; наши — в нужных менеджерах и в нужном порядке

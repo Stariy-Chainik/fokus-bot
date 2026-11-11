@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     ftsarr_regions: str = Field(default="50,77", alias="FTSARR_REGIONS")
     ftsarr_lookback_months: int = Field(default=2, alias="FTSARR_LOOKBACK_MONTHS")
 
+    # «💬 Написать руководителю» (решение владельца 11.11.2026): обращения родителей уходят только руководителю —
+    # FEEDBACK_TG_IDS (tg_id через запятую); пусто — Telegram педагога из OWNER_TEACHER_IDS, иначе администраторы.
+    sheet_parent_feedback: str = Field(default="parent_feedback", alias="SHEET_PARENT_FEEDBACK")
+    feedback_tg_ids: str = Field(default="", alias="FEEDBACK_TG_IDS")
+
+    @property
+    def feedback_tg_id_set(self) -> set:
+        out = set()
+        for chunk in self.feedback_tg_ids.replace("|", ",").split(","):
+            if chunk.strip().isdigit():
+                out.add(int(chunk.strip()))
+        return out
+
     # Кабинет спортсмена: дневник тренировок и задания педагога
     sheet_training_entries: str = Field(default="training_entries", alias="SHEET_TRAINING_ENTRIES")
     sheet_athlete_tasks: str = Field(default="athlete_tasks", alias="SHEET_ATHLETE_TASKS")
