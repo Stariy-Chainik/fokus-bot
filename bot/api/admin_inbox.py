@@ -60,7 +60,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         teacher_view = scope is not None
         held = names.get(a.held_by, a.held_by) if a.held_by and names is not None else a.held_by
         title = KIND_LABEL.get(a.kind, a.kind)
-        approve, reject, note = None, None, ""
+        approve, reject, note, advance = None, None, "", None
         if a.kind == KIND_CASH and a.held_by:
             title = f"Наличные у педагога · {held}"
             if teacher_view:
@@ -68,6 +68,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             else:
                 approve = f"✅ Деньги получены — зачесть{' ' + str(a.amount) + ' ₽' if a.amount else ''}"
                 reject = "❌ Отклонить"
+                advance = "💸 Оставить педагогу как аванс"        # зачесть оплату + выплата педагогу (cash_advance)
         elif a.kind == KIND_CASH and teacher_view:
             approve, reject = "✋ Деньги у меня", "❌ Денег не было"
         elif a.kind == KIND_NEWCHILD:
@@ -81,6 +82,7 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         return {
             "id": a.action_id, "kind": a.kind, "title": title,
             "heldBy": held or "", "approveLabel": approve, "rejectLabel": reject, "note": note,
+            "advanceLabel": advance,
             "studentId": a.student_id, "student": a.student_name,
             "period": a.period_month, "periodLabel": period_label(a.period_month) if a.period_month else "",
             "amount": a.amount, "method": METHOD_LABELS.get(a.method, a.method),
@@ -167,8 +169,11 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             body = {}
         approve = bool(body.get("approve"))
         force = bool(body.get("force"))            # согласие зачесть сумму больше остатка
+        advance = bool(body.get("advance"))        # наличные остаются у педагога авансом в счёт зарплаты
         if action.status != OPEN:
             return _json({"error": "already_decided", "status": action.status}, status=409)
+        if advance and (scope is not None or not approve or action.kind != KIND_CASH or not action.held_by):
+            return _json({"error": "bad_request", "message": "Авансом оставляют только наличные у педагога"}, status=400)
         if action.kind == KIND_NEWCHILD:          # карточки ещё нет — заводим по заявке родителя
             notifier = (getattr(dp, "workflow_data", dp)).get("notifier")
             if approve:
@@ -252,8 +257,13 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
         await _notify_parent(action, student, approved=True, credited=credited)
         logger.info("Очередь решений: админ %s зачёл %d руб. — %s %s",
                     user.tg_id, credited, action.student_id, action.period_month)
+        advanced = 0
+        if advance and credited > 0:
+            from bot.services.cash_advance import keep_as_advance
+            await keep_as_advance(dp["payout_repo"], dp["user_repo"], bot, action, student.name, credited, user.tg_id)
+            advanced = credited
         return _json({"ok": True, "status": DONE, "credited": credited, "rows": rows,
-                      "overpaid": max(0, credited - rest)})
+                      "overpaid": max(0, credited - rest), "advance": advanced})
 
     async def _notify_parent(action, student, approved: bool, credited: int = 0) -> None:
         notifier = (getattr(dp, "workflow_data", dp)).get("notifier")

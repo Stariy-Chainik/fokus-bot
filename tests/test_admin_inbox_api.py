@@ -322,3 +322,80 @@ def test_unlink_drops_client_address_unless_sibling_keeps_it():
         assert asyncio.run(approve_unlink(pending, students, clients, None, action, ADMIN_TG)) is not None
         assert asyncio.run(clients.get_by_id("CLT-0001")).tg_id == expected
         assert asyncio.run(students.get_by_id("STU-0001")).parent_tg_ids == [PARENT_TG]
+
+
+def _held_world(dp):
+    """Наличные 2000 ₽ у педагога TCH-0001 (он же в листе users) и бот, который всё запоминает."""
+    from tests.fakes import FakeBot, mk_user
+    dp["user_repo"].items.append(mk_user(4242, teacher_id="TCH-0001"))
+    action = asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-0001", "Иванов Иван", YM, 2000, "cash",
+                                                held_by="TCH-0001"))
+    return action, FakeBot()
+
+
+def test_cash_held_by_teacher_can_stay_with_him_as_advance(api):
+    """«💸 Оставить педагогу как аванс» (решение владельца 12.11.2026): оплата ученика зачитывается, педагогу —
+    выплата на ту же сумму за текущий месяц с пометкой, от кого деньги, и сообщение «сдавать не нужно»."""
+    from bot.utils.dates import current_period, period_label
+    app, dp = api
+    action, bot = _held_world(dp)
+    item = _call(app, "GET", "/api/admin/inbox")[1]["items"][0]
+    assert item["advanceLabel"] == "💸 Оставить педагогу как аванс" and item["heldBy"] == "Река Станислав"
+    # аванс — только для наличных у педагога: обычная заявка родителя → 400, строка не тронута
+    plain = asyncio.run(dp["pending_repo"].add(KIND_CASH, "STU-0001", "Иванов Иван", YM, 500, "cash", str(PARENT_TG)))
+    assert _call(app, "GET", "/api/admin/inbox")[1]["items"][1]["advanceLabel"] is None
+    status, r = _call(app, "POST", f"/api/admin/inbox/{plain.action_id}/decide", json={"approve": True, "advance": True})
+    assert status == 400 and plain.status == OPEN
+
+    async def decide():
+        web_app = web.Application()
+        register_admin_api(web_app, dp, bot)
+        client = TestClient(TestServer(web_app))
+        await client.start_server()
+        try:
+            resp = await client.post(f"/api/admin/inbox/{action.action_id}/decide",
+                                     headers={"Authorization": f"tma {make_init_data(user_id=ADMIN_TG)}"},
+                                     json={"approve": True, "advance": True})
+            return resp.status, await resp.json()
+        finally:
+            await client.close()
+    status, r = asyncio.run(decide())
+    assert status == 200 and r["credited"] == 2000 and r["advance"] == 2000 and action.status == DONE
+    assert sum(p.total_amount for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID) == 2000
+    [payout] = dp["payout_repo"].items
+    assert (payout.teacher_id, payout.period_month, payout.amount, payout.paid_by_tg_id) == \
+           ("TCH-0001", current_period(), 2000, ADMIN_TG)
+    assert payout.comment == f"наличные от родителя: Иванов Иван, {period_label(YM).lower()}"
+    teacher_msgs = [m[1] for m in bot.sent if m[0] == 4242]
+    assert teacher_msgs and "авансом" in teacher_msgs[0] and "Сдавать их в школу не нужно" in teacher_msgs[0]
+
+
+def test_telegram_advance_button_credits_and_records_payout(api):
+    """Кнопка `padv:` в сообщении «Наличные у педагога»: сумма больше остатка — сначала выбор, повтор не зачтёт дважды."""
+    from types import SimpleNamespace
+
+    from bot.handlers.client.my_bills import payment as pay_mod
+    from bot.services.payment_events import held_rows
+    from tests.fakes import FakeCallbackQuery, FakeMessage
+    app, dp = api
+    action, bot = _held_world(dp)
+    assert f"padv:{action.action_id}:2000" in [b.value for row in held_rows(action) for b in row]
+    admin = asyncio.run(dp["user_repo"].get_by_tg_id(ADMIN_TG))
+
+    def press(data):
+        msg = FakeMessage("💵 Наличные у педагога")
+        msg.caption = None
+        cb = FakeCallbackQuery(data, user_id=ADMIN_TG, message=msg, bot=bot)
+        asyncio.run(pay_mod.cb_action_advance(cb, admin, dp["payment_service"], dp["student_repo"], dp["client_repo"],
+                                              dp["user_repo"], SimpleNamespace(_public_id=""), dp["pending_repo"],
+                                              dp["payout_repo"]))
+        return msg.screens[-1] if msg.screens else (None, None), cb
+    (text, kb), _ = press(f"padv:{action.action_id}:9000")                  # больше остатка 4800 — выбор
+    assert "осталось 4800" in text and action.status == OPEN and not dp["payout_repo"].items
+    assert f"padv:{action.action_id}:4800:f" in [b.callback_data for row in kb.inline_keyboard for b in row]
+    (text, _), _ = press(f"padv:{action.action_id}:2000")
+    assert "Педагогу — аванс 2000" in text and action.status == DONE
+    assert [p.amount for p in dp["payout_repo"].items] == [2000]
+    assert any(m[0] == 4242 and "авансом" in m[1] for m in bot.sent)
+    (text, _), cb = press(f"padv:{action.action_id}:2000")                 # повтор — ничего не зачтено
+    assert "Уже обработано" in text and len(dp["payout_repo"].items) == 1

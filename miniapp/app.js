@@ -386,10 +386,10 @@ SCREENS['a.inbox'] = async () => {
     ${a.hasFile ? `<img data-file="/inbox/${a.id}/file" alt="Чек" style="display:block;width:100%;max-height:320px;object-fit:contain;border-radius:10px;margin-top:10px;background:var(--bg)">` : ''}
     ${a.note ? `<div class="calm" style="margin-top:10px">${esc(a.note)}</div>` : `<div style="margin-top:10px">${a.receiptMatch === false && !a.receiptGroup && a.receiptAmount
       ? btn(`✅ Зачесть ${fmt(a.receiptAmount)} — как в чеке`, 'inboxDecide', { id: a.id, approve: true, amount: a.receiptAmount }) + btn(`Зачесть ${fmt(a.amount)} — как в заявке`, 'inboxDecide', { id: a.id, approve: true }, 'ghost')
-      : btn(a.approveLabel || (a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`), 'inboxDecide', { id: a.id, approve: true })}${btn(a.rejectLabel || '❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>`}
+      : btn(a.approveLabel || (a.kind === 'child' ? '✅ Привязать' : `✅ Подтвердить${a.amount ? ' ' + fmt(a.amount) : ''}`), 'inboxDecide', { id: a.id, approve: true })}${a.advanceLabel ? btn(a.advanceLabel, 'inboxDecide', { id: a.id, approve: true, advance: true }, 'sec') + `<div class="hint" style="margin:-2px 0 8px">Оплата ученика зачтётся, а ${esc(a.heldBy)} получит выплату на эту сумму авансом за текущий месяц — деньги сдавать не нужно</div>` : ''}${btn(a.rejectLabel || '❌ Отклонить', 'inboxDecide', { id: a.id, approve: false }, 'ghost')}</div>`}
   </div>`;
   // наличные на руках у педагогов — контроль администратора: у кого и сколько ещё не передано
-  const held = (d.held || []).length ? `<div class="card pad" style="margin-bottom:10px"><div style="font-weight:700">💵 Наличные у педагогов</div>${d.held.map(h => `<div style="display:flex;justify-content:space-between;margin-top:6px"><span>${esc(h.name)} · ${plural(h.count, ['заявка', 'заявки', 'заявок'])}</span><b class="money">${fmt(h.amount)}</b></div>`).join('')}<div class="hint" style="margin-top:6px">Зачтите оплату, когда педагог передаст деньги.</div></div>` : '';
+  const held = (d.held || []).length ? `<div class="card pad" style="margin-bottom:10px"><div style="font-weight:700">💵 Наличные у педагогов</div>${d.held.map(h => `<div style="display:flex;justify-content:space-between;margin-top:6px"><span>${esc(h.name)} · ${plural(h.count, ['заявка', 'заявки', 'заявок'])}</span><b class="money">${fmt(h.amount)}</b></div>`).join('')}<div class="hint" style="margin-top:6px">Зачтите оплату, когда педагог передаст деньги, — или оставьте их ему авансом в счёт зарплаты.</div></div>` : '';
   return { title: 'Ждут решения', html: `
     ${ROLE === 'admin' ? held : ''}
     ${d.items.length ? d.items.map(card).join('') : empty('Ничего не ждёт решения', '<p class="hint" style="margin:0">Сюда попадают чеки, наличные и заявки родителей</p>')}
@@ -1490,15 +1490,16 @@ async function loadAuthImage(img) {
   } catch (_) { img.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Чек не загрузился — посмотрите его в чате бота' })); }
 }
 /* Решение из очереди: подтвердить оплату / привязать ребёнка или отклонить. */
-ACT.inboxDecide = async ({ id, approve, amount, force }) => {
+ACT.inboxDecide = async ({ id, approve, amount, force, advance }) => {
   try {
-    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force } });
+    const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force, advance } });
     closeSheet(); render();
     if (r.status === 'held') { toast('Передано администратору — он зачтёт, когда получит деньги'); return; }
+    if (r.advance) { toast(`Оплата ${fmt(r.credited)} зачтена, педагогу — аванс ${fmt(r.advance)}`); return; }
     toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : (r.status === 'done' ? 'Заявка закрыта — оплата уже была отмечена' : 'Готово')) : 'Отклонено');
   } catch (e) {
     // сумма больше остатка — спрашиваем, что зачесть; повтор решения — сообщаем и обновляем
-    if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'inboxDecide', { id, approve: true });
+    if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'inboxDecide', { id, approve: true, advance });
     if (e.status === 409) { render(); toast('Эта заявка уже обработана'); return; }
     toast(errText(e));
   }

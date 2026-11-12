@@ -145,9 +145,11 @@ def _spawn(coro) -> None:
 
 
 def held_rows(action) -> list:
-    """Кнопки администратору по наличным у педагога: зачесть, когда деньги переданы."""
+    """Кнопки администратору по наличным у педагога: зачесть, когда деньги переданы, или оставить
+    их педагогу авансом в счёт зарплаты (bot/services/cash_advance.py)."""
     from bot.screens import cb
     return [[cb(f"✅ Деньги получены — зачесть {action.amount} ₽", f"pact:{action.action_id}:{action.amount}:c")],
+            [cb("💸 Оставить педагогу как аванс", f"padv:{action.action_id}:{action.amount}")],
             [cb("❌ Отклонить", f"pnay:{action.action_id}")]]
 
 
@@ -176,7 +178,8 @@ async def _send_held(action) -> None:
         text = (f"💵 Наличные у педагога: {action.amount} ₽ — {action.student_name}, "
                 f"{period_label(action.period_month).lower()}\n"
                 f"Деньги у: {await teacher_name(action.held_by)}\n"
-                f"Зачтите оплату, когда педагог передаст деньги. Заявка — в «Ждут решения».")
+                f"Зачтите оплату, когда педагог передаст деньги, или оставьте их ему авансом в счёт зарплаты. "
+                f"Заявка — в «Ждут решения».")
         kb = to_aiogram_markup(held_rows(action))
         for tg_id in admins:
             try:

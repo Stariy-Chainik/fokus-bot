@@ -912,6 +912,14 @@ async def cb_action_confirm(
         f"\n\n✅ Оплата подтверждена: {credited} руб." + (f" (в т.ч. переплата {over})" if over else "")
         if credited else "\n\n✅ Заявка закрыта: оплата уже была отмечена вручную",
     )
+    logger.info("Админ %s подтвердил %s: %d руб. (%d строк)", callback.from_user.id, action_id, credited, count)
+    await callback.answer("Оплата подтверждена")
+    await _after_credit(callback, action, student, credited, client_repo, cloudkassir_service)
+
+
+async def _after_credit(callback: CallbackQuery, action, student, credited: int,
+                        client_repo: ClientRepository, cloudkassir_service: CloudKassirService) -> None:
+    """После зачёта по заявке: родителю «оплата подтверждена», фискальный чек (если настроен)."""
     addr = parse_addr(action.parent_addr) if action.parent_addr else None
     if addr is not None:
         await resolve_notifier(callback.bot).send(
@@ -921,15 +929,78 @@ async def cb_action_confirm(
         )
     else:                                       # наличные принял педагог — сообщаем всем родителям ученика
         await notify_payment_confirmed(resolve_notifier(callback.bot), student, action.period_month, credited)
-    logger.info("Админ %s подтвердил %s: %d руб. (%d строк)", callback.from_user.id, action_id, credited, count)
-    await callback.answer("Оплата подтверждена")
-
     if credited > 0 and cloudkassir_service._public_id and student.client_id:
         client = await client_repo.get_by_id(student.client_id)
         if client and client.phone:
             await cloudkassir_service.send_income_receipt(
                 client.phone, student.name, action.period_month, credited,
             )
+
+
+@router.callback_query(F.data.startswith("padv:"), AdminOnly())
+async def cb_action_advance(
+    callback: CallbackQuery, user: User, payment_service: PaymentService,
+    student_repo: StudentRepository, client_repo: ClientRepository, user_repo: UserRepository,
+    cloudkassir_service: CloudKassirService, pending_repo=None, payout_repo=None,
+) -> None:
+    """`padv:{action_id}:{сумма}[:f]` — наличные у педагога остаются ему авансом (bot/services/cash_advance.py):
+    оплата ученика зачитывается, педагогу — выплата на ту же сумму за текущий месяц."""
+    from bot.services.cash_advance import keep_as_advance
+    parts = (callback.data or "").split(":")
+    force = parts[-1] == "f"
+    action_id = parts[1] if len(parts) > 1 else ""
+    amount = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    action = await pending_repo.get_by_id(action_id) if pending_repo else None
+    if action is None or action.kind != KIND_CASH or not action.held_by or payout_repo is None:
+        await callback.answer("Заявка не найдена", show_alert=True)
+        return
+    if action.status != OPEN:
+        await _edit_admin_msg(callback, f"\n\n↩️ Уже обработано ({action.status}) — повтор не зачтён")
+        await callback.answer("Эта оплата уже обработана", show_alert=True)
+        return
+    student = await student_repo.get_by_id(action.student_id)
+    if student is None:
+        await callback.answer("Ученик не найден", show_alert=True)
+        return
+    claimed = action.amount if amount is None else amount
+    rest = rest_for_keys(await payment_service.ledger_for(student, action.period_month), action.keys)
+    if claimed > rest and not force:
+        rows = [
+            *([[cb_btn(f"💸 Зачесть остаток {rest} руб. — аванс {rest} руб.", f"padv:{action_id}:{rest}:f")]] if rest else []),
+            [cb_btn(f"💸 Зачесть {claimed} руб. (переплата) — аванс {claimed} руб.", f"padv:{action_id}:{claimed}:f")],
+            [cb_btn("❌ Отклонить", f"pnay:{action_id}")],
+        ]
+        await _edit_admin_msg(
+            callback,
+            f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб. "
+            "Аванс педагогу будет на ту же сумму, что зачтётся ученику.",
+            keep_rows=rows,
+        )
+        await callback.answer("Сумма больше остатка", show_alert=True)
+        return
+    if claimed <= 0:
+        await callback.answer("Нечего зачитывать", show_alert=True)
+        return
+    if not await claim_action(pending_repo, action_id, DONE, callback.from_user.id):
+        await _edit_admin_msg(callback, "\n\n↩️ Уже обработано — повтор не зачтён")
+        await callback.answer("Эта оплата уже обработана", show_alert=True)
+        return
+    credited, count = await payment_service.record_payment(
+        action.student_id, student.name, action.period_month, claimed,
+        callback.from_user.id, action.keys or None, "наличные у педагога — аванс", action.method or CASH,
+        key_caps=action.key_amounts or None,
+    )
+    payout = await keep_as_advance(payout_repo, user_repo, callback.bot, action, student.name, credited,
+                                   callback.from_user.id)
+    await _edit_admin_msg(
+        callback,
+        f"\n\n✅ Оплата подтверждена: {credited} руб.\n"
+        f"💸 Педагогу — аванс {payout.amount} руб. за {_period_label(payout.period_month).lower()}",
+    )
+    logger.info("Админ %s: %s — %d руб. зачтено, аванс педагогу %s", callback.from_user.id, action_id, credited,
+                action.held_by)
+    await callback.answer("Оплата зачтена, аванс записан")
+    await _after_credit(callback, action, student, credited, client_repo, cloudkassir_service)
 
 
 @router.callback_query(F.data.startswith("pnay:"), PaymentDecider())
