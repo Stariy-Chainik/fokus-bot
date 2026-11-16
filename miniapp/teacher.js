@@ -133,14 +133,15 @@ SCREENS['t.lesson'] = async ({ id }) => {
       <div class="hint">${fdate(l.date)} · ${l.durationMin} мин${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>
       ${payPill || l.locked ? `<div style="margin-top:8px">${payPill}${l.locked ? ` ${pill('🔒 период сдан', 'mute')}` : ''}</div>` : ''}</div>
     ${l.attendees.length ? `<div class="eyebrow">${l.roster ? `Абонемент за ${MON_NOM[+l.date.slice(5, 7) - 1].toLowerCase()}` : l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({
-      lead: initials(a.name), t: esc(a.name), s: l.direct ? 'платит напрямую' : (T_PAY[a.payStatus] ? T_PAY[a.payStatus][0] : ''),
+      lead: initials(a.name), t: esc(a.name), s: l.direct ? (a.directPaid ? '✓ оплачено напрямую' : 'платит напрямую') : (T_PAY[a.payStatus] ? T_PAY[a.payStatus][0] : ''),
       r: a.amount === null ? '' : a.amount ? `<b class="${l.direct ? 'direct' : ''}">${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'),
       go: 't.student', p: { id: a.studentId },
     })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
     <div class="card" style="margin-top:10px">${l.direct
       ? `<div class="total"><span>Платят родители напрямую</span><span class="big direct">${fmt(l.directAmount)}</span></div>
          ${l.rent ? `<div class="total"><span>Аренда зала школе</span><span class="big">${fmt(l.rent)}</span></div>` : ''}
-         <div class="pad hint" style="padding-top:0">Школа это занятие не начисляет и оплату по нему не отслеживает.</div>`
+         ${l.rent ? `<div class="total"><span>Остаётся вам</span><span class="big direct">${fmt(l.directAmount - l.rent)}</span></div>` : ''}
+         <div class="pad hint" style="padding-top:0">Оплата педагогу напрямую, в счёт школы не входит.</div>`
       : `<div class="total"><span>Мне начислено</span><span class="big">${fmt(l.earned)}</span></div>`}</div>
     <div style="margin-top:12px">${l.locked
       ? `<div class="card pad hint">Период сдан — занятие меняет только администратор.</div>`

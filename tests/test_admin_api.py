@@ -422,6 +422,19 @@ def test_student_lessons_by_month_with_share_and_paid_mark(api):
     assert _call(app, "GET", "/api/admin/students/STU-9999/lessons")[0] == 404
 
 
+def test_direct_paid_mark_does_not_increase_school_collection(api, monkeypatch):
+    from config.settings import settings
+    app, _dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
+    status, data = _call(app, "GET", f"/api/admin/students/STU-0001/lessons?ym={YM}")
+    assert status == 200
+    rows = {x["id"]: x for x in data["lessons"]}
+    assert (rows["LES-1"]["direct"], rows["LES-1"]["paid"]) == (2000, True)
+    assert rows["LES-2"]["paid"] is False
+    assert (data["total"], data["paid"]) == (800, 0)
+
+
 def test_ledger_without_sync_does_not_write(api):
     """Экраны-списки считают остаток без записи строки-остатка: запись по каждому ученику группы
     делала сводку педагога 11-секундной (30.09.2026)."""

@@ -44,6 +44,11 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         rent = lesson_rent(ls)
         if rent and not income:
             kind, note = "rent", "родители платят педагогу напрямую, школе — аренда зала"
+            from bot.services.pair_pricing import agreement_for
+            agreement = agreement_for(ls)
+            if agreement is not None:
+                total = sum(agreement.amounts.values())
+                note = f"родители платят {total} ₽ напрямую: педагогу {total - rent} ₽, школе аренда {rent} ₽"
             income = rent
         salary = 0
         if t:

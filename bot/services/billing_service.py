@@ -135,6 +135,9 @@ def discounted(amount: int, student_id: str, date_or_period: str) -> int:
 def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
     """Начисления ученикам за занятие; поверх расчёта — постоянная скидка ученика (STUDENT_DISCOUNTS)."""
     rows = _build_billing_rows(lesson, teacher, include_direct)
+    from bot.services.pair_pricing import agreement_for
+    if agreement_for(lesson) is not None:
+        return rows                 # явные согласованные доли уже окончательные
     for row in rows:
         pct = student_discount(row.student_id, row.date)
         if pct:
@@ -210,6 +213,11 @@ def _build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool =
     participants = [(sid, sname or "") for sid, sname in slots if sid]
     if not participants:
         return rows
+
+    from bot.services.pair_pricing import agreement_for
+    agreement = agreement_for(lesson)
+    if agreement is not None:
+        return [_make(sid, sname, agreement.amounts[sid], lesson.duration_min) for sid, sname in participants]
 
     n = len(participants)
     rates = [student_rate(lesson.teacher_id, sid, lesson.date, rate_for_student)

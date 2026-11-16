@@ -413,6 +413,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         statuses = await _pay_statuses(ls, teacher, g, [a["studentId"] for a in attendees], students, cache)
         for a, status in zip(attendees, statuses, strict=True):
             a["payStatus"] = status
+            if is_direct(ls, teacher):
+                a["directPaid"] = settings.direct_lesson_paid(a["studentId"], ls.lesson_id)
         payable = [a for a in attendees if a["payStatus"]]
         return _json({
             "id": ls.lesson_id, "date": ls.date, "type": ls.type.value, "durationMin": ls.duration_min,

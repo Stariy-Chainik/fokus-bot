@@ -251,6 +251,20 @@ def test_direct_pay_teacher_is_shown_in_the_bill_but_not_charged(api, monkeypatc
     assert bill["accrued"] == sum(r["accrued"] for r in bill["rows"] if not r.get("direct"))
 
 
+def test_direct_confirmation_is_visible_but_is_not_a_school_payment(api, monkeypatch):
+    app, dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    before = len(asyncio.run(dp["payment_repo"].get_all()))
+    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
+    bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
+    direct = next(r for r in bill["rows"] if r.get("direct"))
+    lessons = {x["id"]: x for x in direct["lessons"]}
+    assert lessons["LES-1"]["paid"] is True and lessons["LES-2"]["paid"] is False
+    assert direct["paid"] == 2000 and direct["rest"] == 0
+    assert bill["paid"] == 0
+    assert len(asyncio.run(dp["payment_repo"].get_all())) == before
+
+
 def test_bills_start_from_the_configured_month(api, monkeypatch):
     """Месяцы до PARENT_BILLS_SINCE_PERIOD родителю не показываем — это архив школы."""
     app, _dp = api

@@ -594,7 +594,7 @@ SCREENS['a.student.lessons'] = async ({ id, name, ym }) => {
   const days = {};
   d.lessons.forEach(x => { (days[x.date] = days[x.date] || []).push(x); });
   const body = Object.keys(days).map(day => `<div class="grp"><span>${fdate(day)}</span></div>${days[day].map(x => `<button class="lesson-line pick" ${ROLE === 'admin' ? `data-go="a.lesson" data-p='${esc(JSON.stringify({ id: x.id }))}'` : x.mine ? `data-go="t.lesson" data-p='${esc(JSON.stringify({ id: x.id }))}'` : 'disabled style="opacity:1"'}>
-      ${d.money === false ? '' : x.amount ? `<span class="mark ${x.paid ? 'paid' : ''}">${x.paid ? '✓' : ''}</span>` : '<span class="mark" style="visibility:hidden"></span>'}
+      ${d.money === false ? '' : x.amount || x.direct ? `<span class="mark ${x.paid ? 'paid' : ''}">${x.paid ? '✓' : ''}</span>` : '<span class="mark" style="visibility:hidden"></span>'}
       <span>${x.type === 'group' ? '👥' : '👤'} ${esc(x.group ? plainName(x.group) : 'индивидуальное')} · ${x.durationMin} мин<div class="d">${esc(x.teacher)}${x.attended ? '' : ' · посещение не отмечается'}</div></span>
       <span class="amt">${d.money === false ? '' : x.amount ? fmt(x.amount) : x.direct ? `<span class="hint">${fmt(x.direct)} напрямую</span>` : `<span class="hint">${free(x)}</span>`}</span></button>`).join('')}`).join('');
   return { title: name || d.student.name, html: `

@@ -27,7 +27,7 @@ async def month_lessons(dp, sid: str, period: str, keep: Callable | None = None,
         if (ls.date[:7] == period and ls.lesson_id not in seen and ls.type == LessonType.GROUP
                 and not ls.attendees and any(g in my_groups for g in ls.group_ids)):   # объединённое — обеим группам
             rows.append((ls, None, False))
-    direct = {x.lesson_id: x.amount for row in await payment_service.direct_pay_rows(sid, period) for x in row.lessons}
+    direct = {x.lesson_id: x for row in await payment_service.direct_pay_rows(sid, period) for x in row.lessons}
     out = []
     for ls, mark, attended in sorted(rows, key=lambda r: (r[0].date, r[0].recorded_at or "")):
         if keep is not None and not keep(ls):
@@ -38,8 +38,8 @@ async def month_lessons(dp, sid: str, period: str, keep: Callable | None = None,
             "teacherId": ls.teacher_id, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
             "group": lesson_group_title(ls, groups), "mode": g.billing_mode.value if g else "",
             "amount": (mark.amount if mark else 0) if money else 0,
-            "paid": bool(mark and mark.paid) if money else False,
-            "direct": direct.get(ls.lesson_id) if money else None,   # прямая оплата педагогу: сумма родителя
+            "paid": (direct[ls.lesson_id].paid if ls.lesson_id in direct else bool(mark and mark.paid)) if money else False,
+            "direct": direct[ls.lesson_id].amount if money and ls.lesson_id in direct else None,
             "attended": attended,                                    # False — группа без отметки посещения
         })
     billed = [x for x in out if x["amount"]]

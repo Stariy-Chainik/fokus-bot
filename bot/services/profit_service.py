@@ -189,6 +189,10 @@ def lesson_rent(lesson: Lesson) -> int:
     since = settings.hall_rent_since_period
     if since and lesson.date[:7] < since:
         return 0
+    from bot.services.pair_pricing import agreement_for
+    agreement = agreement_for(lesson)
+    if agreement is not None and agreement.rent is not None:
+        return agreement.rent
     base = settings.hall_rent_map.get(lesson.teacher_id, 0)
     personal = settings.hall_rent_student_map
     for sid in (lesson.student_1_id, lesson.student_2_id, lesson.student_3_id, lesson.student_4_id):

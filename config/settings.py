@@ -327,6 +327,19 @@ class Settings(BaseSettings):
                 out[(parts[0], parts[1])] = (int(parts[2]), since)
         return out
 
+    # Доли конкретной пары за целый урок (не ставка за 45 мин), с даты включительно.
+    # teacher:student1:amount1:student2:amount2:YYYY-MM-DD[:аренда за целый урок]
+    pair_lesson_prices: str = Field(default="", alias="PAIR_LESSON_PRICES")
+
+    # Подтверждённая владельцем прямая оплата конкретного занятия: student:lesson через запятую.
+    # Только отметка покрытия урока; деньги не становятся оплатой школе и не идут в её сбор.
+    direct_paid_lessons: str = Field(default="", alias="DIRECT_PAID_LESSONS")
+
+    def direct_lesson_paid(self, student_id: str, lesson_id: str) -> bool:
+        return f"{student_id}:{lesson_id}" in {
+            item.strip() for item in self.direct_paid_lessons.replace("|", ",").split(",")
+        }
+
     # Постоянная скидка ученика на всё, что ему начисляет школа: посещения, индивидуальные, абонемент.
     # Формат: STU-0191:10:2026-10 — 10 % с октября 2026 (месяц необязателен — за всё время).
     # Зарплату педагога не меняет. Явная цена ученика (переопределение абонемента, STUDENT_LESSON_RATES) — без скидки.

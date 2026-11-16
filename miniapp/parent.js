@@ -224,7 +224,7 @@ SCREENS['p.bill'] = async ({ ym }) => {
     const pick = sel[r.key];
     const what = `${l.type === 'group' ? '👥' : '👤'} ${fdate(l.date)} · ${l.durationMin} мин`;
     // прямая оплата педагогу: выбирать нечего — школе за них не платят
-    if (r.direct) return `<div class="lesson-line"><span></span><span>${what}</span><span class="amt">${fmt(l.amount)}</span></div>`;
+    if (r.direct) return `<div class="lesson-line"><span class="mark ${l.paid ? 'paid' : ''}">${l.paid ? '✓' : ''}</span><span>${what}${l.paid ? '<div class="d">оплачено напрямую</div>' : ''}</span><span class="amt">${fmt(l.amount)}</span></div>`;
     if (l.paid) return `<div class="lesson-line"><span class="mark paid">✓</span><span>${what}<div class="d">оплачено</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
     const on = !!pick && (pick.all || pick.lessons.has(l.id));
     return `<button class="lesson-line pick" data-act="bPickLesson" data-p='${esc(JSON.stringify({ key: r.key, id: l.id }))}'>${mark(on)}<span>${what}</span><span class="amt">${fmt(l.amount)}</span></button>`;
@@ -264,7 +264,7 @@ SCREENS['p.bill'] = async ({ ym }) => {
     const sum = rows.reduce((a, r) => a + r.accrued, 0);
     return `<div class="eyebrow" style="display:flex;justify-content:space-between"><span>${title}</span><span class="money">${fmt(sum)}</span></div>
       <div class="card bill">${rows.map(block).join('')}</div>
-      ${id === 'direct' ? '<p class="hint" style="margin:6px 2px 0">Эти занятия вы оплачиваете педагогу лично — в сумму «К оплате» они не входят, школа их не отслеживает.</p>' : ''}`;
+      ${id === 'direct' ? '<p class="hint" style="margin:6px 2px 0">Эти занятия вы оплачиваете педагогу лично — в сумму «К оплате» они не входят.</p>' : ''}`;
   };
   return { title: `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`, html: `
     <div class="card pad"><div style="font-weight:800;font-size:16px">${esc(b.student.name)}</div>
