@@ -243,6 +243,26 @@ def test_teachers_list_and_card(api):
     assert card["submitted"] == ["2026-08"] and card["salary"] == 1500 + 1500 + 1333
 
 
+def test_fixed_group_pay_note_is_current_and_admin_only(api, monkeypatch):
+    app, dp = api
+    monkeypatch.setattr(settings, "salary_duration_groups", "GRP-0001:45")
+    monkeypatch.setattr(settings, "group_salary_rates", "GRP-0001:1000")
+    card = _call(app, "GET", "/api/admin/teachers/TCH-0001")[1]
+    assert card["adminNotes"] == ["БП Джаз — 1\u202f000 ₽ за занятие независимо от длительности"]
+    monkeypatch.setattr(settings, "group_salary_rates", "GRP-0001:1200")
+    assert "1\u202f200 ₽" in _call(app, "GET", "/api/admin/teachers/TCH-0001")[1]["adminNotes"][0]
+    teacher_tg = 4242
+    asyncio.run(dp["user_repo"].add(teacher_tg, teacher_id="TCH-0001"))
+    assert _call(app, "GET", "/api/admin/teachers/TCH-0001", tg_id=teacher_tg)[0] == 403
+    assert _call(app, "GET", "/api/admin/teachers/TCH-0001", tg_id=PARENT_TG)[0] == 403
+    assert _call(app, "GET", "/api/admin/teachers/TCH-0001", headers={})[0] == 401
+    from tests.test_teacher_api import _call as teacher_call
+    own = teacher_call(dp, "GET", "/api/teacher/me", tg_id=teacher_tg)[1]
+    assert "adminNotes" not in own and "независимо от длительности" not in str(own)
+    monkeypatch.setattr(settings, "salary_duration_groups", "")
+    assert _call(app, "GET", "/api/admin/teachers/TCH-0001")[1]["adminNotes"] == []
+
+
 def test_pay_flow_marks_and_confirm(api):
     app, dp = api
     status, groups = _call(app, "GET", "/api/admin/pay/groups")

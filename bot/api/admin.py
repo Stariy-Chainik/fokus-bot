@@ -565,12 +565,22 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         period = current_period()
         groups = await _groups_by_id()
         gids = [r.group_id for r in await dp["teacher_group_repo"].get_all() if r.teacher_id == tid]
+        # Внутренняя пометка только в защищённом API администратора, не в данных кабинета педагога.
+        admin_notes = []
+        for gid in gids:
+            if gid not in groups or settings.salary_duration_group_map.get(gid) != 45:
+                continue
+            rate = settings.group_salary_rate(gid, date.today().isoformat())
+            if rate is not None:
+                amount = f"{rate:,}".replace(",", "\u202f")
+                admin_notes.append(f"{groups[gid].name} — {amount} ₽ за занятие независимо от длительности")
         subs = (sorted({s.period_month for s in await submission_repo.get_by_teacher(tid)}, reverse=True)
                 if settings.teacher_period_submit_enabled else [])       # сдача выключена — блока нет
         return _json({
             "id": t.teacher_id, "name": t.name, "tgId": t.tg_id,
             "rates": {"group": t.rate_group, "teacher": t.rate_for_teacher, "student": t.rate_for_student},
             "groups": [{"id": g, "name": groups[g].name} for g in gids if g in groups],
+            "adminNotes": admin_notes,
             "submitted": subs, "period": period,
             "salary": await salary_service.total_for(t, period),
             "isOwner": tid in settings.owner_teacher_id_set,

@@ -618,6 +618,7 @@ SCREENS['a.teacher'] = async ({ id, ym }) => {
   return { title: t.name, html: `
     <div class="kpis">${kpi(fmt(t.rates.group), 'ставка — группа / 45 мин')}${kpi(fmt(t.rates.teacher), 'ставка — инд. / 45 мин')}${kpi(fmt(t.rates.student), 'цена для ученика / 45 мин')}${kpi(fmt(t.salary), `начислено за ${MON_NOM[+t.period.slice(5) - 1].toLowerCase()}`)}</div>
     ${t.isOwner ? '<div class="card pad" style="margin-top:10px;background:var(--warn-soft);border-color:var(--warn-soft)">👑 Руководитель: зарплата остаётся в прибыли</div>' : ''}
+    ${(t.adminNotes || []).length ? `<div class="eyebrow">Пометки администратора</div><div class="card pad">${t.adminNotes.map(n => `<div>${esc(n)}</div>`).join('')}</div>` : ''}
     ${lessonsBlock}
     <div class="eyebrow">Группы</div>${t.groups.length ? list(t.groups.map(g => cell({ lead: '💃', plain: true, t: esc(g.name) }))) : '<div class="empty">Групп нет</div>'}
     ${t.periodSubmit ? `<div class="eyebrow">Сданные периоды</div>${t.submitted.length ? list(t.submitted.map(ym => `<div class="cell static"><span class="lead plain">🔒</span><span><div class="t">${fmon(ym)}</div><div class="s">сдан — занятия заморожены</div></span><span class="r"><button class="chip" style="padding:2px 8px" data-act="openPeriod" data-p='${esc(JSON.stringify({ id, ym }))}'>открыть</button></span></div>`)) : empty('Сданных периодов нет', '<p class="hint" style="margin:0">Сданный месяц закрыт для правок педагога; открыть его можно здесь</p>')}` : ''}
