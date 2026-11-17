@@ -333,15 +333,14 @@ def await_teacher(dp):
 def test_admin_bill_includes_direct_lessons_without_charging_school(api, monkeypatch):
     app, dp = api
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
-    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
     before = len(asyncio.run(dp["payment_repo"].get_all()))
     status, bill = _call(app, "GET", f"/api/admin/bill/STU-0001?ym={YM}")
     assert status == 200
     direct = bill["directRows"]
     assert len(direct) == 1 and direct[0]["teacherId"] == "TCH-0001"
-    assert (direct[0]["total"], direct[0]["paid"], direct[0]["rest"]) == (4000, 2000, 2000)
-    assert [(x["lessonId"], x["amount"], x["paid"]) for x in direct[0]["items"]] == [
-        ("LES-1", 2000, True), ("LES-2", 2000, False)]
+    assert direct[0]["total"] == 4000 and "paid" not in direct[0] and "rest" not in direct[0]
+    assert [(x["lessonId"], x["amount"]) for x in direct[0]["items"]] == [("LES-1", 2000), ("LES-2", 2000)]
+    assert all("paid" not in x for x in direct[0]["items"])
     assert (bill["total"], bill["paid"], bill["rest"]) == (800, 0, 800)
     assert all(x["lessonId"] not in {"LES-1", "LES-2"} for row in bill["rows"] for x in row["items"])
     assert len(asyncio.run(dp["payment_repo"].get_all())) == before
@@ -461,16 +460,15 @@ def test_student_lessons_by_month_with_share_and_paid_mark(api):
     assert _call(app, "GET", "/api/admin/students/STU-9999/lessons")[0] == 404
 
 
-def test_direct_paid_mark_does_not_increase_school_collection(api, monkeypatch):
+def test_direct_lessons_have_no_payment_status_and_do_not_increase_school_collection(api, monkeypatch):
     from config.settings import settings
     app, _dp = api
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
-    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
     status, data = _call(app, "GET", f"/api/admin/students/STU-0001/lessons?ym={YM}")
     assert status == 200
     rows = {x["id"]: x for x in data["lessons"]}
-    assert (rows["LES-1"]["direct"], rows["LES-1"]["paid"]) == (2000, True)
-    assert rows["LES-2"]["paid"] is False
+    assert (rows["LES-1"]["direct"], rows["LES-1"]["paid"]) == (2000, None)
+    assert rows["LES-2"]["paid"] is None
     assert (data["total"], data["paid"]) == (800, 0)
 
 

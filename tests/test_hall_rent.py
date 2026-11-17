@@ -38,6 +38,24 @@ def test_rent_per_student_and_status(admin_api, monkeypatch):  # noqa: F811
     assert hall_rent.settled("2026-01") is False                # до месяца начала учёта — только справочно
 
 
+def test_month_rent_grows_per_lesson_not_per_partner_and_only_receipt_closes_it(admin_api, monkeypatch):  # noqa: F811
+    _app, dp = admin_api
+    _direct(monkeypatch)
+    monkeypatch.setattr(settings, "pair_lesson_prices", f"TCH-0001:STU-0001:1000:STU-0002:1600:{YM}-01:800")
+    teacher = dp["teacher_repo"].items[0]
+    pair = [("STU-0001", "Антон"), ("STU-0002", "Полина")]
+    lessons = [mk_lesson("LES-PAIR", teacher, f"{YM}-14", duration=90, students=pair)]
+    repo = dp["hall_rent_repo"]
+    first = asyncio.run(hall_rent.status(repo, teacher.teacher_id, YM, lessons))
+    assert (first["lessons"], first["accrued"], first["paid"], first["rest"]) == (1, 800, 0, 800)
+    lessons.append(mk_lesson("LES-PAIR2", teacher, f"{YM}-20", duration=90, students=pair))
+    month = asyncio.run(hall_rent.status(repo, teacher.teacher_id, YM, lessons))
+    assert (month["lessons"], month["accrued"], month["paid"], month["rest"]) == (2, 1600, 0, 1600)
+    asyncio.run(hall_rent.record_payment(repo, teacher.teacher_id, YM, 1600, ADMIN_TG, "аренда за месяц"))
+    settled = asyncio.run(hall_rent.status(repo, teacher.teacher_id, YM, lessons))
+    assert settled["status"] == "paid" and settled["rest"] == 0
+
+
 def test_admin_marks_rent_received_and_teacher_sees_it(admin_api, monkeypatch):  # noqa: F811
     app, dp = admin_api
     _direct(monkeypatch)

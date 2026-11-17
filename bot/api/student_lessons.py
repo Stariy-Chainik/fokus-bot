@@ -38,7 +38,8 @@ async def month_lessons(dp, sid: str, period: str, keep: Callable | None = None,
             "teacherId": ls.teacher_id, "teacher": teachers.get(ls.teacher_id, ls.teacher_name),
             "group": lesson_group_title(ls, groups), "mode": g.billing_mode.value if g else "",
             "amount": (mark.amount if mark else 0) if money else 0,
-            "paid": (direct[ls.lesson_id].paid if ls.lesson_id in direct else bool(mark and mark.paid)) if money else False,
+            # null — школа не отслеживает расчёт ученика с педагогом, это не долг/неоплаченный урок.
+            "paid": (None if ls.lesson_id in direct else bool(mark and mark.paid)) if money else False,
             "direct": direct[ls.lesson_id].amount if money and ls.lesson_id in direct else None,
             "attended": attended,                                    # False — группа без отметки посещения
         })

@@ -49,13 +49,15 @@ def test_direct_lesson_has_one_flat_rent_and_teacher_keeps_remainder(agreement, 
     assert lesson_rent(replace(agreement, type=LessonType.GROUP)) == 0
 
 
-def test_direct_confirmation_covers_only_named_student_and_lesson(agreement, monkeypatch):
+def test_direct_costs_have_no_parent_payment_status(agreement, monkeypatch):
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
-    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-2:LES-000001")
     lessons = [agreement, replace(agreement, lesson_id="LES-000002")]
     teachers = {"TCH-0001": _teacher()}
-    assert [x.paid for row in direct_pay_rows("STU-2", lessons, teachers) for x in row.lessons] == [True, False]
-    assert [x.paid for row in direct_pay_rows("STU-1", lessons, teachers) for x in row.lessons] == [False, False]
+    polina = [x for row in direct_pay_rows("STU-2", lessons, teachers) for x in row.lessons]
+    anton = [x for row in direct_pay_rows("STU-1", lessons, teachers) for x in row.lessons]
+    assert [x.amount for x in polina] == [1600, 1600]
+    assert [x.amount for x in anton] == [1000, 1000]
+    assert all(not hasattr(x, "paid") for x in polina + anton)
 
 
 def test_latest_valid_agreement_and_reka_distribution(agreement, monkeypatch):

@@ -98,11 +98,10 @@ def render_bill_detail(
             for item in row.lessons:
                 d.lines.append(
                     f"    {format_date_display(item.date)}  {item.duration_min} мин"
-                    f"  — {item.amount} руб." + (" ✅ оплачено напрямую" if item.paid else "")
+                    f"  — {item.amount} руб."
                 )
             d.lines.append(f"  <i>Итого: {row.total} руб. — оплачивается педагогу напрямую</i>")
-            d.lines.append("  <i>в «К оплате» не входит, школа эти занятия не отслеживает</i>\n"
-                           if not any(item.paid for item in row.lessons) else "  <i>в «К оплате» школы не входит</i>\n")
+            d.lines.append("  <i>в «К оплате» не входит, школа эти занятия не отслеживает</i>\n")
             d.direct_total += row.total
     if d.grand_total == 0 and not d.direct_total:
         d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]

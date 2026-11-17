@@ -265,9 +265,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
             rows.append({
                 "key": f"DIRECT:{direct.teacher_id}", "name": direct.name, "subscription": False,
                 "direct": True,                       # платит родитель лично педагогу
-                "accrued": direct.total, "paid": sum(item.amount for item in direct.lessons if item.paid), "rest": 0, "overpaid": 0,
+                "accrued": direct.total, "paid": 0, "rest": 0, "overpaid": 0,
                 "lessons": [{"id": item.lesson_id, "date": item.date, "durationMin": item.duration_min,
-                             "amount": item.amount, "paid": item.paid, "type": "individual"}
+                             "amount": item.amount, "paid": None, "type": "individual"}
                             for item in direct.lessons],
             })
         accrued, paid, rest = payment_ledger.ledger_totals(ledgers)

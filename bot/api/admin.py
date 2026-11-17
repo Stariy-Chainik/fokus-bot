@@ -752,12 +752,10 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         # Прямая оплата видна в счёте, но не входит в выбор оплаты и сбор школы.
         direct_rows = []
         for direct in await payment_service.direct_pay_rows(sid, period):
-            direct_paid = sum(item.amount for item in direct.lessons if item.paid)
             direct_rows.append({
                 "teacherId": direct.teacher_id, "name": direct.name, "total": direct.total,
-                "paid": direct_paid, "rest": direct.total - direct_paid,
                 "items": [{"lessonId": item.lesson_id, "date": item.date, "durationMin": item.duration_min,
-                           "amount": item.amount, "paid": item.paid} for item in direct.lessons],
+                           "amount": item.amount} for item in direct.lessons],
             })
         return _json({
             "student": {"id": sid, "name": student.name}, "period": period,

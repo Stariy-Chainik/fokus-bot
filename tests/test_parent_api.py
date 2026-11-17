@@ -251,16 +251,16 @@ def test_direct_pay_teacher_is_shown_in_the_bill_but_not_charged(api, monkeypatc
     assert bill["accrued"] == sum(r["accrued"] for r in bill["rows"] if not r.get("direct"))
 
 
-def test_direct_confirmation_is_visible_but_is_not_a_school_payment(api, monkeypatch):
+def test_direct_cost_is_visible_without_payment_status_or_school_payment(api, monkeypatch):
     app, dp = api
     monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
     before = len(asyncio.run(dp["payment_repo"].get_all()))
-    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
     bill = _call(app, "GET", f"/api/parent/bill/STU-0001/{YM}")[1]
     direct = next(r for r in bill["rows"] if r.get("direct"))
     lessons = {x["id"]: x for x in direct["lessons"]}
-    assert lessons["LES-1"]["paid"] is True and lessons["LES-2"]["paid"] is False
-    assert direct["paid"] == 2000 and direct["rest"] == 0
+    assert lessons["LES-1"]["paid"] is None and lessons["LES-2"]["paid"] is None
+    assert lessons["LES-1"]["amount"] == 2000
+    assert direct["paid"] == 0 and direct["rest"] == 0
     assert bill["paid"] == 0
     assert len(asyncio.run(dp["payment_repo"].get_all())) == before
 

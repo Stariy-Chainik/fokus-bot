@@ -244,7 +244,6 @@ class DirectPayLesson:
     date: str
     duration_min: int
     amount: int
-    paid: bool = False
 
 
 @dataclass(frozen=True)
@@ -280,8 +279,7 @@ def direct_pay_rows(student_id: str, month_lessons: list, teachers_by_id: dict) 
         amount = sum(row.amount for row in build_billing_rows(ls, teacher, include_direct=True)
                      if row.student_id == student_id)
         by_teacher.setdefault(ls.teacher_id, []).append(
-            DirectPayLesson(ls.lesson_id, ls.date, ls.duration_min, amount,
-                            settings.direct_lesson_paid(student_id, ls.lesson_id)))
+            DirectPayLesson(ls.lesson_id, ls.date, ls.duration_min, amount))
     return [
         DirectPayRow(tid, teachers_by_id[tid].name, sum(item.amount for item in items), items)
         for tid, items in by_teacher.items()

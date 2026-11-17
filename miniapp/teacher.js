@@ -133,7 +133,7 @@ SCREENS['t.lesson'] = async ({ id }) => {
       <div class="hint">${fdate(l.date)} · ${l.durationMin} мин${l.recordedAt ? ` · отмечено ${l.recordedAt.slice(11, 16)}` : ''}</div>
       ${payPill || l.locked ? `<div style="margin-top:8px">${payPill}${l.locked ? ` ${pill('🔒 период сдан', 'mute')}` : ''}</div>` : ''}</div>
     ${l.attendees.length ? `<div class="eyebrow">${l.roster ? `Абонемент за ${MON_NOM[+l.date.slice(5, 7) - 1].toLowerCase()}` : l.type === 'group' ? 'Посетили' : 'Ученики'}</div>${list(l.attendees.map(a => cell({
-      lead: initials(a.name), t: esc(a.name), s: l.direct ? (a.directPaid ? '✓ оплачено напрямую' : 'платит напрямую') : (T_PAY[a.payStatus] ? T_PAY[a.payStatus][0] : ''),
+      lead: initials(a.name), t: esc(a.name), s: l.direct ? 'Оплата напрямую педагогу' : (T_PAY[a.payStatus] ? T_PAY[a.payStatus][0] : ''),
       r: a.amount === null ? '' : a.amount ? `<b class="${l.direct ? 'direct' : ''}">${fmt(a.amount)}</b>` : esc(l.freeLabel || 'абонемент'),
       go: 't.student', p: { id: a.studentId },
     })))}` : '<div class="empty">Посещаемость не отмечалась</div>'}
@@ -368,7 +368,7 @@ const tRentBlock = (r, period) => {
     <div class="card">
       <div class="total"><span>За ${mon} · ${plural(r.lessons, ['занятие', 'занятия', 'занятий'])}</span><span class="big">${fmt(r.accrued)}</span></div>
       ${status ? `<div class="pad" style="padding-top:0">${status}</div>` : ''}
-      <div class="pad hint" style="padding-top:0">${r.settle ? 'Перечислите школе одной суммой в конце месяца — администратор отметит получение.' : 'Справочно: ставка за каждый начатый час индивидуального занятия.'}</div>
+      <div class="pad hint" style="padding-top:0">${r.settle ? `${ended ? 'Итог за месяц. ' : 'Сумма увеличивается по мере проведения занятий. '}Перечислите школе одной суммой в конце месяца — администратор отметит получение.` : 'Справочно: ставка за каждый начатый час индивидуального занятия.'}</div>
     </div>
     ${r.payments.length ? list(r.payments.map(p => cell({ lead: '🏠', plain: true, t: `получено ${fmt(p.amount)}`, s: `${fdate(p.date)}${p.comment ? ' · ' + esc(p.comment) : ''}` }))) : ''}`;
 };

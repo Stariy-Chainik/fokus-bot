@@ -224,7 +224,7 @@ SCREENS['p.bill'] = async ({ ym }) => {
     const pick = sel[r.key];
     const what = `${l.type === 'group' ? '👥' : '👤'} ${fdate(l.date)} · ${l.durationMin} мин`;
     // прямая оплата педагогу: выбирать нечего — школе за них не платят
-    if (r.direct) return `<div class="lesson-line"><span class="mark ${l.paid ? 'paid' : ''}">${l.paid ? '✓' : ''}</span><span>${what}${l.paid ? '<div class="d">оплачено напрямую</div>' : ''}</span><span class="amt">${fmt(l.amount)}</span></div>`;
+    if (r.direct) return `<div class="lesson-line"><span>🤝</span><span>${what}<div class="d">Оплата напрямую педагогу</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
     if (l.paid) return `<div class="lesson-line"><span class="mark paid">✓</span><span>${what}<div class="d">оплачено</div></span><span class="amt">${fmt(l.amount)}</span></div>`;
     const on = !!pick && (pick.all || pick.lessons.has(l.id));
     return `<button class="lesson-line pick" data-act="bPickLesson" data-p='${esc(JSON.stringify({ key: r.key, id: l.id }))}'>${mark(on)}<span>${what}</span><span class="amt">${fmt(l.amount)}</span></button>`;
