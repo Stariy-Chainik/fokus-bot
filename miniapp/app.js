@@ -473,11 +473,17 @@ SCREENS['a.bill'] = async ({ ym, sid }) => {
       ? `<div class="lesson-line">${mark(false, true)}<span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></div>`
       : `<button class="lesson-line pick" data-act="abillPick" data-p='${esc(JSON.stringify({ key: r.key, id: m.lessonId }))}'>${mark((sel.rows[r.key] || []).includes(m.lessonId), false)}<span>${fdate(m.date)} · ${m.durationMin} мин</span><span class="amt">${fmt(m.amount)}</span></button>`).join('');
   }).join('');
+  const directHtml = (d.directRows || []).length ? `<div class="eyebrow">Оплачивается педагогу напрямую</div>
+    <div class="card bill">${d.directRows.map(r => `<div class="grp"><span>🤝 ${esc(r.name)}</span><span class="money">${fmt(r.total)}</span></div>
+      ${r.items.map(m => `<button class="lesson-line pick" data-go="a.lesson" data-p='${esc(JSON.stringify({ id: m.lessonId }))}'>${mark(false, m.paid)}<span>${fdate(m.date)} · ${m.durationMin} мин<div class="d">${m.paid ? 'оплачено напрямую' : 'не оплачено'}</div></span><span class="amt">${fmt(m.amount)}</span></button>`).join('')}
+      <div class="total"><span>Оплачено напрямую ${fmt(r.paid)}</span><span class="money">${r.rest ? `осталось ${fmt(r.rest)}` : '✓ оплачено'}</span></div>`).join('')}</div>
+    <p class="hint" style="margin-top:8px">Эти суммы платят педагогу лично — в сумму к оплате школе они не входят.</p>` : '';
   return { title: 'Счёт ученика', html: `
     <div class="card bill"><div class="pad" style="border-bottom:1px solid var(--line)"><div style="font-weight:800;font-size:16px">${esc(d.student.name)}</div><div class="hint">${d.groups.length ? 'Группы: ' + esc(d.groups.join(', ')) + '<br>' : ''}Месяц: ${fmon(ym)}${d.rest ? ' · отметьте галочками, что оплачено' : ''}</div>${d.rest ? billAllChip(sel, 'abillAll') : ''}</div>
     ${d.rows.length ? rowsHtml : '<div class="empty">Начислений за месяц нет</div>'}
     <div class="total"><span>Начислено ${fmt(d.total)}<br><span class="hint">оплачено ${fmt(d.paid)}</span></span><span class="big ${d.rest ? 'bad' : 'ok'}">${d.rest ? fmt(d.rest) : '✓ оплачено'}</span></div></div>
     ${d.rest ? `<div style="margin-top:12px">${btn(picked ? `✅ Отметить оплату ${fmt(picked)}` : 'Отметьте занятия галочками', 'abillAsk', { sid, ym, name: d.student.name }, picked ? '' : 'sec')}</div>` : ''}
+    ${directHtml}
     <div style="margin-top:12px">${btn('📨 Отправить родителям', 'sendBill', { ym, sid }, d.rows.length ? 'ghost' : 'sec')}</div>` };
 };
 

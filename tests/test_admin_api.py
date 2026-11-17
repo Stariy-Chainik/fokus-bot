@@ -330,6 +330,25 @@ def await_teacher(dp):
     return asyncio.run(dp["teacher_repo"].get_by_id("TCH-0001"))
 
 
+def test_admin_bill_includes_direct_lessons_without_charging_school(api, monkeypatch):
+    app, dp = api
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "direct_paid_lessons", "STU-0001:LES-1")
+    before = len(asyncio.run(dp["payment_repo"].get_all()))
+    status, bill = _call(app, "GET", f"/api/admin/bill/STU-0001?ym={YM}")
+    assert status == 200
+    direct = bill["directRows"]
+    assert len(direct) == 1 and direct[0]["teacherId"] == "TCH-0001"
+    assert (direct[0]["total"], direct[0]["paid"], direct[0]["rest"]) == (4000, 2000, 2000)
+    assert [(x["lessonId"], x["amount"], x["paid"]) for x in direct[0]["items"]] == [
+        ("LES-1", 2000, True), ("LES-2", 2000, False)]
+    assert (bill["total"], bill["paid"], bill["rest"]) == (800, 0, 800)
+    assert all(x["lessonId"] not in {"LES-1", "LES-2"} for row in bill["rows"] for x in row["items"])
+    assert len(asyncio.run(dp["payment_repo"].get_all())) == before
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "")
+    assert _call(app, "GET", f"/api/admin/bill/STU-0001?ym={YM}")[1]["directRows"] == []
+
+
 def test_bill_send_requires_bot(api):
     app, _ = api
     assert _call(app, "POST", f"/api/admin/bill/STU-0001/send?ym={YM}")[0] == 503
