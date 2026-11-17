@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
 
 from bot.models import Lesson, Billing, Teacher
 from bot.models.enums import LessonType
@@ -132,13 +133,35 @@ def discounted(amount: int, student_id: str, date_or_period: str) -> int:
     return round(amount * (100 - pct) / 100) if pct else amount
 
 
+def student_lesson_price(teacher_id: str, student_id: str, lesson_date: str) -> int | None:
+    """Согласованная личная цена за целый урок (STUDENT_LESSON_PRICES), без деления на участников."""
+    from config.settings import settings
+    matches: list[tuple[str, int]] = []
+    for chunk in settings.student_lesson_prices.replace("|", ",").split(","):
+        parts = [p.strip() for p in chunk.split(":")]
+        if len(parts) != 4 or parts[:2] != [teacher_id, student_id] or not parts[2].isdigit():
+            continue
+        try:
+            date.fromisoformat(parts[3])
+        except ValueError:
+            continue
+        if parts[3] <= lesson_date:
+            matches.append((parts[3], int(parts[2])))
+    return max(matches, key=lambda row: row[0])[1] if matches else None
+
+
 def build_billing_rows(lesson: Lesson, teacher: Teacher, include_direct: bool = False) -> list[Billing]:
     """Начисления ученикам за занятие; поверх расчёта — постоянная скидка ученика (STUDENT_DISCOUNTS)."""
     rows = _build_billing_rows(lesson, teacher, include_direct)
     from bot.services.pair_pricing import agreement_for
-    if agreement_for(lesson) is not None:
-        return rows                 # явные согласованные доли уже окончательные
+    pair_agreed = agreement_for(lesson) is not None
     for row in rows:
+        personal = student_lesson_price(lesson.teacher_id, row.student_id, lesson.date) if lesson.type == LessonType.INDIVIDUAL else None
+        if personal is not None:
+            row.amount, row.exact = personal, 0.0
+            continue
+        if pair_agreed:
+            continue                # явные согласованные доли уже окончательные
         pct = student_discount(row.student_id, row.date)
         if pct:
             row.amount = round(row.amount * (100 - pct) / 100)

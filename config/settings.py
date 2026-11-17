@@ -331,6 +331,10 @@ class Settings(BaseSettings):
     # teacher:student1:amount1:student2:amount2:YYYY-MM-DD[:аренда за целый урок]
     pair_lesson_prices: str = Field(default="", alias="PAIR_LESSON_PRICES")
 
+    # Личная окончательная цена за целое индивидуальное занятие, в том числе в паре.
+    # teacher:student:amount:YYYY-MM-DD; не меняет долю остальных участников и аренду.
+    student_lesson_prices: str = Field(default="", alias="STUDENT_LESSON_PRICES")
+
     # Постоянная скидка ученика на всё, что ему начисляет школа: посещения, индивидуальные, абонемент.
     # Формат: STU-0191:10:2026-10 — 10 % с октября 2026 (месяц необязателен — за всё время).
     # Зарплату педагога не меняет. Явная цена ученика (переопределение абонемента, STUDENT_LESSON_RATES) — без скидки.

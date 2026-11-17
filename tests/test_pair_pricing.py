@@ -68,3 +68,38 @@ def test_latest_valid_agreement_and_reka_distribution(agreement, monkeypatch):
         "TCH-0001:STU-1:1:STU-2:2:2026-11-10:999",
     ]))
     assert [r.amount for r in build_billing_rows(agreement, _teacher())] == [1250, 1750]
+
+
+@pytest.mark.parametrize("minutes", [45, 60, 90])
+@pytest.mark.parametrize("paired", [True, False])
+def test_personal_whole_lesson_price_keeps_partner_price_and_ignores_minutes(agreement, monkeypatch, minutes, paired):
+    monkeypatch.setattr(settings, "student_lesson_prices", "TCH-0001:STU-2:1600:2026-11-09")
+    monkeypatch.setattr(settings, "student_discounts", "STU-2:10")
+    lesson = replace(agreement, duration_min=minutes)
+    if not paired:
+        lesson = replace(lesson, student_1_id="STU-2", student_2_id=None)
+    rows = round_month(build_billing_rows(lesson, _teacher()))
+    amounts = {r.student_id: r.amount for r in rows}
+    assert amounts["STU-2"] == 1600
+    if paired:
+        assert amounts["STU-1"] == 1000
+
+
+def test_personal_flat_price_does_not_change_past_or_group_lessons(agreement, monkeypatch):
+    monkeypatch.setattr(settings, "pair_lesson_prices", "")
+    monkeypatch.setattr(settings, "student_lesson_prices", "TCH-0001:STU-2:1600:2026-11-09")
+    before = replace(agreement, date="2026-11-08")
+    assert [r.amount for r in build_billing_rows(before, _teacher())] == [900, 900]
+    group = replace(agreement, type=LessonType.GROUP, attendees="STU-2:60:800")
+    assert [r.amount for r in build_billing_rows(group, _teacher())] == [800]
+
+
+def test_personal_direct_price_keeps_school_billing_empty_and_rent_unchanged(agreement, monkeypatch):
+    monkeypatch.setattr(settings, "direct_pay_teacher_ids", "TCH-0001")
+    monkeypatch.setattr(settings, "hall_rent_since_period", "2026-11")
+    monkeypatch.setattr(settings, "student_lesson_prices", "TCH-0001:STU-2:1600:2026-11-09")
+    teacher = _teacher()
+    assert build_billing_rows(agreement, teacher) == []
+    assert {r.student_id: r.amount for r in build_billing_rows(agreement, teacher, include_direct=True)} == {
+        "STU-1": 1000, "STU-2": 1600}
+    assert lesson_rent(agreement) == 800
