@@ -20,11 +20,20 @@ logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
 _GREETING = re.compile(r"(?:доброе утро|добрый день|добрый вечер|здравствуйте|всем привет)[!.,]*")
 _HEADER = re.compile(r"расписание со мной(?: (?:на )?(.+?))?[:.!]?")
-_WEEKDAYS = ("понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье")
-_SLOT = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)(?:\s+(.*))?")
+_DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+_WEEKDAYS = {**{day: index for index, day in enumerate(_DAYS)}, "среду": 2, "пятницу": 4, "субботу": 5}
+_DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
+_TIME = r"(?:[01]?\d|2[0-3])[:.][0-5]\d"
+_SLOT = re.compile(
+    rf"(?:[♦🔶🔷🔸🔹◆▪•-]\ufe0f?\s*)?(?P<start>{_TIME})"
+    rf"(?:\s*[-–—]\s*(?P<end>{_TIME}))?(?:(?:\s*[-–—]\s*|\s+)(?P<names>.+))?",
+)
 _MINUTES = re.compile(r"(.+?)\s+(\d{1,3})(?:\s*мин\.?)?", re.IGNORECASE)
 _NAME_WORD = re.compile(r"[а-яa-z]+")
-_NICKNAMES = {"екатерина": ("катя",), "николай": ("коля",), "софия": ("соня",), "софья": ("соня",)}
+_NICKNAMES = {
+    "екатерина": ("катя",), "николай": ("коля",), "софия": ("соня",), "софья": ("соня",),
+    "ирина": ("ира",), "александр": ("саша",), "александра": ("саша",), "эмилия": ("эмили",),
+}
 
 
 def _plain(text: str) -> str:
@@ -38,6 +47,7 @@ class Slot:
     names: str
     duration: int | None
     suggested: bool = False
+    end: str | None = None
 
 
 def _plan_day(label: str, published: date) -> date | None:
@@ -46,7 +56,7 @@ def _plan_day(label: str, published: date) -> date | None:
     if label == "завтра":
         return published + timedelta(days=1)
     if label in _WEEKDAYS:
-        return published + timedelta(days=(_WEEKDAYS.index(label) - published.weekday()) % 7)
+        return published + timedelta(days=(_WEEKDAYS[label] - published.weekday()) % 7)
     explicit = re.fullmatch(r"(?:(\w+) )?(\d{1,2})[./](\d{1,2})(?:[./](\d{4}))?", label)
     if explicit:
         weekday, day, month, year = explicit.groups()
@@ -56,37 +66,65 @@ def _plan_day(label: str, published: date) -> date | None:
                 target = target.replace(year=target.year + 1)
         except ValueError:
             return None
-        if weekday is None or weekday == _WEEKDAYS[target.weekday()]:
+        if weekday is None or _WEEKDAYS.get(weekday) == target.weekday():
             return target
     return None
+
+
+def _time_parts(value: str) -> tuple[str, int]:
+    hour, minute = map(int, value.replace(".", ":").split(":"))
+    return f"{hour:02d}:{minute:02d}", hour * 60 + minute
+
+
+def _parse_slot(line: str) -> Slot | None:
+    match = _SLOT.fullmatch(line)
+    if not match:
+        return None
+    time, at = _time_parts(match["start"])
+    names = (match["names"] or "").strip()
+    if re.match(r"\d{1,2}[:.]\d", names):
+        return None  # некорректное время окончания не считаем именем
+    explicit = _MINUTES.fullmatch(names)
+    duration = None
+    if explicit:
+        names, duration = explicit[1], int(explicit[2])
+        if duration <= 0:
+            return None
+    end = None
+    if match["end"]:
+        end, ends_at = _time_parts(match["end"])
+        interval = ends_at - at
+        if interval <= 0 or (duration is not None and duration != interval):
+            return None
+        duration = interval
+    if _plain(names).rstrip(".!") == "свободно":
+        names = ""
+    return Slot(time, at, names, duration, end=end)
 
 
 def parse_schedule(text: str, published: date) -> tuple[date, list[Slot]] | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if lines and _GREETING.fullmatch(_plain(lines[0])):
         lines = lines[1:]
-    header = _HEADER.fullmatch(_plain(lines[0])) if lines else None
-    day = _plan_day(header[1] or "", published) if header else None
+    if not lines:
+        return None
+    title = _plain(lines[0]).rstrip(":")
+    header = _HEADER.fullmatch(title)
+    if header:
+        day = _plan_day(header[1] or "", published)
+    else:
+        day = _plan_day(title, published) if _DAY_HEADER.fullmatch(title) else None
     if day is None:
         return None
     slots: list[Slot] = []
     for line in lines[1:]:
-        match = _SLOT.fullmatch(line)
-        if not match:
+        slot = _parse_slot(line)
+        if slot is None:
             return None  # в том числе второй заголовок с расписанием другого педагога
-        hour, minute = int(match[1]), int(match[2])
-        at = hour * 60 + minute
-        if slots and at <= slots[-1].at:
+        if slots and slot.at <= slots[-1].at:
             return None
-        names = (match[3] or "").strip()
-        explicit = _MINUTES.fullmatch(names)
-        duration = None
-        if explicit:
-            names, duration = explicit[1], int(explicit[2])
-            if duration <= 0:
-                return None
-        slots.append(Slot(f"{hour:02d}:{minute:02d}", at, names, duration))
-    if not any(slot.names for slot in slots):
+        slots.append(slot)
+    if not slots:
         return None
     for i, slot in enumerate(slots[:-1]):
         if slot.names and slot.duration is None and slots[i + 1].at - slot.at == 45:
@@ -105,8 +143,9 @@ class StudentNames:
             variants = {words, (words[0],)}
             if len(words) >= 2:
                 surname, given = words[:2]
-                variants.update({(surname, given), (given, surname), (given,)})
-                variants.update((alias,) for alias in _NICKNAMES.get(given, ()))
+                variants.update({(surname, given), (given, surname)})
+                for name in (given, *_NICKNAMES.get(given, ())):
+                    variants.update({(name,), (name, surname[0])})
             for variant in variants:
                 self.aliases.setdefault(variant, set()).add(sid)
 
@@ -118,9 +157,13 @@ class StudentNames:
         words = self.words(text)
         solo = {(sid,) for sid in self.aliases.get(words, ())}
         pairs: set[tuple[str, ...]] = set()
-        for pos in range(1, len(words)):
-            right = self.aliases.get(words[pos:], ())
-            for left_id in self.aliases.get(words[:pos], ()):
+        if "и" in words:
+            splits = [(words[:pos], words[pos + 1:]) for pos, word in enumerate(words) if word == "и"]
+        else:
+            splits = [(words[:pos], words[pos:]) for pos in range(1, len(words))]
+        for left_words, right_words in splits:
+            right = self.aliases.get(right_words, ())
+            for left_id in self.aliases.get(left_words, ()):
                 partner = self.students[left_id].partner_id
                 if partner and partner != left_id and partner in right and self.students[partner].partner_id == left_id:
                     pairs.add(tuple(sorted((left_id, partner))))
@@ -128,8 +171,11 @@ class StudentNames:
         return next(iter(choices)) if len(choices) == 1 else ()
 
     def row(self, slot: dict) -> dict:
-        ids = self.match(slot["names"])
-        return {"time": slot["time"], "text": slot["names"], "duration": slot["duration"],
+        text = slot["names"]
+        label = _plain(text).rstrip(".!")
+        kind = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
+        ids = self.match(text) if kind == "individual" else ()
+        return {"time": slot["time"], "end": slot.get("end"), "text": text, "kind": kind, "duration": slot["duration"],
                 "suggested": slot["suggested"], "students": [self.students[sid].name for sid in ids]}
 
 

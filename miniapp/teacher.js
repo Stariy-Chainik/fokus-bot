@@ -56,16 +56,18 @@ SCREENS['t.home'] = async () => {
 SCREENS['t.schedule.drafts'] = async () => {
   const { drafts } = await api('/schedule-drafts');
   const renderSlot = s => {
-    if (!s.text) return cell({ lead: s.time, t: 'Свободное окно' });
     const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : 'Уточнить длительность';
-    const details = s.students.length ? duration : `Уточнить участников · ${duration}`;
+    const timing = s.end ? `${s.time}–${s.end} · ${duration}` : duration;
+    if (s.kind === 'free') return cell({ lead: s.time, t: 'Свободное окно', s: s.duration ? esc(timing) : '' });
+    if (s.kind === 'group') return cell({ lead: s.time, t: 'Групповое занятие', s: esc(timing) });
+    const details = s.students.length ? timing : `Уточнить участников · ${timing}`;
     return cell({ lead: s.time, cls: 'wrap', t: esc(s.students.join(' + ') || s.text), s: esc(details) });
   };
   const renderDraft = d => `<div class="eyebrow">${esc(fdate(d.date))} · Черновик</div>
     ${list(d.slots.map(renderSlot))}
     <div style="margin:8px 0 16px"><a href="${esc(d.source)}" target="_blank" rel="noopener">Открыть сообщение в Telegram</a></div>`;
   return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(renderDraft).join('') :
-    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе сообщение с заголовком «Расписание со мной на …».</p>') };
+    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>') };
 };
 
 /* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */
