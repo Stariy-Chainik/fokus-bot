@@ -19,9 +19,14 @@ SCREENS['t.home'] = async () => {
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
   ].filter(Boolean);
+  const recordLesson = goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name });
   const today = h.lessonsToday ? `
     <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 't.lessons', { key: h.today })}${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok', 't.lessons', { key: h.today })}</div>
-    <div style="margin-top:10px">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>` : '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
+    <div style="margin-top:10px">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>
+    <div style="margin-top:10px">${recordLesson}</div>` : `<div class="card pad">
+      <div class="hint">Занятий сегодня ещё не отмечено</div>
+      <div style="margin-top:10px">${recordLesson}</div>
+    </div>`;
   // Сдача периода отключена (periodSubmit=false): ни замка, ни напоминаний «не сдан».
   const lockNote = !h.periodSubmit ? '' : h.periodSubmitted ? ' · период сдан' : h.canSubmit ? ' · можно сдать период' : '';
   const monthLine = `${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}${h.groupLessonsMonth ? ` · 👥 ${h.groupLessonsMonth}` : ''}${h.individualLessonsMonth ? ` · 👤 ${h.individualLessonsMonth}` : ''}${lockNote}`;
@@ -36,9 +41,8 @@ SCREENS['t.home'] = async () => {
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
     <div class="eyebrow">Сегодня</div>
-    ${h.schedulePilot ? goBtn('📋 Расписание из Telegram', 't.schedule.drafts', {}, 'sec') : ''}
     ${today}
-    <div style="margin-top:10px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
+    ${h.schedulePilot ? `<div style="margin-top:12px">${list([cell({ lead: '📋', plain: true, t: 'Расписание из Telegram', go: 't.schedule.drafts' })])}</div>` : ''}
     <div class="eyebrow">${mon}</div>
     ${list([
       cell({ lead: '💰', plain: true, t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
