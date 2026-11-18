@@ -9,6 +9,7 @@ from bot.models import Student
 from bot.services.schedule_pilot import SchedulePilot, StudentNames, parse_schedule
 from tests.fakes import mk_user
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, _call, make_api
+from tests.test_teacher_api import _call as call_teacher
 
 CHAT = -1001111111111
 PUBLISHED = datetime(2026, 11, 18, 21, 5, tzinfo=timezone.utc)  # четверг в Москве
@@ -105,11 +106,14 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     asyncio.run(pilot.receive(_message(), 1, edited=False))
     dp["user_repo"].items.append(mk_user(tg_id=123, is_admin=True, teacher_id="TCH-0001"))
-    route = "/api/admin/schedule-drafts"
-    assert _call(app, "GET", route, headers={})[0] == 401
-    assert _call(app, "GET", route, tg_id=PARENT_TG)[0] == 403
-    assert _call(app, "GET", route, tg_id=123)[0] == 404
-    status, data = _call(app, "GET", route)
+    route = "/api/teacher/schedule-drafts"
+    assert "schedulePilot" not in _call(app, "GET", "/api/admin/home")[1]
+    assert call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]["schedulePilot"] is True
+    assert "schedulePilot" not in call_teacher(app, "GET", "/api/teacher/home", tg_id=123)[1]
+    assert call_teacher(app, "GET", route, headers={})[0] == 401
+    assert call_teacher(app, "GET", route, tg_id=PARENT_TG)[0] == 403
+    assert call_teacher(app, "GET", route, tg_id=123)[0] == 404
+    status, data = call_teacher(app, "GET", route, tg_id=ADMIN_TG)
     assert status == 200
     assert data["drafts"][0]["slots"][0]["text"] == "Егор Катя"
     assert dp["lesson_repo"].items == lessons_before

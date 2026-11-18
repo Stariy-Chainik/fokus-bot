@@ -165,6 +165,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     diary_service = _dp_get(dp, "diary_service")
     notifier = _dp_get(dp, "notifier")
     hall_rent_repo = _dp_get(dp, "hall_rent_repo")
+    schedule_pilot = _dp_get(dp, "schedule_pilot")
 
     async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
         """Результаты турниров ФТСАРР ученика — свежие первыми (лист competition_results)."""
@@ -277,6 +278,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             "periodSubmit": settings.teacher_period_submit_enabled,   # кнопка «Сдать период» и замок месяца
         })
 
+    async def schedule_drafts(request: web.Request, user, teacher) -> web.Response:
+        if schedule_pilot is None or not schedule_pilot.owns(user):
+            return _json({"error": "not_found"}, status=404)
+        drafts = await schedule_pilot.drafts(await student_repo.get_all())
+        return _json({"drafts": drafts})
+
     async def home(request: web.Request, user, teacher) -> web.Response:
         """Сводка: «требует внимания» (оценки, счета, период) → «сегодня» (занятия дня) → «месяц» (зарплата)."""
         today = date.today().isoformat()
@@ -300,6 +307,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         payouts = await _payouts(teacher, period, earned_month)
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
+            **({"schedulePilot": True} if schedule_pilot is not None and schedule_pilot.owns(user) else {}),
             # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
             "rentMonth": rent["accrued"] if rent else 0,
             "rentDue": {"period": prev, "rest": prev_rent["rest"]} if prev_rent and prev_rent["rest"] else None,
@@ -1737,6 +1745,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
+        ("GET", "/schedule-drafts", schedule_drafts),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),

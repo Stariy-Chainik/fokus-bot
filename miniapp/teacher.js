@@ -36,6 +36,7 @@ SCREENS['t.home'] = async () => {
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
     <div class="eyebrow">Сегодня</div>
+    ${h.schedulePilot ? goBtn('📋 Расписание из Telegram', 't.schedule.drafts', {}, 'sec') : ''}
     ${today}
     <div style="margin-top:10px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>
     <div class="eyebrow">${mon}</div>
@@ -46,6 +47,21 @@ SCREENS['t.home'] = async () => {
       ...(h.rentMonth ? [cell({ lead: '🏠', plain: true, t: 'Аренда зала школе', s: 'индивидуальные — перечисляете в конце месяца', r: `<b>${fmt(h.rentMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
     ])}
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
+};
+
+SCREENS['t.schedule.drafts'] = async () => {
+  const { drafts } = await api('/schedule-drafts');
+  const renderSlot = s => {
+    if (!s.text) return cell({ lead: s.time, t: 'Свободное окно' });
+    const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : 'Уточнить длительность';
+    const details = s.students.length ? duration : `Уточнить участников · ${duration}`;
+    return cell({ lead: s.time, cls: 'wrap', t: esc(s.students.join(' + ') || s.text), s: esc(details) });
+  };
+  const renderDraft = d => `<div class="eyebrow">${esc(fdate(d.date))} · Черновик</div>
+    ${list(d.slots.map(renderSlot))}
+    <div style="margin:8px 0 16px"><a href="${esc(d.source)}" target="_blank" rel="noopener">Открыть сообщение в Telegram</a></div>`;
+  return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(renderDraft).join('') :
+    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе сообщение с заголовком «Расписание со мной на …».</p>') };
 };
 
 /* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */
