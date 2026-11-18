@@ -393,6 +393,12 @@ Human-readable sequential strings; never autoincrement integers. See `bot/utils/
 
 ## Tests
 
+Кнопка «Вчера» в мастере записи (`yesterdayOf` в `miniapp/app.js`, общий экран администратора и педагога)
+вычитает день из календарной даты сервера в UTC, без преобразования локальной полуночи телефона в UTC.
+Исправление 18.11.2026: в Москве выбор «Вчера» от 18 ноября давал 16-е вместо 17-го. Проверка
+`tests/test_record_dates.py` выполняет реальный JS в Node.js для семи часовых поясов, границ месяца/года,
+високосного года и переходов летнего времени (без Node этот тест пропускается).
+
 `tests/fakes.py` — фейки Telegram (`FakeCallbackQuery`, `FakeMessage`, `FakeState`, `FakeBot`), in-memory репозитории
 (`StudentRepoFake`, `LessonRepoFake`, `PaymentRepoFake`, `StudentGroupRepoFake`, …), конструкторы сущностей (`mk_*`)
 и golden-инфраструктура (`assert_golden`, `screen_dump`). `install_fake_show_card()` подменяет `show_card` в модуле

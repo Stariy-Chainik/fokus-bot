@@ -1366,7 +1366,12 @@ function rwGroupChips(o, w, items, idsOf) {
   const chip = (v, label, on) => `<button class="chip" aria-pressed="${on}" data-act="rwFilter" data-p='${esc(JSON.stringify({ v }))}'>${label}</button>`;
   return `<div class="chips scroll">${chip('', `Все · ${items.length}`, !w.fgid)}${counts.map(([g, n]) => chip(g.id, `${esc(plainName(g.name))} · ${n}`, w.fgid === g.id)).join('')}</div>`;
 }
-function yesterdayOf(today) { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
+// today — календарная дата сервера, а не локальный момент времени на телефоне.
+function yesterdayOf(today) {
+  const d = new Date(today + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 Object.assign(ACT, {
   /* «🔗 Пригласить родителей» (решение владельца 15.10.2026): короткий текст со ссылками группы — вместо
      Google-документа. Админ и педагог: один и тот же лист, путь API у каждой роли свой. */
