@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     teacher_reminder_time: str = Field(default="21:00", alias="TEACHER_REMINDER_TIME")
     admin_digest_time: str = Field(default="10:00", alias="ADMIN_DIGEST_TIME")
     reminder_tz: str = Field(default="Europe/Moscow", alias="REMINDER_TZ")
+    schedule_pilot_chat_id: int = Field(default=0, alias="SCHEDULE_PILOT_CHAT_ID")
+    schedule_pilot_tg_id: int = Field(default=0, alias="SCHEDULE_PILOT_TG_ID")
+    schedule_pilot_teacher_id: str = Field(default="", alias="SCHEDULE_PILOT_TEACHER_ID")
+    schedule_pilot_db: str = Field(default="", alias="SCHEDULE_PILOT_DB")
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )

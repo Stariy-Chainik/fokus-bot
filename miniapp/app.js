@@ -285,6 +285,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
+    ${h.schedulePilot ? goBtn('📋 Расписание из Telegram', 'a.schedule.drafts', {}, 'sec') : ''}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
     ${flowTiles}
@@ -607,6 +608,21 @@ SCREENS['a.student.lessons'] = async ({ id, name, ym }) => {
     ${d.lessons.length ? `<div class="card pad" style="margin-top:10px"><b>${plural(d.lessons.length, ['занятие', 'занятия', 'занятий'])}</b>${d.total ? ` · за занятия начислено ${fmt(d.total)}, оплачено ${fmt(d.paid)}` : ''}</div>
       <div class="card bill" style="margin-top:10px">${body}</div>
       <p class="hint" style="margin-top:8px">${d.money === false ? '' : '✓ — занятие оплачено, пустой квадрат — ещё нет. Абонемент считается за месяц — он в счёте. «Напрямую» — родитель платит педагогу лично. '}${ROLE === 'admin' ? 'Тап по занятию — его карточка.' : `Тап по своему занятию — его карточка.${d.all ? '' : ' Показаны ваши направления.'}`}</p>` : `<div class="empty" style="margin-top:10px">За ${MON_NOM[+period.slice(5) - 1].toLowerCase()} занятий нет</div>`}` };
+};
+
+SCREENS['a.schedule.drafts'] = async () => {
+  const { drafts } = await api('/schedule-drafts');
+  const renderSlot = s => {
+    if (!s.text) return cell({ lead: s.time, t: 'Свободное окно' });
+    const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : 'Уточнить длительность';
+    const details = s.students.length ? duration : `Уточнить участников · ${duration}`;
+    return cell({ lead: s.time, cls: 'wrap', t: esc(s.students.join(' + ') || s.text), s: esc(details) });
+  };
+  const renderDraft = d => `<div class="eyebrow">${esc(fdate(d.date))} · Черновик</div>
+    ${list(d.slots.map(renderSlot))}
+    <div style="margin:8px 0 16px"><a href="${esc(d.source)}" target="_blank" rel="noopener">Открыть сообщение в Telegram</a></div>`;
+  return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(renderDraft).join('') :
+    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе сообщение с заголовком «Расписание со мной на …».</p>') };
 };
 
 SCREENS['a.teachers'] = async () => {

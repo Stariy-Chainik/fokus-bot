@@ -132,6 +132,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     salary_service = dp["salary_service"]
     client_repo = dp["client_repo"]
     profit_service = dp["profit_service"]
+    schedule_pilot = _dp_get(dp, "schedule_pilot")
 
     def admin_only(handler):
         async def wrapped(request: web.Request) -> web.Response:
@@ -165,6 +166,12 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         return _json({"tgId": user.tg_id, "isAdmin": user.is_admin, "teacherId": user.teacher_id,
                       "name": teacher.name if teacher else ""})
 
+    async def schedule_drafts(request: web.Request, user) -> web.Response:
+        if schedule_pilot is None or not schedule_pilot.owns(user):
+            return _json({"error": "not_found"}, status=404)
+        drafts = await schedule_pilot.drafts(await student_repo.get_all())
+        return _json({"drafts": drafts})
+
     async def home(request: web.Request, user) -> web.Response:
         """Сводка: «требует внимания» (должники) → «сегодня» (занятия дня) → «месяц» (сбор оплат, прибыль).
 
@@ -186,6 +193,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         month = await profit_service.get_month_summary(period)    # как экран «Прибыль»
         return _json({
             "today": today, "period": period, "currentPeriod": current, "prevPeriod": prev,
+            **({"schedulePilot": True} if schedule_pilot is not None and schedule_pilot.owns(user) else {}),
             "debtorsCount": debtors_count, "debtorsTotal": debtors_total,
             "lessonsToday": len(lessons_today), "todayTeachers": await _today_by_teacher(lessons_today),
             "incomeToday": day.total_income, "profitToday": day.profit,
@@ -800,6 +808,7 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
 
     routes = [
         ("GET", "/me", me), ("GET", "/home", home), ("GET", "/flow", flow), ("GET", "/activity", activity),
+        ("GET", "/schedule-drafts", schedule_drafts),
         ("GET", "/pay/breakdown", pay_breakdown),
         ("GET", "/activity/file", activity_file),
         ("GET", "/students", students), ("GET", "/students/{sid}", student_card),

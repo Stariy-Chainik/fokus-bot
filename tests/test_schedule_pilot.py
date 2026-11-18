@@ -1,0 +1,115 @@
+import asyncio
+import logging
+from datetime import date, datetime, timedelta, timezone
+
+from aiogram.types import Chat, Message, Update, User
+
+from bot.middlewares.private_only import PrivateChatsOnlyMiddleware
+from bot.models import Student
+from bot.services.schedule_pilot import SchedulePilot, StudentNames, parse_schedule
+from tests.fakes import mk_user
+from tests.test_admin_api import ADMIN_TG, PARENT_TG, _call, make_api
+
+CHAT = -1001111111111
+PUBLISHED = datetime(2026, 11, 18, 21, 5, tzinfo=timezone.utc)  # четверг в Москве
+SCHEDULE = """Добрый вечер
+
+Расписание со мной на четверг
+
+16:30 Егор Катя 60
+17:30 Мирон София
+18:15 Ким Алина
+19:00 Коля Соня
+19:45
+20:30 Антон Полина"""
+
+
+def _message(text=SCHEDULE, *, uid=ADMIN_TG, chat=CHAT, edited=False):
+    return Message(message_id=17, date=PUBLISHED, chat=Chat(id=chat, type="supergroup"),
+                   from_user=User(id=uid, is_bot=False, first_name="Педагог"), text=text,
+                   edit_date=int((PUBLISHED + timedelta(minutes=5)).timestamp()) if edited else None)
+
+
+def test_sample_schedule_and_unknown_duration():
+    parsed = parse_schedule(SCHEDULE, date(2026, 11, 19))
+    assert parsed is not None
+    day, slots = parsed
+    assert day == date(2026, 11, 19)
+    assert [(s.time, s.duration, s.suggested) for s in slots] == [
+        ("16:30", 60, False), ("17:30", 45, True), ("18:15", 45, True),
+        ("19:00", 45, True), ("19:45", None, False), ("20:30", None, False),
+    ]
+    assert slots[4].names == ""
+    for text in ("Расписание Влада на четверг", "Расписание Кирилла на четверг", "Расписание на четверг",
+                 "Расписание со мной и Владом на четверг"):
+        assert parse_schedule(f"{text}\n16:30 Егор Катя", day) is None
+    assert parse_schedule(f"{SCHEDULE}\nВлад\n21:15 Егор Катя", day) is None
+
+
+def test_matching_requires_a_unique_student_or_pair():
+    students = StudentNames([
+        Student("a", "Зотов Антон", partner_id="p"),
+        Student("p", "Рычкова Полина", partner_id="a"),
+        Student("b", "Иванов Антон"),
+        Student("c", "Ким Алина"),
+        Student("d", "Ким Алексей", partner_id="e"),
+        Student("e", "Иванова Алина", partner_id="d"),
+    ])
+    assert students.match("Антон Полина") == ("a", "p")
+    assert students.match("Ким Алина") == ()
+    assert students.match("Антон") == ()
+
+
+def test_only_pilot_posts_are_stored_and_edits_replace_them(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="bot.services.schedule_pilot")
+
+    async def run():
+        db = tmp_path / "drafts.db"
+        pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", db)
+        middleware = PrivateChatsOnlyMiddleware(pilot)
+
+        async def private_handler(*args):
+            raise AssertionError("Групповое сообщение дошло до обычного обработчика")
+
+        await middleware(private_handler, Update(update_id=1, message=_message(uid=22)), {})
+        await middleware(private_handler, Update(update_id=2, message=_message(chat=-100777)), {})
+        kirill = SCHEDULE.replace("со мной", "Кирилла")
+        await middleware(private_handler, Update(update_id=3, message=_message(text=kirill)), {})
+        assert not db.exists()
+
+        original = Update(update_id=4, message=_message())
+        await middleware(private_handler, original, {})
+        await middleware(private_handler, original, {})
+        assert len([record for record in caplog.records if "Черновик" in record.message]) == 1
+        edited = SCHEDULE.replace("20:30 Антон Полина", "20:30 Антон Полина 45")
+        await middleware(private_handler, Update(update_id=5, edited_message=_message(text=edited, edited=True)), {})
+        await middleware(private_handler, original, {})
+        restarted = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", db)
+        drafts = await restarted.drafts([])
+        assert len(drafts) == 1
+        assert drafts[0]["date"] == "2026-11-19"
+        assert drafts[0]["slots"][-1]["duration"] == 45
+
+        await middleware(private_handler, Update(update_id=6, edited_message=_message(text=kirill, edited=True)), {})
+        await middleware(private_handler, original, {})
+        assert await restarted.drafts([]) == []
+
+    asyncio.run(run())
+
+
+def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    lessons_before = list(dp["lesson_repo"].items)
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "drafts.db")
+    dp["schedule_pilot"] = pilot
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    asyncio.run(pilot.receive(_message(), 1, edited=False))
+    dp["user_repo"].items.append(mk_user(tg_id=123, is_admin=True, teacher_id="TCH-0001"))
+    route = "/api/admin/schedule-drafts"
+    assert _call(app, "GET", route, headers={})[0] == 401
+    assert _call(app, "GET", route, tg_id=PARENT_TG)[0] == 403
+    assert _call(app, "GET", route, tg_id=123)[0] == 404
+    status, data = _call(app, "GET", route)
+    assert status == 200
+    assert data["drafts"][0]["slots"][0]["text"] == "Егор Катя"
+    assert dp["lesson_repo"].items == lessons_before

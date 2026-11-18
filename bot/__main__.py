@@ -12,6 +12,7 @@ FSM storage:
 import asyncio
 import time
 import logging
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -20,6 +21,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from bot.services import activity, pending_queue
+from bot.services.schedule_pilot import SchedulePilot
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
@@ -195,7 +197,13 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
-    dp.update.outer_middleware(PrivateChatsOnlyMiddleware())       # в группах бот молчит (15.10.2026)
+    schedule_pilot = None
+    if (settings.schedule_pilot_chat_id and settings.schedule_pilot_tg_id
+            and settings.schedule_pilot_teacher_id and settings.schedule_pilot_db):
+        schedule_pilot = SchedulePilot(settings.schedule_pilot_chat_id, settings.schedule_pilot_tg_id,
+                                       settings.schedule_pilot_teacher_id, Path(settings.schedule_pilot_db))
+        dp["schedule_pilot"] = schedule_pilot
+    dp.update.outer_middleware(PrivateChatsOnlyMiddleware(schedule_pilot))
     dp.update.outer_middleware(DedupUpdateMiddleware())
     dp.update.middleware(AuthMiddleware(user_repo))
     if settings.parent_cabinet_only and settings.miniapp_url:       # родитель в Telegram — только кабинет
@@ -212,6 +220,13 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp.include_routers(common_router, admin_router, teacher_router, athlete_router, client_router)
 
     return dp
+
+
+def _telegram_updates(dp: Dispatcher) -> list[str]:
+    updates = set(dp.resolve_used_update_types())
+    if dp.workflow_data.get("schedule_pilot") is not None:
+        updates.add("edited_message")
+    return sorted(updates)
 
 
 def _register_payment_webhook(app, dp: Dispatcher, bot: Bot) -> None:
@@ -310,7 +325,7 @@ async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     await bot.set_webhook(
         url=webhook_url,
         drop_pending_updates=True,
-        allowed_updates=dp.resolve_used_update_types(),
+        allowed_updates=_telegram_updates(dp),
     )
     logger.info("Webhook зарегистрирован: %s", webhook_url)
 
@@ -354,7 +369,7 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
     logger.info("Payment webhook сервер запущен на порту %d", settings.payment_webhook_port)
 
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, allowed_updates=_telegram_updates(dp))
     finally:
         await runner.cleanup()
 
