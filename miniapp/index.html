@@ -236,7 +236,13 @@
   .schedule-date-link { border: 0; padding: 0; background: transparent; color: inherit; font: inherit;
     text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); cursor: pointer; }
   .schedule-list { list-style: none; margin: 0; padding: 0; }
-  .schedule-head + .schedule-list, .schedule-list li + li { border-top: 1px solid var(--line); }
+  .schedule-head + .schedule-list, .schedule-mark-guide + .schedule-list, .schedule-list li + li { border-top: 1px solid var(--line); }
+  .schedule-mark-guide { margin: 0; padding: 0 14px 12px; }
+  .schedule-mark-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; padding-right: 6px; }
+  .schedule-mark-row .schedule-slot { padding-right: 4px; }
+  .schedule-mark-row:has(input:checked) { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+  .schedule-check { min-width: 44px; min-height: 44px; display: grid; place-items: center; cursor: pointer; }
+  .schedule-check input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); cursor: pointer; }
   .schedule-slot { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: 12px; align-items: center;
     width: 100%; min-height: 56px; padding: 9px 14px; text-align: left; background: transparent; color: var(--ink);
     border: 0; font: inherit; }
@@ -258,11 +264,12 @@
   .schedule-state.held { background: var(--ok-soft); color: var(--ok); }
   .schedule-state.cancelled { background: var(--bg); color: var(--muted); }
   .schedule-state.pending { background: var(--warn-soft); color: var(--warn); }
-  .schedule-choice { padding: 0 14px 14px; }
+  .schedule-mark-extra:not(:empty) { padding: 0 14px 12px; }
   .schedule-attendees { min-width: 0; margin: 12px 0 0; border: 1px solid var(--line); border-radius: 10px; }
   .schedule-attendees legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
   .schedule-attendee { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, .8fr); align-items: center; gap: 8px; padding: 5px 0; }
   .schedule-attendee label { overflow-wrap: anywhere; }
+  .schedule-attendee input[type="checkbox"] { accent-color: var(--accent); }
   .schedule-attendee .search { margin: 0; padding: 6px; }
   .schedule-review-error { color: var(--bad); margin-bottom: 8px; }
   .schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
