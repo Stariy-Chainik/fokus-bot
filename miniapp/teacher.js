@@ -93,7 +93,7 @@ SCREENS['t.schedule.drafts'] = async () => {
         <div class="hint">Черновик</div></div></div>
       ${scheduleRows(d.slots, d.id)}
       <div class="schedule-notice">
-        ${toMark ? btn('Подвести итог дня', 'scheduleReviewOpen', { id: d.id }) : ''}
+        ${toMark ? btn('Отметить занятия за день', 'scheduleReviewOpen', { id: d.id }) : ''}
         ${btn('Добавить строку', 'scheduleTap', { id: d.id }, 'sec')}
       </div>
       ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
@@ -321,7 +321,7 @@ SCREENS['t.schedule.review'] = async () => {
       <div class="schedule-slot">${scheduleTime(s)}<div class="schedule-slot-text"><strong>${esc(scheduleTitle(s))}</strong>
         <span class="hint">${esc(details || `${s.duration} мин`)}</span></div></div>
       <div class="schedule-choice">
-        <label class="schedule-field"><span class="hint">Итог занятия</span>
+        <label class="schedule-field"><span class="hint">Статус занятия</span>
           <select class="search" data-schedule-choice="${esc(s.time)}" id="schedule-choice-${key}">
             ${s.status === 'pending' ? '<option value="held">Проверить запись</option>' :
               [[ '', 'Оставить в плане' ], [ 'held', 'Состоялось' ], [ 'cancelled', 'Отменилось' ]]
@@ -334,8 +334,9 @@ SCREENS['t.schedule.review'] = async () => {
           ${['existing','same_day'].includes(error.code) ? btn('Записать ещё одно занятие', 'scheduleResolve', { time: s.time, allowNew: true }, 'ghost') : ''}` : ''}
       </div></section>`;
   });
-  return { title: review.time ? 'Отметить занятие' : 'Подвести итог дня', html: slots.length ?
-    `${rows.join('')}<div class="schedule-actions">${btn('Сохранить итог', 'scheduleReviewSave')}</div>` :
+  const guide = review.time ? '' : '<p class="hint">Выбери «Состоялось» или «Отменилось». Остальные занятия останутся в плане.</p>';
+  return { title: review.time ? 'Отметить занятие' : 'Отметить занятия за день', html: slots.length ?
+    `${guide}${rows.join('')}<div class="schedule-actions">${btn('Сохранить отметки', 'scheduleReviewSave')}</div>` :
     '<div class="card pad hint">Все выбранные занятия отмечены.</div>' };
 };
 
@@ -370,7 +371,7 @@ async function saveScheduleReview(actions) {
   const errors = response.results.filter(r => r.error);
   if (!errors.length && !Object.keys(review.errors).length) {
     back();
-    toast('Итог сохранён');
+    toast('Отметки сохранены');
     return;
   }
   try {
