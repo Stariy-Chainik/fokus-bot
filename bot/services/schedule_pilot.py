@@ -247,6 +247,7 @@ class SchedulePilot:
         self.tg_id = tg_id
         self.teacher_id = teacher_id
         self.path = path
+        self.lock = asyncio.Lock()
 
     def owns(self, user: User) -> bool:
         return user.tg_id == self.tg_id and user.teacher_id == self.teacher_id
@@ -286,6 +287,11 @@ class SchedulePilot:
             revision INTEGER NOT NULL, source_revision TEXT NOT NULL, payload TEXT NOT NULL,
             PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS draft_results (
+            chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER, time TEXT,
+            status TEXT NOT NULL, lesson_id TEXT NOT NULL, request TEXT,
+            PRIMARY KEY (chat_id, sender_id, teacher_id, message_id, time)
+        )""")
         return conn
 
     def _save(self, message_id: int, version: int, update_id: int, payload: str | None) -> bool:
@@ -315,7 +321,7 @@ class SchedulePilot:
             conn.execute("BEGIN IMMEDIATE")
             source = conn.execute("""SELECT version, update_id, payload FROM drafts
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
-            edit = conn.execute("""SELECT revision FROM draft_edits
+            edit = conn.execute("""SELECT revision, payload FROM draft_edits
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
             if source is None or (source[2] is None and edit is None):
                 raise KeyError(message_id)
@@ -325,6 +331,16 @@ class SchedulePilot:
                 if source[2] is None or self._source_revision(source[0], source[1]) != base:
                     raise DraftConflict
                 payload = source[2]
+            locked_times = set(self._outcomes(conn, message_id))
+            if locked_times:
+                previous = json.loads(edit[1] if edit else source[2])
+                new = json.loads(payload)
+                if previous["date"] != new["date"]:
+                    raise ValueError("Дата закреплена после отметки занятий")
+                rows = {row["time"]: row for row in new["slots"]}
+                rows.update((row["time"], row) for row in previous["slots"] if row["time"] in locked_times)
+                new["slots"] = [rows[time] for time in sorted(rows)]
+                payload = json.dumps(new, ensure_ascii=False)
             conn.execute("""INSERT INTO draft_edits VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET revision=excluded.revision, source_revision=excluded.source_revision,
                     payload=excluded.payload""", (*key, revision + 1, base, payload))
@@ -332,6 +348,34 @@ class SchedulePilot:
     async def save_edit(self, message_id: int, revision: int, source_revision: str, plan: dict | None) -> None:
         raw = json.dumps(plan, ensure_ascii=False) if plan is not None else None
         await asyncio.to_thread(self._write_edit, message_id, revision, source_revision, raw)
+
+    def _outcomes(self, conn: sqlite3.Connection, message_id: int) -> dict[str, tuple[str, str, str | None]]:
+        return {time: (status, lesson, body) for time, status, lesson, body in conn.execute("""
+            SELECT time, status, lesson_id, request FROM draft_results
+            WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?
+        """, (self.chat_id, self.tg_id, self.teacher_id, message_id))}
+
+    def _read_outcomes(self, message_id: int) -> dict[str, tuple[str, str, str | None]]:
+        with closing(self._open()) as conn:
+            return self._outcomes(conn, message_id)
+
+    async def outcomes(self, message_id: int) -> dict[str, tuple[str, str, str | None]]:
+        return await asyncio.to_thread(self._read_outcomes, message_id)
+
+    def _change_outcome(self, message_id: int, time: str, status: str, lesson_id: str, body: str | None) -> None:
+        key = (self.chat_id, self.tg_id, self.teacher_id, message_id, time)
+        with closing(self._open()) as conn, conn:
+            if status == "planned":
+                conn.execute("""DELETE FROM draft_results
+                    WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=? AND time=?""", key)
+            else:
+                conn.execute("""INSERT INTO draft_results VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT DO UPDATE SET status=excluded.status, lesson_id=excluded.lesson_id, request=excluded.request
+                """, (*key, status, lesson_id, body))
+
+    async def set_outcome(self, message_id: int, time: str, status: str, lesson_id: str = "", body: dict | None = None) -> None:
+        raw = json.dumps(body) if body is not None else None
+        await asyncio.to_thread(self._change_outcome, message_id, time, status, lesson_id, raw)
 
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)
@@ -342,6 +386,10 @@ class SchedulePilot:
             plan = self._view(edit or source, names)
             plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
                         source=f"https://t.me/c/{chat_slug}/{message_id}", sourceUpdated=bool(edit and base != latest))
+            outcomes = await self.outcomes(message_id)
+            for slot in plan["slots"]:
+                status, lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))
+                slot.update(status=status, lessonId=lesson_id if status == "held" else "")
             if plan["sourceUpdated"] and source:
                 plan["telegram"] = dict(self._view(source, names), sourceRevision=latest)
             result.append(plan)

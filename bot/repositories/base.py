@@ -19,6 +19,7 @@ from typing import Any
 
 import gspread
 import requests.exceptions
+from gspread.utils import ValueInputOption
 from urllib3.exceptions import ProtocolError
 
 from .sheets_client import SheetsClient
@@ -137,10 +138,14 @@ class BaseRepository:
             logger.error("Ошибка добавления строк в %s: %s", self._sheet_name, exc)
             raise
 
-    def _sync_append_row(self, values: list[Any]) -> None:
+    def _sync_append_row(self, values: list[Any], *, retry: bool = True) -> None:
         t0 = time.monotonic()
         try:
-            _with_retry(self._ws_ready().append_row, values, value_input_option="USER_ENTERED")
+            append = self._ws_ready().append_row
+            if retry:
+                _with_retry(append, values, value_input_option="USER_ENTERED")
+            else:
+                append(values, value_input_option=ValueInputOption.user_entered)
             logger.info("SHEETS append %s in %.0f ms",
                         self._sheet_name, (time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -394,8 +399,11 @@ class BaseRepository:
                 return cached[0]
         return await self._load()
 
-    async def _append_row(self, values: list[Any]) -> None:
-        await asyncio.to_thread(self._sync_append_row, values)
+    async def _append_row(self, values: list[Any], *, retry: bool = True) -> None:
+        if retry:
+            await asyncio.to_thread(self._sync_append_row, values)
+        else:
+            await asyncio.to_thread(self._sync_append_row, values, retry=False)
         self._patch_cache(0, values=values, append=True)
 
     async def _append_rows(self, rows: list[list[Any]]) -> None:

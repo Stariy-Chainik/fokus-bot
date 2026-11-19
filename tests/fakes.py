@@ -255,7 +255,12 @@ class LessonRepoFake:
     async def add_new(self, lesson):
         """Как LessonRepository.add_new: свежий номер и запись."""
         from bot.utils import generate_lesson_id
-        lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
+        if lesson.lesson_id:
+            existing = await self.get_by_id(lesson.lesson_id)
+            if existing is not None:
+                return existing
+        else:
+            lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
         return await self.add(lesson)
 
     async def individual_lesson_exists(self, teacher_id, student_id, lesson_date):

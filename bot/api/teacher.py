@@ -29,6 +29,7 @@ from bot.api.admin import auth_tg_id
 from bot.api.homework import homework_routes
 from bot.services.group_invite import group_invite
 from bot.api.record import RecordError, record_create, record_options
+from bot.api.schedule_record import draft_day
 from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_group_names
 from bot.models import TeacherPeriodSubmission
 from bot.models.enums import PaymentStatus, GroupBillingMode, LessonType
@@ -307,7 +308,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 group_ids = set(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))
                 groups = {g.group_id: g.name for g in await group_repo.get_all() if g.group_id in group_ids}
                 plan = edited_schedule(body, await student_repo.get_all(), groups)
-            await schedule_pilot.save_edit(int(mid), revision, base, plan)
+            async with schedule_pilot.lock:
+                await schedule_pilot.save_edit(int(mid), revision, base, plan)
         except ValueError as exc:
             return _json({"error": "bad_request", "message": str(exc)}, status=400)
         except KeyError:
@@ -316,6 +318,23 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "conflict", "message": "Черновик обновился. Открой последнюю версию и проверь изменения."},
                          status=409)
         return _json({"ok": True})
+
+    async def schedule_attendance(request: web.Request, user, teacher) -> web.Response:
+        mid = request.match_info["mid"]
+        if schedule_pilot is None or not schedule_pilot.owns(user) or not re.fullmatch(r"[0-9]{1,10}", mid):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Проверь выбранные занятия")
+            results = await draft_day(dp, teacher, schedule_pilot, int(mid), body)
+        except ValueError as exc:
+            return _json({"error": "bad_request", "message": str(exc)}, status=400)
+        except KeyError:
+            return _json({"error": "not_found"}, status=404)
+        except DraftConflict:
+            return _json({"error": "conflict", "message": "Черновик обновился. Проверь текущую версию."}, status=409)
+        return _json({"results": results})
 
     async def home(request: web.Request, user, teacher) -> web.Response:
         """Сводка: «требует внимания» (оценки, счета, период) → «сегодня» (занятия дня) → «месяц» (зарплата)."""
@@ -1780,6 +1799,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/schedule-drafts", schedule_drafts),
         ("PUT", "/schedule-drafts/{mid}", schedule_save),
+        ("POST", "/schedule-drafts/{mid}/attendance", schedule_attendance),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),

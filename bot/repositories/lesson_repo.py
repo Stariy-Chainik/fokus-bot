@@ -86,12 +86,17 @@ class LessonRepository(BaseRepository):
         и оба записали LES-002440 — у пары занятие задвоилось под одним номером."""
         from bot.utils import generate_lesson_id
         async with self._sheet_lock():
-            lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
+            if lesson.lesson_id:
+                existing = await self.get_by_id(lesson.lesson_id)
+                if existing is not None:
+                    return existing
+            else:
+                lesson.lesson_id = generate_lesson_id(await self.get_existing_ids())
             await self.add(lesson)
         return lesson
 
     async def add(self, lesson: Lesson) -> Lesson:
-        await self._append_row([
+        values = [
             lesson.lesson_id,
             lesson.teacher_id,
             lesson.teacher_name,
@@ -112,7 +117,12 @@ class LessonRepository(BaseRepository):
             lesson.student_4_id or "",
             lesson.student_4_name or "",
             lesson.merged_groups or "",
-        ])
+        ]
+        if lesson.lesson_id.startswith("LES-SCH-"):
+            # После сетевого сбоя сначала сверяем постоянный ID в журнале, а не повторяем append вслепую.
+            await self._append_row(values, retry=False)
+        else:
+            await self._append_row(values)
         return lesson
 
     async def delete(self, lesson_id: str) -> bool:

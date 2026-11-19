@@ -7,9 +7,10 @@ from aiogram.types import Chat, Message, Update, User
 
 from bot.middlewares.private_only import PrivateChatsOnlyMiddleware
 from bot.models import Student
+from bot.services.billing_service import build_billing_rows
 from bot.services.schedule_pilot import SchedulePilot, StudentNames, parse_schedule
-from tests.fakes import mk_user
-from tests.test_admin_api import ADMIN_TG, PARENT_TG, _call, make_api
+from tests.fakes import mk_lesson, mk_user
+from tests.test_admin_api import ADMIN_TG, PARENT_TG, _call, await_teacher, make_api
 from tests.test_teacher_api import _call as call_teacher
 
 CHAT = -1001111111111
@@ -223,3 +224,100 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
     asyncio.run(pilot.receive(_message("Влад\n16:45 Егор и Катя", edited=True), 4, edited=True))
     assert current()["slots"][0]["time"] == "16:45" and current()["sourceUpdated"]
     assert dp["lesson_repo"].items == lessons_before
+
+
+def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "day.db")
+    dp["schedule_pilot"] = pilot
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    dp["user_repo"].items.append(mk_user(tg_id=123, teacher_id="TCH-0001"))
+    day = date.today() - timedelta(days=1)
+    published = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
+    text = "Расписание со мной\n17:00 Иванов Иван 45\n18:00 Петрова Анна 60\n19:00 группа 90\n20:30 Свободно"
+
+    def receive(value, uid):
+        msg = _message(value).model_copy(update={"date": published, "edit_date": int(published.timestamp()) + uid})
+        asyncio.run(pilot.receive(msg, uid, edited=uid != 1))
+
+    receive(text, 1)
+    route = "/api/teacher/schedule-drafts"
+
+    def call(method, suffix="", body=None, actor=ADMIN_TG):
+        return call_teacher(app, method, route + suffix, tg_id=actor, json=body)
+
+    def plan():
+        return call("GET")[1]["drafts"][0]
+
+    def actions(*items, actor=ADMIN_TG):
+        p = plan()
+        return call("POST", "/17/attendance",
+                    {"revision": p["revision"], "sourceRevision": p["sourceRevision"], "actions": items}, actor=actor)
+
+    p = plan()
+    p["slots"][2]["groupId"] = "GRP-0001"
+    assert call("PUT", "/17", p)[0] == 200
+    teacher = await_teacher(dp)
+    journal = dp["lesson_repo"].items
+    journal[:] = [mk_lesson("LES-098877", teacher, day.isoformat(), duration=45,
+                             students=[("STU-0001", "Иванов Иван")])]
+    held = {"time": "19:00", "status": "held", "attendanceConfirmed": True, "studentIds": ["STU-0001"]}
+    cancelled = {"time": "18:00", "status": "cancelled"}
+    assert actions(held, actor=123)[0] == 404
+    assert actions({"time": "19:00", "status": "held"})[1]["results"][0]["code"] == "attendance"
+    status, result = actions(held, cancelled, {"time": "17:00", "status": "held"})
+    assert status == 200
+    group, cancellation, existing = result["results"]
+    assert group["status"] == "held" and cancellation["status"] == "cancelled"
+    assert existing["matches"][0]["id"] == "LES-098877"
+    assert len(journal) == 2
+    group_lesson = next(ls for ls in journal if ls.lesson_id == group["lessonId"])
+    bills = build_billing_rows(group_lesson, teacher)
+    assert [(b.student_id, b.amount) for b in bills] == [("STU-0001", 800)]
+
+    assert actions(held)[1]["results"][0]["lessonId"] == group["lessonId"]
+    linked = actions({"time": "17:00", "status": "held", "lessonId": "LES-098877"})[1]["results"][0]
+    assert linked["lessonId"] == "LES-098877" and len(journal) == 2
+    receive(text.replace("17:00", "17:15"), 2)
+    p = plan()
+    assert p["sourceUpdated"] and p["slots"][0]["time"] == "17:00" and p["slots"][0]["status"] == "held"
+    assert p["slots"][1]["status"] == "cancelled"
+    applied = {"revision": p["revision"], "sourceRevision": p["telegram"]["sourceRevision"], "useTelegram": True}
+    assert call("PUT", "/17", applied)[0] == 200
+    assert next(s for s in plan()["slots"] if s["time"] == "18:00")["status"] == "cancelled"
+    assert len(journal) == 2
+
+
+def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    database = tmp_path / "retry.db"
+    pilot = SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)
+    dp["schedule_pilot"] = pilot
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    day = date.today() - timedelta(days=1)
+    published = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
+    msg = _message("Расписание со мной\n17:00 Иванов Иван 45", chat=CHAT + 1).model_copy(update={"date": published})
+    asyncio.run(pilot.receive(msg, 1, edited=False))
+    repo = dp["lesson_repo"]
+    repo.items.clear()
+    original_add = repo.add_new
+
+    async def broken_reply(lesson):
+        await original_add(lesson)
+        raise OSError("lost reply after writing")
+
+    monkeypatch.setattr(repo, "add_new", broken_reply)
+    route = "/api/teacher/schedule-drafts"
+
+    def mark_held():
+        _, view = call_teacher(app, "GET", route, tg_id=ADMIN_TG)
+        draft = view["drafts"][0]
+        body = {"revision": draft["revision"], "sourceRevision": draft["sourceRevision"],
+                "actions": [{"time": "17:00", "status": "held"}]}
+        return call_teacher(app, "POST", route + "/17/attendance", tg_id=ADMIN_TG, json=body)[1]["results"][0]
+
+    assert mark_held()["status"] == "pending"
+    assert len(repo.items) == 1
+    dp["schedule_pilot"] = SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)
+    assert mark_held()["lessonId"] == repo.items[0].lesson_id
+    assert len(repo.items) == 1

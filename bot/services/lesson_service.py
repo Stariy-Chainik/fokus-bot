@@ -67,7 +67,12 @@ class LessonService:
         bypass_period_lock: bool = False,
         allow_same_day: bool = False,
         merged_groups: list[str] | None = None,
+        lesson_id: str = "",
     ) -> Lesson:
+        if lesson_id:
+            existing = await self._lesson_repo.get_by_id(lesson_id)
+            if existing is not None:
+                return existing
         if date.fromisoformat(lesson_date) > date.today():
             raise ValueError(f"Дата {lesson_date} в будущем — запрещено")
 
@@ -83,7 +88,7 @@ class LessonService:
 
         now = now_str()
         lesson = Lesson(
-            lesson_id="",                     # номер выдаёт add_new под замком листа
+            lesson_id=lesson_id,              # обычно номер выдаёт add_new под замком листа
             teacher_id=teacher.teacher_id,
             teacher_name=teacher.name,
             type=lesson_type,
@@ -145,6 +150,7 @@ class LessonService:
         duration_min: int,
         students: list[tuple[str, str]],
         bypass_period_lock: bool = False,
+        lesson_id: str = "",
     ) -> Lesson:
         """Одно INDIVIDUAL-занятие на 2-4 солистов (счёт делится поровну).
 
@@ -164,6 +170,7 @@ class LessonService:
             student_3_id=ids[2], student_3_name=names[2],
             student_4_id=ids[3], student_4_name=names[3],
             bypass_period_lock=bypass_period_lock,
+            lesson_id=lesson_id,
         )
 
     async def create_soloist_batch(

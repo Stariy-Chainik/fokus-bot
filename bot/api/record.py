@@ -142,7 +142,7 @@ def _request_key(teacher_id: str, body: dict) -> tuple:
             tuple(sorted(str(i) for i in ids)), tuple(sorted((str(k), str(v)) for k, v in tiers.items())))
 
 
-async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> dict:
+async def record_create(dp, teacher, body: dict, bypass_period_lock: bool, *, lesson_id: str = "") -> dict:
     """Создать занятие(я) по данным мастера; повтор того же запроса в течение 30 с не создаёт занятия заново.
 
     Случай 10.10.2026: два одинаковых «Сохранить» с iPhone с разницей в секунду записали обе пары дважды.
@@ -165,7 +165,7 @@ async def record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> di
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     _recent[key] = (time.monotonic(), fut)
     try:
-        result = await _record_create(dp, teacher, body, bypass_period_lock)
+        result = await _record_create(dp, teacher, body, bypass_period_lock, lesson_id=lesson_id)
     except BaseException:
         _recent.pop(key, None)
         fut.set_result(None)
@@ -208,7 +208,7 @@ async def _ensure_visible(dp, teacher_id: str, group_id: str, ids: list) -> None
             logger.info("Индивидуальное: %s добавлена в %s педагога %s (не из его групп)", sid, group_id, teacher_id)
 
 
-async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> dict:
+async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool, *, lesson_id: str = "") -> dict:
     """Создать занятие(я) по данным мастера. Ошибки — RecordError (код + текст для пользователя)."""
     lesson_service, group_repo, student_repo = dp["lesson_service"], dp["group_repo"], dp["student_repo"]
     kind, day, duration = body.get("kind"), body.get("date"), body.get("durationMin")
@@ -253,6 +253,7 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
                 teacher=teacher, lesson_type=LessonType.GROUP, lesson_date=day, duration_min=duration,
                 attendees=csv, group_id=group.group_id, bypass_period_lock=bypass_period_lock,
                 merged_groups=[g.group_id for g, _m in merged],
+                lesson_id=lesson_id,
             )
             label = merged_title([group.name, *(g.name for g, _m in merged)])
             return {"created": 1, "lessons": [lesson.lesson_id], "attendees": len(ids), "label": label}
@@ -275,10 +276,19 @@ async def _record_create(dp, teacher, body: dict, bypass_period_lock: bool) -> d
             lesson = await lesson_service.create_shared_individual(
                 teacher=teacher, lesson_date=day, duration_min=duration,
                 students=[(s.student_id, s.name) for s in picked], bypass_period_lock=bypass_period_lock,
+                lesson_id=lesson_id,
             )
             return {"created": 1, "lessons": [lesson.lesson_id], "label": " + ".join(s.name for s in picked)}
         if not ids:
             raise RecordError("bad_request", "Не выбран ни один ученик")
+        if lesson_id:
+            student = students[ids[0]]
+            lesson = await lesson_service.create(
+                teacher=teacher, lesson_type=LessonType.INDIVIDUAL, lesson_date=day, duration_min=duration,
+                student_1_id=student.student_id, student_1_name=student.name, bypass_period_lock=bypass_period_lock,
+                allow_same_day=bool(body.get("confirmSameDay")), lesson_id=lesson_id,
+            )
+            return {"created": 1, "lessons": [lesson.lesson_id], "label": student.name}
         lessons = await lesson_service.create_soloist_batch(
             teacher=teacher, lesson_date=day, duration_min=duration,
             students=[(i, students[i].name) for i in ids], bypass_period_lock=bypass_period_lock,

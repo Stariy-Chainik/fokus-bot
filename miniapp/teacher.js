@@ -56,32 +56,51 @@ SCREENS['t.home'] = async () => {
 /* ── Предварительное расписание ────────────────────────────────────── */
 const schedulePlan = id => state.ui.scheduleDrafts?.find(d => d.id === id);
 const scheduleDraft = () => state.ui.scheduleEdit;
-const scheduleRows = (slots, edit = false) => slots.length ? `<ol class="schedule-list">${slots.map((s, index) => {
-  const group = s.kind === 'group', free = s.kind === 'free';
-  const title = free ? 'Свободное окно' : group ? (s.groupId ? s.text : 'Групповое занятие') :
-    s.students.join(' + ') || s.text;
-  const type = free ? '' : group ? (s.groupId ? 'Группа' : '') :
-    s.students.length === 2 ? 'Пара' : s.students.length === 1 ? 'Индивидуальное' : 'Уточнить участников';
+const scheduleStatus = { held: 'В журнале', cancelled: 'Отменено', pending: 'Проверить запись' };
+const scheduleTitle = s => s.kind === 'free' ? 'Свободное окно' : s.kind === 'group' ?
+  (s.groupId ? s.text : 'Групповое занятие') : s.students.join(' + ') || s.text;
+const scheduleTime = s => `<span class="schedule-time"><time>${esc(s.time)}</time>${s.end ? `<time class="schedule-end">${esc(s.end)}</time>` : ''}</span>`;
+const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-list">${slots.map(s => {
+  const free = s.kind === 'free';
+  const type = !free && s.kind === 'individual' && !s.studentIds?.length ? 'Уточнить участников' :
+    s.kind === 'group' && !s.groupId ? 'Выбрать группу' : '';
   const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : free ? '' : 'Уточнить длительность';
-  const inner = `<span class="schedule-time"><time>${esc(s.time)}</time>${s.end ? `<time class="schedule-end">${esc(s.end)}</time>` : ''}</span>
-    <span class="schedule-slot-text"><strong>${esc(title)}</strong>
-      ${type || duration ? `<span class="hint">${esc([type, duration].filter(Boolean).join(' · '))}</span>` : ''}
-    </span>`;
-  return `<li>${edit ? `<button type="button" class="schedule-slot" data-act="scheduleSlotEdit" data-p='{"index":${index}}'>${inner}<span class="chev" aria-hidden="true">›</span></button>` :
-    `<div class="schedule-slot${free ? ' schedule-free' : ''}">${inner}</div>`}</li>`;
+  const label = scheduleStatus[s.status];
+  const inner = `${scheduleTime(s)}<span class="schedule-slot-text"><strong>${esc(scheduleTitle(s))}</strong>
+    ${type || duration ? `<span class="hint">${esc([type, duration].filter(Boolean).join(' · '))}</span>` : ''}
+    ${label ? `<span class="schedule-state ${esc(s.status)}">${label}</span>` : ''}</span>`;
+  const style = `schedule-slot${free || s.status === 'cancelled' ? ' schedule-free' : ''}`;
+  return `<li>${id === null ? `<div class="${style}">${inner}</div>` :
+    `<button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify({ id, time: s.time }))}'>
+      ${inner}<span class="chev" aria-hidden="true">›</span></button>`}</li>`;
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
 
-SCREENS['t.schedule.drafts'] = async () => {
+async function loadSchedule() {
   const { drafts } = await api('/schedule-drafts');
   state.ui.scheduleDrafts = drafts;
-  const day = d => `<section class="card schedule-day">
-    <div class="schedule-head"><div><h2>${esc(fdate(d.date))}</h2><div class="hint">Черновик</div></div>
-      ${btn('Изменить', 'scheduleStart', { id: d.id }, 'sec')}</div>
-    ${scheduleRows(d.slots)}
-    ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки сохранены.</div>
-      ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id: d.id }, 'sec') : ''}</div>` : ''}
-    <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
-  </section>`;
+}
+
+SCREENS['t.schedule.drafts'] = async () => {
+  await loadSchedule();
+  const drafts = state.ui.scheduleDrafts;
+  const day = d => {
+    const hasMarks = d.slots.some(s => s.status && s.status !== 'planned');
+    const date = esc(fdate(d.date));
+    const toMark = d.slots.some(s => s.kind !== 'free' && (!s.status || s.status === 'planned' || s.status === 'pending'));
+    return `<section class="card schedule-day">
+      <div class="schedule-head"><div><h2>${hasMarks ? date :
+        `<button type="button" class="schedule-date-link" data-act="scheduleChangeDate" data-p='{"id":${d.id}}'>${date}</button>`}</h2>
+        <div class="hint">Черновик</div></div></div>
+      ${scheduleRows(d.slots, d.id)}
+      <div class="schedule-notice">
+        ${toMark ? btn('Подвести итог дня', 'scheduleReviewOpen', { id: d.id }) : ''}
+        ${btn('Добавить строку', 'scheduleTap', { id: d.id }, 'sec')}
+      </div>
+      ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
+        ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id: d.id }, 'sec') : ''}</div>` : ''}
+      <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
+    </section>`;
+  };
   return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(day).join('') :
     empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>') };
 };
@@ -89,31 +108,12 @@ SCREENS['t.schedule.drafts'] = async () => {
 SCREENS['t.schedule.source'] = async ({ id }) => {
   const source = schedulePlan(id)?.telegram;
   return { title: 'Новая версия из Telegram', html: source ? `
-    <section class="card schedule-day">
-      <div class="schedule-head"><h2>${esc(fdate(source.date))}</h2></div>
-      ${scheduleRows(source.slots)}
-    </section>
+    <section class="card schedule-day"><div class="schedule-head"><h2>${esc(fdate(source.date))}</h2></div>
+      ${scheduleRows(source.slots)}</section>
     <div class="schedule-actions">${btn('Применить версию из Telegram', 'scheduleUseSource', { id })}</div>` :
     '<div class="card pad hint">Новой версии пока нет</div>' };
 };
 
-SCREENS['t.schedule.edit'] = async () => {
-  const d = scheduleDraft();
-  if (!d) return { title: 'Редактирование', html: '<div class="card pad hint">Открой черновик заново.</div>' };
-  if (!d.options) d.options = await api('/record/options');
-  return { title: 'Редактирование', html: `
-    <div class="schedule-date">${field('schedule-date', 'Дата расписания', d.date, 'type="date" required')}</div>
-    <section class="card schedule-day">${scheduleRows(d.slots, true)}</section>
-    <div class="schedule-actions">${btn('Добавить строку', 'scheduleSlotEdit', { index: -1 }, 'sec')}
-      ${btn('Сохранить черновик', 'scheduleSave')}</div>` };
-};
-
-ACT.scheduleStart = ({ id }) => {
-  const plan = schedulePlan(id);
-  if (!plan) return;
-  state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })) };
-  go('t.schedule.edit');
-};
 ACT.scheduleSource = ({ id }) => go('t.schedule.source', { id });
 
 function scheduleSelect(id, label, selected, options, none) {
@@ -122,9 +122,30 @@ function scheduleSelect(id, label, selected, options, none) {
     <select class="search" id="${id}"><option value="">${none}</option>${choices.join('')}</select></label>`;
 }
 
-ACT.scheduleSlotEdit = ({ index }) => {
+async function scheduleOptions() {
+  if (!state.ui.scheduleOptions) state.ui.scheduleOptions = await api('/record/options');
+  return state.ui.scheduleOptions;
+}
+
+ACT.scheduleTap = async ({ id, time }) => {
+  const plan = schedulePlan(id);
+  if (!plan || state.ui.scheduleSaving || state.ui.scheduleOpening) return;
+  const index = time ? plan.slots.findIndex(s => s.time === time) : -1;
+  if (time && index < 0) return;
+  const slot = plan.slots[index];
+  if (slot?.status === 'held') return go('t.lesson', { id: slot.lessonId });
+  if (slot?.status === 'cancelled') return sheet(`<h3>${esc(scheduleTitle(slot))}</h3>
+    <p class="hint">${esc(time)} · Отменено</p>${btn('Вернуть в план', 'scheduleSingleStatus', { id, time, status: 'planned' })}`);
+  if (slot?.status === 'pending') return ACT.scheduleReviewOpen({ id, time });
+  state.ui.scheduleOpening = true;
+  try {
+    state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })), options: await scheduleOptions() };
+    scheduleSlotForm(index);
+  } catch (e) { toast(errText(e)); } finally { state.ui.scheduleOpening = false; }
+};
+
+function scheduleSlotForm(index) {
   const d = scheduleDraft();
-  d.date = val('schedule-date');
   const s = d.slots[index] || { time: '', duration: null, kind: 'individual', studentIds: [], students: [], groupId: null, text: '' };
   const people = new Map(d.options.students.map(p => [p.id, p]));
   (s.studentIds || []).forEach((sid, i) => {
@@ -133,7 +154,7 @@ ACT.scheduleSlotEdit = ({ index }) => {
   const options = [...people.values()];
   const kinds = [{ id: 'individual', name: 'Индивидуальное или парное' },
     { id: 'group', name: 'Групповое' }, { id: 'free', name: 'Свободное окно' }];
-  sheet(`<h3>${index < 0 ? 'Новая строка' : 'Изменить строку'}</h3>
+  sheet(`<h3>${index < 0 ? 'Новая строка' : 'Занятие'}</h3>
     <div class="schedule-fields">
       ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
       ${field('schedule-duration', 'Минуты', s.duration ?? '', 'type="number" min="1" max="1440" inputmode="numeric"')}
@@ -147,26 +168,49 @@ ACT.scheduleSlotEdit = ({ index }) => {
     <div id="schedule-group-field">
       ${scheduleSelect('schedule-group', 'Группа', s.groupId, d.options.groups, 'Группа без уточнения')}
     </div>
-    <div class="schedule-actions">${btn('Готово', 'scheduleSlotDone', { index })}
-      ${index < 0 ? '' : btn('Убрать строку', 'scheduleSlotRemove', { index }, 'ghost')}</div>`);
+    <div class="schedule-actions">
+      ${btn('Сохранить строку', 'scheduleSlotDone', { index })}
+      <div id="schedule-row-held">${btn('Состоялось', 'scheduleSlotDone', { index, held: true }, 'sec')}</div>
+      ${index < 0 || s.kind === 'free' ? '' : btn('Отменилось', 'scheduleSingleStatus', { id: d.id, time: s.time, status: 'cancelled' }, 'ghost')}
+      ${index < 0 ? '' : btn('Убрать строку', 'scheduleSlotRemove', { index }, 'ghost')}
+    </div>`);
   const kind = document.getElementById('schedule-kind');
   const update = () => {
     document.getElementById('schedule-people').hidden = kind.value !== 'individual';
     document.getElementById('schedule-group-field').hidden = kind.value !== 'group';
+    document.getElementById('schedule-row-held').hidden = kind.value === 'free';
     document.getElementById('schedule-text-field').hidden = Boolean(val('schedule-student-a') || val('schedule-student-b'));
   };
   kind.addEventListener('change', update);
   for (const id of ['schedule-student-a', 'schedule-student-b']) document.getElementById(id).addEventListener('change', update);
   update();
+}
+
+async function scheduleWrite(plan, fields) {
+  if (state.ui.scheduleSaving) return false;
+  state.ui.scheduleSaving = true;
+  try {
+    await api(`/schedule-drafts/${plan.id}`, { method: 'PUT', body: { revision: plan.revision, ...fields } });
+    return true;
+  } catch (e) {
+    toast(e.data?.message || errText(e));
+    return false;
+  } finally {
+    state.ui.scheduleSaving = false;
+  }
+}
+const saveScheduleRows = (plan, slots, date = plan.date) =>
+  scheduleWrite(plan, { date, slots, sourceRevision: plan.sourceRevision });
+
+ACT.scheduleSlotRemove = async ({ index }) => {
+  const d = scheduleDraft();
+  if (await saveScheduleRows(d, d.slots.filter((_, i) => i !== index))) {
+    closeSheet();
+    render();
+  }
 };
 
-ACT.scheduleSlotRemove = ({ index }) => {
-  scheduleDraft().slots.splice(index, 1);
-  closeSheet();
-  render();
-};
-
-ACT.scheduleSlotDone = ({ index }) => {
+ACT.scheduleSlotDone = async ({ index, held }) => {
   const d = scheduleDraft();
   const kind = val('schedule-kind'), time = val('schedule-time');
   const raw = val('schedule-duration'), duration = raw ? Number(raw) : null;
@@ -176,47 +220,171 @@ ACT.scheduleSlotDone = ({ index }) => {
   const studentIds = kind === 'individual' ? [val('schedule-student-a'), val('schedule-student-b')].filter(Boolean) : [];
   if (studentIds.length === 2 && studentIds[0] === studentIds[1]) return toast('Выбери двух разных учеников');
   const groupId = kind === 'group' ? val('schedule-group') || null : null;
-  const students = ['schedule-student-a', 'schedule-student-b'].map(id => document.getElementById(id))
-    .filter(el => kind === 'individual' && el.value).map(el => el.selectedOptions[0].textContent);
-  const text = kind === 'individual' ? students.join(' + ') || val('schedule-text').trim() :
-    groupId ? document.getElementById('schedule-group').selectedOptions[0].textContent : '';
-  if (kind === 'individual' && !text) return toast('Выбери ученика или введи имя');
-  const [hours, minutes] = time.split(':').map(Number), finish = hours * 60 + minutes + duration;
-  const end = duration && finish < 1440 ? [Math.floor(finish / 60), finish % 60].map(n => String(n).padStart(2, '0')).join(':') : null;
-  const row = { time, end, duration, kind, studentIds, students, groupId, text, suggested: false };
-  if (index < 0) d.slots.push(row);
-  else d.slots[index] = row;
-  d.slots.sort((a, b) => a.time.localeCompare(b.time));
+  const text = kind === 'individual' ? val('schedule-text').trim() : '';
+  if (kind === 'individual' && !studentIds.length && !text) return toast('Выбери ученика или введи имя');
+  if (held && (!duration || (kind === 'group' ? !groupId : !studentIds.length))) return toast('Уточни длительность и состав');
+  const row = { time, duration, kind, studentIds, groupId, text, suggested: false };
+  const slots = d.slots.filter((_, i) => i !== index).concat(row);
+  if (!await saveScheduleRows(d, slots)) return;
   closeSheet();
+  if (held) return ACT.scheduleReviewOpen({ id: d.id, time });
+  toast('Строка сохранена');
   render();
 };
 
-async function saveSchedule(plan, fields) {
-  if (state.ui.scheduleSaving) return;
-  state.ui.scheduleSaving = true;
-  try {
-    await api(`/schedule-drafts/${plan.id}`, { method: 'PUT', body: { revision: plan.revision, ...fields } });
-    state.ui.scheduleEdit = null;
-    back();
-    toast('Черновик сохранён');
-  } catch (e) {
-    toast(e.data?.message || errText(e));
-  } finally {
-    state.ui.scheduleSaving = false;
+ACT.scheduleChangeDate = ({ id }) => {
+  const plan = schedulePlan(id);
+  sheet(`<h3>Дата расписания</h3>${field('schedule-date', 'Дата', plan.date, 'type="date" required')}
+    <div class="schedule-actions">${btn('Сохранить', 'scheduleDateDone', { id })}</div>`);
+};
+ACT.scheduleDateDone = async ({ id }) => {
+  const plan = schedulePlan(id), date = val('schedule-date');
+  if (!date) return toast('Укажи дату расписания');
+  if (await saveScheduleRows(plan, plan.slots, date)) {
+    closeSheet();
+    render();
   }
-}
-
-ACT.scheduleSave = () => {
-  const d = scheduleDraft();
-  d.date = val('schedule-date');
-  if (!d.date) return toast('Укажи дату расписания');
-  return saveSchedule(d, { date: d.date, slots: d.slots, sourceRevision: d.sourceRevision });
 };
 
-ACT.scheduleUseSource = ({ id }) => {
+ACT.scheduleUseSource = async ({ id }) => {
   const d = schedulePlan(id);
-  if (!d?.telegram || !confirm('Заменить сохранённый черновик этой версией из Telegram?')) return;
-  return saveSchedule(d, { sourceRevision: d.telegram.sourceRevision, useTelegram: true });
+  if (!d?.telegram || !confirm('Обновить незакрытые строки из Telegram? Отметки занятий сохранятся.')) return;
+  if (await scheduleWrite(d, { sourceRevision: d.telegram.sourceRevision, useTelegram: true })) {
+    back();
+    toast('Версия Telegram применена');
+  }
+};
+
+async function sendScheduleActions(plan, actions) {
+  if (state.ui.scheduleSaving) return null;
+  state.ui.scheduleSaving = true;
+  try {
+    return await api(`/schedule-drafts/${plan.id}/attendance`, { method: 'POST',
+      body: { revision: plan.revision, sourceRevision: plan.sourceRevision, actions } });
+  } catch (e) {
+    toast(e.data?.message || errText(e));
+    return null;
+  } finally { state.ui.scheduleSaving = false; }
+}
+
+ACT.scheduleSingleStatus = async ({ id, time, status }) => {
+  const plan = schedulePlan(id);
+  if (!plan) return;
+  const result = await sendScheduleActions(plan, [{ time, status }]);
+  if (!result) return;
+  const row = result.results[0];
+  if (row.error) return toast(row.error);
+  closeSheet();
+  toast(status === 'cancelled' ? 'Занятие отменено' : 'Занятие возвращено в план');
+  render();
+};
+
+ACT.scheduleReviewOpen = async ({ id, time }) => {
+  if (state.ui.scheduleOpening || state.ui.scheduleSaving) return;
+  state.ui.scheduleOpening = true;
+  try {
+    closeSheet();
+    await loadSchedule();
+    const plan = schedulePlan(id);
+    if (!plan) return toast('Черновик не найден');
+    state.ui.scheduleReview = { id, time, options: await scheduleOptions(), choices: {}, errors: {} };
+    go('t.schedule.review');
+  } catch (e) { toast(errText(e)); } finally { state.ui.scheduleOpening = false; }
+};
+
+const scheduleReview = () => state.ui.scheduleReview;
+const reviewKey = time => time.replace(':', '');
+function scheduleAttendanceFields(slot, group, key, selected, choice) {
+  if (!group?.attendance || slot.status === 'pending') return '';
+  const chosen = selected?.studentIds || [], tiers = selected?.tiers || {};
+  return `<fieldset class="schedule-attendees" id="schedule-attendees-${key}" ${choice === 'held' ? '' : 'hidden'}><legend>Кто был</legend>
+    ${group.roster.map(s => `<div class="schedule-attendee"><label>
+      <input type="checkbox" data-schedule-present="${key}" value="${esc(s.id)}"${chosen.includes(s.id) ? ' checked' : ''}> ${esc(s.name)}</label>
+      ${group.fixedPrice ? '' : `<select class="search" data-schedule-tier="${esc(s.id)}" aria-label="Тариф · ${esc(s.name)}">
+        ${[['', 'По карточке'], ['full', 'Полное'], ...(group.priceShort ? [['short', 'Короткое']] : []), ['trial', 'Пробное']]
+          .map(([v, label]) => `<option value="${esc(v)}"${tiers[s.id] === v ? ' selected' : ''}>${label}</option>`).join('')}
+      </select>`}</div>`).join('') || '<p class="hint">В группе нет учеников</p>'}</fieldset>`;
+}
+
+SCREENS['t.schedule.review'] = async () => {
+  const review = scheduleReview(), plan = schedulePlan(review.id);
+  const slots = (plan?.slots || []).filter(s => s.kind !== 'free' && (!review.time || review.time === s.time)
+    && (!s.status || s.status === 'planned' || s.status === 'pending'));
+  const rows = slots.map(s => {
+    const key = reviewKey(s.time), error = review.errors[s.time], selected = review.choices[s.time];
+    const choice = selected?.status || (review.time || s.status === 'pending' ? 'held' : '');
+    const group = review.options.groups.find(g => g.id === s.groupId);
+    const details = !s.duration ? 'Уточни длительность в черновике' :
+      s.kind === 'group' && !s.groupId ? 'Выбери группу в черновике' :
+      s.kind === 'individual' && !s.studentIds?.length ? 'Выбери состав в черновике' : '';
+    return `<section class="card schedule-review-row">
+      <div class="schedule-slot">${scheduleTime(s)}<div class="schedule-slot-text"><strong>${esc(scheduleTitle(s))}</strong>
+        <span class="hint">${esc(details || `${s.duration} мин`)}</span></div></div>
+      <div class="schedule-choice">
+        <label class="schedule-field"><span class="hint">Итог занятия</span>
+          <select class="search" data-schedule-choice="${esc(s.time)}" id="schedule-choice-${key}">
+            ${s.status === 'pending' ? '<option value="held">Проверить запись</option>' :
+              [[ '', 'Оставить в плане' ], [ 'held', 'Состоялось' ], [ 'cancelled', 'Отменилось' ]]
+                .map(([v, label]) => `<option value="${v}"${choice === v ? ' selected' : ''}>${label}</option>`).join('')}
+          </select></label>
+        ${scheduleAttendanceFields(s, group, key, selected, choice)}
+        ${error ? `<p class="hint schedule-review-error" role="alert">${esc(error.error)}</p>
+          ${(error.matches || []).map(m => btn(`Связать · ${m.durationMin} мин · внесено в ${esc(m.recordedAt.slice(-8,-3))}`,
+            'scheduleResolve', { time: s.time, lessonId: m.id }, 'sec')).join('')}
+          ${['existing','same_day'].includes(error.code) ? btn('Записать ещё одно занятие', 'scheduleResolve', { time: s.time, allowNew: true }, 'ghost') : ''}` : ''}
+      </div></section>`;
+  });
+  return { title: review.time ? 'Отметить занятие' : 'Подвести итог дня', html: slots.length ?
+    `${rows.join('')}<div class="schedule-actions">${btn('Сохранить итог', 'scheduleReviewSave')}</div>` :
+    '<div class="card pad hint">Все выбранные занятия отмечены.</div>' };
+};
+
+document.addEventListener('change', event => {
+  const select = event.target.closest?.('[data-schedule-choice]');
+  if (!select) return;
+  const box = document.getElementById(`schedule-attendees-${reviewKey(select.dataset.scheduleChoice)}`);
+  if (box) box.hidden = select.value !== 'held';
+});
+
+function scheduleReviewActions() {
+  return [...document.querySelectorAll('[data-schedule-choice]')].filter(el => el.value).map(el => {
+    const time = el.dataset.scheduleChoice, key = reviewKey(time);
+    const selected = [...document.querySelectorAll(`[data-schedule-present="${key}"]:checked`)];
+    const studentIds = selected.map(x => x.value);
+    const tiers = Object.fromEntries(selected.map(x => [x.value, x.closest('.schedule-attendee').querySelector('select')?.value])
+      .filter(([, v]) => v));
+    return { time, status: el.value, studentIds, tiers, attendanceConfirmed: studentIds.length > 0 };
+  });
+}
+
+async function saveScheduleReview(actions) {
+  const review = scheduleReview(), plan = schedulePlan(review.id);
+  if (!actions.length) return toast('Выбери хотя бы одно занятие');
+  review.choices = { ...review.choices, ...Object.fromEntries(actions.map(a => [a.time, a])) };
+  const response = await sendScheduleActions(plan, actions);
+  if (!response) return;
+  for (const row of response.results) {
+    if (row.error) review.errors[row.time] = row;
+    else delete review.errors[row.time];
+  }
+  const errors = response.results.filter(r => r.error);
+  if (!errors.length && !Object.keys(review.errors).length) {
+    back();
+    toast('Итог сохранён');
+    return;
+  }
+  try {
+    await loadSchedule();
+    render();
+  } catch (e) { toast(errText(e)); }
+}
+
+ACT.scheduleReviewSave = () => saveScheduleReview(scheduleReviewActions());
+ACT.scheduleResolve = ({ time, lessonId, allowNew }) => {
+  const action = scheduleReviewActions().find(a => a.time === time);
+  if (!action || action.status !== 'held') return toast('Выбери «Состоялось»');
+  if (allowNew && !confirm('Записать ещё одно проведённое занятие в журнал и в счёт?')) return;
+  return saveScheduleReview([{ ...action, lessonId, allowNew }]);
 };
 
 /* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */
