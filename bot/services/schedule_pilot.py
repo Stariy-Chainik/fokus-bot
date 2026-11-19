@@ -9,6 +9,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,7 @@ from bot.models import Student, User
 
 logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
+DRAFT_DURATIONS = (45, 60, 90)
 _GREETING = re.compile(r"(?:доброе утро|добрый день|добрый вечер|здравствуйте|всем привет)[!.,]*")
 _HEADER = re.compile(r"расписание со мной(?: (?:на )?(.+?))?[:.!]?")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
@@ -102,7 +104,7 @@ def _parse_slot(line: str) -> Slot | None:
     return Slot(time, at, names, duration, end=end)
 
 
-def parse_schedule(text: str, published: date) -> tuple[date, list[Slot]] | None:
+def parse_schedule(text: str, published: date, *, accept_weekday: bool = True) -> tuple[date, list[Slot]] | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if lines and _GREETING.fullmatch(_plain(lines[0])):
         lines = lines[1:]
@@ -113,7 +115,7 @@ def parse_schedule(text: str, published: date) -> tuple[date, list[Slot]] | None
     if header:
         day = _plan_day(header[1] or "", published)
     else:
-        day = _plan_day(title, published) if _DAY_HEADER.fullmatch(title) else None
+        day = _plan_day(title, published) if accept_weekday and _DAY_HEADER.fullmatch(title) else None
     if day is None:
         return None
     slots: list[Slot] = []
@@ -127,8 +129,9 @@ def parse_schedule(text: str, published: date) -> tuple[date, list[Slot]] | None
     if not slots:
         return None
     for i, slot in enumerate(slots[:-1]):
-        if slot.names and slot.duration is None and slots[i + 1].at - slot.at == 45:
-            slots[i] = replace(slot, duration=45, suggested=True)
+        gap = slots[i + 1].at - slot.at
+        if slot.names and slot.duration is None and gap in DRAFT_DURATIONS:
+            slots[i] = replace(slot, duration=gap, suggested=True)
     return day, slots
 
 
@@ -151,6 +154,12 @@ def _telegram_plan(raw: str, source: str | None) -> dict:
             original_time = row["time"]
         if original_time is not None:
             slots.append({**row, "telegram_time": original_time})
+    for row, next_row in pairwise(slots):
+        # У старых импортированных слотов пересчитываем только неназначенную длительность.
+        if "at" in row and "at" in next_row and row["duration"] is None and _slot_kind(row) != "free":
+            gap = next_row["at"] - row["at"]
+            if gap in DRAFT_DURATIONS:
+                row.update(duration=gap, suggested=True)
     return {**plan, "slots": slots}
 
 
@@ -195,10 +204,11 @@ class StudentNames:
     def row(self, slot: dict) -> dict:
         text = slot["names"]
         kind = _slot_kind(slot)
-        ids = slot.get("student_ids") or (self.match(text) if kind == "individual" else ())
+        picked = slot.get("student_ids") or (self.match(text) if kind == "individual" else ())
+        ids = [sid for sid in picked if sid in self.students]
         return {"time": slot["time"], "end": slot.get("end"), "text": text, "kind": kind, "duration": slot["duration"],
-                "suggested": slot["suggested"], "groupId": slot.get("group_id"), "studentIds": list(ids),
-                "students": [self.students[sid].name for sid in ids if sid in self.students],
+                "suggested": slot["suggested"], "groupId": slot.get("group_id"), "studentIds": ids,
+                "students": [self.students[sid].name for sid in ids],
                 "telegramTime": slot["telegram_time"]}
 
 
@@ -276,6 +286,8 @@ def _edit_telegram_slots(past: dict, new: dict, locked: set[str]) -> list[dict]:
             if changed["time"] != old["time"]:
                 raise ValueError("Свободные окна и уже отмеченные строки сохраняют своё время")
             after[origin] = old
+        elif changed["duration"] != old["duration"] and changed["duration"] not in DRAFT_DURATIONS:
+            raise ValueError("Выбери 45, 60 или 90 минут")
     return sorted(after.values(), key=lambda row: row["time"])
 
 
@@ -284,11 +296,12 @@ class DraftConflict(Exception):
 
 
 class SchedulePilot:
-    def __init__(self, chat_id: int, tg_id: int, teacher_id: str, path: Path):
+    def __init__(self, chat_id: int, tg_id: int, teacher_id: str, path: Path, *, accept_weekday: bool = True):
         self.chat_id = chat_id
         self.tg_id = tg_id
         self.teacher_id = teacher_id
         self.path = path
+        self.accept_weekday = accept_weekday
         self.lock = asyncio.Lock()
 
     def owns(self, user: User) -> bool:
@@ -301,7 +314,7 @@ class SchedulePilot:
                 or sender.is_bot or message.sender_chat is not None or message.forward_origin is not None):
             return
         published = message.date.astimezone(_MOSCOW)
-        parsed = parse_schedule(message.text or "", published.date())
+        parsed = parse_schedule(message.text or "", published.date(), accept_weekday=self.accept_weekday)
         if parsed is None and not edited:
             return
         payload = None
@@ -456,3 +469,22 @@ class SchedulePilot:
     @staticmethod
     def _view(plan: dict, names: StudentNames) -> dict:
         return {"date": plan["date"], "slots": [names.row(slot) for slot in plan["slots"]]}
+
+
+class SchedulePilots:
+    """Один источник и один изолированный черновик на аккаунт педагога."""
+
+    def __init__(self, accounts: list[SchedulePilot]):
+        self.accounts = {pilot.tg_id: pilot for pilot in accounts}
+        if len(self.accounts) != len(accounts):
+            raise ValueError("У Telegram-аккаунта может быть один источник расписания")
+
+    def for_user(self, user: User) -> SchedulePilot | None:
+        pilot = self.accounts.get(user.tg_id)
+        return pilot if pilot and pilot.owns(user) else None
+
+    async def receive(self, message: Message, update_id: int, *, edited: bool) -> None:
+        if message.from_user:
+            pilot = self.accounts.get(message.from_user.id)
+            if pilot:
+                await pilot.receive(message, update_id, edited=edited)

@@ -168,7 +168,15 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     diary_service = _dp_get(dp, "diary_service")
     notifier = _dp_get(dp, "notifier")
     hall_rent_repo = _dp_get(dp, "hall_rent_repo")
-    schedule_pilot = _dp_get(dp, "schedule_pilot")
+    schedule_pilots = _dp_get(dp, "schedule_pilots")
+
+    def schedule_for(user):
+        return schedule_pilots.for_user(user) if schedule_pilots else None
+
+    async def schedule_students(user, teacher):
+        if user.is_admin:
+            return await student_repo.get_all()
+        return await visibility.students_for_teacher(teacher.teacher_id)
 
     async def _competitions(student_id: str, limit: int = 10) -> list[dict]:
         """Результаты турниров ФТСАРР ученика — свежие первыми (лист competition_results)."""
@@ -282,13 +290,15 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         })
 
     async def schedule_drafts(request: web.Request, user, teacher) -> web.Response:
-        if schedule_pilot is None or not schedule_pilot.owns(user):
+        pilot = schedule_for(user)
+        if pilot is None:
             return _json({"error": "not_found"}, status=404)
-        drafts = await schedule_pilot.drafts(await student_repo.get_all())
-        return _json({"drafts": drafts})
+        drafts = await pilot.drafts(await schedule_students(user, teacher))
+        return _json({"drafts": drafts, "acceptWeekday": pilot.accept_weekday})
 
     async def schedule_save(request: web.Request, user, teacher) -> web.Response:
-        if schedule_pilot is None or not schedule_pilot.owns(user):
+        pilot = schedule_for(user)
+        if pilot is None:
             return _json({"error": "not_found"}, status=404)
         mid = request.match_info["mid"]
         if not re.fullmatch(r"[0-9]{1,10}", mid):
@@ -307,9 +317,9 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             if body.get("useTelegram") is not True:
                 group_ids = set(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))
                 groups = {g.group_id: g.name for g in await group_repo.get_all() if g.group_id in group_ids}
-                plan = edited_schedule(body, await student_repo.get_all(), groups)
-            async with schedule_pilot.lock:
-                await schedule_pilot.save_edit(int(mid), revision, base, plan)
+                plan = edited_schedule(body, await schedule_students(user, teacher), groups)
+            async with pilot.lock:
+                await pilot.save_edit(int(mid), revision, base, plan)
         except ValueError as exc:
             return _json({"error": "bad_request", "message": str(exc)}, status=400)
         except KeyError:
@@ -321,13 +331,14 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
 
     async def schedule_attendance(request: web.Request, user, teacher) -> web.Response:
         mid = request.match_info["mid"]
-        if schedule_pilot is None or not schedule_pilot.owns(user) or not re.fullmatch(r"[0-9]{1,10}", mid):
+        pilot = schedule_for(user)
+        if pilot is None or not re.fullmatch(r"[0-9]{1,10}", mid):
             return _json({"error": "not_found"}, status=404)
         try:
             body = await request.json()
             if not isinstance(body, dict):
                 raise ValueError("Проверь выбранные занятия")
-            results = await draft_day(dp, teacher, schedule_pilot, int(mid), body)
+            results = await draft_day(dp, teacher, pilot, int(mid), body, await schedule_students(user, teacher))
         except ValueError as exc:
             return _json({"error": "bad_request", "message": str(exc)}, status=400)
         except KeyError:
@@ -359,7 +370,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         payouts = await _payouts(teacher, period, earned_month)
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
-            **({"schedulePilot": True} if schedule_pilot is not None and schedule_pilot.owns(user) else {}),
+            **({"schedulePilot": True} if schedule_for(user) is not None else {}),
             # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
             "rentMonth": rent["accrued"] if rent else 0,
             "rentDue": {"period": prev, "rest": prev_rent["rest"]} if prev_rent and prev_rent["rest"] else None,

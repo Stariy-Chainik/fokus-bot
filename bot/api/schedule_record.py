@@ -8,6 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from bot.api.record import RecordError, record_create, record_options
+from bot.models import Student
 from bot.models.enums import LessonType
 from bot.services.schedule_pilot import DraftConflict, SchedulePilot
 from bot.utils.attendees import TRIAL_TIER
@@ -25,14 +26,14 @@ def _journal_match(lesson, slot: dict, day: str) -> bool:
     return lesson.type == LessonType.INDIVIDUAL and bool(participants) and participants == set(slot["studentIds"])
 
 
-async def draft_day(dp, teacher, pilot: SchedulePilot, mid: int, body: dict) -> list[dict]:
+async def draft_day(dp, teacher, pilot: SchedulePilot, mid: int, body: dict, students: list[Student]) -> list[dict]:
     actions = body.get("actions")
     if (not isinstance(actions, list) or not 1 <= len(actions) <= 100
             or any(not isinstance(a, dict) or not isinstance(a.get("time"), str)
                    or a.get("status") not in ("held", "cancelled", "planned") for a in actions)):
         raise ValueError("Выбери занятия и их статусы")
     async with pilot.lock:
-        drafts = await pilot.drafts(await dp["student_repo"].get_all())
+        drafts = await pilot.drafts(students)
         plan = next((d for d in drafts if d["id"] == mid), None)
         if plan is None:
             raise KeyError(mid)

@@ -1,7 +1,13 @@
 import json
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import BaseModel, Field
+
+
+class SchedulePilotAccount(BaseModel):
+    teacher_id: str = Field(pattern=r"^TCH-[0-9]+$")
+    tg_id: int = Field(gt=0)
+    accept_weekday: bool = True
 
 
 class Settings(BaseSettings):
@@ -28,6 +34,7 @@ class Settings(BaseSettings):
     schedule_pilot_tg_id: int = Field(default=0, alias="SCHEDULE_PILOT_TG_ID")
     schedule_pilot_teacher_id: str = Field(default="", alias="SCHEDULE_PILOT_TEACHER_ID")
     schedule_pilot_db: str = Field(default="", alias="SCHEDULE_PILOT_DB")
+    schedule_pilot_accounts: list[SchedulePilotAccount] = Field(default_factory=list, alias="SCHEDULE_PILOT_ACCOUNTS")
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )

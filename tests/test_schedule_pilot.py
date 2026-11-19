@@ -11,8 +11,8 @@ from aiogram.types import Chat, Message, Update, User
 from bot.middlewares.private_only import PrivateChatsOnlyMiddleware
 from bot.models import Student
 from bot.services.billing_service import build_billing_rows
-from bot.services.schedule_pilot import SchedulePilot, StudentNames, parse_schedule
-from tests.fakes import mk_lesson, mk_user
+from bot.services.schedule_pilot import SchedulePilot, SchedulePilots, StudentNames, parse_schedule
+from tests.fakes import mk_lesson, mk_teacher, mk_user
 from tests.test_admin_api import ADMIN_TG, PARENT_TG, _call, await_teacher, make_api
 from tests.test_teacher_api import _call as call_teacher
 
@@ -63,7 +63,7 @@ def test_sample_schedule_and_unknown_duration():
     [
         ("Понедельник:\n♦️ 19.45 Антон и Полина", 23, [("19:45", "Антон и Полина", None, None)]),
         (TUESDAY, 24, [
-            ("16:15", "Ира М.", 45, None), ("17:00", "Коля и Соня", None, None), ("18:00", "Егор и Катя", None, None),
+            ("16:15", "Ира М.", 45, None), ("17:00", "Коля и Соня", 60, None), ("18:00", "Егор и Катя", 60, None),
             ("19:00", "группа", 90, "20:30"), ("20:30", "Антон и Полина", None, None),
         ]),
         ("Четверг:\n♦️ 18.00 Егор и Катя 60\n♦️ 19.00 свободно", 19,
@@ -90,6 +90,23 @@ def test_weekday_post_must_describe_only_the_author_and_one_day():
         TUESDAY.replace("19.00 - 20.30", "19.00 - 18.30"),
     ):
         assert parse_schedule(unrelated, published) is None
+
+
+def test_duration_inference_uses_next_row_and_keeps_explicit_values():
+    text = """Четверг:
+15:00 Иван
+16:30 Анна
+17:30 свободно
+18:15 Мирон 30
+19:15 группа 45
+20:00 София
+21:15 Антон
+"""
+    parsed = parse_schedule(text, date(2026, 11, 19))
+    assert parsed is not None
+    assert [(s.duration, s.suggested) for s in parsed[1]] == [
+        (90, True), (60, True), (None, False), (30, False), (45, False), (None, False), (None, False),
+    ]
 
 
 def test_matching_requires_a_unique_student_or_pair():
@@ -156,7 +173,7 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
     app, dp = make_api(monkeypatch)
     lessons_before = list(dp["lesson_repo"].items)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "drafts.db")
-    dp["schedule_pilot"] = pilot
+    dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     asyncio.run(pilot.receive(_message(TUESDAY + "\n♦️ 21:15 свободно"), 1, edited=False))
     dp["user_repo"].items.append(mk_user(tg_id=123, is_admin=True, teacher_id="TCH-0001"))
@@ -176,12 +193,54 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
     assert dp["lesson_repo"].items == lessons_before
 
 
+def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    database = tmp_path / "teacher-sources.db"
+    nazar, ivan = 222, 333
+    dp["user_repo"].items.extend([mk_user(tg_id=nazar, teacher_id="TCH-0007"), mk_user(tg_id=ivan, teacher_id="TCH-0003")])
+    dp["teacher_repo"].items.extend([mk_teacher("TCH-0007", "Назар"), mk_teacher("TCH-0003", "Иван")])
+    dp["teacher_group_repo"]._t2g["TCH-0003"] = ["GRP-0001"]
+    pilots = SchedulePilots([
+        SchedulePilot(CHAT, nazar, "TCH-0007", database, accept_weekday=False),
+        SchedulePilot(CHAT, ivan, "TCH-0003", database),
+    ])
+    dp["schedule_pilots"] = pilots
+    route = "/api/teacher/schedule-drafts"
+
+    async def incoming():
+        await pilots.receive(_message("Четверг:\n17:00 Иванов Иван 45", uid=nazar), 1, edited=False)
+        await pilots.receive(_message("Расписание Леры на четверг\n17:00 Иванов Иван 45", uid=nazar), 2, edited=False)
+        await pilots.receive(_message("Четверг:\n18:00 Петрова Анна 90", uid=ivan), 3, edited=False)
+
+    asyncio.run(incoming())
+    status, data = call_teacher(app, "GET", route, tg_id=nazar)
+    assert (status, data) == (200, {"drafts": [], "acceptWeekday": False})
+    asyncio.run(pilots.receive(_message("Расписание со мной на четверг\n17:00 Иванов Иван 30", uid=nazar), 4, edited=False))
+    view_nazar = call_teacher(app, "GET", route, tg_id=nazar)[1]["drafts"][0]
+    view_ivan = call_teacher(app, "GET", route, tg_id=ivan)[1]["drafts"][0]
+    assert [s["time"] for s in view_nazar["slots"]] == ["17:00"]
+    assert view_nazar["slots"][0]["studentIds"] == []
+    assert [s["time"] for s in view_ivan["slots"]] == ["18:00"]
+    assert view_ivan["slots"][0]["studentIds"] == ["STU-0002"]
+    assert call_teacher(app, "GET", "/api/teacher/home", tg_id=nazar)[1]["schedulePilot"] is True
+    assert call_teacher(app, "GET", "/api/teacher/home", tg_id=ivan)[1]["schedulePilot"] is True
+
+    slot = view_nazar["slots"][0]
+    assert slot["duration"] == 30
+    assert call_teacher(app, "PUT", route + "/17", tg_id=nazar, json=view_nazar)[0] == 200
+    updated = call_teacher(app, "GET", route, tg_id=nazar)[1]["drafts"][0]
+    updated["slots"][0]["duration"] = 75
+    assert call_teacher(app, "PUT", route + "/17", tg_id=nazar, json=updated)[0] == 400
+    updated["slots"][0]["duration"] = 60
+    assert call_teacher(app, "PUT", route + "/17", tg_id=nazar, json=updated)[0] == 200
+
+
 def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkeypatch, tmp_path):
     app, dp = make_api(monkeypatch)
     lessons_before = list(dp["lesson_repo"].items)
     database = tmp_path / "drafts.db"
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)
-    dp["schedule_pilot"] = pilot
+    dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     dp["user_repo"].items.append(mk_user(tg_id=123, teacher_id="TCH-0001"))
     asyncio.run(pilot.receive(_message(TUESDAY), 1, edited=False))
@@ -201,7 +260,7 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
 
     updated = TUESDAY.replace("16.15 - Ира М.", "16.30 - Ира М.")
     asyncio.run(pilot.receive(_message(updated, edited=True), 2, edited=True))
-    dp["schedule_pilot"] = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)
+    dp["schedule_pilots"] = SchedulePilots([SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)])
     edited = current()
     assert edited["date"] == "2026-11-25"
     assert edited["sourceUpdated"] is True
@@ -229,7 +288,7 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
 def test_draft_does_not_accept_new_rows_or_convert_free_slot(monkeypatch, tmp_path):
     app, dp = make_api(monkeypatch)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "only-telegram.db")
-    dp["schedule_pilot"] = pilot
+    dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     original = TUESDAY + "\n♦️ 21:15 свободно"
     asyncio.run(pilot.receive(_message(original), 1, edited=False))
@@ -266,7 +325,7 @@ def test_draft_does_not_accept_new_rows_or_convert_free_slot(monkeypatch, tmp_pa
 def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(monkeypatch, tmp_path):
     app, dp = make_api(monkeypatch)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "day.db")
-    dp["schedule_pilot"] = pilot
+    dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     dp["user_repo"].items.append(mk_user(tg_id=123, teacher_id="TCH-0001"))
     day = date.today() - timedelta(days=1)
@@ -329,7 +388,7 @@ def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, 
     app, dp = make_api(monkeypatch)
     database = tmp_path / "retry.db"
     pilot = SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)
-    dp["schedule_pilot"] = pilot
+    dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     day = date.today() - timedelta(days=1)
     published = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
@@ -355,6 +414,6 @@ def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, 
 
     assert mark_held()["status"] == "pending"
     assert len(repo.items) == 1
-    dp["schedule_pilot"] = SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)
+    dp["schedule_pilots"] = SchedulePilots([SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)])
     assert mark_held()["lessonId"] == repo.items[0].lesson_id
     assert len(repo.items) == 1

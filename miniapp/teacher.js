@@ -71,6 +71,7 @@ function scheduleMarks(id) {
   return days.get(id);
 }
 const scheduleMarkLabel = count => count ? `Отметить занятия · ${count}` : 'Отметить занятия';
+const scheduleDurations = [45, 60, 90];
 const hasReadyScheduleMarks = marks => marks.size > 0 && ![...marks.values()].some(m => m.loading);
 const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-list">${slots.map(s => {
   const free = s.kind === 'free';
@@ -94,7 +95,8 @@ const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-l
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
 
 async function loadSchedule() {
-  const { drafts } = await api('/schedule-drafts');
+  const { drafts, acceptWeekday } = await api('/schedule-drafts');
+  state.ui.scheduleAcceptWeekday = acceptWeekday !== false;
   for (const plan of drafts) {
     const marks = scheduleMarks(plan.id);
     const eligible = new Map(plan.slots.filter(canMarkSchedule).map(s => [s.time, scheduleStamp(plan, s)]));
@@ -125,7 +127,8 @@ SCREENS['t.schedule.drafts'] = async () => {
     </section>`;
   };
   const body = drafts.length ? drafts.map(day).join('') :
-    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>');
+    empty('Черновиков пока нет', `<p class="hint">Опубликуй в группе расписание одного дня с заголовком
+      ${state.ui.scheduleAcceptWeekday ? '«Четверг:»' : '«Расписание со мной на четверг»'}.</p>`);
   return { title: 'Расписание из Telegram', html: body +
     `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
 };
@@ -179,11 +182,14 @@ function scheduleSlotForm(index) {
   const options = [...people.values()];
   const kinds = [{ id: 'individual', name: 'Индивидуальное или парное' },
     { id: 'group', name: 'Групповое' }];
+  const externalDuration = s.duration && !scheduleDurations.includes(s.duration) ? ` · из поста ${s.duration} мин` : '';
   sheet(`<h3>Занятие</h3>
-    <div class="schedule-fields">
-      ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
-      ${field('schedule-duration', 'Минуты', s.duration ?? '', 'type="number" min="1" max="1440" inputmode="numeric"')}
-    </div>
+    ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
+    <div class="hint schedule-length-label">Длительность${externalDuration}</div>
+    <div class="chips" id="schedule-duration-options" role="group" aria-label="Длительность занятия">
+      ${scheduleDurations.map(minutes => `<button type="button" class="chip" data-act="scheduleChooseDuration"
+        data-p='{"minutes":${minutes}}' data-minutes="${minutes}" aria-pressed="${s.duration === minutes}">${minutes} мин</button>`).join('')}
+    </div><input type="hidden" id="schedule-duration" value="${esc(s.duration ?? '')}">
     ${scheduleSelect('schedule-kind', 'Тип', s.kind, kinds, 'Выбрать тип')}
     <div id="schedule-people">
       ${scheduleSelect('schedule-student-a', 'Ученик', s.studentIds?.[0], options, 'Выбрать ученика')}
@@ -207,6 +213,13 @@ function scheduleSlotForm(index) {
   for (const id of ['schedule-student-a', 'schedule-student-b']) document.getElementById(id).addEventListener('change', update);
   update();
 }
+
+ACT.scheduleChooseDuration = ({ minutes }) => {
+  if (!scheduleDurations.includes(minutes)) return;
+  document.getElementById('schedule-duration').value = String(minutes);
+  document.querySelectorAll('#schedule-duration-options button').forEach(b =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.minutes) === minutes)));
+};
 
 async function scheduleWrite(plan, fields) {
   if (state.ui.scheduleSaving) return false;

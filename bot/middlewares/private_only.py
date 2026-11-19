@@ -15,7 +15,7 @@ from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
 from aiogram.types import TelegramObject, Update
 
-from bot.services.schedule_pilot import SchedulePilot
+from bot.services.schedule_pilot import SchedulePilot, SchedulePilots
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def _chat_of(update: Update):
 
 
 class PrivateChatsOnlyMiddleware(BaseMiddleware):
-    def __init__(self, schedule_pilot: SchedulePilot | None = None):
+    def __init__(self, schedule_pilot: SchedulePilot | SchedulePilots | None = None):
         self.schedule_pilot = schedule_pilot
 
     async def __call__(

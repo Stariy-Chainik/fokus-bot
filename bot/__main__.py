@@ -21,7 +21,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from bot.services import activity, pending_queue
-from bot.services.schedule_pilot import SchedulePilot
+from bot.services.schedule_pilot import SchedulePilot, SchedulePilots
 from config.settings import settings
 from bot.repositories import (
     SheetsClient, UserRepository, TeacherRepository, StudentRepository,
@@ -197,13 +197,17 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
     dp["diary_service"] = diary_service
 
     # ── Middleware ────────────────────────────────────────────────────────────
-    schedule_pilot = None
-    if (settings.schedule_pilot_chat_id and settings.schedule_pilot_tg_id
-            and settings.schedule_pilot_teacher_id and settings.schedule_pilot_db):
-        schedule_pilot = SchedulePilot(settings.schedule_pilot_chat_id, settings.schedule_pilot_tg_id,
-                                       settings.schedule_pilot_teacher_id, Path(settings.schedule_pilot_db))
-        dp["schedule_pilot"] = schedule_pilot
-    dp.update.outer_middleware(PrivateChatsOnlyMiddleware(schedule_pilot))
+    schedule_pilots = None
+    if settings.schedule_pilot_chat_id and settings.schedule_pilot_db:
+        chat, path = settings.schedule_pilot_chat_id, Path(settings.schedule_pilot_db)
+        pilots = [SchedulePilot(chat, a.tg_id, a.teacher_id, path, accept_weekday=a.accept_weekday)
+                  for a in settings.schedule_pilot_accounts]
+        if settings.schedule_pilot_tg_id and settings.schedule_pilot_teacher_id:
+            pilots.append(SchedulePilot(chat, settings.schedule_pilot_tg_id, settings.schedule_pilot_teacher_id, path))
+        if pilots:
+            schedule_pilots = SchedulePilots(pilots)
+            dp["schedule_pilots"] = schedule_pilots
+    dp.update.outer_middleware(PrivateChatsOnlyMiddleware(schedule_pilots))
     dp.update.outer_middleware(DedupUpdateMiddleware())
     dp.update.middleware(AuthMiddleware(user_repo))
     if settings.parent_cabinet_only and settings.miniapp_url:       # родитель в Telegram — только кабинет
@@ -224,7 +228,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
 
 def _telegram_updates(dp: Dispatcher) -> list[str]:
     updates = set(dp.resolve_used_update_types())
-    if dp.workflow_data.get("schedule_pilot") is not None:
+    if dp.workflow_data.get("schedule_pilots") is not None:
         updates.add("edited_message")
     return sorted(updates)
 
