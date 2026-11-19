@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 
 import logging
+import re
 import time
 import uuid
 from datetime import date
@@ -48,6 +49,7 @@ from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services import hall_rent
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
+from bot.services.schedule_pilot import DraftConflict, edited_schedule
 from bot.services.salary_summary import summarize, summary_dicts
 from bot.services.subscription_frequency import frequency_info, set_frequency
 from bot.utils.dates import format_date_display
@@ -283,6 +285,37 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         drafts = await schedule_pilot.drafts(await student_repo.get_all())
         return _json({"drafts": drafts})
+
+    async def schedule_save(request: web.Request, user, teacher) -> web.Response:
+        if schedule_pilot is None or not schedule_pilot.owns(user):
+            return _json({"error": "not_found"}, status=404)
+        mid = request.match_info["mid"]
+        if not re.fullmatch(r"[0-9]{1,10}", mid):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except ValueError:
+            return _json({"error": "bad_request"}, status=400)
+        if not isinstance(body, dict):
+            return _json({"error": "bad_request"}, status=400)
+        revision, base = body.get("revision"), body.get("sourceRevision")
+        if type(revision) is not int or revision < 0 or not isinstance(base, str) or not re.fullmatch(r"\d{1,20}:\d{1,20}", base):
+            return _json({"error": "bad_request"}, status=400)
+        try:
+            plan = None
+            if body.get("useTelegram") is not True:
+                group_ids = set(await teacher_group_repo.get_groups_for_teacher(teacher.teacher_id))
+                groups = {g.group_id: g.name for g in await group_repo.get_all() if g.group_id in group_ids}
+                plan = edited_schedule(body, await student_repo.get_all(), groups)
+            await schedule_pilot.save_edit(int(mid), revision, base, plan)
+        except ValueError as exc:
+            return _json({"error": "bad_request", "message": str(exc)}, status=400)
+        except KeyError:
+            return _json({"error": "not_found"}, status=404)
+        except DraftConflict:
+            return _json({"error": "conflict", "message": "Черновик обновился. Открой последнюю версию и проверь изменения."},
+                         status=409)
+        return _json({"ok": True})
 
     async def home(request: web.Request, user, teacher) -> web.Response:
         """Сводка: «требует внимания» (оценки, счета, период) → «сегодня» (занятия дня) → «месяц» (зарплата)."""
@@ -1746,6 +1779,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     routes = [
         ("GET", "/me", me), ("GET", "/home", home),
         ("GET", "/schedule-drafts", schedule_drafts),
+        ("PUT", "/schedule-drafts/{mid}", schedule_save),
         ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
         ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
         ("GET", "/groups", groups), ("GET", "/groups/{gid}", group),

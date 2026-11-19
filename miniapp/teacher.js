@@ -53,21 +53,170 @@ SCREENS['t.home'] = async () => {
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
 
+/* ── Предварительное расписание ────────────────────────────────────── */
+const schedulePlan = id => state.ui.scheduleDrafts?.find(d => d.id === id);
+const scheduleDraft = () => state.ui.scheduleEdit;
+const scheduleRows = (slots, edit = false) => slots.length ? `<ol class="schedule-list">${slots.map((s, index) => {
+  const group = s.kind === 'group', free = s.kind === 'free';
+  const title = free ? 'Свободное окно' : group ? (s.groupId ? s.text : 'Групповое занятие') :
+    s.students.join(' + ') || s.text;
+  const type = free ? '' : group ? (s.groupId ? 'Группа' : '') :
+    s.students.length === 2 ? 'Пара' : s.students.length === 1 ? 'Индивидуальное' : 'Уточнить участников';
+  const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : free ? '' : 'Уточнить длительность';
+  const inner = `<span class="schedule-time"><time>${esc(s.time)}</time>${s.end ? `<time class="schedule-end">${esc(s.end)}</time>` : ''}</span>
+    <span class="schedule-slot-text"><strong>${esc(title)}</strong>
+      ${type || duration ? `<span class="hint">${esc([type, duration].filter(Boolean).join(' · '))}</span>` : ''}
+    </span>`;
+  return `<li>${edit ? `<button type="button" class="schedule-slot" data-act="scheduleSlotEdit" data-p='{"index":${index}}'>${inner}<span class="chev" aria-hidden="true">›</span></button>` :
+    `<div class="schedule-slot${free ? ' schedule-free' : ''}">${inner}</div>`}</li>`;
+}).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
+
 SCREENS['t.schedule.drafts'] = async () => {
   const { drafts } = await api('/schedule-drafts');
-  const renderSlot = s => {
-    const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : 'Уточнить длительность';
-    const timing = s.end ? `${s.time}–${s.end} · ${duration}` : duration;
-    if (s.kind === 'free') return cell({ lead: s.time, t: 'Свободное окно', s: s.duration ? esc(timing) : '' });
-    if (s.kind === 'group') return cell({ lead: s.time, t: 'Групповое занятие', s: esc(timing) });
-    const details = s.students.length ? timing : `Уточнить участников · ${timing}`;
-    return cell({ lead: s.time, cls: 'wrap', t: esc(s.students.join(' + ') || s.text), s: esc(details) });
-  };
-  const renderDraft = d => `<div class="eyebrow">${esc(fdate(d.date))} · Черновик</div>
-    ${list(d.slots.map(renderSlot))}
-    <div style="margin:8px 0 16px"><a href="${esc(d.source)}" target="_blank" rel="noopener">Открыть сообщение в Telegram</a></div>`;
-  return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(renderDraft).join('') :
+  state.ui.scheduleDrafts = drafts;
+  const day = d => `<section class="card schedule-day">
+    <div class="schedule-head"><div><h2>${esc(fdate(d.date))}</h2><div class="hint">Черновик</div></div>
+      ${btn('Изменить', 'scheduleStart', { id: d.id }, 'sec')}</div>
+    ${scheduleRows(d.slots)}
+    ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки сохранены.</div>
+      ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id: d.id }, 'sec') : ''}</div>` : ''}
+    <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
+  </section>`;
+  return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(day).join('') :
     empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>') };
+};
+
+SCREENS['t.schedule.source'] = async ({ id }) => {
+  const source = schedulePlan(id)?.telegram;
+  return { title: 'Новая версия из Telegram', html: source ? `
+    <section class="card schedule-day">
+      <div class="schedule-head"><h2>${esc(fdate(source.date))}</h2></div>
+      ${scheduleRows(source.slots)}
+    </section>
+    <div class="schedule-actions">${btn('Применить версию из Telegram', 'scheduleUseSource', { id })}</div>` :
+    '<div class="card pad hint">Новой версии пока нет</div>' };
+};
+
+SCREENS['t.schedule.edit'] = async () => {
+  const d = scheduleDraft();
+  if (!d) return { title: 'Редактирование', html: '<div class="card pad hint">Открой черновик заново.</div>' };
+  if (!d.options) d.options = await api('/record/options');
+  return { title: 'Редактирование', html: `
+    <div class="schedule-date">${field('schedule-date', 'Дата расписания', d.date, 'type="date" required')}</div>
+    <section class="card schedule-day">${scheduleRows(d.slots, true)}</section>
+    <div class="schedule-actions">${btn('Добавить строку', 'scheduleSlotEdit', { index: -1 }, 'sec')}
+      ${btn('Сохранить черновик', 'scheduleSave')}</div>` };
+};
+
+ACT.scheduleStart = ({ id }) => {
+  const plan = schedulePlan(id);
+  if (!plan) return;
+  state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })) };
+  go('t.schedule.edit');
+};
+ACT.scheduleSource = ({ id }) => go('t.schedule.source', { id });
+
+function scheduleSelect(id, label, selected, options, none) {
+  const choices = options.map(o => `<option value="${esc(o.id)}"${o.id === selected ? ' selected' : ''}>${esc(o.name)}</option>`);
+  return `<label class="schedule-field"><span class="hint">${label}</span>
+    <select class="search" id="${id}"><option value="">${none}</option>${choices.join('')}</select></label>`;
+}
+
+ACT.scheduleSlotEdit = ({ index }) => {
+  const d = scheduleDraft();
+  d.date = val('schedule-date');
+  const s = d.slots[index] || { time: '', duration: null, kind: 'individual', studentIds: [], students: [], groupId: null, text: '' };
+  const people = new Map(d.options.students.map(p => [p.id, p]));
+  (s.studentIds || []).forEach((sid, i) => {
+    if (!people.has(sid)) people.set(sid, { id: sid, name: s.students[i] || s.text });
+  });
+  const options = [...people.values()];
+  const kinds = [{ id: 'individual', name: 'Индивидуальное или парное' },
+    { id: 'group', name: 'Групповое' }, { id: 'free', name: 'Свободное окно' }];
+  sheet(`<h3>${index < 0 ? 'Новая строка' : 'Изменить строку'}</h3>
+    <div class="schedule-fields">
+      ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
+      ${field('schedule-duration', 'Минуты', s.duration ?? '', 'type="number" min="1" max="1440" inputmode="numeric"')}
+    </div>
+    ${scheduleSelect('schedule-kind', 'Тип', s.kind, kinds, 'Выбрать тип')}
+    <div id="schedule-people">
+      ${scheduleSelect('schedule-student-a', 'Ученик', s.studentIds?.[0], options, 'Выбрать ученика')}
+      ${scheduleSelect('schedule-student-b', 'Второй ученик', s.studentIds?.[1], options, 'Без пары')}
+      <div id="schedule-text-field">${field('schedule-text', 'Имя из расписания', s.kind === 'individual' ? s.text : '', 'maxlength="300" autocomplete="off"')}</div>
+    </div>
+    <div id="schedule-group-field">
+      ${scheduleSelect('schedule-group', 'Группа', s.groupId, d.options.groups, 'Группа без уточнения')}
+    </div>
+    <div class="schedule-actions">${btn('Готово', 'scheduleSlotDone', { index })}
+      ${index < 0 ? '' : btn('Убрать строку', 'scheduleSlotRemove', { index }, 'ghost')}</div>`);
+  const kind = document.getElementById('schedule-kind');
+  const update = () => {
+    document.getElementById('schedule-people').hidden = kind.value !== 'individual';
+    document.getElementById('schedule-group-field').hidden = kind.value !== 'group';
+    document.getElementById('schedule-text-field').hidden = Boolean(val('schedule-student-a') || val('schedule-student-b'));
+  };
+  kind.addEventListener('change', update);
+  for (const id of ['schedule-student-a', 'schedule-student-b']) document.getElementById(id).addEventListener('change', update);
+  update();
+};
+
+ACT.scheduleSlotRemove = ({ index }) => {
+  scheduleDraft().slots.splice(index, 1);
+  closeSheet();
+  render();
+};
+
+ACT.scheduleSlotDone = ({ index }) => {
+  const d = scheduleDraft();
+  const kind = val('schedule-kind'), time = val('schedule-time');
+  const raw = val('schedule-duration'), duration = raw ? Number(raw) : null;
+  if (!time || !kind) return toast('Укажи время начала и тип');
+  if (duration !== null && (!Number.isInteger(duration) || duration < 1 || duration > 1440)) return toast('Проверь длительность');
+  if (d.slots.some((s, i) => i !== index && s.time === time)) return toast(`Время ${time} уже занято в черновике`);
+  const studentIds = kind === 'individual' ? [val('schedule-student-a'), val('schedule-student-b')].filter(Boolean) : [];
+  if (studentIds.length === 2 && studentIds[0] === studentIds[1]) return toast('Выбери двух разных учеников');
+  const groupId = kind === 'group' ? val('schedule-group') || null : null;
+  const students = ['schedule-student-a', 'schedule-student-b'].map(id => document.getElementById(id))
+    .filter(el => kind === 'individual' && el.value).map(el => el.selectedOptions[0].textContent);
+  const text = kind === 'individual' ? students.join(' + ') || val('schedule-text').trim() :
+    groupId ? document.getElementById('schedule-group').selectedOptions[0].textContent : '';
+  if (kind === 'individual' && !text) return toast('Выбери ученика или введи имя');
+  const [hours, minutes] = time.split(':').map(Number), finish = hours * 60 + minutes + duration;
+  const end = duration && finish < 1440 ? [Math.floor(finish / 60), finish % 60].map(n => String(n).padStart(2, '0')).join(':') : null;
+  const row = { time, end, duration, kind, studentIds, students, groupId, text, suggested: false };
+  if (index < 0) d.slots.push(row);
+  else d.slots[index] = row;
+  d.slots.sort((a, b) => a.time.localeCompare(b.time));
+  closeSheet();
+  render();
+};
+
+async function saveSchedule(plan, fields) {
+  if (state.ui.scheduleSaving) return;
+  state.ui.scheduleSaving = true;
+  try {
+    await api(`/schedule-drafts/${plan.id}`, { method: 'PUT', body: { revision: plan.revision, ...fields } });
+    state.ui.scheduleEdit = null;
+    back();
+    toast('Черновик сохранён');
+  } catch (e) {
+    toast(e.data?.message || errText(e));
+  } finally {
+    state.ui.scheduleSaving = false;
+  }
+}
+
+ACT.scheduleSave = () => {
+  const d = scheduleDraft();
+  d.date = val('schedule-date');
+  if (!d.date) return toast('Укажи дату расписания');
+  return saveSchedule(d, { date: d.date, slots: d.slots, sourceRevision: d.sourceRevision });
+};
+
+ACT.scheduleUseSource = ({ id }) => {
+  const d = schedulePlan(id);
+  if (!d?.telegram || !confirm('Заменить сохранённый черновик этой версией из Telegram?')) return;
+  return saveSchedule(d, { sourceRevision: d.telegram.sourceRevision, useTelegram: true });
 };
 
 /* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */

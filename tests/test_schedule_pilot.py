@@ -170,3 +170,56 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
     assert (slots[3]["kind"], slots[3]["time"], slots[3]["end"], slots[3]["duration"]) == ("group", "19:00", "20:30", 90)
     assert slots[-1]["kind"] == "free"
     assert dp["lesson_repo"].items == lessons_before
+
+
+def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    lessons_before = list(dp["lesson_repo"].items)
+    database = tmp_path / "drafts.db"
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)
+    dp["schedule_pilot"] = pilot
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    dp["user_repo"].items.append(mk_user(tg_id=123, teacher_id="TCH-0001"))
+    asyncio.run(pilot.receive(_message(TUESDAY), 1, edited=False))
+    route = "/api/teacher/schedule-drafts"
+
+    def current():
+        _, data = call_teacher(app, "GET", route, tg_id=ADMIN_TG)
+        return data["drafts"][0]
+
+    original = current()
+    assert original["id"] == 17 and original["revision"] == 0
+    save = {
+        "date": "2026-11-25", "revision": 0, "sourceRevision": original["sourceRevision"],
+        "slots": [
+            {"time": "19:30", "kind": "group", "duration": 90, "groupId": "GRP-0001"},
+            {"time": "16:55", "kind": "individual", "duration": 60, "studentIds": ["STU-0001", "STU-0002"]},
+            {"time": "21:00", "kind": "free", "duration": None},
+        ],
+    }
+    assert call_teacher(app, "PUT", route + "/17", tg_id=123, json=save)[0] == 404
+    assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=save)[0] == 200
+
+    updated = TUESDAY.replace("16.15 - Ира М.", "16.30 - Ира М.")
+    asyncio.run(pilot.receive(_message(updated, edited=True), 2, edited=True))
+    dp["schedule_pilot"] = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)
+    edited = current()
+    assert edited["date"] == "2026-11-25"
+    assert edited["sourceUpdated"] is True
+    assert [(s["time"], s["end"]) for s in edited["slots"]] == [("16:55", "17:55"), ("19:30", "21:00"), ("21:00", None)]
+    assert edited["slots"][0]["students"] == ["Иванов Иван", "Петрова Анна"]
+    assert edited["slots"][1]["text"] == "БП Джаз"
+    assert edited["telegram"]["slots"][0]["time"] == "16:30"
+    assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=save)[0] == 409  # второе окно с устаревшей версией
+
+    adopt = {"revision": edited["revision"], "sourceRevision": edited["telegram"]["sourceRevision"], "useTelegram": True}
+    asyncio.run(pilot.receive(_message(updated.replace("16.30", "16.45"), edited=True), 3, edited=True))
+    assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=adopt)[0] == 409
+    assert current()["slots"][0]["time"] == "16:55"
+    adopt["sourceRevision"] = current()["telegram"]["sourceRevision"]
+    assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=adopt)[0] == 200
+    assert current()["slots"][0]["time"] == "16:45" and not current()["sourceUpdated"]
+
+    asyncio.run(pilot.receive(_message("Влад\n16:45 Егор и Катя", edited=True), 4, edited=True))
+    assert current()["slots"][0]["time"] == "16:45" and current()["sourceUpdated"]
+    assert dp["lesson_repo"].items == lessons_before

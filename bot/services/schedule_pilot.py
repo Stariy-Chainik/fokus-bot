@@ -173,10 +173,72 @@ class StudentNames:
     def row(self, slot: dict) -> dict:
         text = slot["names"]
         label = _plain(text).rstrip(".!")
-        kind = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
-        ids = self.match(text) if kind == "individual" else ()
+        inferred = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
+        kind = slot.get("kind", inferred)
+        ids = slot.get("student_ids") or (self.match(text) if kind == "individual" else ())
         return {"time": slot["time"], "end": slot.get("end"), "text": text, "kind": kind, "duration": slot["duration"],
-                "suggested": slot["suggested"], "students": [self.students[sid].name for sid in ids]}
+                "suggested": slot["suggested"], "groupId": slot.get("group_id"), "studentIds": list(ids),
+                "students": [self.students[sid].name for sid in ids if sid in self.students]}
+
+
+def edited_schedule(body: dict, students: list[Student], groups: dict[str, str]) -> dict:
+    """Проверяем поля черновика и сохраняем выбранные карточки вместе с их названиями."""
+    day, rows = body.get("date"), body.get("slots")
+    if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise ValueError("Укажи дату расписания")
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        raise ValueError("Проверь дату расписания") from None
+    if not isinstance(rows, list) or len(rows) > 100:
+        raise ValueError("Проверь список занятий")
+    student_names = {s.student_id: s.name for s in students}
+    slots: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Проверь список занятий")
+        time, kind, duration = row.get("time"), row.get("kind"), row.get("duration")
+        if not isinstance(time, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time):
+            raise ValueError("Укажи время начала каждой строки")
+        if time in slots:
+            raise ValueError(f"Две строки начинаются в {time}. Проверь время")
+        if kind not in ("individual", "group", "free"):
+            raise ValueError("Выбери тип занятия")
+        if duration is not None and (type(duration) is not int or not 1 <= duration <= 1440):
+            raise ValueError(f"Проверь длительность строки {time}")
+        ids = row.get("studentIds") or []
+        group_id = row.get("groupId") or None
+        text = row.get("text") or ""
+        if not isinstance(text, str) or len(text) > 300:
+            raise ValueError(f"Слишком длинная подпись в строке {time}")
+        if kind == "individual":
+            if (not isinstance(ids, list) or len(ids) > 2
+                    or any(not isinstance(sid, str) or sid not in student_names for sid in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError(f"Проверь состав в строке {time}")
+            text = " + ".join(student_names[sid] for sid in ids) if ids else text.strip()
+            if not text:
+                raise ValueError(f"Укажи участника в строке {time}")
+        else:
+            ids = []
+        if kind == "group":
+            if group_id is not None and (not isinstance(group_id, str) or group_id not in groups):
+                raise ValueError(f"Проверь группу в строке {time}")
+            text = groups[group_id] if group_id else "группа"
+        else:
+            group_id = None
+        if kind == "free":
+            text = ""
+        _, start = _time_parts(time)
+        finish = start + (duration or 0)
+        end = f"{finish // 60:02d}:{finish % 60:02d}" if duration and finish < 1440 else None
+        slots[time] = {"time": time, "end": end, "duration": duration, "kind": kind, "names": text,
+                       "student_ids": ids, "group_id": group_id, "suggested": row.get("suggested") is True}
+    return {"date": day, "slots": [slots[time] for time in sorted(slots)]}
+
+
+class DraftConflict(Exception):
+    """Открытая в кабинете версия уже устарела."""
 
 
 class SchedulePilot:
@@ -219,6 +281,11 @@ class SchedulePilot:
             version INTEGER, update_id INTEGER, payload TEXT,
             PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS draft_edits (
+            chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER,
+            revision INTEGER NOT NULL, source_revision TEXT NOT NULL, payload TEXT NOT NULL,
+            PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
+        )""")
         return conn
 
     def _save(self, message_id: int, version: int, update_id: int, payload: str | None) -> bool:
@@ -229,19 +296,58 @@ class SchedulePilot:
             """, (self.chat_id, self.tg_id, self.teacher_id, message_id, version, update_id, payload))
             return cursor.rowcount > 0
 
-    def _latest(self) -> list[tuple[int, str]]:
+    def _latest(self) -> list[tuple]:
         with closing(self._open()) as conn:
-            return list(conn.execute("""SELECT message_id, payload FROM drafts WHERE chat_id=? AND sender_id=?
-                AND teacher_id=? AND payload IS NOT NULL ORDER BY message_id DESC LIMIT 10""",
+            return list(conn.execute("""SELECT message_id, d.version, d.update_id, d.payload,
+                    e.revision, e.source_revision, e.payload
+                FROM drafts AS d LEFT JOIN draft_edits AS e USING (chat_id, sender_id, teacher_id, message_id)
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND (d.payload IS NOT NULL OR e.payload IS NOT NULL)
+                ORDER BY message_id DESC LIMIT 10""",
                 (self.chat_id, self.tg_id, self.teacher_id)))
+
+    @staticmethod
+    def _source_revision(version: int, update_id: int) -> str:
+        return f"{version}:{update_id}"
+
+    def _write_edit(self, message_id: int, revision: int, base: str, payload: str | None) -> None:
+        key = (self.chat_id, self.tg_id, self.teacher_id, message_id)
+        with closing(self._open()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            source = conn.execute("""SELECT version, update_id, payload FROM drafts
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
+            edit = conn.execute("""SELECT revision FROM draft_edits
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
+            if source is None or (source[2] is None and edit is None):
+                raise KeyError(message_id)
+            if (edit[0] if edit else 0) != revision:
+                raise DraftConflict
+            if payload is None:  # явное применение увиденной пользователем версии из Telegram
+                if source[2] is None or self._source_revision(source[0], source[1]) != base:
+                    raise DraftConflict
+                payload = source[2]
+            conn.execute("""INSERT INTO draft_edits VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO UPDATE SET revision=excluded.revision, source_revision=excluded.source_revision,
+                    payload=excluded.payload""", (*key, revision + 1, base, payload))
+
+    async def save_edit(self, message_id: int, revision: int, source_revision: str, plan: dict | None) -> None:
+        raw = json.dumps(plan, ensure_ascii=False) if plan is not None else None
+        await asyncio.to_thread(self._write_edit, message_id, revision, source_revision, raw)
 
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)
         chat_slug = str(self.chat_id).removeprefix("-100")
         result = []
-        for message_id, raw in await asyncio.to_thread(self._latest):
-            plan = json.loads(raw)
-            plan["slots"] = [names.row(slot) for slot in plan["slots"]]
-            plan["source"] = f"https://t.me/c/{chat_slug}/{message_id}"
+        for message_id, version, update_id, source, revision, base, edit in await asyncio.to_thread(self._latest):
+            latest = self._source_revision(version, update_id)
+            plan = self._view(edit or source, names)
+            plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
+                        source=f"https://t.me/c/{chat_slug}/{message_id}", sourceUpdated=bool(edit and base != latest))
+            if plan["sourceUpdated"] and source:
+                plan["telegram"] = dict(self._view(source, names), sourceRevision=latest)
             result.append(plan)
         return result
+
+    @staticmethod
+    def _view(raw: str, names: StudentNames) -> dict:
+        plan = json.loads(raw)
+        return {"date": plan["date"], "slots": [names.row(slot) for slot in plan["slots"]]}
