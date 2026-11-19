@@ -132,6 +132,28 @@ def parse_schedule(text: str, published: date) -> tuple[date, list[Slot]] | None
     return day, slots
 
 
+def _slot_kind(slot: dict) -> str:
+    label = _plain(slot["names"]).rstrip(".!")
+    inferred = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
+    return slot.get("kind", inferred)
+
+
+def _telegram_plan(raw: str, source: str | None) -> dict:
+    """Привязываем старые черновики к строкам поста, не считая свободное окно занятием."""
+    plan = json.loads(raw)
+    originals = {row["time"]: _slot_kind(row) for row in json.loads(source)["slots"]} if source else {}
+    slots = []
+    for row in plan["slots"]:
+        original_time = row.get("telegram_time")
+        if original_time is None and ("at" in row or (
+            row["time"] in originals and (originals[row["time"]] == "free") == (_slot_kind(row) == "free")
+        )):
+            original_time = row["time"]
+        if original_time is not None:
+            slots.append({**row, "telegram_time": original_time})
+    return {**plan, "slots": slots}
+
+
 class StudentNames:
     def __init__(self, students: list[Student]):
         self.students = {s.student_id: s for s in students if not s.is_archived}
@@ -172,13 +194,12 @@ class StudentNames:
 
     def row(self, slot: dict) -> dict:
         text = slot["names"]
-        label = _plain(text).rstrip(".!")
-        inferred = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
-        kind = slot.get("kind", inferred)
+        kind = _slot_kind(slot)
         ids = slot.get("student_ids") or (self.match(text) if kind == "individual" else ())
         return {"time": slot["time"], "end": slot.get("end"), "text": text, "kind": kind, "duration": slot["duration"],
                 "suggested": slot["suggested"], "groupId": slot.get("group_id"), "studentIds": list(ids),
-                "students": [self.students[sid].name for sid in ids if sid in self.students]}
+                "students": [self.students[sid].name for sid in ids if sid in self.students],
+                "telegramTime": slot["telegram_time"]}
 
 
 def edited_schedule(body: dict, students: list[Student], groups: dict[str, str]) -> dict:
@@ -198,6 +219,9 @@ def edited_schedule(body: dict, students: list[Student], groups: dict[str, str])
         if not isinstance(row, dict):
             raise ValueError("Проверь список занятий")
         time, kind, duration = row.get("time"), row.get("kind"), row.get("duration")
+        origin = row.get("telegramTime")
+        if not isinstance(origin, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", origin):
+            raise ValueError("Добавляй новые занятия через обычный мастер")
         if not isinstance(time, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time):
             raise ValueError("Укажи время начала каждой строки")
         if time in slots:
@@ -233,8 +257,26 @@ def edited_schedule(body: dict, students: list[Student], groups: dict[str, str])
         finish = start + (duration or 0)
         end = f"{finish // 60:02d}:{finish % 60:02d}" if duration and finish < 1440 else None
         slots[time] = {"time": time, "end": end, "duration": duration, "kind": kind, "names": text,
-                       "student_ids": ids, "group_id": group_id, "suggested": row.get("suggested") is True}
+                       "student_ids": ids, "group_id": group_id, "suggested": row.get("suggested") is True,
+                       "telegram_time": origin}
     return {"date": day, "slots": [slots[time] for time in sorted(slots)]}
+
+
+def _edit_telegram_slots(past: dict, new: dict, locked: set[str]) -> list[dict]:
+    before = {s["telegram_time"]: s for s in past["slots"]}
+    after = {s["telegram_time"]: s for s in new["slots"]}
+    if before.keys() != after.keys() or len(after) != len(new["slots"]):
+        raise ValueError("Черновик содержит только строки из Telegram. Новое занятие добавь через обычный мастер.")
+    for origin, old in before.items():
+        changed = after[origin]
+        free = _slot_kind(old) == "free"
+        if free != (_slot_kind(changed) == "free"):
+            raise ValueError("Новое занятие на свободное время добавь через обычный мастер")
+        if free or old["time"] in locked:
+            if changed["time"] != old["time"]:
+                raise ValueError("Свободные окна и уже отмеченные строки сохраняют своё время")
+            after[origin] = old
+    return sorted(after.values(), key=lambda row: row["time"])
 
 
 class DraftConflict(Exception):
@@ -296,10 +338,20 @@ class SchedulePilot:
 
     def _save(self, message_id: int, version: int, update_id: int, payload: str | None) -> bool:
         with closing(self._open()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            key = (self.chat_id, self.tg_id, self.teacher_id, message_id)
+            previous = conn.execute("""SELECT d.payload, e.payload FROM drafts AS d JOIN draft_edits AS e
+                USING (chat_id, sender_id, teacher_id, message_id)
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
+            if previous and any("telegram_time" not in s for s in json.loads(previous[1])["slots"]):
+                normalized = _telegram_plan(previous[1], previous[0])
+                conn.execute("""UPDATE draft_edits SET payload=?
+                    WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""",
+                    (json.dumps(normalized, ensure_ascii=False), *key))
             cursor = conn.execute("""INSERT INTO drafts VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET version=excluded.version, update_id=excluded.update_id,
                 payload=excluded.payload WHERE (excluded.version, excluded.update_id) > (drafts.version, drafts.update_id)
-            """, (self.chat_id, self.tg_id, self.teacher_id, message_id, version, update_id, payload))
+            """, (*key, version, update_id, payload))
             return cursor.rowcount > 0
 
     def _latest(self) -> list[tuple]:
@@ -321,26 +373,32 @@ class SchedulePilot:
             conn.execute("BEGIN IMMEDIATE")
             source = conn.execute("""SELECT version, update_id, payload FROM drafts
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
-            edit = conn.execute("""SELECT revision, payload FROM draft_edits
+            edit = conn.execute("""SELECT revision, payload, source_revision FROM draft_edits
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
             if source is None or (source[2] is None and edit is None):
                 raise KeyError(message_id)
             if (edit[0] if edit else 0) != revision:
                 raise DraftConflict
-            if payload is None:  # явное применение увиденной пользователем версии из Telegram
-                if source[2] is None or self._source_revision(source[0], source[1]) != base:
-                    raise DraftConflict
-                payload = source[2]
+            latest = self._source_revision(source[0], source[1])
+            previous = _telegram_plan(edit[1] if edit else source[2], source[2])
             locked_times = set(self._outcomes(conn, message_id))
-            if locked_times:
-                previous = json.loads(edit[1] if edit else source[2])
+            if payload is None:
+                if source[2] is None or latest != base:
+                    raise DraftConflict
+                new = _telegram_plan(source[2], source[2])
+                locked = [row for row in previous["slots"] if row["time"] in locked_times]
+                locked_origins = {row["telegram_time"] for row in locked}
+                remaining = [row for row in new["slots"] if row["time"] not in locked_times
+                             and row["telegram_time"] not in locked_origins]
+                new["slots"] = sorted(remaining + locked, key=lambda row: row["time"])
+            else:
+                if base != (edit[2] if edit else latest):
+                    raise DraftConflict
                 new = json.loads(payload)
-                if previous["date"] != new["date"]:
-                    raise ValueError("Дата закреплена после отметки занятий")
-                rows = {row["time"]: row for row in new["slots"]}
-                rows.update((row["time"], row) for row in previous["slots"] if row["time"] in locked_times)
-                new["slots"] = [rows[time] for time in sorted(rows)]
-                payload = json.dumps(new, ensure_ascii=False)
+                new["slots"] = _edit_telegram_slots(previous, new, locked_times)
+            if locked_times and previous["date"] != new["date"]:
+                raise ValueError("Дата закреплена после отметки занятий")
+            payload = json.dumps(new, ensure_ascii=False)
             conn.execute("""INSERT INTO draft_edits VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET revision=excluded.revision, source_revision=excluded.source_revision,
                     payload=excluded.payload""", (*key, revision + 1, base, payload))
@@ -383,7 +441,7 @@ class SchedulePilot:
         result = []
         for message_id, version, update_id, source, revision, base, edit in await asyncio.to_thread(self._latest):
             latest = self._source_revision(version, update_id)
-            plan = self._view(edit or source, names)
+            plan = self._view(_telegram_plan(edit or source, source), names)
             plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
                         source=f"https://t.me/c/{chat_slug}/{message_id}", sourceUpdated=bool(edit and base != latest))
             outcomes = await self.outcomes(message_id)
@@ -391,11 +449,10 @@ class SchedulePilot:
                 status, lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))
                 slot.update(status=status, lessonId=lesson_id if status == "held" else "")
             if plan["sourceUpdated"] and source:
-                plan["telegram"] = dict(self._view(source, names), sourceRevision=latest)
+                plan["telegram"] = dict(self._view(_telegram_plan(source, source), names), sourceRevision=latest)
             result.append(plan)
         return result
 
     @staticmethod
-    def _view(raw: str, names: StudentNames) -> dict:
-        plan = json.loads(raw)
+    def _view(plan: dict, names: StudentNames) -> dict:
         return {"date": plan["date"], "slots": [names.row(slot) for slot in plan["slots"]]}

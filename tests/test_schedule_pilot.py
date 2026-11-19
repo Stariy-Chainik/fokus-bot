@@ -1,5 +1,8 @@
 import asyncio
+import json
 import logging
+import sqlite3
+from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -190,14 +193,9 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
 
     original = current()
     assert original["id"] == 17 and original["revision"] == 0
-    save = {
-        "date": "2026-11-25", "revision": 0, "sourceRevision": original["sourceRevision"],
-        "slots": [
-            {"time": "19:30", "kind": "group", "duration": 90, "groupId": "GRP-0001"},
-            {"time": "16:55", "kind": "individual", "duration": 60, "studentIds": ["STU-0001", "STU-0002"]},
-            {"time": "21:00", "kind": "free", "duration": None},
-        ],
-    }
+    save = {**original, "date": "2026-11-25"}
+    save["slots"][0].update(time="16:55", duration=60, studentIds=["STU-0001", "STU-0002"])
+    save["slots"][3].update(time="19:30", groupId="GRP-0001")
     assert call_teacher(app, "PUT", route + "/17", tg_id=123, json=save)[0] == 404
     assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=save)[0] == 200
 
@@ -207,9 +205,11 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
     edited = current()
     assert edited["date"] == "2026-11-25"
     assert edited["sourceUpdated"] is True
-    assert [(s["time"], s["end"]) for s in edited["slots"]] == [("16:55", "17:55"), ("19:30", "21:00"), ("21:00", None)]
+    assert [(s["time"], s["end"]) for s in edited["slots"] if s["telegramTime"] in ("16:15", "19:00")] == [
+        ("16:55", "17:55"), ("19:30", "21:00"),
+    ]
     assert edited["slots"][0]["students"] == ["Иванов Иван", "Петрова Анна"]
-    assert edited["slots"][1]["text"] == "БП Джаз"
+    assert next(s for s in edited["slots"] if s["time"] == "19:30")["text"] == "БП Джаз"
     assert edited["telegram"]["slots"][0]["time"] == "16:30"
     assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=save)[0] == 409  # второе окно с устаревшей версией
 
@@ -224,6 +224,43 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
     asyncio.run(pilot.receive(_message("Влад\n16:45 Егор и Катя", edited=True), 4, edited=True))
     assert current()["slots"][0]["time"] == "16:45" and current()["sourceUpdated"]
     assert dp["lesson_repo"].items == lessons_before
+
+
+def test_draft_does_not_accept_new_rows_or_convert_free_slot(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "only-telegram.db")
+    dp["schedule_pilot"] = pilot
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    original = TUESDAY + "\n♦️ 21:15 свободно"
+    asyncio.run(pilot.receive(_message(original), 1, edited=False))
+    path = "/api/teacher/schedule-drafts"
+
+    def read():
+        return call_teacher(app, "GET", path, tg_id=ADMIN_TG)[1]["drafts"][0]
+
+    d = read()
+    lesson = {"time": "22:00", "kind": "individual", "studentIds": ["STU-0001"], "duration": 45}
+    for bogus in (lesson, {**lesson, "telegramTime": "22:00"}, {**lesson, "telegramTime": "16:15"}):
+        edit = {**d, "slots": [*d["slots"], bogus]}
+        assert call_teacher(app, "PUT", path + "/17", tg_id=ADMIN_TG, json=edit)[0] == 400
+    edit = {**d, "slots": [*d["slots"][:-1], {**lesson, "telegramTime": "21:15"}]}
+    assert call_teacher(app, "PUT", path + "/17", tg_id=ADMIN_TG, json=edit)[0] == 400
+    assert read()["slots"][-1]["kind"] == "free"
+
+    # Старый клиент раньше мог создать ручную строку. Она не должна попасть в новый список или в журнал.
+    stored = {"date": d["date"], "slots": [
+        {"time": "16:15", "names": "Иванов Иван", "kind": "individual", "duration": 60, "suggested": False},
+        {"time": "22:00", "names": "Петрова Анна", "kind": "individual", "duration": 45, "suggested": False},
+    ]}
+    with closing(sqlite3.connect(pilot.path)) as conn, conn:
+        conn.execute("INSERT INTO draft_edits VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (CHAT, ADMIN_TG, "TCH-0001", 17, 1, d["sourceRevision"], json.dumps(stored)))
+    assert [s["time"] for s in read()["slots"]] == ["16:15"]
+    asyncio.run(pilot.receive(_message(original.replace("16.15", "16.30"), edited=True), 2, edited=True))
+    assert [s["time"] for s in read()["slots"]] == ["16:15"]  # правка старой строки пережила изменение поста
+    p = read()
+    body = {**p, "actions": [{"time": "22:00", "status": "held"}]}
+    assert call_teacher(app, "POST", path + "/17/attendance", tg_id=ADMIN_TG, json=body)[0] == 400
 
 
 def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(monkeypatch, tmp_path):

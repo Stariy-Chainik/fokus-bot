@@ -3,6 +3,8 @@
    Данные — /api/teacher/*: педагог видит только свои занятия, группы и учеников,
    замок сданного периода для него действует. */
 'use strict';
+const teacherRecordButton = (label = '✏️ Отметить занятие', kind = '') =>
+  goBtn(label, 'a.record.w', { tid: state.me.teacherId, name: state.me.name }, kind);
 
 /* ── Сводка ──────────────────────────────────────────────────────────── */
 /* Сводка — как у администратора, три блока по приоритету: что ждёт педагога → что было сегодня →
@@ -19,7 +21,7 @@ SCREENS['t.home'] = async () => {
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
   ].filter(Boolean);
-  const recordLesson = goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name });
+  const recordLesson = teacherRecordButton();
   const today = h.lessonsToday ? `
     <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 't.lessons', { key: h.today })}${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok', 't.lessons', { key: h.today })}</div>
     <div style="margin-top:10px">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>
@@ -83,8 +85,9 @@ const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-l
   if (id === null) return `<li><div class="${style}">${inner}</div></li>`;
   const mark = scheduleMarks(id).get(s.time);
   return `<li data-schedule-time="${esc(s.time)}"><div class="schedule-mark-row">
-    <button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify({ id, time: s.time }))}'>
-      ${inner}<span class="chev" aria-hidden="true">›</span></button>
+    ${free ? `<div class="${style}">${inner}</div>` :
+      `<button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify({ id, time: s.time }))}'>
+      ${inner}<span class="chev" aria-hidden="true">›</span></button>`}
     ${canMarkSchedule(s) ? `<label class="schedule-check"><input type="checkbox" data-schedule-check
       aria-label="${esc(`Отметить занятие в ${s.time} · ${scheduleTitle(s)}`)}"${mark ? ' checked' : ''}></label>` : ''}
     </div><div class="schedule-mark-extra" data-schedule-extra>${scheduleMarkDetails(id, s, mark)}</div></li>`;
@@ -114,18 +117,17 @@ SCREENS['t.schedule.drafts'] = async () => {
         <div class="hint">Черновик</div></div></div>
       ${toMark ? '<p class="hint schedule-mark-guide">Поставь галочки у проведённых занятий, чтобы внести их в журнал.</p>' : ''}
       ${scheduleRows(d.slots, d.id)}
-      <div class="schedule-notice">
-        ${toMark ? `<button type="button" class="btn" data-act="scheduleMarkSave" data-p='{"id":${d.id}}'
-          data-schedule-submit ${hasReadyScheduleMarks(marks) ? '' : 'disabled'}>${scheduleMarkLabel(marks.size)}</button>` : ''}
-        ${btn('Добавить строку', 'scheduleTap', { id: d.id }, 'sec')}
-      </div>
+      ${toMark ? `<div class="schedule-notice"><button type="button" class="btn" data-act="scheduleMarkSave" data-p='{"id":${d.id}}'
+        data-schedule-submit ${hasReadyScheduleMarks(marks) ? '' : 'disabled'}>${scheduleMarkLabel(marks.size)}</button></div>` : ''}
       ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
         ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id: d.id }, 'sec') : ''}</div>` : ''}
       <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
     </section>`;
   };
-  return { title: 'Расписание из Telegram', html: drafts.length ? drafts.map(day).join('') :
-    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>') };
+  const body = drafts.length ? drafts.map(day).join('') :
+    empty('Черновиков пока нет', '<p class="hint">Опубликуйте в группе расписание одного дня, например с заголовком «Четверг:».</p>');
+  return { title: 'Расписание из Telegram', html: body +
+    `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
 };
 
 SCREENS['t.schedule.source'] = async ({ id }) => {
@@ -153,9 +155,9 @@ async function scheduleOptions() {
 ACT.scheduleTap = async ({ id, time }) => {
   const plan = schedulePlan(id);
   if (!plan || state.ui.scheduleSaving || state.ui.scheduleOpening) return;
-  const index = time ? plan.slots.findIndex(s => s.time === time) : -1;
-  if (time && index < 0) return;
+  const index = plan.slots.findIndex(s => s.time === time);
   const slot = plan.slots[index];
+  if (!slot || slot.kind === 'free') return;
   if (slot?.status === 'held') return go('t.lesson', { id: slot.lessonId });
   if (slot?.status === 'cancelled') return sheet(`<h3>${esc(scheduleTitle(slot))}</h3>
     <p class="hint">${esc(time)} · Отменено</p>${btn('Вернуть в план', 'scheduleSingleStatus', { id, time, status: 'planned' })}`);
@@ -169,15 +171,15 @@ ACT.scheduleTap = async ({ id, time }) => {
 
 function scheduleSlotForm(index) {
   const d = scheduleDraft();
-  const s = d.slots[index] || { time: '', duration: null, kind: 'individual', studentIds: [], students: [], groupId: null, text: '' };
+  const s = d.slots[index];
   const people = new Map(d.options.students.map(p => [p.id, p]));
   (s.studentIds || []).forEach((sid, i) => {
     if (!people.has(sid)) people.set(sid, { id: sid, name: s.students[i] || s.text });
   });
   const options = [...people.values()];
   const kinds = [{ id: 'individual', name: 'Индивидуальное или парное' },
-    { id: 'group', name: 'Групповое' }, { id: 'free', name: 'Свободное окно' }];
-  sheet(`<h3>${index < 0 ? 'Новая строка' : 'Занятие'}</h3>
+    { id: 'group', name: 'Групповое' }];
+  sheet(`<h3>Занятие</h3>
     <div class="schedule-fields">
       ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
       ${field('schedule-duration', 'Минуты', s.duration ?? '', 'type="number" min="1" max="1440" inputmode="numeric"')}
@@ -193,8 +195,7 @@ function scheduleSlotForm(index) {
     </div>
     <div class="schedule-actions">
       ${btn('Сохранить строку', 'scheduleSlotDone', { index })}
-      ${index < 0 || s.kind === 'free' ? '' : btn('Отменилось', 'scheduleSingleStatus', { id: d.id, time: s.time, status: 'cancelled' }, 'ghost')}
-      ${index < 0 ? '' : btn('Убрать строку', 'scheduleSlotRemove', { index }, 'ghost')}
+      ${btn('Отменилось', 'scheduleSingleStatus', { id: d.id, time: s.time, status: 'cancelled' }, 'ghost')}
     </div>`);
   const kind = document.getElementById('schedule-kind');
   const update = () => {
@@ -223,14 +224,6 @@ async function scheduleWrite(plan, fields) {
 const saveScheduleRows = (plan, slots, date = plan.date) =>
   scheduleWrite(plan, { date, slots, sourceRevision: plan.sourceRevision });
 
-ACT.scheduleSlotRemove = async ({ index }) => {
-  const d = scheduleDraft();
-  if (await saveScheduleRows(d, d.slots.filter((_, i) => i !== index))) {
-    closeSheet();
-    render();
-  }
-};
-
 ACT.scheduleSlotDone = async ({ index }) => {
   const d = scheduleDraft();
   const kind = val('schedule-kind'), time = val('schedule-time');
@@ -243,8 +236,8 @@ ACT.scheduleSlotDone = async ({ index }) => {
   const groupId = kind === 'group' ? val('schedule-group') || null : null;
   const text = kind === 'individual' ? val('schedule-text').trim() : '';
   if (kind === 'individual' && !studentIds.length && !text) return toast('Выбери ученика или введи имя');
-  const row = { time, duration, kind, studentIds, groupId, text, suggested: false };
-  const slots = d.slots.filter((_, i) => i !== index).concat(row);
+  const row = { telegramTime: d.slots[index].telegramTime, time, duration, kind, studentIds, groupId, text, suggested: false };
+  const slots = d.slots.map((slot, i) => i === index ? row : slot);
   if (!await saveScheduleRows(d, slots)) return;
   closeSheet();
   toast('Строка сохранена');
@@ -480,7 +473,7 @@ SCREENS['t.lessons'] = async ({ key }) => {
       <div class="card" style="margin-top:12px"><div class="total"><span>${plural(shown.length, ['занятие', 'занятия', 'занятий'])} · начислит школа</span><span class="big">${fmt(sums.school)}</span></div>
         ${sums.direct ? `<div class="total"><span>оплачивают родители напрямую</span><span class="big direct">${fmt(sums.direct)}</span></div>` : ''}</div>`
       : empty(type ? 'Таких занятий нет' : 'Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие кнопкой ниже или выберите другой день</p>')}
-    <div style="margin-top:12px">${goBtn('✏️ Отметить занятие', 'a.record.w', { tid: state.me.teacherId, name: state.me.name })}</div>` };
+    <div style="margin-top:12px">${teacherRecordButton()}</div>` };
 };
 
 /* Статус оплаты ученика в карточке занятия: по накопительным оплатам месяца (как ✅/⬜ у родителя). */
