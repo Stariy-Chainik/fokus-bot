@@ -95,8 +95,9 @@ const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-l
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
 
 async function loadSchedule() {
-  const { drafts, acceptWeekday } = await api('/schedule-drafts');
-  state.ui.scheduleAcceptWeekday = acceptWeekday !== false;
+  const { drafts, acceptWeekday, acceptPlainTitle } = await api('/schedule-drafts');
+  state.ui.scheduleTitleExample = acceptPlainTitle ? '«Расписание на четверг»' :
+    acceptWeekday !== false ? '«Четверг:»' : '«Расписание со мной на четверг»';
   for (const plan of drafts) {
     const marks = scheduleMarks(plan.id);
     const eligible = new Map(plan.slots.filter(canMarkSchedule).map(s => [s.time, scheduleStamp(plan, s)]));
@@ -128,7 +129,7 @@ SCREENS['t.schedule.drafts'] = async () => {
   };
   const body = drafts.length ? drafts.map(day).join('') :
     empty('Черновиков пока нет', `<p class="hint">Опубликуй в группе расписание одного дня с заголовком
-      ${state.ui.scheduleAcceptWeekday ? '«Четверг:»' : '«Расписание со мной на четверг»'}.</p>`);
+      ${state.ui.scheduleTitleExample}.</p>`);
   return { title: 'Расписание из Telegram', html: body +
     `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
 };

@@ -8,6 +8,7 @@ class SchedulePilotAccount(BaseModel):
     teacher_id: str = Field(pattern=r"^TCH-[0-9]+$")
     tg_id: int = Field(gt=0)
     accept_weekday: bool = True
+    accept_plain_title: bool = False
 
 
 class Settings(BaseSettings):

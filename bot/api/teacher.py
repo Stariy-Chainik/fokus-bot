@@ -294,7 +294,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         if pilot is None:
             return _json({"error": "not_found"}, status=404)
         drafts = await pilot.drafts(await schedule_students(user, teacher))
-        return _json({"drafts": drafts, "acceptWeekday": pilot.accept_weekday})
+        return _json({"drafts": drafts, "acceptWeekday": pilot.accept_weekday,
+                      "acceptPlainTitle": pilot.accept_plain_title})
 
     async def schedule_save(request: web.Request, user, teacher) -> web.Response:
         pilot = schedule_for(user)

@@ -22,6 +22,7 @@ _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
 _GREETING = re.compile(r"(?:доброе утро|добрый день|добрый вечер|здравствуйте|всем привет)[!.,]*")
 _HEADER = re.compile(r"расписание со мной(?: (?:на )?(.+?))?[:.!]?")
+_PLAIN_HEADER = re.compile(r"(?:мое )?расписание(?:(?: *: *| )(?:на )?(.+?))?[.!]?")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _WEEKDAYS = {**{day: index for index, day in enumerate(_DAYS)}, "среду": 2, "пятницу": 4, "субботу": 5}
 _DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
@@ -104,7 +105,9 @@ def _parse_slot(line: str) -> Slot | None:
     return Slot(time, at, names, duration, end=end)
 
 
-def parse_schedule(text: str, published: date, *, accept_weekday: bool = True) -> tuple[date, list[Slot]] | None:
+def parse_schedule(
+    text: str, published: date, *, accept_weekday: bool = True, accept_plain_title: bool = False,
+) -> tuple[date, list[Slot]] | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if lines and _GREETING.fullmatch(_plain(lines[0])):
         lines = lines[1:]
@@ -112,21 +115,31 @@ def parse_schedule(text: str, published: date, *, accept_weekday: bool = True) -
         return None
     title = _plain(lines[0]).rstrip(":")
     header = _HEADER.fullmatch(title)
+    plain_header = _PLAIN_HEADER.fullmatch(title) if accept_plain_title and header is None else None
+    first_slot = 1
     if header:
         day = _plan_day(header[1] or "", published)
+    elif plain_header:
+        label = plain_header[1] or ""
+        if not label and len(lines) > 1:
+            next_line = _plain(lines[1]).rstrip(":")
+            if _DAY_HEADER.fullmatch(next_line) or next_line in ("сегодня", "завтра"):
+                label = next_line
+                first_slot += 1
+        day = _plan_day(label, published)
     else:
         day = _plan_day(title, published) if accept_weekday and _DAY_HEADER.fullmatch(title) else None
     if day is None:
         return None
     slots: list[Slot] = []
-    for line in lines[1:]:
+    for line in lines[first_slot:]:
         slot = _parse_slot(line)
         if slot is None:
             return None  # в том числе второй заголовок с расписанием другого педагога
         if slots and slot.at <= slots[-1].at:
             return None
         slots.append(slot)
-    if not slots:
+    if not slots or (plain_header and not any(slot.names for slot in slots)):
         return None
     for i, slot in enumerate(slots[:-1]):
         gap = slots[i + 1].at - slot.at
@@ -296,12 +309,16 @@ class DraftConflict(Exception):
 
 
 class SchedulePilot:
-    def __init__(self, chat_id: int, tg_id: int, teacher_id: str, path: Path, *, accept_weekday: bool = True):
+    def __init__(
+        self, chat_id: int, tg_id: int, teacher_id: str, path: Path, *,
+        accept_weekday: bool = True, accept_plain_title: bool = False,
+    ):
         self.chat_id = chat_id
         self.tg_id = tg_id
         self.teacher_id = teacher_id
         self.path = path
         self.accept_weekday = accept_weekday
+        self.accept_plain_title = accept_plain_title
         self.lock = asyncio.Lock()
 
     def owns(self, user: User) -> bool:
@@ -314,7 +331,8 @@ class SchedulePilot:
                 or sender.is_bot or message.sender_chat is not None or message.forward_origin is not None):
             return
         published = message.date.astimezone(_MOSCOW)
-        parsed = parse_schedule(message.text or "", published.date(), accept_weekday=self.accept_weekday)
+        parsed = parse_schedule(message.text or "", published.date(),
+                                accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title)
         if parsed is None and not edited:
             return
         payload = None

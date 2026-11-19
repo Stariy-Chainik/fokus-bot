@@ -92,6 +92,31 @@ def test_weekday_post_must_describe_only_the_author_and_one_day():
         assert parse_schedule(unrelated, published) is None
 
 
+def test_plain_schedule_title_defaults_to_publication_day_and_can_specify_a_day():
+    published = date(2026, 11, 19)
+    for title, expected in (
+        ("Расписание:", published),
+        ("Добрый день!\nРасписание на пятницу", date(2026, 11, 20)),
+        ("Моё расписание\nПятница:", date(2026, 11, 20)),
+    ):
+        text = f"{title}\n17.00 Иванов Иван\n18:00 Петрова Анна"
+        parsed = parse_schedule(text, published, accept_weekday=False, accept_plain_title=True)
+        assert parsed is not None
+        day, slots = parsed
+        assert day == expected
+        assert [(slot.time, slot.names, slot.duration) for slot in slots] == [
+            ("17:00", "Иванов Иван", 60), ("18:00", "Петрова Анна", None),
+        ]
+
+    for text in (
+        "Расписание Леры на четверг\n17:00 Иванов Иван",
+        "Расписание\nЛера\n17:00 Иванов Иван",
+        "Обсудим расписание завтра\n17:00 Иванов Иван",
+        "Расписание\n17:00\n18:00 свободно",
+    ):
+        assert parse_schedule(text, published, accept_weekday=False, accept_plain_title=True) is None
+
+
 def test_duration_inference_uses_next_row_and_keeps_explicit_values():
     text = """Четверг:
 15:00 Иван
@@ -201,21 +226,27 @@ def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monke
     dp["teacher_repo"].items.extend([mk_teacher("TCH-0007", "Назар"), mk_teacher("TCH-0003", "Иван")])
     dp["teacher_group_repo"]._t2g["TCH-0003"] = ["GRP-0001"]
     pilots = SchedulePilots([
-        SchedulePilot(CHAT, nazar, "TCH-0007", database, accept_weekday=False),
-        SchedulePilot(CHAT, ivan, "TCH-0003", database),
+        SchedulePilot(CHAT, nazar, "TCH-0007", database, accept_weekday=False, accept_plain_title=True),
+        SchedulePilot(CHAT, ivan, "TCH-0003", database, accept_weekday=False, accept_plain_title=True),
     ])
     dp["schedule_pilots"] = pilots
     route = "/api/teacher/schedule-drafts"
 
-    async def incoming():
+    async def unrelated():
         await pilots.receive(_message("Четверг:\n17:00 Иванов Иван 45", uid=nazar), 1, edited=False)
         await pilots.receive(_message("Расписание Леры на четверг\n17:00 Иванов Иван 45", uid=nazar), 2, edited=False)
         await pilots.receive(_message("Четверг:\n18:00 Петрова Анна 90", uid=ivan), 3, edited=False)
 
+    async def incoming():
+        await pilots.receive(_message("Расписание:\n17:00 Иванов Иван 30", uid=nazar), 4, edited=False)
+        await pilots.receive(_message("Расписание на четверг\n18:00 Петрова Анна 90", uid=ivan), 5, edited=False)
+
+    asyncio.run(unrelated())
+    for teacher in (nazar, ivan):
+        assert call_teacher(app, "GET", route, tg_id=teacher) == (
+            200, {"drafts": [], "acceptWeekday": False, "acceptPlainTitle": True},
+        )
     asyncio.run(incoming())
-    status, data = call_teacher(app, "GET", route, tg_id=nazar)
-    assert (status, data) == (200, {"drafts": [], "acceptWeekday": False})
-    asyncio.run(pilots.receive(_message("Расписание со мной на четверг\n17:00 Иванов Иван 30", uid=nazar), 4, edited=False))
     view_nazar = call_teacher(app, "GET", route, tg_id=nazar)[1]["drafts"][0]
     view_ivan = call_teacher(app, "GET", route, tg_id=ivan)[1]["drafts"][0]
     assert [s["time"] for s in view_nazar["slots"]] == ["17:00"]
