@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 PREFIX = "/api/teacher"
 _submitting = InProgressGuard()
+_SCHEDULE_DRAFT_ID = re.compile(r"(?:[0-9]{1,10}|-[0-9]{1,11})")
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -295,14 +296,14 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             return _json({"error": "not_found"}, status=404)
         drafts = await pilot.drafts(await schedule_students(user, teacher))
         return _json({"drafts": drafts, "acceptWeekday": pilot.accept_weekday,
-                      "acceptPlainTitle": pilot.accept_plain_title})
+                      "acceptPlainTitle": pilot.accept_plain_title, "acceptWeekly": pilot.accept_weekly})
 
     async def schedule_save(request: web.Request, user, teacher) -> web.Response:
         pilot = schedule_for(user)
         if pilot is None:
             return _json({"error": "not_found"}, status=404)
         mid = request.match_info["mid"]
-        if not re.fullmatch(r"[0-9]{1,10}", mid):
+        if not _SCHEDULE_DRAFT_ID.fullmatch(mid):
             return _json({"error": "not_found"}, status=404)
         try:
             body = await request.json()
@@ -333,7 +334,7 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
     async def schedule_attendance(request: web.Request, user, teacher) -> web.Response:
         mid = request.match_info["mid"]
         pilot = schedule_for(user)
-        if pilot is None or not re.fullmatch(r"[0-9]{1,10}", mid):
+        if pilot is None or not _SCHEDULE_DRAFT_ID.fullmatch(mid):
             return _json({"error": "not_found"}, status=404)
         try:
             body = await request.json()

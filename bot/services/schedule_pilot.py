@@ -21,17 +21,20 @@ logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
 _GREETING = re.compile(r"(?:доброе утро|добрый день|добрый вечер|здравствуйте|всем привет)[!.,]*")
-_HEADER = re.compile(r"расписание со мной(?: (?:на )?(.+?))?[:.!]?")
-_PLAIN_HEADER = re.compile(r"(?:мое )?расписание(?:(?: *: *| )(?:на )?(.+?))?[.!]?")
+_HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:на )?(.+?))?[:.!]?")
+_PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:на )?(.+?))?[.!]?")
+_WEEK = re.compile(r"(?:на )?(?:(эту|текущую|следующую) )?неделю")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _WEEKDAYS = {**{day: index for index, day in enumerate(_DAYS)}, "среду": 2, "пятницу": 4, "субботу": 5}
 _DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
+_WEEK_DRAFT_STRIDE = 8  # семь отрицательных ключей на сообщение, по одному для каждого дня
 _TIME = r"(?:[01]?\d|2[0-3])[:.][0-5]\d"
 _SLOT = re.compile(
     rf"(?:[♦🔶🔷🔸🔹◆▪•-]\ufe0f?\s*)?(?P<start>{_TIME})"
     rf"(?:\s*[-–—]\s*(?P<end>{_TIME}))?(?:(?:\s*[-–—]\s*|\s+)(?P<names>.+))?",
 )
-_MINUTES = re.compile(r"(.+?)\s+(\d{1,3})(?:\s*мин\.?)?", re.IGNORECASE)
+_MINUTES = re.compile(r"(.+?)\s+(?:\((\d{1,3})\)|(\d{1,3})(?:\s*мин\.?)?)", re.IGNORECASE)
+_GROUP = re.compile(r"\bгруппа\b")
 _NAME_WORD = re.compile(r"[а-яa-z]+")
 _NICKNAMES = {
     "екатерина": ("катя",), "николай": ("коля",), "софия": ("соня",), "софья": ("соня",),
@@ -90,7 +93,7 @@ def _parse_slot(line: str) -> Slot | None:
     explicit = _MINUTES.fullmatch(names)
     duration = None
     if explicit:
-        names, duration = explicit[1], int(explicit[2])
+        names, duration = explicit[1], int(explicit[2] or explicit[3])
         if duration <= 0:
             return None
     end = None
@@ -105,52 +108,98 @@ def _parse_slot(line: str) -> Slot | None:
     return Slot(time, at, names, duration, end=end)
 
 
-def parse_schedule(
-    text: str, published: date, *, accept_weekday: bool = True, accept_plain_title: bool = False,
-) -> tuple[date, list[Slot]] | None:
+def _schedule_lines(text: str) -> tuple[str, list[str]]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if lines and _GREETING.fullmatch(_plain(lines[0])):
         lines = lines[1:]
     if not lines:
-        return None
+        return "", []
     title = _plain(lines[0]).rstrip(":")
+    greeting = _GREETING.match(title)
+    if greeting and title[greeting.end():].startswith(" "):
+        title = title[greeting.end():].strip()
+    return title, lines[1:]
+
+
+def _parse_slots(lines: list[str]) -> list[Slot] | None:
+    slots: list[Slot] = []
+    for line in lines:
+        slot = _parse_slot(line)
+        if slot is None or (slots and slot.at <= slots[-1].at):
+            return None
+        slots.append(slot)
+    for i, slot in enumerate(slots[:-1]):
+        gap = slots[i + 1].at - slot.at
+        if slot.names and slot.duration is None and gap in DRAFT_DURATIONS:
+            slots[i] = replace(slot, duration=gap, suggested=True)
+    return slots or None
+
+
+def parse_schedule(
+    text: str, published: date, *, accept_weekday: bool = True, accept_plain_title: bool = False,
+) -> tuple[date, list[Slot]] | None:
+    title, lines = _schedule_lines(text)
     header = _HEADER.fullmatch(title)
     plain_header = _PLAIN_HEADER.fullmatch(title) if accept_plain_title and header is None else None
-    first_slot = 1
     if header:
         day = _plan_day(header[1] or "", published)
     elif plain_header:
         label = plain_header[1] or ""
-        if not label and len(lines) > 1:
-            next_line = _plain(lines[1]).rstrip(":")
+        if not label and lines:
+            next_line = _plain(lines[0]).rstrip(":")
             if _DAY_HEADER.fullmatch(next_line) or next_line in ("сегодня", "завтра"):
                 label = next_line
-                first_slot += 1
+                lines = lines[1:]
         day = _plan_day(label, published)
     else:
         day = _plan_day(title, published) if accept_weekday and _DAY_HEADER.fullmatch(title) else None
     if day is None:
         return None
-    slots: list[Slot] = []
-    for line in lines[first_slot:]:
-        slot = _parse_slot(line)
-        if slot is None:
-            return None  # в том числе второй заголовок с расписанием другого педагога
-        if slots and slot.at <= slots[-1].at:
-            return None
-        slots.append(slot)
+    slots = _parse_slots(lines)
     if not slots or (plain_header and not any(slot.names for slot in slots)):
         return None
-    for i, slot in enumerate(slots[:-1]):
-        gap = slots[i + 1].at - slot.at
-        if slot.names and slot.duration is None and gap in DRAFT_DURATIONS:
-            slots[i] = replace(slot, duration=gap, suggested=True)
     return day, slots
+
+
+def _parse_week_schedule(text: str, published: date, *, accept_plain_title: bool) -> dict[date, list[Slot]]:
+    title, lines = _schedule_lines(text)
+    header = _HEADER.fullmatch(title) or (_PLAIN_HEADER.fullmatch(title) if accept_plain_title else None)
+    if header is None:
+        return {}
+    label = header[1] or ""
+    week = _WEEK.fullmatch(label)
+    if label and week is None:
+        return {}
+    monday = published - timedelta(days=published.weekday())
+    if week and week[1] == "следующую":
+        monday += timedelta(days=7)
+    sections: dict[date, list[str]] = {}
+    day = None
+    for line in lines:
+        heading = _plain(line).rstrip(":")
+        if _DAY_HEADER.fullmatch(heading):
+            day = _plan_day(heading, monday)
+            if day is None or day in sections or not 0 <= (day - monday).days < 7:
+                return {}
+            sections[day] = []
+        elif day is None:
+            return {}
+        else:
+            sections[day].append(line)
+    if not sections or (week is None and len(sections) < 2):
+        return {}
+    plans: dict[date, list[Slot]] = {}
+    for day, rows in sections.items():
+        slots = _parse_slots(rows)
+        if slots is None:
+            return {}
+        plans[day] = slots
+    return plans
 
 
 def _slot_kind(slot: dict) -> str:
     label = _plain(slot["names"]).rstrip(".!")
-    inferred = "free" if label in ("", "свободно") else "group" if label == "группа" else "individual"
+    inferred = "free" if label in ("", "свободно") else "group" if _GROUP.search(label) else "individual"
     return slot.get("kind", inferred)
 
 
@@ -311,7 +360,7 @@ class DraftConflict(Exception):
 class SchedulePilot:
     def __init__(
         self, chat_id: int, tg_id: int, teacher_id: str, path: Path, *,
-        accept_weekday: bool = True, accept_plain_title: bool = False,
+        accept_weekday: bool = True, accept_plain_title: bool = False, accept_weekly: bool = False,
     ):
         self.chat_id = chat_id
         self.tg_id = tg_id
@@ -319,6 +368,7 @@ class SchedulePilot:
         self.path = path
         self.accept_weekday = accept_weekday
         self.accept_plain_title = accept_plain_title
+        self.accept_weekly = accept_weekly
         self.lock = asyncio.Lock()
 
     def owns(self, user: User) -> bool:
@@ -331,19 +381,27 @@ class SchedulePilot:
                 or sender.is_bot or message.sender_chat is not None or message.forward_origin is not None):
             return
         published = message.date.astimezone(_MOSCOW)
-        parsed = parse_schedule(message.text or "", published.date(),
+        text = message.text or ""
+        parsed = parse_schedule(text, published.date(),
                                 accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title)
-        if parsed is None and not edited:
+        plans: dict[int, tuple[date, list[Slot]]] = {}
+        if parsed is not None:
+            plans[message.message_id] = parsed
+        elif self.accept_weekly:
+            for day, slots in _parse_week_schedule(text, published.date(), accept_plain_title=self.accept_plain_title).items():
+                draft_id = -(message.message_id * _WEEK_DRAFT_STRIDE + day.weekday())
+                plans[draft_id] = (day, slots)
+        if not plans and not edited:
             return
-        payload = None
-        if parsed:
-            day, slots = parsed
-            payload = json.dumps({"date": day.isoformat(), "published": published.isoformat(),
+        payloads = {
+            draft_id: json.dumps({"date": day.isoformat(), "published": published.isoformat(),
                                   "slots": [asdict(slot) for slot in slots]}, ensure_ascii=False)
+            for draft_id, (day, slots) in plans.items()
+        }
         modified = message.edit_date
         version = int(modified.timestamp()) if isinstance(modified, datetime) else modified or int(message.date.timestamp())
-        stored = await asyncio.to_thread(self._save, message.message_id, version, update_id, payload)
-        if stored and payload:
+        stored = await asyncio.to_thread(self._save, message.message_id, version, update_id, payloads)
+        if stored and plans:
             logger.info("Черновик расписания получен: чат %s, пост %s, педагог %s",
                         self.chat_id, message.message_id, self.teacher_id)
 
@@ -367,23 +425,38 @@ class SchedulePilot:
         )""")
         return conn
 
-    def _save(self, message_id: int, version: int, update_id: int, payload: str | None) -> bool:
+    def _save(self, message_id: int, version: int, update_id: int, payloads: dict[int, str]) -> bool:
+        account = (self.chat_id, self.tg_id, self.teacher_id)
         with closing(self._open()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
-            key = (self.chat_id, self.tg_id, self.teacher_id, message_id)
-            previous = conn.execute("""SELECT d.payload, e.payload FROM drafts AS d JOIN draft_edits AS e
+            current = conn.execute("""SELECT version, update_id FROM drafts
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""",
+                (*account, message_id)).fetchone()
+            if current is not None and current >= (version, update_id):
+                return False
+            week_key = -message_id * _WEEK_DRAFT_STRIDE
+            older_days = conn.execute("""SELECT message_id FROM drafts
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id BETWEEN ? AND ?
+                    AND payload IS NOT NULL""", (*account, week_key - 6, week_key)).fetchall()
+            draft_ids = {message_id, *payloads, *(draft_id for (draft_id,) in older_days)}
+            for draft_id in draft_ids:
+                self._save_draft(conn, draft_id, version, update_id, payloads.get(draft_id))
+            return True
+
+    def _save_draft(self, conn: sqlite3.Connection, draft_id: int, version: int, update_id: int, payload: str | None) -> None:
+        key = (self.chat_id, self.tg_id, self.teacher_id, draft_id)
+        previous = conn.execute("""SELECT d.payload, e.payload FROM drafts AS d JOIN draft_edits AS e
                 USING (chat_id, sender_id, teacher_id, message_id)
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""", key).fetchone()
-            if previous and any("telegram_time" not in s for s in json.loads(previous[1])["slots"]):
-                normalized = _telegram_plan(previous[1], previous[0])
-                conn.execute("""UPDATE draft_edits SET payload=?
-                    WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""",
-                    (json.dumps(normalized, ensure_ascii=False), *key))
-            cursor = conn.execute("""INSERT INTO drafts VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO UPDATE SET version=excluded.version, update_id=excluded.update_id,
-                payload=excluded.payload WHERE (excluded.version, excluded.update_id) > (drafts.version, drafts.update_id)
-            """, (*key, version, update_id, payload))
-            return cursor.rowcount > 0
+        if previous and any("telegram_time" not in s for s in json.loads(previous[1])["slots"]):
+            normalized = _telegram_plan(previous[1], previous[0])
+            conn.execute("""UPDATE draft_edits SET payload=?
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id=?""",
+                (json.dumps(normalized, ensure_ascii=False), *key))
+        conn.execute("""INSERT INTO drafts VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO UPDATE SET version=excluded.version, update_id=excluded.update_id,
+            payload=excluded.payload
+        """, (*key, version, update_id, payload))
 
     def _latest(self) -> list[tuple]:
         with closing(self._open()) as conn:
@@ -391,8 +464,8 @@ class SchedulePilot:
                     e.revision, e.source_revision, e.payload
                 FROM drafts AS d LEFT JOIN draft_edits AS e USING (chat_id, sender_id, teacher_id, message_id)
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND (d.payload IS NOT NULL OR e.payload IS NOT NULL)
-                ORDER BY message_id DESC LIMIT 10""",
-                (self.chat_id, self.tg_id, self.teacher_id)))
+                ORDER BY CASE WHEN message_id < 0 THEN -message_id / ? ELSE message_id END DESC, message_id DESC
+                LIMIT 10""", (self.chat_id, self.tg_id, self.teacher_id, _WEEK_DRAFT_STRIDE)))
 
     @staticmethod
     def _source_revision(version: int, update_id: int) -> str:
@@ -471,10 +544,11 @@ class SchedulePilot:
         chat_slug = str(self.chat_id).removeprefix("-100")
         result = []
         for message_id, version, update_id, source, revision, base, edit in await asyncio.to_thread(self._latest):
+            source_id = -message_id // _WEEK_DRAFT_STRIDE if message_id < 0 else message_id
             latest = self._source_revision(version, update_id)
             plan = self._view(_telegram_plan(edit or source, source), names)
             plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
-                        source=f"https://t.me/c/{chat_slug}/{message_id}", sourceUpdated=bool(edit and base != latest))
+                        source=f"https://t.me/c/{chat_slug}/{source_id}", sourceUpdated=bool(edit and base != latest))
             outcomes = await self.outcomes(message_id)
             for slot in plan["slots"]:
                 status, lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))
@@ -490,7 +564,7 @@ class SchedulePilot:
 
 
 class SchedulePilots:
-    """Один источник и один изолированный черновик на аккаунт педагога."""
+    """Изолированные черновики из одного источника на аккаунт педагога."""
 
     def __init__(self, accounts: list[SchedulePilot]):
         self.accounts = {pilot.tg_id: pilot for pilot in accounts}

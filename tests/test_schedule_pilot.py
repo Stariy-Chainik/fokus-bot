@@ -97,6 +97,7 @@ def test_plain_schedule_title_defaults_to_publication_day_and_can_specify_a_day(
     for title, expected in (
         ("Расписание:", published),
         ("Добрый день!\nРасписание на пятницу", date(2026, 11, 20)),
+        ("Добрый вечер!\nРасписание занятий на пятницу", date(2026, 11, 20)),
         ("Моё расписание\nПятница:", date(2026, 11, 20)),
     ):
         text = f"{title}\n17.00 Иванов Иван\n18:00 Петрова Анна"
@@ -110,6 +111,7 @@ def test_plain_schedule_title_defaults_to_publication_day_and_can_specify_a_day(
 
     for text in (
         "Расписание Леры на четверг\n17:00 Иванов Иван",
+        "Расписание занятий Леры на четверг\n17:00 Иванов Иван",
         "Расписание\nЛера\n17:00 Иванов Иван",
         "Обсудим расписание завтра\n17:00 Иванов Иван",
         "Расписание\n17:00\n18:00 свободно",
@@ -239,20 +241,23 @@ def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monke
 
     async def incoming():
         await pilots.receive(_message("Расписание:\n17:00 Иванов Иван 30", uid=nazar), 4, edited=False)
-        await pilots.receive(_message("Расписание на четверг\n18:00 Петрова Анна 90", uid=ivan), 5, edited=False)
+        post = "Расписание занятий на четверг\n18:00 Петрова Анна 90\n19:30 группа (начинающие)"
+        await pilots.receive(_message(post, uid=ivan), 5, edited=False)
 
     asyncio.run(unrelated())
     for teacher in (nazar, ivan):
         assert call_teacher(app, "GET", route, tg_id=teacher) == (
-            200, {"drafts": [], "acceptWeekday": False, "acceptPlainTitle": True},
+            200, {"drafts": [], "acceptWeekday": False, "acceptPlainTitle": True, "acceptWeekly": False},
         )
     asyncio.run(incoming())
     view_nazar = call_teacher(app, "GET", route, tg_id=nazar)[1]["drafts"][0]
     view_ivan = call_teacher(app, "GET", route, tg_id=ivan)[1]["drafts"][0]
     assert [s["time"] for s in view_nazar["slots"]] == ["17:00"]
     assert view_nazar["slots"][0]["studentIds"] == []
-    assert [s["time"] for s in view_ivan["slots"]] == ["18:00"]
+    assert [s["time"] for s in view_ivan["slots"]] == ["18:00", "19:30"]
     assert view_ivan["slots"][0]["studentIds"] == ["STU-0002"]
+    assert view_ivan["slots"][1]["kind"] == "group"
+    assert view_ivan["slots"][1]["text"] == "группа (начинающие)"
     assert call_teacher(app, "GET", "/api/teacher/home", tg_id=nazar)[1]["schedulePilot"] is True
     assert call_teacher(app, "GET", "/api/teacher/home", tg_id=ivan)[1]["schedulePilot"] is True
 
@@ -264,6 +269,50 @@ def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monke
     assert call_teacher(app, "PUT", route + "/17", tg_id=nazar, json=updated)[0] == 400
     updated["slots"][0]["duration"] = 60
     assert call_teacher(app, "PUT", route + "/17", tg_id=nazar, json=updated)[0] == 200
+
+
+def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, tmp_path):
+    app, dp = make_api(monkeypatch)
+    db = tmp_path / "week.db"
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", db, accept_plain_title=True, accept_weekly=True)
+    dp["schedule_pilots"] = SchedulePilots([pilot])
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+    path = "/api/teacher/schedule-drafts"
+    post = ("Добрый день! Расписание со мной на эту неделю\n"
+            "ВТОРНИК\n17:15 Иванов Иван (60)\n18:15\n"
+            "СРЕДА\n17:15 Петрова Анна\n18:00 группа (начинающие)\n18:45")
+
+    def current():
+        return call_teacher(app, "GET", path, tg_id=ADMIN_TG)[1]["drafts"]
+
+    asyncio.run(pilot.receive(_message(post.replace("со мной", "Леры")), 1, edited=False))
+    assert current() == []
+    asyncio.run(pilot.receive(_message(post), 2, edited=False))
+    tuesday, wednesday = current()
+    assert (tuesday["date"], wednesday["date"]) == ("2026-11-17", "2026-11-18")
+    assert tuesday["id"] != wednesday["id"]
+    assert tuesday["source"] == wednesday["source"] == "https://t.me/c/1111111111/17"
+    assert [(s["duration"], s["suggested"], s["kind"]) for s in tuesday["slots"]] == [
+        (60, False, "individual"), (None, False, "free"),
+    ]
+    assert [(s["duration"], s["kind"]) for s in wednesday["slots"]] == [
+        (45, "individual"), (45, "group"), (None, "free"),
+    ]
+    tuesday["slots"][0]["duration"] = 90
+    assert call_teacher(app, "PUT", f'{path}/{tuesday["id"]}', tg_id=ADMIN_TG, json=tuesday)[0] == 200
+    marked = {**wednesday, "actions": [{"time": "17:15", "status": "cancelled"}]}
+    before = list(dp["lesson_repo"].items)
+    assert call_teacher(app, "POST", f'{path}/{wednesday["id"]}/attendance', tg_id=ADMIN_TG, json=marked)[0] == 200
+    assert dp["lesson_repo"].items == before
+
+    revised = post.replace("17:15 Иванов", "17:00 Иванов").split("СРЕДА")[0]
+    asyncio.run(pilot.receive(_message(revised, edited=True), 3, edited=True))
+    asyncio.run(pilot.receive(_message(post), 2, edited=False))
+    tuesday, wednesday = current()
+    assert tuesday["slots"][0]["time"] == "17:15" and tuesday["slots"][0]["duration"] == 90
+    assert tuesday["sourceUpdated"] and tuesday["telegram"]["slots"][0]["time"] == "17:00"
+    assert wednesday["sourceUpdated"] and "telegram" not in wednesday
+    assert wednesday["slots"][0]["status"] == "cancelled"
 
 
 def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkeypatch, tmp_path):

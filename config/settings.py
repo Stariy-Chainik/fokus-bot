@@ -9,6 +9,7 @@ class SchedulePilotAccount(BaseModel):
     tg_id: int = Field(gt=0)
     accept_weekday: bool = True
     accept_plain_title: bool = False
+    accept_weekly: bool = False
 
 
 class Settings(BaseSettings):
