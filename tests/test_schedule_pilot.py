@@ -136,6 +136,39 @@ def test_duration_inference_uses_next_row_and_keeps_explicit_values():
     ]
 
 
+@pytest.mark.parametrize(
+    ("text", "day", "times"),
+    [
+        ("С.А.\n17:00 Иванов Иван", 19, ["17:00"]),
+        ("С.А.:\nСуббота\n10.30 Иванов Иван\n15.15 Анна", 21, ["10:30", "15:15"]),
+        ("С.А. на субботу\n17:00 Иванов Иван", 21, ["17:00"]),
+        ("С.А. 17:00 Иванов Иван", 19, ["17:00"]),
+        ("Пятница:\nС.А.\nРасписание со мной пт\n♦️ 17:00 Иванов Иван\n♦️\n♦️ 19:15 Анна", 20,
+         ["17:00", "19:15"]),
+    ],
+)
+def test_owner_initials_mark_personal_schedule(text, day, times):
+    published = date(2026, 11, 19)
+    assert parse_schedule(text, published, accept_plain_title=True) is None
+    parsed = parse_schedule(text, published, accept_owner_initials=True)
+    assert parsed is not None
+    when, slots = parsed
+    assert when == date(2026, 11, day)
+    assert [slot.time for slot in slots] == times
+    assert slots[0].names == "Иванов Иван"
+
+
+def test_owner_initials_do_not_override_author_or_conflicting_date():
+    published = date(2026, 11, 19)
+    for text in (
+        "10.30 Иванов Иван\n15.15 Анна",
+        "С.А.\nВлад\n17:00 Иванов Иван",
+        "Расписание Владa на субботу\nС.А.\n17:00 Иванов Иван",
+        "С.А. на субботу\nПятница\n17:00 Иванов Иван",
+    ):
+        assert parse_schedule(text, published, accept_owner_initials=True) is None
+
+
 def test_matching_requires_a_unique_student_or_pair():
     students = StudentNames([
         Student("a", "Зотов Антон", partner_id="p"),

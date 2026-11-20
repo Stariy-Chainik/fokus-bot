@@ -207,7 +207,10 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
             for account in settings.schedule_pilot_accounts
         ]
         if settings.schedule_pilot_tg_id and settings.schedule_pilot_teacher_id:
-            pilots.append(SchedulePilot(chat, settings.schedule_pilot_tg_id, settings.schedule_pilot_teacher_id, path))
+            pilots.append(SchedulePilot(
+                chat, settings.schedule_pilot_tg_id, settings.schedule_pilot_teacher_id, path,
+                accept_owner_initials=settings.schedule_pilot_teacher_id in settings.owner_teacher_id_set,
+            ))
         if pilots:
             schedule_pilots = SchedulePilots(pilots)
             dp["schedule_pilots"] = schedule_pilots

@@ -20,17 +20,20 @@ from bot.models import Student, User
 logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
-_GREETING = re.compile(r"(?:доброе утро|добрый день|добрый вечер|здравствуйте|всем привет)[!.,]*")
+_GREETING = re.compile(r"(?:доброе\s+утро|добрый\s+день|добрый\s+вечер|здравствуйте|всем\s+привет)[!.,]*")
 _HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:на )?(.+?))?[:.!]?")
 _PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:на )?(.+?))?[.!]?")
 _WEEK = re.compile(r"(?:на )?(?:(эту|текущую|следующую) )?неделю")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _WEEKDAYS = {**{day: index for index, day in enumerate(_DAYS)}, "среду": 2, "пятницу": 4, "субботу": 5}
 _DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
+_OWNER_INITIALS = re.compile(r"с\.\s*а\.(?:(?:\s*:\s*|\s+)(.+))?", re.IGNORECASE)
+_SHORT_DAYS = dict(zip(("пн", "вт", "ср", "чт", "пт", "сб", "вс"), _DAYS, strict=True))
 _WEEK_DRAFT_STRIDE = 8  # семь отрицательных ключей на сообщение, по одному для каждого дня
 _TIME = r"(?:[01]?\d|2[0-3])[:.][0-5]\d"
+_SLOT_BULLET = r"[♦🔶🔷🔸🔹◆▪•-]\ufe0f?"
 _SLOT = re.compile(
-    rf"(?:[♦🔶🔷🔸🔹◆▪•-]\ufe0f?\s*)?(?P<start>{_TIME})"
+    rf"(?:{_SLOT_BULLET}\s*)?(?P<start>{_TIME})"
     rf"(?:\s*[-–—]\s*(?P<end>{_TIME}))?(?:(?:\s*[-–—]\s*|\s+)(?P<names>.+))?",
 )
 _MINUTES = re.compile(r"(.+?)\s+(?:\((\d{1,3})\)|(\d{1,3})(?:\s*мин\.?)?)", re.IGNORECASE)
@@ -114,9 +117,9 @@ def _schedule_lines(text: str) -> tuple[str, list[str]]:
         lines = lines[1:]
     if not lines:
         return "", []
-    title = _plain(lines[0]).rstrip(":")
-    greeting = _GREETING.match(title)
-    if greeting and title[greeting.end():].startswith(" "):
+    title = lines[0].rstrip(":").strip()
+    greeting = _GREETING.match(title.casefold())
+    if greeting and title[greeting.end():greeting.end() + 1].isspace():
         title = title[greeting.end():].strip()
     return title, lines[1:]
 
@@ -135,10 +138,50 @@ def _parse_slots(lines: list[str]) -> list[Slot] | None:
     return slots or None
 
 
+def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tuple[date, list[Slot]] | None:
+    has_initials = False
+    day = None
+    intro_and_slots = [title, *lines]
+    for index, raw_line in enumerate(intro_and_slots):
+        line = _plain(raw_line).rstrip(":")
+        initials = _OWNER_INITIALS.fullmatch(raw_line.rstrip(":").strip())
+        header = _HEADER.fullmatch(line) or _PLAIN_HEADER.fullmatch(line)
+        if initials:
+            has_initials = True
+            tail = initials[1] or ""
+            if _SLOT.fullmatch(tail):
+                intro_and_slots[index] = tail
+                break
+            label = _plain(tail).removeprefix("на ")
+        elif header:
+            label = header[1] or ""
+        elif _DAY_HEADER.fullmatch(line) or line in _SHORT_DAYS:
+            label = line
+        else:
+            break
+        if label:
+            candidate = _plan_day(_SHORT_DAYS.get(label, label), published)
+            if candidate is None or (day and day != candidate):
+                return None
+            day = candidate
+    else:
+        return None
+    if not has_initials:
+        return None
+    slots = _parse_slots([line for line in intro_and_slots[index:] if not re.fullmatch(_SLOT_BULLET, line)])
+    return (day or published, slots) if slots and any(slot.names for slot in slots) else None
+
+
 def parse_schedule(
     text: str, published: date, *, accept_weekday: bool = True, accept_plain_title: bool = False,
+    accept_owner_initials: bool = False,
 ) -> tuple[date, list[Slot]] | None:
     title, lines = _schedule_lines(text)
+    if accept_owner_initials:
+        owner_plan = _parse_owner_schedule(title, lines, published)
+        if owner_plan is not None:
+            return owner_plan
+    title = _plain(title)
     header = _HEADER.fullmatch(title)
     plain_header = _PLAIN_HEADER.fullmatch(title) if accept_plain_title and header is None else None
     if header:
@@ -163,6 +206,7 @@ def parse_schedule(
 
 def _parse_week_schedule(text: str, published: date, *, accept_plain_title: bool) -> dict[date, list[Slot]]:
     title, lines = _schedule_lines(text)
+    title = _plain(title)
     header = _HEADER.fullmatch(title) or (_PLAIN_HEADER.fullmatch(title) if accept_plain_title else None)
     if header is None:
         return {}
@@ -361,6 +405,7 @@ class SchedulePilot:
     def __init__(
         self, chat_id: int, tg_id: int, teacher_id: str, path: Path, *,
         accept_weekday: bool = True, accept_plain_title: bool = False, accept_weekly: bool = False,
+        accept_owner_initials: bool = False,
     ):
         self.chat_id = chat_id
         self.tg_id = tg_id
@@ -369,6 +414,7 @@ class SchedulePilot:
         self.accept_weekday = accept_weekday
         self.accept_plain_title = accept_plain_title
         self.accept_weekly = accept_weekly
+        self.accept_owner_initials = accept_owner_initials
         self.lock = asyncio.Lock()
 
     def owns(self, user: User) -> bool:
@@ -382,8 +428,10 @@ class SchedulePilot:
             return
         published = message.date.astimezone(_MOSCOW)
         text = message.text or ""
-        parsed = parse_schedule(text, published.date(),
-                                accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title)
+        parsed = parse_schedule(
+            text, published.date(), accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title,
+            accept_owner_initials=self.accept_owner_initials,
+        )
         plans: dict[int, tuple[date, list[Slot]]] = {}
         if parsed is not None:
             plans[message.message_id] = parsed

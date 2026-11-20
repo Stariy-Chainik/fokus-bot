@@ -731,7 +731,7 @@ SCREENS['a.profit.profit'] = async ({ ym }) => {
   return { title: `Прибыль за ${fmon(ym)}`, html: `
     <div class="card pad money" style="display:grid;gap:6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;color:var(--ok)">${fmt(t.profit)}</div>
       ${moneyRow('Выручка', fmt(t.totalIncome))}${moneyRow('занятия', fmt(t.lessonIncome), '', true)}${moneyRow('абонементы', fmt(t.subscriptionIncome), '', true)}${moneyRow('прочие доходы', fmt(t.manualIncome), '', true)}
-      ${moneyRow('− Зарплата педагогов', fmt(t.salary), 'var(--bad)')}${t.ownerIncome ? moneyRow('👑 руководитель остаётся в прибыли', fmt(t.ownerIncome), '', true) : ''}
+      ${moneyRow('− Зарплата педагогов', fmt(t.salary), 'var(--bad)')}
       ${moneyRow('− Расходы', fmt(t.manualExpenses), 'var(--bad)')}</div>
     <div class="eyebrow">Зарплата по педагогам</div>${b.rows.length ? list(b.rows.map(r => cell({ lead: r.owner ? '👑' : initials(r.name), t: esc(r.name), s: `выручка ${fmt(r.income)} → прибыль ${fmt(r.profit)}`, r: r.owner ? pill('в прибыли', 'warn') : `<b style="color:var(--bad)">− ${fmt(r.salary)}</b>`, go: 'a.profit.teacher', p: { period: ym, tid: r.teacherId } }))) : empty('Занятий нет', '<p class="hint" style="margin:0">Отметьте занятие или выберите другой день</p>')}
     ${b.finance.some(f => f.kind === 'expense') ? `<div class="eyebrow">Расходы</div>${list(b.finance.filter(f => f.kind === 'expense').map(f => cell({ lead: '📉', plain: true, t: esc(f.title), r: `<b style="color:var(--bad)">− ${fmt(f.amount)}</b>` })))}` : ''}
