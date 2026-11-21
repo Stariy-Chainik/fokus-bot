@@ -155,7 +155,31 @@ const groupsShort = (groups, limit = 1) => {
 const stickyFilters = inner => `<div class="filters">${inner}</div>`;
 const searchBox = (id, placeholder, value = '', extra = '') => `<div class="search-box"><input class="search" id="${id}" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off" ${extra}><button type="button" class="search-x${value ? ' on' : ''}" data-act="searchClear" data-p='${esc(JSON.stringify({ id }))}' aria-label="Очистить">×</button></div>`;
 const attr = (go, p) => go ? `data-go="${go}" data-p='${esc(JSON.stringify(p || {}))}'` : '';
-const cell = ({ lead, t, s, r, go, p, act, plain, cls = '' }) => `<button class="cell ${lead === undefined ? 'nolead' : ''} ${go || act ? '' : 'static'} ${cls}" ${go ? attr(go, p) : act ? `data-act="${act}" data-p='${esc(JSON.stringify(p || {}))}'` : ''}>${lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : ''}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
+let _icSeq = 0;
+/* Градиентные SVG-иконки для ключевых карточек (единый стиль с таббаром). */
+function cardIcon(k) {
+  const u = ++_icSeq;
+  const m = {
+    inbox: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FBBF24"/><stop offset="100%" stop-color="#D97706"/></linearGradient></defs><path d="M4.5 5.5A2.5 2.5 0 0 1 7 3h10a2.5 2.5 0 0 1 2.5 2.5L21 14v4.5A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5V14l1.5-8.5Z" fill="url(#ci1_${u})"/><path d="M3 14h5.2l1.6 2.5h4.4L15.8 14H21" fill="none" stroke="#FFFBEB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    debt: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FB7185"/><stop offset="100%" stop-color="#B91C1C"/></linearGradient></defs><path d="M10.3 3.9a2 2 0 0 1 3.4 0l7.7 13.4A2 2 0 0 1 19.7 20H4.3a2 2 0 0 1-1.7-2.7l7.7-13.4Z" fill="url(#ci1_${u})"/><path d="M12 9v4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1.2" fill="#fff"/></svg>`,
+    bell: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#818CF8"/><stop offset="100%" stop-color="#4338CA"/></linearGradient></defs><path d="M18 15.5V10a6 6 0 1 0-12 0v5.5L4 17.5v1h16v-1l-2-2Z" fill="url(#ci1_${u})"/><path d="M9.8 19.5a2.4 2.4 0 0 0 4.4 0" fill="#FBBF24"/></svg>`,
+    trophy: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FDE047"/><stop offset="100%" stop-color="#D97706"/></linearGradient></defs><path d="M7 6H4v2.5a3 3 0 0 0 3 3M17 6h3v2.5a3 3 0 0 1-3 3" fill="none" stroke="#D97706" stroke-width="2" stroke-linecap="round"/><path d="M7 4h10v5.5a5 5 0 0 1-10 0V4Z" fill="url(#ci1_${u})"/><rect x="10.8" y="14.5" width="2.4" height="4" fill="#D97706"/><rect x="7.5" y="18.2" width="9" height="2.6" rx="1.3" fill="url(#ci1_${u})"/></svg>`,
+    pay: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#059669"/></linearGradient></defs><circle cx="12" cy="12" r="9.5" fill="url(#ci1_${u})"/><path d="m8 12.2 2.8 2.8L16.5 9.2" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    bill: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#38BDF8"/><stop offset="100%" stop-color="#0369A1"/></linearGradient></defs><path d="M5 3.5h14v17l-2.3-1.5-2.3 1.5L12 19l-2.4 1.5-2.3-1.5L5 20.5v-17Z" fill="url(#ci1_${u})"/><path d="M8.5 8.5h7M8.5 12.2h5M8.5 15.8h3.5" stroke="#E0F2FE" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    history: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#60A5FA"/><stop offset="100%" stop-color="#2563EB"/></linearGradient></defs><circle cx="12" cy="12" r="9.5" fill="url(#ci1_${u})"/><path d="M12 7v5.2l3.6 2.1" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    profit: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FB7185"/><stop offset="100%" stop-color="#A3123E"/></linearGradient><linearGradient id="ci2_${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FCD34D"/><stop offset="100%" stop-color="#D97706"/></linearGradient></defs><rect x="3" y="13" width="4.8" height="8" rx="2" fill="url(#ci1_${u})" opacity=".72"/><rect x="9.6" y="3.5" width="4.8" height="17.5" rx="2" fill="url(#ci1_${u})"/><rect x="16.2" y="8.5" width="4.8" height="12.5" rx="2" fill="url(#ci2_${u})"/></svg>`,
+    plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4ADE80"/><stop offset="100%" stop-color="#15803D"/></linearGradient></defs><circle cx="12" cy="12" r="9.5" fill="url(#ci1_${u})"/><path d="M12 7.5v9M7.5 12h9" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+    minus: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FB923C"/><stop offset="100%" stop-color="#DC2626"/></linearGradient></defs><circle cx="12" cy="12" r="9.5" fill="url(#ci1_${u})"/><path d="M7.5 12h9" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+    salary: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#047857"/></linearGradient><linearGradient id="ci2_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FDE68A"/><stop offset="100%" stop-color="#D97706"/></linearGradient></defs><rect x="2.5" y="6" width="18" height="14" rx="3.2" fill="url(#ci1_${u})"/><rect x="14.5" y="10.6" width="7" height="4.8" rx="2.4" fill="url(#ci2_${u})"/><circle cx="17.2" cy="13" r="1" fill="#78350F"/></svg>`,
+    chat: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FB7185"/><stop offset="100%" stop-color="#A3123E"/></linearGradient></defs><path d="M4 6.5A3.5 3.5 0 0 1 7.5 3h9A3.5 3.5 0 0 1 20 6.5v6A3.5 3.5 0 0 1 16.5 16H10l-4.5 4v-4A3.5 3.5 0 0 1 4 12.5v-6Z" fill="url(#ci1_${u})"/><circle cx="9" cy="9.5" r="1.2" fill="#fff"/><circle cx="12" cy="9.5" r="1.2" fill="#fff"/><circle cx="15" cy="9.5" r="1.2" fill="#fff"/></svg>`,
+    family: `<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ci1_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#60A5FA"/><stop offset="100%" stop-color="#1D4ED8"/></linearGradient><linearGradient id="ci2_${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#93C5FD"/><stop offset="100%" stop-color="#3B82F6"/></linearGradient></defs><circle cx="16.5" cy="8.2" r="3" fill="url(#ci2_${u})"/><path d="M13.5 19.5c0-2.5 2-4.2 4.6-4.2 1.8 0 3.2.8 3.9 2.1v2.1h-8.5Z" fill="url(#ci2_${u})"/><circle cx="9.2" cy="7.5" r="3.8" fill="url(#ci1_${u})"/><path d="M2.5 19.5c0-3.3 2.9-5.5 6.7-5.5s6.7 2.2 6.7 5.5c0 .8-.6 1.5-1.4 1.5H3.9c-.8 0-1.4-.7-1.4-1.5Z" fill="url(#ci1_${u})"/></svg>`,
+  };
+  return m[k] || '';
+}
+const cell = ({ lead, icon, t, s, r, go, p, act, plain, cls = '' }) => {
+  const leadHtml = icon ? `<span class="lead ic-svg">${cardIcon(icon)}</span>` : (lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : '');
+  return `<button class="cell ${leadHtml ? '' : 'nolead'} ${go || act ? '' : 'static'} ${cls}" ${go ? attr(go, p) : act ? `data-act="${act}" data-p='${esc(JSON.stringify(p || {}))}'` : ''}>${leadHtml}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
+};
 const list = rows => `<div class="list">${rows.join('')}</div>`;
 const pill = (txt, kind = 'mute') => `<span class="pill ${kind}">${txt}</span>`;
 const btn = (txt, act, p = {}, kind = '') => `<button class="btn ${kind}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${txt}</button>`;
@@ -394,8 +418,8 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase();
   const c = h.collected;
   const attention = [
-    inbox.total ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки родителей', r: pill(inbox.total, 'warn'), go: 'a.inbox' }) : '',
-    h.debtorsCount ? cell({ lead: '⚠️', plain: true, t: 'Должники', s: `за ${prevMon} и раньше · ${fmt(h.debtorsTotal)}`, r: pill(h.debtorsCount, 'bad'), go: 'a.debtors' }) : '',
+    inbox.total ? cell({ icon: 'inbox', t: 'Ждут решения', s: 'чеки, наличные, заявки родителей', r: pill(inbox.total, 'warn'), go: 'a.inbox' }) : '',
+    h.debtorsCount ? cell({ icon: 'debt', t: 'Должники', s: `за ${prevMon} и раньше · ${fmt(h.debtorsTotal)}`, r: pill(h.debtorsCount, 'bad'), go: 'a.debtors' }) : '',
   ].filter(Boolean);
   const today = h.lessonsToday ? `
     <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 'a.lessons.day', { date: h.today })}${kpi(fmt(h.profitToday), `прибыль · выручка ${fmt(h.incomeToday)}`, h.profitToday < 0 ? 'bad' : 'ok', 'a.profit.day', { date: h.today })}</div>
@@ -422,7 +446,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${attention.length ? '' : '<div class="eyebrow">Требует внимания</div><div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
-    <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' }), cell({ lead: '🏆', plain: true, t: 'Турниры', s: h.competitions && h.competitions.count ? `${fmon(h.period).toLowerCase()}: ${plural(h.competitions.count, ['турнир', 'турнира', 'турниров'])} · ${plural(h.competitions.pairs, ['выступление', 'выступления', 'выступлений'])}` : 'результаты наших пар из базы ФТСАРР', go: 'a.competitions', p: { ym: h.period } })])}</div>
+    <div style="margin-top:10px">${list([cell({ icon: 'bell', t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' }), cell({ icon: 'trophy', t: 'Турниры', s: h.competitions && h.competitions.count ? `${fmon(h.period).toLowerCase()}: ${plural(h.competitions.count, ['турнир', 'турнира', 'турниров'])} · ${plural(h.competitions.pairs, ['выступление', 'выступления', 'выступлений'])}` : 'результаты наших пар из базы ФТСАРР', go: 'a.competitions', p: { ym: h.period } })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
 };
@@ -460,22 +484,22 @@ SCREENS['a.money'] = async () => {
   const inbox = await api('/inbox').catch(() => ({ total: 0 }));
   setBadges({ 'a.money': inbox.total || 0 });
   return { title: 'Деньги', html: `
-    ${inbox.total ? list([cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })]) : ''}
+    ${inbox.total ? list([cell({ icon: 'inbox', t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })]) : ''}
     <div class="eyebrow">Оплаты</div>${list([
-      cell({ lead: '💾', plain: true, t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }),
-      cell({ lead: '🧾', plain: true, t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }),
-      cell({ lead: '⚠️', plain: true, t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }),
-      cell({ lead: '📜', plain: true, t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' }),
+      cell({ icon: 'pay', t: 'Подтвердить оплату', s: 'ученик → педагог → занятия', go: 'a.pay' }),
+      cell({ icon: 'bill', t: 'Счёт ученика за период', s: 'просмотр и отправка родителям', go: 'a.pay', p: { bill: true } }),
+      cell({ icon: 'debt', t: 'Должники', s: 'сводный долг по месяцам, напоминание', go: 'a.debtors' }),
+      cell({ icon: 'history', t: 'История оплат', s: 'по фамилии → месяцы → оплаты', go: 'a.payhist.search' }),
     ])}
     <div class="eyebrow">Школа</div>${list([
-      cell({ lead: '📊', plain: true, t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} }),
+      cell({ icon: 'profit', t: 'Прибыль', s: 'месяц или день; доходы и расходы', go: 'a.profit', p: {} }),
       // прочие доходы и расходы месяца — прямо из «Денег», не только со дна экрана «Прибыль» (решение владельца 18.10.2026)
-      cell({ lead: '➕', plain: true, t: 'Записать доход', s: 'турнир, продажа костюмов, аренда зала другим…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'income' } }),
-      cell({ lead: '➖', plain: true, t: 'Записать расход', s: 'аренда, реклама, костюмы, инвентарь…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'expense' } }),
+      cell({ icon: 'plus', t: 'Записать доход', s: 'турнир, продажа костюмов, аренда зала другим…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'income' } }),
+      cell({ icon: 'minus', t: 'Записать расход', s: 'аренда, реклама, костюмы, инвентарь…', act: 'finForm', p: { ym: lastPeriods(1)[0], kind: 'expense' } }),
     ])}
     <div class="eyebrow">Педагоги</div>${list([
       // один вход (решение владельца 01.11.2026): выплата остатка, аванс, премия и нестандартный день — в карточке педагога
-      cell({ lead: '💰', plain: true, t: 'Зарплаты', s: 'начислено, выплаты, аванс, премии', go: 'a.salaries', p: {} }),
+      cell({ icon: 'salary', t: 'Зарплаты', s: 'начислено, выплаты, аванс, премии', go: 'a.salaries', p: {} }),
     ])}
     <p class="hint" style="margin-top:12px">${state.me ? `Вы вошли как администратор (id ${state.me.tgId}).` : ''}</p>` };
 };
@@ -1768,7 +1792,21 @@ document.addEventListener('click', e => {
   if (el.dataset.root) { haptic('select'); closeSheet(); root(el.dataset.root); return; }
   const p = el.dataset.p ? JSON.parse(el.dataset.p) : {};
   if (el.dataset.go) { if (el.dataset.replace) { haptic('select'); state.stack.pop(); } go(el.dataset.go, p); return; }
-  if (el.dataset.act && ACT[el.dataset.act]) { if (el.classList.contains('chip')) haptic('select'); ACT[el.dataset.act](p); }
+  if (el.dataset.act && ACT[el.dataset.act]) {
+    if (el.dataset.busy === '1') return;
+    if (el.classList.contains('chip')) haptic('select');
+    const res = ACT[el.dataset.act](p);
+    if (res && typeof res.then === 'function') {
+      el.dataset.busy = '1';
+      if (el.classList.contains('btn')) el.classList.add('busy');
+      if (el.tagName === 'BUTTON') el.disabled = true;
+      res.finally(() => {
+        delete el.dataset.busy;
+        el.classList.remove('busy');
+        if (el.tagName === 'BUTTON') el.disabled = false;
+      });
+    }
+  }
 });
 const handleBack = () => { if (hasSheet()) { closeSheet(); return; } back(); };
 document.getElementById('back').addEventListener('click', handleBack);

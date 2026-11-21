@@ -153,6 +153,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
                          teacher_repo)
     from bot.services import receipt_check     # сумма в чеке против заявки родителя — сообщение при расхождении
     receipt_check.setup(tg_bot, pending_repo, user_repo)
+    bg_health.setup(tg_bot, user_repo)       # автоалерты админам при сбоях фоновых задач
     cloudkassir_service = CloudKassirService(
         settings.cloudkassir_public_id,
         settings.cloudkassir_api_secret,

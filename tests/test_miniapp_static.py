@@ -175,3 +175,16 @@ def test_all_tab_icons_defined() -> None:
     defined = set(re.findall(r"^\s*([a-z]+):\s*'<svg ", icons_block.group(1), flags=re.M))
     used = set(re.findall(r"\['[^']+',\s*'[^']+',\s*'([a-z]+)'\]", tabs_block.group(1)))
     assert used and not (used - defined), f"не определены иконки вкладок: {used - defined}"
+
+
+def test_all_card_icons_defined() -> None:
+    """Каждая иконка из `cell({ icon: '...' })` должна быть определена в `cardIcon`."""
+    app_src = (MINIAPP / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"function cardIcon\(k\) \{(.*?)\n\}", app_src, flags=re.S)
+    assert block
+    defined = set(re.findall(r"^\s*([a-z]+):\s*`<svg ", block.group(1), flags=re.M))
+    used: set[str] = set()
+    for name in ("app.js", *ROLE_FILES):
+        src = (MINIAPP / name).read_text(encoding="utf-8")
+        used |= set(re.findall(r"cell\(\{[^}]*\bicon:\s*'([a-z]+)'", src))
+    assert used and not (used - defined), f"не определены иконки карточек: {used - defined}"

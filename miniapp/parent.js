@@ -80,12 +80,12 @@ SCREENS['p.home'] = async () => {
     })))}` : ''}
     <div class="eyebrow">Доступ к кабинету</div>
     ${list([cell({
-      lead: '👥', plain: true, t: `Кто привязан к ${many ? 'детям' : 'ребёнку'}`,
+      icon: 'family', t: `Кто привязан к ${many ? 'детям' : 'ребёнку'}`,
       s: many ? h.children.map(c => `${esc(firstName(c.name))}: ${c.parents}`).join(' · ') : (h.children[0].parents > 1 ? plural(h.children[0].parents, ['родитель', 'родителя', 'родителей']) + ' · лишних можно отвязать' : 'только вы'),
       go: 'p.family', p: {},
     })])}
     <div class="eyebrow">Руководитель студии</div>
-    ${list([cell({ lead: '💬', plain: true, t: 'Написать руководителю', s: 'пожелание, замечание, благодарность или вопрос — лично руководителю', go: 'p.feedback', p: {} })])}
+    ${list([cell({ icon: 'chat', t: 'Написать руководителю', s: 'пожелание, замечание, благодарность или вопрос — лично руководителю', go: 'p.feedback', p: {} })])}
     <div style="margin-top:14px">${h.children.map(c => btn(`↩️ ${many ? esc(firstName(c.name)) + ' — ' : ''}это не мой ребёнок`, 'pUnlinkAsk', { id: c.id, name: c.name }, 'ghost')).join('')}</div>` };
 };
 /* «💬 Написать руководителю» (решение владельца 11.11.2026): вид обращения чипом, текст, при нескольких детях —

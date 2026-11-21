@@ -130,6 +130,8 @@
   .cell:not(.static):active { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .cell .lead { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; font-size: 13px; }
   .cell .lead.plain { background: transparent; width: 26px; font-size: 18px; }
+  .cell .lead.ic-svg { background: color-mix(in srgb, var(--line) 42%, transparent); width: 34px; height: 34px; border-radius: 10px; }
+  .cell .lead.ic-svg svg { width: 21px; height: 21px; display: block; }
   .cell.nolead { grid-template-columns: minmax(0, 1fr) auto; }
   .cell .t { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -156,7 +158,9 @@
   .btn.sec { background: var(--accent-soft); color: var(--accent-deep); }
   .btn.ghost { background: transparent; border: 1px solid var(--line-strong); color: var(--ink); }
   .btn.danger { background: var(--bad-soft); color: var(--bad); }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn.busy { pointer-events: none; }
+  .btn.busy::after { content: ''; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; flex: none; }
   .btn + .btn { margin-top: 8px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
   .chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 8px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
@@ -304,7 +308,7 @@
   @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   .fade { animation: fade .16s ease-out; }
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .fade, .skeleton, .sheet, .sheet-wrap, .head-act.spin { animation: none; } .tabs button .ic, .btn { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .fade, .skeleton, .sheet, .sheet-wrap, .head-act.spin, .btn.busy::after { animation: none; } .tabs button .ic, .btn { transition: none; } }
 </style>
 </head>
 <body>
