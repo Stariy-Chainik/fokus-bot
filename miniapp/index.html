@@ -92,14 +92,12 @@
   .head-act.spin { color: var(--accent); animation: spin .75s linear infinite; }
   @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
   .content { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 14px 14px 24px; }
-  .tabs { flex: none; display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); padding: 5px 4px calc(9px + env(safe-area-inset-bottom)); }
-  .tabs button { position: relative; flex: 1; min-width: 0; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; white-space: nowrap; font-weight: 600; color: var(--muted); padding: 3px 0; border-radius: 10px; cursor: pointer; transition: color .15s ease; }
-  .tabs button .ic { position: relative; width: 40px; height: 28px; border-radius: 14px; display: grid; place-items: center; transition: background .15s ease, transform .12s ease; }
-  .tabs button .ic svg { width: 22px; height: 22px; display: block; opacity: .72; filter: saturate(.82); transition: opacity .15s ease, filter .15s ease; }
+  .tabs { flex: none; display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); padding: 6px 4px calc(10px + env(safe-area-inset-bottom)); }
+  .tabs button { position: relative; flex: 1; min-width: 0; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; white-space: nowrap; font-weight: 600; color: var(--muted); padding: 4px 0; border-radius: 10px; cursor: pointer; transition: color .15s ease; }
+  .tabs button .ic { position: relative; font-size: 22px; line-height: 1; width: 40px; height: 26px; border-radius: 13px; display: grid; place-items: center; transition: background .15s ease, transform .12s ease; }
   .tabs button:active .ic { transform: scale(.92); }
   .tabs button[aria-selected="true"] { color: var(--accent); font-weight: 700; }
   .tabs button[aria-selected="true"] .ic { background: var(--accent-soft); }
-  .tabs button[aria-selected="true"] .ic svg { opacity: 1; filter: none; }
   .tabs .badge { position: absolute; top: -3px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 10px; font-weight: 800; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--tab-bg); font-variant-numeric: tabular-nums; pointer-events: none; }
   .tabs .badge.acc { background: var(--accent); color: var(--accent-ink); }
   .tabs .badge.warn { background: var(--warn); color: #fff; }
@@ -130,8 +128,6 @@
   .cell:not(.static):active { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .cell .lead { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; font-size: 13px; }
   .cell .lead.plain { background: transparent; width: 26px; font-size: 18px; }
-  .cell .lead.ic-svg { background: color-mix(in srgb, var(--line) 42%, transparent); width: 34px; height: 34px; border-radius: 10px; }
-  .cell .lead.ic-svg svg { width: 21px; height: 21px; display: block; }
   .cell.nolead { grid-template-columns: minmax(0, 1fr) auto; }
   .cell .t { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .s { font-size: 12.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

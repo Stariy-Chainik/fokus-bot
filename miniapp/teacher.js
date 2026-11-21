@@ -18,7 +18,7 @@ SCREENS['t.home'] = async () => {
   });
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1];
   const attention = [
-    h.inbox ? cell({ icon: 'inbox', t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
+    h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
     h.heldCash ? cell({ lead: '💵', plain: true, t: 'Наличные у вас', s: 'передайте администратору — он зачтёт оплату', r: `<b>${fmt(h.heldCash)}</b>` }) : '',
     // аренда зала за прошлый месяц ещё не перечислена школе (прямая оплата, с месяца начала учёта)
     h.rentDue ? cell({ lead: '🏠', plain: true, t: `Аренда зала за ${MON_NOM[+h.rentDue.period.slice(5) - 1].toLowerCase()}`, s: 'перечислите школе одной суммой', r: `<b>${fmt(h.rentDue.rest)}</b>`, go: 't.money', p: { ym: h.rentDue.period } }) : '',
@@ -52,7 +52,7 @@ SCREENS['t.home'] = async () => {
     ${h.schedulePilot ? `<div style="margin-top:12px">${list([cell({ lead: '📋', plain: true, t: 'Расписание из Telegram', go: 't.schedule.drafts' })])}</div>` : ''}
     <div class="eyebrow">${mon}</div>
     ${list([
-      cell({ icon: 'salary', t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
+      cell({ lead: '💰', plain: true, t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
       ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
       // две цифры рядом: зарплата от школы и аренда зала школе (решение владельца 27.10.2026)
       ...(h.rentMonth ? [cell({ lead: '🏠', plain: true, t: 'Аренда зала школе', s: 'индивидуальные — перечисляете в конце месяца', r: `<b>${fmt(h.rentMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
