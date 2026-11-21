@@ -603,13 +603,13 @@ class Settings(BaseSettings):
 
         for chunk in chunks(self.salary_duration_groups):
             parts = [p.strip() for p in chunk.split(":")]
-            if not (len(parts) == 2 and parts[0] and parts[1].isdigit() and int(parts[1]) > 0):
+            if not (len(parts) == 2 and parts[0] and parts[1].isdigit()):
                 errors.append(f"SALARY_DURATION_GROUPS: некорректная запись {chunk!r}")
 
         for chunk in chunks(self.student_lesson_rates):
             parts = [p.strip() for p in chunk.split(":")]
             if not (len(parts) in (3, 4) and parts[0] and parts[1] and parts[2].isdigit()
-                    and (len(parts) == 3 or not parts[3] or _YM_RE.match(parts[3]))):
+                    and (len(parts) == 3 or not parts[3] or _valid_ym_or_date(parts[3]))):
                 errors.append(f"STUDENT_LESSON_RATES: некорректная запись {chunk!r}")
 
         for chunk in chunks(self.pair_lesson_prices):

@@ -40,6 +40,9 @@ rsync -avz --delete \
   --exclude='.venv' \
   --exclude='.claude' \
   --exclude='.vscode' \
+  --exclude='.mypy_cache' \
+  --exclude='.pytest_cache' \
+  --exclude='.ruff_cache' \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   --exclude='bot.log' \
@@ -52,7 +55,19 @@ echo "→ restart $SERVICE"
 ssh "$HOST" "systemctl restart $SERVICE && sleep 3 && systemctl is-active $SERVICE"
 
 echo "→ health check"
-ssh "$HOST" 'PORT=$(grep -E "^PAYMENT_WEBHOOK_PORT=" /opt/fokus-bot/.env 2>/dev/null | cut -d= -f2 | tr -d " \r" || true); PORT=${PORT:-8081}; curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null && echo "✓ /health ok (port ${PORT})" || echo "⚠ /health check failed on port ${PORT}"'
+ssh "$HOST" '
+PORT=$(grep -E "^PAYMENT_WEBHOOK_PORT=" /opt/fokus-bot/.env 2>/dev/null | cut -d= -f2 | tr -d " \r" || true)
+PORT=${PORT:-8081}
+for i in $(seq 1 15); do
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    echo "✓ /health ok (port ${PORT}, ${i}s)"
+    exit 0
+  fi
+  sleep 1
+done
+echo "⚠ /health check failed on port ${PORT} after 15s" >&2
+exit 1
+'
 
 echo "→ last 20 log lines"
 ssh "$HOST" "journalctl -u $SERVICE -n 20 --no-pager"
