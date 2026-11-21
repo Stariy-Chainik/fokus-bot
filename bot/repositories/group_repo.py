@@ -116,8 +116,9 @@ class GroupRepository(BaseRepository):
                 5: now_str(),
             })
         from bot.services import activity
-        await activity.record(activity.GROUP, f"Биллинг группы {group_id}: {billing_mode.value} · {price_full} ₽"
-                              + (f" · короткий {price_short} ₽" if price_short else ""), ref=group_id)
+        from bot.utils.format import format_money
+        await activity.record(activity.GROUP, f"Биллинг группы {group_id}: {billing_mode.value} · {format_money(price_full)}"
+                              + (f" · короткий {format_money(price_short)}" if price_short else ""), ref=group_id)
         return True
 
     async def set_archived(self, group_id: str, archived: bool) -> bool:

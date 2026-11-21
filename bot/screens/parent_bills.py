@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from bot.services.payment_ledger import lesson_paid_marks
 from bot.utils.bill_format import payment_purpose
 from bot.utils.dates import format_date_display, period_label
+from bot.utils.format import format_money
 from .types import cb, url, webapp
 
 HOME = "go:home"
@@ -72,23 +73,26 @@ def render_bill_detail(
                     for item in unpaid_items:
                         d.lines.append(
                             f"    ⬜ {format_date_display(item.date)}  {item.duration_min} мин"
-                            f"  — {item.amount} руб."
+                            f"  — {format_money(item.amount)}"
                         )
                 if paid_items:
                     d.lines.append("  <b>✅ Оплачено:</b>")
                     for item in paid_items:
                         d.lines.append(
                             f"    ✅ {format_date_display(item.date)}  {item.duration_min} мин"
-                            f"  — {item.amount} руб."
+                            f"  — {format_money(item.amount)}"
                         )
             if ledger.fully_paid:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено</i>\n")
+                d.lines.append(f"  <i>Итого: {format_money(ledger.accrued)} — оплачено</i>\n")
             elif ledger.paid:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб. — оплачено {ledger.paid}, к доплате {ledger.remainder}</i>\n")
+                d.lines.append(
+                    f"  <i>Итого: {format_money(ledger.accrued)} — оплачено {format_money(ledger.paid)},"
+                    f" к доплате {format_money(ledger.remainder)}</i>\n"
+                )
             else:
-                d.lines.append(f"  <i>Итого: {ledger.accrued} руб.</i>\n")
+                d.lines.append(f"  <i>Итого: {format_money(ledger.accrued)}</i>\n")
             if ledger.overpaid:
-                d.lines.append(f"  <i>переплата {ledger.overpaid} руб. — учтём в следующем месяце</i>\n")
+                d.lines.append(f"  <i>переплата {format_money(ledger.overpaid)} — учтём в следующем месяце</i>\n")
             d.grand_total += ledger.accrued
             d.paid_total += ledger.paid
             d.unpaid_total += ledger.remainder
@@ -98,17 +102,17 @@ def render_bill_detail(
             for item in row.lessons:
                 d.lines.append(
                     f"    {format_date_display(item.date)}  {item.duration_min} мин"
-                    f"  — {item.amount} руб."
+                    f"  — {format_money(item.amount)}"
                 )
-            d.lines.append(f"  <i>Итого: {row.total} руб. — оплачивается педагогу напрямую</i>")
+            d.lines.append(f"  <i>Итого: {format_money(row.total)} — оплачивается педагогу напрямую</i>")
             d.lines.append("  <i>в «К оплате» не входит, школа эти занятия не отслеживает</i>\n")
             d.direct_total += row.total
     if d.grand_total == 0 and not d.direct_total:
         d.lines = [f"📋 {period_label(period_month)}\n\nЗанятий не найдено."]
     elif d.unpaid_total > 0:
         if d.paid_total:
-            d.lines.append(f"Оплачено: {d.paid_total} руб.")
-        d.lines.append(f"<b>К оплате: {d.unpaid_total} руб.</b>")
+            d.lines.append(f"Оплачено: {format_money(d.paid_total)}")
+        d.lines.append(f"<b>К оплате: {format_money(d.unpaid_total)}</b>")
     else:
         d.lines.append("✅ Период полностью оплачен")
     return d
@@ -143,7 +147,7 @@ def bills_list_screen(
         text = f"<b>💳 Оплата занятий — {who}</b>" + ("\nДругие месяцы:" if show_older else "")
     rows = [[cb(f"{r.icon} {r.label}", f"client_bill:{student_id}:{r.period}")] for r in period_rows]
     if pay_all and pay_all[1] >= 2:          # «Оплатить всё» — остатки нескольких месяцев разом (как в кабинете)
-        rows.append([cb(f"💳 Оплатить всё · {pay_all[0]} руб. ({pay_all[1]} мес.)", f"client_payall:{student_id}")])
+        rows.append([cb(f"💳 Оплатить всё · {format_money(pay_all[0])} ({pay_all[1]} мес.)", f"client_payall:{student_id}")])
     if show_older:
         rows.append([cb("« К текущим месяцам", f"cl_bills_stu:{student_id}")])
     else:
@@ -168,10 +172,10 @@ def teacher_select_screen(student_id: str, period_month: str, who: str, unpaid: 
     rows = []
     for i, u in enumerate(unpaid):
         mark = "✅" if u["tid"] in chosen else "⬜"
-        rows.append([cb(f"{mark} {u['name']} — {u['amount']} руб.", f"pselt:{i}")])
+        rows.append([cb(f"{mark} {u['name']} — {format_money(u['amount'])}", f"pselt:{i}")])
     total = sum(u["amount"] for u in unpaid if u["tid"] in chosen)
     if total > 0:
-        rows.append([cb(f"➡️ К оплате: {total} руб.", "pselgo")])
+        rows.append([cb(f"➡️ К оплате: {format_money(total)}", "pselgo")])
     rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
     who_part = f" — {who}" if who else ""
     text = (f"<b>💳 Оплата за {period_label(period_month)}{who_part}</b>\n"
@@ -186,15 +190,15 @@ def lesson_select_screen(student_id: str, period_month: str, who: str, name: str
     total = 0
     for i, m in enumerate(marks):
         if m["paid"]:
-            rows.append([cb(f"✅ {format_date_display(m['date'])} — {m['amount']} руб. (оплачено)", "noop")])
+            rows.append([cb(f"✅ {format_date_display(m['date'])} — {format_money(m['amount'])} (оплачено)", "noop")])
             continue
         mark = "☑️" if m["lesson_id"] in chosen else "⬜"
         if m["lesson_id"] in chosen:
             total += m["amount"]
-        rows.append([cb(f"{mark} {format_date_display(m['date'])} · {m['duration_min']} мин — {m['amount']} руб.",
+        rows.append([cb(f"{mark} {format_date_display(m['date'])} · {m['duration_min']} мин — {format_money(m['amount'])}",
                         f"plsn:{i}")])
     if total:
-        rows.append([cb(f"➡️ Оплатить выбранное: {total} руб.", "plsngo")])
+        rows.append([cb(f"➡️ Оплатить выбранное: {format_money(total)}", "plsngo")])
     rows.append([cb("Оплатить всё", "plsnall")])
     rows.append([cb("« К счёту", f"client_bill:{student_id}:{period_month}")])
     who_part = f" — {who}" if who else ""
@@ -209,8 +213,8 @@ def methods_screen(student_id: str, period_month: str, who: str, sel: list, yook
     who_part = f" — {who}" if who else ""
     lines = [f"<b>💳 Оплата за {period_label(period_month)}{who_part}</b>"]
     for u in sel:
-        lines.append(f"  • {u['name']} — {u['amount']} руб.")
-    lines.append(f"Сумма: <b>{total} руб.</b>\n\nВыберите способ оплаты:")
+        lines.append(f"  • {u['name']} — {format_money(u['amount'])}")
+    lines.append(f"Сумма: <b>{format_money(total)}</b>\n\nВыберите способ оплаты:")
     lines.append(
         "\n<i>💵 Наличные — передайте администратору или педагогу, он подтвердит оплату.\n"
         "🏦 По реквизитам — после перевода обязательно прикрепите чек, иначе оплата не будет зачтена.\n"
@@ -231,7 +235,7 @@ def methods_screen(student_id: str, period_month: str, who: str, sel: list, yook
 
 def cash_screen(total: int, student_id: str, period_month: str) -> tuple:
     text = (f"<b>💵 Оплата наличными</b>\n"
-            f"Сумма: <b>{total} руб.</b>\n\n"
+            f"Сумма: <b>{format_money(total)}</b>\n\n"
             f"Передайте деньги администратору или преподавателю.\n"
             f"Нажмите кнопку, чтобы уведомить администратора.")
     rows = [
@@ -268,7 +272,7 @@ def _purpose_lines(student_name: str, period_month: str) -> list:
 
 def bank_screen(total: int, student_id: str, period_month: str, bank_details: str, webapp_url: str = "",
                 student_name: str = "") -> tuple:
-    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b>", ""]
+    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{format_money(total)}</b>", ""]
     if bank_details:
         lines += [bank_details.replace("\\n", "\n"), ""]
     lines += _purpose_lines(student_name, period_month)
@@ -278,7 +282,7 @@ def bank_screen(total: int, student_id: str, period_month: str, bank_details: st
 
 def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str, webapp_url: str = "",
                student_name: str = "") -> tuple:
-    lines = ["<b>📱 Оплата через СБП</b>", f"Сумма: <b>{total} руб.</b>", ""]
+    lines = ["<b>📱 Оплата через СБП</b>", f"Сумма: <b>{format_money(total)}</b>", ""]
     if sbp_details:
         lines += [sbp_details, ""]
     lines += _purpose_lines(student_name, period_month)
@@ -289,13 +293,13 @@ def sbp_screen(total: int, student_id: str, period_month: str, sbp_details: str,
 def online_pay_screen(kind: str, total: int, pay_url: str, student_id: str, period_month: str) -> tuple:
     if kind == "ysbp":
         text = (f"<b>📱 Оплата через СБП</b>\n"
-                f"Сумма: <b>{total} руб.</b>\n\n"
+                f"Сумма: <b>{format_money(total)}</b>\n\n"
                 f"Нажмите кнопку — откроется страница СБП (QR или переход в банк).\n"
                 f"После оплаты статус обновится автоматически.")
         label = "📱 Перейти к оплате"
     else:
         text = (f"<b>💳 Оплата картой онлайн</b>\n"
-                f"Сумма: <b>{total} руб.</b>\n\n"
+                f"Сумма: <b>{format_money(total)}</b>\n\n"
                 f"Нажмите кнопку для перехода на страницу оплаты.\n"
                 f"После оплаты статус обновится автоматически.")
         label = "💳 Перейти к оплате"
@@ -313,8 +317,8 @@ def pay_all_screen(student_id: str, student_name: str, periods: list, total: int
                    cash: bool = True, bank: bool = True, yookassa: bool = False) -> tuple:
     """«Оплатить всё»: месяцы с остатком и способы — наличные или реквизиты (СБП онлайн — по месяцам)."""
     lines = [f"<b>💳 Оплатить всё — {student_name}</b>"]
-    lines += [f"  • {period_label(ym)} — {amount} руб." for ym, amount in periods]
-    lines.append(f"Итого: <b>{total} руб.</b>\n\nВыберите способ оплаты:")
+    lines += [f"  • {period_label(ym)} — {format_money(amount)}" for ym, amount in periods]
+    lines.append(f"Итого: <b>{format_money(total)}</b>\n\nВыберите способ оплаты:")
     rows = []
     if cash:
         rows.append([cb("💵 Наличные", f"payall:cash:{student_id}")])
@@ -330,7 +334,7 @@ def pay_all_bank_screen(student_id: str, student_name: str, periods: list, total
     from bot.utils.bill_format import payment_purpose
     from bot.utils.dates import display_period
     purpose = f"Оплата занятий, {student_name.strip()}, " + ", ".join(display_period(ym) for ym, _ in periods)
-    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{total} руб.</b> за {len(periods)} мес.", ""]
+    lines = ["<b>🏦 Оплата по реквизитам</b>", f"Сумма: <b>{format_money(total)}</b> за {len(periods)} мес.", ""]
     if bank_details:
         lines += [bank_details.replace("\\n", "\n"), ""]
     lines += ["Назначение платежа (скопируйте):", f"<code>{purpose}</code>", "",
@@ -369,7 +373,7 @@ def receipt_duplicate_screen(student_id: str, period_month: str) -> tuple:
 def receipt_online_screen(student_id: str, period_month: str, method: str, online_row) -> tuple:
     """Чек пришёл сразу после платежа ЮКассы — скорее всего это его чек, он уже зачтён (05.10.2026)."""
     from bot.utils.dates import period_label
-    text = (f"✅ Ваш платёж {online_row.total_amount} ₽ за {period_label(online_row.period_month).lower()} через "
+    text = (f"✅ Ваш платёж {format_money(online_row.total_amount)} за {period_label(online_row.period_month).lower()} через "
             "СБП онлайн уже зачтён автоматически — чек на него присылать не нужно.\n\n"
             "Если это другой перевод (по реквизитам), нажмите кнопку и пришлите чек ещё раз.")
     rows = [[cb("📎 Это другой перевод", f"receipt_force:{method}:{student_id}:{period_month}")]]

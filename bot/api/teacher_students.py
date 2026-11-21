@@ -263,10 +263,11 @@ def student_routes(
             await activity.record(activity.STUDENT, f"Ученик {sid} убран из группы {gid} педагогом {teacher.name}",
                                   actor=user.tg_id, ref=sid)
         if bot is not None:
+            from bot.utils.format import format_money
             text = (f"👋 Педагог {teacher.name}: ученик уходит из группы\nУченик: {s.name}\nГруппа: {g.name}\n"
                     + (f"С месяца: {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
                        else "Убран из состава (оплата по посещениям — история сохранена)")
-                    + (f"\nНеоплачено {debt} ₽ — у ушедшего в должниках не считается" if debt > 0 else "\nДолгов нет."))
+                    + (f"\nНеоплачено {format_money(debt)} — у ушедшего в должниках не считается" if debt > 0 else "\nДолгов нет."))
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
         logger.info("Mini App: педагог %s — ученик %s ушёл из %s с %s (%s, неоплачено %d)",
                     teacher.teacher_id, sid, gid, left, result, debt)
@@ -309,11 +310,12 @@ def student_routes(
             p = await archive_preview(sid, **_archive_deps())
             return _json({"error": "debt", "debt": p.debt.as_dict() if p else {}}, status=409)
         if bot is not None:
+            from bot.utils.format import format_money
             others = {g for g, _n in r.groups} - own
             text = (f"📦 Педагог {teacher.name}: ученик ушёл из школы\nУченик: {r.name}\n"
                     f"Снят с групп: {', '.join(n for _g, n in r.groups) or 'не состоял в группах'}\n"
                     f"Родителей отвязано: {r.parents}" + (f" · партнёр {r.partner} отвязан" if r.partner else "")
-                    + (f"\nНеоплачено {r.debt.total} ₽ — у ушедшего в должниках не считается"
+                    + (f"\nНеоплачено {format_money(r.debt.total)} — у ушедшего в должниках не считается"
                        if r.debt.total else "\nДолгов нет.")
                     + "\nКарточка в архиве, вернуть — в карточке ученика.")
             admins = {u.tg_id for u in await user_repo.get_admins()}
@@ -377,11 +379,12 @@ def student_routes(
         await activity.record(activity.STUDENT, f"Ученик {sid} переведён педагогом {teacher.name}: {src} → {dst}"
                               + (f" (ушёл с {left})" if result == "marked" else ""), actor=user.tg_id, ref=sid)
         if bot is not None:
+            from bot.utils.format import format_money
             text = (f"🔄 Педагог {teacher.name} перевёл ученика в другую группу\nУченик: {s.name}\n"
                     f"Из: {g_from.name}\nВ: {g_to.name}\n"
                     + (f"Из старой — с {period_label(left)} (абонемент дальше не начисляется)" if result == "marked"
                        else "Из старой убран сразу (оплата по посещениям — история сохранена)")
-                    + (f"\nНеоплачено {debt} ₽ — остаётся в счёте" if debt > 0 else "\nДолгов нет."))
+                    + (f"\nНеоплачено {format_money(debt)} — остаётся в счёте" if debt > 0 else "\nДолгов нет."))
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
         logger.info("Mini App: педагог %s перевёл %s: %s → %s (%s, с %s, неоплачено %d)",
                     teacher.teacher_id, sid, src, dst, result, left, debt)

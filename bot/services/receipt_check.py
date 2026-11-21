@@ -235,6 +235,7 @@ async def _alert(action, group: list, amount: int, date: str) -> None:
     from bot.services import activity
     from bot.services.payment_methods import callback_code
     from bot.utils.dates import period_label
+    from bot.utils.format import format_amount, format_money
 
     group = sorted(group, key=lambda a: a.period_month)
     claimed = sum(a.amount for a in group)
@@ -242,18 +243,23 @@ async def _alert(action, group: list, amount: int, date: str) -> None:
     months = ", ".join(period_label(a.period_month).lower() for a in group)
     text = (f"⚠️ Сумма в чеке не совпадает с {'заявкой' if single else 'заявками'}\n"
             f"{action.student_name} · {months}\n"
-            f"В чеке: {amount} ₽ · в {'заявке' if single else 'заявках'}: {claimed} ₽"
-            + ("" if single else f" ({' + '.join(str(a.amount) for a in group)})")
+            f"В чеке: {format_money(amount)} · в {'заявке' if single else 'заявках'}: {format_money(claimed)}"
+            + ("" if single else f" ({' + '.join(format_amount(a.amount) for a in group)})")
             + (f"\nДата в чеке: {date}" if date else "")
             + ("\nЗачтите ровно сумму из чека или проверьте заявку в «Ждут решения»." if single
                else "\nПроверьте заявки в «Ждут решения» перед зачётом."))
     rows = None
     if single:
-        rows = [[cb(f"✅ Зачесть {amount} ₽ — как в чеке", f"pact:{action.action_id}:{amount}:{callback_code(action.method or '')}")],
-                [cb("❌ Не подтверждать", f"pnay:{action.action_id}")]]
+        rows = [
+            [cb(
+                f"✅ Зачесть {format_money(amount)} — как в чеке",
+                f"pact:{action.action_id}:{amount}:{callback_code(action.method or '')}",
+            )],
+            [cb("❌ Не подтверждать", f"pnay:{action.action_id}")],
+        ]
     kb = to_aiogram_markup(rows) if rows else None
     await activity.record(activity.QUEUE, f"Чек на другую сумму: {action.student_id} · {action.period_month} · "
-                          f"в чеке {amount} ₽, в заявке {claimed} ₽", ref=action.action_id)
+                          f"в чеке {format_money(amount)}, в заявке {format_money(claimed)}", ref=action.action_id)
     for tg_id in await _recipients(action.student_id):
         try:
             await _deps["bot"].send_message(tg_id, text, reply_markup=kb)

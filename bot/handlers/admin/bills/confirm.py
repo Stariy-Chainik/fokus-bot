@@ -206,17 +206,19 @@ async def cb_pay_pick_invoice(
             continue  # остаток 0 — платить нечего
         label = labels.get(p.teacher_id) or p.teacher_name or "—"
         if paid:
+            from bot.utils.format import format_money
             when = f" ({(p.paid_at or '')[:10]})" if p.paid_at else ""
             rows.append([InlineKeyboardButton(
-                text=f"✅ {label} — {p.total_amount} руб.{when}", callback_data="noop",
+                text=f"✅ {label} — {format_money(p.total_amount)}{when}", callback_data="noop",
             )])
         else:
+            from bot.utils.format import format_money
             # По занятиям можно отметить выборочно; абонемент — только целиком
             target = (f"pay_invoice:{p.payment_id}:{group_id}"
                       if p.teacher_id.startswith(SUBSCRIPTION_KEY_PREFIX)
                       else f"paysel:{p.payment_id}:{group_id}")
             rows.append([InlineKeyboardButton(
-                text=f"⏳ {label} — к доплате {p.total_amount} руб.",
+                text=f"⏳ {label} — к доплате {format_money(p.total_amount)}",
                 callback_data=target,
             )])
     if not rows:
@@ -253,12 +255,13 @@ async def cb_pay_confirm(
         )
         await callback.answer()
         return
+    from bot.utils.format import format_money
     await callback.message.edit_text(
         f"<b>Подтвердить оплату счёта {payment.payment_id}?</b>\n"
         f"Ученик: {payment.student_name}\n"
         f"Педагог: {payment.teacher_name or '—'}\n"
         f"Период: {display_period(payment.period_month)}\n"
-        f"Сумма: {payment.total_amount} руб.",
+        f"Сумма: {format_money(payment.total_amount)}",
         reply_markup=kb_confirm(
             f"do_confirm_payment:{payment.payment_id}:{group_id}", pick_cb,
         ),
@@ -317,14 +320,15 @@ async def cb_do_confirm_payment(
 # ранних занятий (порядок дат), поэтому суммарно учёт всегда сходится.
 
 def _sel_screen(student_name: str, ledger, marks: list, chosen: set) -> tuple:
+    from bot.utils.format import format_money
     lines = [f"<b>{student_name}</b> — {ledger.name}",
-             f"Начислено {ledger.accrued} руб., оплачено {ledger.paid}, к доплате {ledger.remainder}",
+             f"Начислено {format_money(ledger.accrued)}, оплачено {format_money(ledger.paid)}, к доплате {format_money(ledger.remainder)}",
              "", "Отметьте занятия, которые оплачены:"]
     rows: list[list[InlineKeyboardButton]] = []
     total = 0
     for i, m in enumerate(marks):
         when = format_date_short_with_wd(m["date"])
-        label = f"{when} · {m['duration_min']} мин · {m['amount']} руб."
+        label = f"{when} · {m['duration_min']} мин · {format_money(m['amount'])}"
         if m["paid"]:
             rows.append([InlineKeyboardButton(text=f"✅ {label}", callback_data="noop")])
             continue
@@ -334,7 +338,7 @@ def _sel_screen(student_name: str, ledger, marks: list, chosen: set) -> tuple:
         rows.append([InlineKeyboardButton(text=f"{mark} {label}", callback_data=f"pslt:{i}")])
     if total > 0:
         rows.append([InlineKeyboardButton(
-            text=f"✅ Подтвердить оплату {total} руб.", callback_data="pslgo")])
+            text=f"✅ Подтвердить оплату {format_money(total)}", callback_data="pslgo")])
     return "\n".join(lines), rows, total
 
 
@@ -420,13 +424,14 @@ async def cb_pay_select_confirm(
         return
     back_cb = f"paysel:{ledger.pending.payment_id}:{data['psel_group']}" if ledger.pending else "admin:menu"
     dates = ", ".join(format_date_short_with_wd(m["date"]) for m in picked)
+    from bot.utils.format import format_money
     await callback.message.edit_text(
         f"<b>Подтвердить оплату?</b>\n"
         f"Ученик: {student.name}\n"
         f"{'Группа' if ledger.group else 'Педагог'}: {ledger.name}\n"
         f"Период: {display_period(data['psel_period'])}\n"
         f"Занятий: {len(picked)} ({dates})\n"
-        f"Сумма: <b>{total} руб.</b>\n\n"
+        f"Сумма: <b>{format_money(total)}</b>\n\n"
         f"<i>Сумма закроет остаток начиная с самых ранних неоплаченных занятий.</i>",
         reply_markup=kb_confirm(f"pslok:{total}", back_cb),
     )
@@ -462,10 +467,11 @@ async def cb_pay_select_apply(
         await settle_actions(pending_repo, payment_service, student, period, credited, callback.from_user.id)
         await notify_payment_confirmed(resolve_notifier(callback.bot), student, period, credited)
         if credited > 0:
+            from bot.utils.format import format_money
             logger.info("Админ %s отметил оплату %d руб.: %s %s %s",
                         callback.from_user.id, credited, student_id, period, teacher_id)
             await callback.message.edit_text(
-                f"✅ Оплата {credited} руб. отмечена ({rows_count} записей).",
+                f"✅ Оплата {format_money(credited)} отмечена ({rows_count} записей).",
                 reply_markup=kb_back(back_cb),
             )
         else:

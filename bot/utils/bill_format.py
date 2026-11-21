@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from bot.utils.dates import display_period, format_date_short_with_wd
+from bot.utils.format import format_money
 
 
 def payment_purpose(student_name: str, period_month: str) -> str:
@@ -30,7 +31,7 @@ def build_bill_text(
             # Абонемент: фикс-сумма за месяц, без разбивки по датам.
             lines.append(f"💳 <b>{agg.name}</b>")
             lines.append("    · фиксированная сумма за месяц")
-            lines.append(f"  <b>Сумма: {agg.total} ₽</b>")
+            lines.append(f"  <b>Сумма: {format_money(agg.total)}</b>")
             lines.append("")
             continue
         lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b>")
@@ -39,14 +40,14 @@ def build_bill_text(
             if b.date != cur_date:
                 cur_date = b.date
                 lines.append(f"  📅 <b>{format_date_short_with_wd(b.date)}</b>")
-            lines.append(f"    · {b.duration_min} мин · {b.amount} ₽")
-        lines.append(f"  <b>Сумма: {agg.total} ₽</b>")
+            lines.append(f"    · {b.duration_min} мин · {format_money(b.amount)}")
+        lines.append(f"  <b>Сумма: {format_money(agg.total)}</b>")
         lines.append("")
     if paid > 0:
-        lines.append(f"Начислено: {grand_total} ₽ · оплачено: {paid} ₽")
-        lines.append(f"<b>Остаток к оплате: {max(grand_total - paid, 0)} ₽</b>")
+        lines.append(f"Начислено: {format_money(grand_total)} · оплачено: {format_money(paid)}")
+        lines.append(f"<b>Остаток к оплате: {format_money(max(grand_total - paid, 0))}</b>")
     else:
-        lines.append(f"<b>Итого к оплате: {grand_total} ₽</b>")
+        lines.append(f"<b>Итого к оплате: {format_money(grand_total)}</b>")
     return "\n".join(lines), grand_total
 
 

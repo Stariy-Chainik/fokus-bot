@@ -35,19 +35,19 @@ def test_profit_includes_manual_income_and_expenses():
         summary,
     )
     # Выручка = 10000 + 6000 + 15000 = 31000; расходы = 4000 + 20000
-    assert "Выручка:    31000 ₽" in text
-    assert "Расходы:   20000 ₽" in text
-    assert "Прибыль:  7000 ₽" in text          # 31000 − 24000
-    assert "Турнир «Кубок»: 15000 ₽" in text
-    assert "Аренда зала: 20000 ₽" in text
-    assert "Азбука: 6000 ₽ (3 уч.)" in text
+    assert "Выручка:    31 000 ₽" in text
+    assert "Расходы:   20 000 ₽" in text
+    assert "Прибыль:  7 000 ₽" in text          # 31000 − 24000
+    assert "Турнир «Кубок»: 15 000 ₽" in text
+    assert "Аренда зала: 20 000 ₽" in text
+    assert "Азбука: 6 000 ₽ (3 уч.)" in text
 
 
 def test_profit_without_manual_entries_unchanged():
     summary = ProfitSummary(period="2026-07", teacher_rows=(_teacher_row(),))
     text = _format_profit("Прибыль за 07.2026", summary)
-    assert "Выручка:    10000 ₽" in text
-    assert "Прибыль:  6000 ₽" in text
+    assert "Выручка:    10 000 ₽" in text
+    assert "Прибыль:  6 000 ₽" in text
     assert "Расходы" not in text
 
 
@@ -61,8 +61,8 @@ def test_profit_shows_hall_rent_share():
         ),),
     )
     text = _format_profit("Прибыль за 09.2026", summary)
-    assert "🏟 в т.ч. аренда зала: 6000 ₽ (12 зан.)" in text
-    assert "Прибыль:  6000 ₽" in text
+    assert "🏟 в т.ч. аренда зала: 6 000 ₽ (12 зан.)" in text
+    assert "Прибыль:  6 000 ₽" in text
 
 
 def test_profit_shows_owner_salary_kept_in_profit():
@@ -78,7 +78,7 @@ def test_profit_shows_owner_salary_kept_in_profit():
         ),
     )
     text = _format_profit("Прибыль за 09.2026", summary)
-    assert "  Выручка: 50000 ₽  Зарплата: 0 ₽" in text
-    assert "  👑 руководитель: 50000 ₽ остаются в прибыли" in text
-    assert "Зарплата: 4000 ₽\n  👑 руководитель в прибыли: 50000 ₽" in text
-    assert "Прибыль:  56000 ₽" in text                # 60000 − 4000
+    assert "  Выручка: 50 000 ₽  Зарплата: 0 ₽" in text
+    assert "  👑 руководитель: 50 000 ₽ остаются в прибыли" in text
+    assert "Зарплата: 4 000 ₽\n  👑 руководитель в прибыли: 50 000 ₽" in text
+    assert "Прибыль:  56 000 ₽" in text                # 60000 − 4000

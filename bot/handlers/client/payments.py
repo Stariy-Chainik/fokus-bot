@@ -97,11 +97,12 @@ async def process_yookassa_event(
     if len(periods) >= 2:
         period_month = ", ".join(sorted(periods))
     if count > 0:
+        from bot.utils.format import format_money
         msg = (
             f"💰 Оплата через ЮКасса\n\n"
             f"Ученик: {student_id}\n"
             f"Период: {period_month}\n"
-            f"Сумма: {amount} руб."
+            f"Сумма: {format_money(amount)}"
         )
         admins = await user_repo.get_admins()
         for admin in admins:
@@ -159,12 +160,13 @@ async def on_successful_payment(
         admins = await user_repo.get_admins()
         student_name = payment.student_name if payment else "—"
         period = payment.period_month if payment else "—"
-        amount = payment.total_amount if payment else "—"
+        from bot.utils.format import format_money
+        amount_text = format_money(payment.total_amount) if payment else "—"
         notify = (
             f"💰 Получена оплата от клиента\n\n"
             f"Ученик: {student_name}\n"
             f"Период: {period}\n"
-            f"Сумма: {amount} руб.\n"
+            f"Сумма: {amount_text}\n"
             f"ID счёта: {payment_id}"
         )
         for admin in admins:

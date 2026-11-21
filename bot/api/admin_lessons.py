@@ -47,8 +47,12 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             from bot.services.pair_pricing import agreement_for
             agreement = agreement_for(ls)
             if agreement is not None:
+                from bot.utils.format import format_money
                 total = sum(agreement.amounts.values())
-                note = f"родители платят {total} ₽ напрямую: педагогу {total - rent} ₽, школе аренда {rent} ₽"
+                note = (
+                    f"родители платят {format_money(total)} напрямую: "
+                    f"педагогу {format_money(total - rent)}, школе аренда {format_money(rent)}"
+                )
             income = rent
         salary = 0
         if t:
@@ -60,8 +64,9 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
                 day = sum(x.amount for x in await salary_service.lines_for(t, ym) if x.kind == "shift" and x.date == ls.date)
                 groups_day = len({x.group_id for x in await lesson_repo.get_all()
                                   if x.teacher_id == t.teacher_id and x.date == ls.date and x.group_id})
+                from bot.utils.format import format_money
                 salary = round(day / groups_day) if groups_day else 0
-                note = (note + " · " if note else "") + f"смена {day} ₽ за день ÷ {groups_day} групп"
+                note = (note + " · " if note else "") + f"смена {format_money(day)} за день ÷ {groups_day} групп"
             else:
                 salary = line.amount if line is not None else 0
         owner = bool(t) and is_owner(t.teacher_id)

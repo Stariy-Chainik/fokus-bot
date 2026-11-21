@@ -397,21 +397,25 @@ def billing_routes(
                 or gid not in await student_group_repo.get_groups_for_student(sid, include_left=True):
             return _json({"error": "not_found"}, status=404)
         key = f"{SUBSCRIPTION_KEY_PREFIX}{gid}"
+        from bot.utils.format import format_amount, format_money
         async with payment_lock(sid, period):
             led = (await payment_service.ledger_for(s, period)).get(key)
             old = led.accrued if led else group.price_full
             if led and led.paid > amount:
-                return _json({"error": "paid_more", "message": f"За этот месяц уже оплачено {led.paid} ₽ — "
+                return _json({"error": "paid_more", "message": f"За этот месяц уже оплачено {format_money(led.paid)} — "
                               f"сумму ниже оплаченного поставить нельзя"}, status=409)
             if old == amount:
                 return _json({"ok": True, "old": old, "amount": amount, "unchanged": True})
             await dp["subscription_override_repo"].upsert(gid, period, sid, amount)
             await payment_service.ledger_for(s, period)
-        await activity.record(activity.PAYMENT, f"Абонемент {sid} в {gid} за {period}: {old} → {amount} ₽"
+        await activity.record(activity.PAYMENT, f"Абонемент {sid} в {gid} за {period}: {format_amount(old)} → {format_money(amount)}"
                               f" · педагог {teacher.name}" + (f" · {reason}" if reason else ""), actor=user.tg_id, ref=sid)
         if bot is not None:
-            text = (f"✏️ Педагог {teacher.name} изменил абонемент\nУченик: {s.name}\nГруппа: {group.name}\n"
-                    f"Месяц: {period_label(period)}\nБыло {old} ₽ → стало {amount} ₽" + (f"\nПричина: {reason}" if reason else ""))
+            text = (
+                f"✏️ Педагог {teacher.name} изменил абонемент\nУченик: {s.name}\nГруппа: {group.name}\n"
+                f"Месяц: {period_label(period)}\nБыло {format_money(old)} → стало {format_money(amount)}"
+                + (f"\nПричина: {reason}" if reason else "")
+            )
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
         logger.info("Mini App: педагог %s изменил абонемент %s %s %s: %d → %d", teacher.teacher_id, sid, gid, period, old, amount)
         return _json({"ok": True, "old": old, "amount": amount})
@@ -464,8 +468,9 @@ def billing_routes(
             amount = int(str(form.get("amount") or 0))
         except ValueError:
             amount = 0
+        from bot.utils.format import format_money
         caption = (f"🧾 Чек перевода от педагога {teacher.name}\nУченик: {s.name}\nПериод: {period_label(period)}"
-                   + (f"\nСумма: {amount} руб." if amount else ""))
+                   + (f"\nСумма: {format_money(amount)}" if amount else ""))
         filename = upload.filename or ("receipt.jpg" if is_image else "receipt.pdf")
         file_id, sent = "", 0
         for admin in await user_repo.get_admins():
@@ -581,7 +586,8 @@ def billing_routes(
         async with payment_lock(sid, period):
             rest = rest_for_keys(await payment_service.ledger_for(s, period), keys)
             if total > rest:
-                return _json({"error": "overpay", "message": f"К оплате осталось {rest} ₽", "rest": rest}, status=409)
+                from bot.utils.format import format_money
+                return _json({"error": "overpay", "message": f"К оплате осталось {format_money(rest)}", "rest": rest}, status=409)
             for p in parts:
                 ids = [x for x in (p.get("lessonIds") or []) if isinstance(x, str)]
                 if ids:

@@ -148,16 +148,17 @@ async def _render_periods(callback: CallbackQuery, student, payment_repo: Paymen
     lines = [f"📜 <b>История оплат — {student.name}</b>"]
     if not by_period:
         lines.append("\nСчетов и оплат пока нет.")
+    from bot.utils.format import format_money
     for period in sorted(by_period, reverse=True):
         items = by_period[period]
         paid = sum(p.total_amount for p in items if p.status == PaymentStatus.PAID)
         pending = sum(p.total_amount for p in items if p.status != PaymentStatus.PAID and p.total_amount > 0)
-        label = f"{_period_label(period)} — {paid} ₽" + (f" · ожидает {pending} ₽" if pending else "")
+        label = f"{_period_label(period)} — {format_money(paid)}" + (f" · ожидает {format_money(pending)}" if pending else "")
         icon = "✅" if paid and not pending else ("⏳" if pending else "•")
         rows.append([InlineKeyboardButton(text=f"{icon} {label}", callback_data=f"payhist_p:{student.student_id}:{period}")])
     total_paid = sum(p.total_amount for p in pays if p.status == PaymentStatus.PAID)
     if pays:
-        lines.append(f"\nВсего оплачено: <b>{total_paid} ₽</b>\nВыберите месяц:")
+        lines.append(f"\nВсего оплачено: <b>{format_money(total_paid)}</b>\nВыберите месяц:")
     rows.append([InlineKeyboardButton(text="🔍 Другой ученик", callback_data="admin:payhist")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="go:home")])
     await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -191,20 +192,21 @@ async def cb_payhist_period(
     paid = [p for p in pays if p.status == PaymentStatus.PAID]
     pending = [p for p in pays if p.status != PaymentStatus.PAID and p.total_amount > 0]
     lines = [f"📜 <b>{student.name} — {_period_label(period)}</b>"]
+    from bot.utils.format import format_money
     if paid:
         lines.append("\n<b>Оплачено:</b>")
         for p in sorted(paid, key=lambda p: (p.paid_at or "", p.teacher_name or "")):
             comment = p.comment or ""
             # Старые технические метки не дублируем рядом с точным способом.
             note = "" if comment in {"чек", "ЮКасса"} else comment
-            lines.append(f"✅ {_fmt_date(p.paid_at)} · {p.teacher_name or p.teacher_id} — <b>{p.total_amount} ₽</b>\n"
+            lines.append(f"✅ {_fmt_date(p.paid_at)} · {p.teacher_name or p.teacher_id} — <b>{format_money(p.total_amount)}</b>\n"
                          f"    {_method(p)}" + (f" · {note}" if note else ""))
-        lines.append(f"Итого оплачено: <b>{sum(p.total_amount for p in paid)} ₽</b>")
+        lines.append(f"Итого оплачено: <b>{format_money(sum(p.total_amount for p in paid))}</b>")
     if pending:
         lines.append("\n<b>Ожидает оплаты:</b>")
         for p in sorted(pending, key=lambda p: p.teacher_name or ""):
-            lines.append(f"⏳ {p.teacher_name or p.teacher_id} — {p.total_amount} ₽")
-        lines.append(f"Итого к оплате: <b>{sum(p.total_amount for p in pending)} ₽</b>")
+            lines.append(f"⏳ {p.teacher_name or p.teacher_id} — {format_money(p.total_amount)}")
+        lines.append(f"Итого к оплате: <b>{format_money(sum(p.total_amount for p in pending))}</b>")
     if not pays:
         lines.append("\nСчетов за этот месяц нет.")
     kb = InlineKeyboardMarkup(inline_keyboard=[

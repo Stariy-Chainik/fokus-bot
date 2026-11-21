@@ -63,8 +63,9 @@ async def queue_action(
             kind, sid, name, period_month, amount, method, parent_addr,
             file_id, file_type, comment, "|".join(chunks), held_by,
         )
+        from bot.utils.format import format_money
         await activity.record(activity.QUEUE, f"Заявка от родителя ({kind}): {sid} · {period_month}"
-                              + (f" · {amount} ₽ · {method}" if amount else ""), ref=action.action_id)
+                              + (f" · {format_money(amount)} · {method}" if amount else ""), ref=action.action_id)
         payment_events.request_created(action)       # копия с кнопками педагогу, который решает сам
         receipt_check.schedule(action)               # сумма в чеке против заявки — сообщение только при расхождении
         return action

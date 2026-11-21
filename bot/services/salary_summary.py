@@ -62,7 +62,8 @@ class SummaryRow:
 
 
 def _fmt(n: int) -> str:
-    return f"{n:,}".replace(",", " ")
+    from bot.utils.format import format_amount
+    return format_amount(n)
 
 
 def rate_text(rate45: int) -> str:

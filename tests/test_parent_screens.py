@@ -83,9 +83,9 @@ def test_bill_detail_shows_unpaid_lessons_first_and_paid_lessons_below():
     text = "\n".join(detail.lines)
 
     assert "<b>⬜ К оплате:</b>" in text
-    assert "⬜ 19.09.2026  60 мин  — 1300 руб." in text
+    assert "⬜ 19.09.2026  60 мин  — 1 300 ₽" in text
     assert "<b>✅ Оплачено:</b>" in text
-    assert "✅ 05.09.2026  60 мин  — 1300 руб." in text
+    assert "✅ 05.09.2026  60 мин  — 1 300 ₽" in text
     assert text.index("⬜ 19.09.2026") < text.index("✅ 05.09.2026")
     assert "частич" not in text.lower()
     assert detail.unpaid_total == 1300
@@ -115,11 +115,11 @@ def test_teacher_select_and_methods():
     unpaid = [{"tid": "T1", "name": "Река", "amount": 1000, "pid": 5}, {"tid": "T2", "name": "Абонемент", "amount": 7000, "pid": 6}]
     text, kb = teacher_select_screen("STU-1", "2026-09", "Иванов", unpaid, {"T1"})
     assert "Оплата за Сентябрь 2026 — Иванов" in text
-    assert _payloads(kb)[0] == [("✅ Река — 1000 руб.", "cb", "pselt:0")]
-    assert _payloads(kb)[1] == [("⬜ Абонемент — 7000 руб.", "cb", "pselt:1")]
-    assert _payloads(kb)[2] == [("➡️ К оплате: 1000 руб.", "cb", "pselgo")]
+    assert _payloads(kb)[0] == [("✅ Река — 1 000 ₽", "cb", "pselt:0")]
+    assert _payloads(kb)[1] == [("⬜ Абонемент — 7 000 ₽", "cb", "pselt:1")]
+    assert _payloads(kb)[2] == [("➡️ К оплате: 1 000 ₽", "cb", "pselgo")]
     text, kb = methods_screen("STU-1", "2026-09", "Иванов", unpaid, yookassa=True)
-    assert "Сумма: <b>8000 руб.</b>" in text
+    assert "Сумма: <b>8 000 ₽</b>" in text
     assert [b.value for row in kb for b in row] == [       # порядок: реквизиты → СБП онлайн
         "pay_method:bank:STU-1:2026-09", "pay_method:ysbp:STU-1:2026-09", "client_bill:STU-1:2026-09",
     ]
@@ -168,8 +168,8 @@ def test_admin_confirm_rows_and_caption():
     assert rows[0][0].value == "rcpp:STU-1:2026-09:5:1300:c"
     rows = admin_confirm_rows("STU-1", "2026-09", "", False, ("tg", 7), 1300, "bank")
     assert rows[0][0].value == "receipt_confirm:STU-1:2026-09:1300:b"
-    cap = receipt_caption("bank", "Иванов", "2026-09", 800, "• Река — 800 руб.")
-    assert cap.startswith("📎 Чек об оплате\n\nСпособ: 🏦 По реквизитам\nУченик: Иванов\nПериод: Сентябрь 2026\nСумма: 800 руб.")
+    cap = receipt_caption("bank", "Иванов", "2026-09", 800, "• Река — 800 ₽")
+    assert cap.startswith("📎 Чек об оплате\n\nСпособ: 🏦 По реквизитам\nУченик: Иванов\nПериод: Сентябрь 2026\nСумма: 800 ₽")
     assert period_label("2026-01") == "Январь 2026"
 
 
@@ -178,8 +178,8 @@ def test_breakdown_lines_short_when_too_long():
     bills = {"T1": BillAggregate("Река", 100, items=items)}
     full = breakdown_lines(bills, ["T1"], limit=10_000)
     short = breakdown_lines(bills, ["T1"], limit=50)
-    assert full[0].startswith("• Река — 100 руб.: 01.09 (60м, группа)")
-    assert short == ["• Река — 100 руб. (29 зан.)"]
+    assert full[0].startswith("• Река — 100 ₽: 01.09 (60м, группа)")
+    assert short == ["• Река — 100 ₽ (29 зан.)"]
 
 
 def test_admin_lesson_selection_screen():
@@ -193,12 +193,12 @@ def test_admin_lesson_selection_screen():
         {"lesson_id": "LES-3", "date": "2026-09-11", "duration_min": 60, "amount": 1667, "paid": False},
     ]
     text, rows, total = _sel_screen("Зотов Антон", ledger, marks, {"LES-3"})
-    assert "Начислено 7917 руб., оплачено 2500, к доплате 5417" in text
+    assert "Начислено 7 917 ₽, оплачено 2 500 ₽, к доплате 5 417 ₽" in text
     labels = [(r[0].text, r[0].callback_data) for r in rows]
     assert labels[0][1] == "noop" and labels[0][0].startswith("✅")
     assert labels[1][0].startswith("⬜") and labels[1][1] == "pslt:1"
     assert labels[2][0].startswith("☑️") and labels[2][1] == "pslt:2"
-    assert labels[3] == ("✅ Подтвердить оплату 1667 руб.", "pslgo")
+    assert labels[3] == ("✅ Подтвердить оплату 1 667 ₽", "pslgo")
     assert total == 1667
     # ничего не выбрано — кнопки подтверждения нет
     _, rows_empty, total_empty = _sel_screen("Зотов Антон", ledger, marks, set())
@@ -228,11 +228,11 @@ def test_bill_detail_shows_direct_pay_teacher_outside_the_total():
     detail = asyncio.run(bill_detail([_student()], "2026-09", _Service()))
     text = "\n".join(detail.lines)
 
-    assert "Клецова Ангелина" in text and "02.09.2026  60 мин  — 1334 руб." in text
+    assert "Клецова Ангелина" in text and "02.09.2026  60 мин  — 1 334 ₽" in text
     assert "оплачивается педагогу напрямую" in text
     assert detail.direct_total == 2334
     assert detail.grand_total == 1300 and detail.unpaid_total == 1300   # прямая оплата вне сумм школы
-    assert "К оплате: 1300 руб." in text
+    assert "К оплате: 1 300 ₽" in text
 
 
 def test_bill_detail_with_only_direct_lessons_is_not_empty():
@@ -339,11 +339,11 @@ def test_pay_all_and_unlink_screens_for_max():
     from bot.services.parent_views import PeriodRow
     rows = [PeriodRow("2026-09", "Сентябрь", "⏳"), PeriodRow("2026-10", "Октябрь", "⏳")]
     _t, kb = bills_list_screen(rows, "STU-1", "Иванов", False, False, pay_all=(11000, 2))
-    assert any(b.value == "client_payall:STU-1" and "11000" in b.label for r in kb for b in r)
+    assert any(b.value == "client_payall:STU-1" and "11 000 ₽" in b.label for r in kb for b in r)
     _t, kb = bills_list_screen(rows, "STU-1", "Иванов", False, False, pay_all=(6000, 1))     # один месяц — кнопки нет
     assert not any(b.value.startswith("client_payall") for r in kb for b in r)
     text, kb = pay_all_screen("STU-1", "Иванов Иван", [("2026-09", 5000), ("2026-10", 6000)], 11000)
-    assert "11000" in text and [b.value for r in kb for b in r][:2] == ["payall:cash:STU-1", "payall:bank:STU-1"]
+    assert "11 000 ₽" in text and [b.value for r in kb for b in r][:2] == ["payall:cash:STU-1", "payall:bank:STU-1"]
     text, kb = pay_all_bank_screen("STU-1", "Иванов Иван", [("2026-09", 5000), ("2026-10", 6000)], 11000, "Банк")
     assert "Оплата занятий, Иванов Иван, 09.2026, 10.2026" in text and kb[0][0].value == "receipt_upload_all:STU-1"
     text, kb = unlink_confirm_screen(SimpleNamespace(student_id="STU-1", name="Иванов Иван"))

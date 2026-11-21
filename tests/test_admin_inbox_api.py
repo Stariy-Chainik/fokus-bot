@@ -391,10 +391,10 @@ def test_telegram_advance_button_credits_and_records_payout(api):
                                               dp["payout_repo"]))
         return msg.screens[-1] if msg.screens else (None, None), cb
     (text, kb), _ = press(f"padv:{action.action_id}:9000")                  # больше остатка 4800 — выбор
-    assert "осталось 4800" in text and action.status == OPEN and not dp["payout_repo"].items
+    assert "осталось 4 800" in text and action.status == OPEN and not dp["payout_repo"].items
     assert f"padv:{action.action_id}:4800:f" in [b.callback_data for row in kb.inline_keyboard for b in row]
     (text, _), _ = press(f"padv:{action.action_id}:2000")
-    assert "Педагогу — аванс 2000" in text and action.status == DONE
+    assert "Педагогу — аванс 2 000" in text and action.status == DONE
     assert [p.amount for p in dp["payout_repo"].items] == [2000]
     assert any(m[0] == 4242 and "авансом" in m[1] for m in bot.sent)
     (text, _), cb = press(f"padv:{action.action_id}:2000")                 # повтор — ничего не зачтено

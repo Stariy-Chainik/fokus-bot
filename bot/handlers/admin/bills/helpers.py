@@ -92,6 +92,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
             has_pending.add(p.teacher_id)
     lines = [f"<b>Счёт: {student_name}</b>", f"Период: {display_period(period_month)}", ""]
     grand_total = 0
+    from bot.utils.format import format_money
     grand_paid = 0
     for teacher_id, agg in bills.items():
         subtotal = agg.total
@@ -101,12 +102,12 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
         if paid >= subtotal:
             status = f"✅ Оплачен ({last_paid_at.get(teacher_id, '')})"
         elif teacher_id in has_pending:
-            status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
+            status = f"⬜ Не оплачен — к оплате {format_money(subtotal - paid)}"
         elif paid:
-            status = f"⬜ Не оплачен — к оплате {subtotal - paid} руб."
+            status = f"⬜ Не оплачен — к оплате {format_money(subtotal - paid)}"
         else:
-            status = f"⏳ Счёт не создан — {subtotal} руб."
-        lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b> — {subtotal} руб. — {status}")
+            status = f"⏳ Счёт не создан — {format_money(subtotal)}"
+        lines.append(f"{'👥' if agg.group else '👨‍🏫'} <b>{agg.name}</b> — {format_money(subtotal)} — {status}")
         items = sorted(agg.items, key=lambda b: (b.date, b.lesson_id))
         marks = lesson_paid_marks([b.amount for b in items], paid,
                                   [b.lesson_id in pinned.get(teacher_id, set()) for b in items])
@@ -121,7 +122,7 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
                 kind = "групп." if b.lesson_type == "group" else "инд."
                 lines.append(
                     f"    {mark} {format_date_short_with_wd(b.date)} · {kind}"
-                    f" · {b.duration_min} мин · {b.amount} ₽"
+                    f" · {b.duration_min} мин · {format_money(b.amount)}"
                 )
 
         # Неоплаченные уроки всегда сверху, оплаченные — ниже.
@@ -133,9 +134,11 @@ def _bill_detail_lines(student_name: str, period_month: str, bills: dict, paymen
         lines.append("")
     grand_due = grand_total - grand_paid
     if grand_due:
-        lines.append(f"Итого: {grand_total} руб. · оплачено {grand_paid} · к оплате {grand_due}")
+        lines.append(
+            f"Итого: {format_money(grand_total)} · оплачено {format_money(grand_paid)} · к оплате {format_money(grand_due)}"
+        )
     else:
-        lines.append(f"Итого: {grand_total} руб. · ✅ оплачено")
+        lines.append(f"Итого: {format_money(grand_total)} · ✅ оплачено")
     return lines
 
 

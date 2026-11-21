@@ -69,8 +69,9 @@ async def edit_rate_value(message: Message, state: FSMContext) -> None:
     await state.update_data(**updated)
     await state.set_state(EditTeacherRatesStates.confirming)
     label = _RATE_LABELS.get(rate_type, rate_type)
+    from bot.utils.format import format_money
     await message.answer(
-        f"<b>Изменить ставку «{label}» → {rate} руб.?</b>",
+        f"<b>Изменить ставку «{label}» → {format_money(rate)}?</b>",
         reply_markup=kb_confirm("confirm_edit_rates", f"card_edit_rates:{data['teacher_id']}"),
     )
 

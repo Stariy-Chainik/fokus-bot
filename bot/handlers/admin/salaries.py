@@ -124,6 +124,7 @@ async def cb_salary_show(
     submission = await submission_repo.get_by_teacher_and_period(teacher_id, period_month)
     period_status = "✅ Сдан педагогом" if submission else "⏳ Открыт"
 
+    from bot.utils.format import format_money
     lines = [
         f"<b>Педагог: {teacher.name}</b>",
         f"Период: {display_period(period_month)}",
@@ -131,7 +132,7 @@ async def cb_salary_show(
         f"Всего занятий: {total}",
         f"👥 Групповые ({group}): {gline}",
         f"👤 Индивидуальные ({ind}): {iline}",
-        f"Начислено: {total_earned} руб." + (f" (в т.ч. 🎁 премии {bonus} руб.)" if bonus else ""),
+        f"Начислено: {format_money(total_earned)}" + (f" (в т.ч. 🎁 премии {format_money(bonus)})" if bonus else ""),
     ]
     if settings.teacher_period_submit_enabled:          # сдача выключена — статуса периода нет
         lines += ["", f"Период: {period_status}"]
@@ -171,7 +172,8 @@ async def _show_day_salary(
             lines.append(f"  👥 Групповые ({group}): {gline}")
         if ind:
             lines.append(f"  👤 Индивидуальные ({ind}): {iline}")
-        lines.append(f"\n<b>К выплате: {total_earned} руб.</b>")
+        from bot.utils.format import format_money
+        lines.append(f"\n<b>К выплате: {format_money(total_earned)}</b>")
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Назад", callback_data=f"salary_day:{teacher_id}")],

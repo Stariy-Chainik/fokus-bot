@@ -108,14 +108,15 @@ async def cb_teacher_card(
         for g in groups if g.group_id in share_map
     )
 
+    from bot.utils.format import format_money
     text = (
         f"👨‍🏫 <b>{teacher.name}</b>\n"
         f"ID: {teacher.teacher_id}\n"
         f"{tg_info}\n\n"
-        f"📊 Ставки (руб. за 45 мин):\n"
-        f"  Групповое: <b>{teacher.rate_group}</b>\n"
-        f"  Инд. педагогу: <b>{teacher.rate_for_teacher}</b>\n"
-        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n"
+        f"📊 Ставки (за 45 мин):\n"
+        f"  Групповое: <b>{format_money(teacher.rate_group)}</b>\n"
+        f"  Инд. педагогу: <b>{format_money(teacher.rate_for_teacher)}</b>\n"
+        f"  Инд. ученику: <b>{format_money(teacher.rate_for_student)}</b>\n"
         f"{share_lines}\n"
         f"🏢 Группы:\n{groups_block}"
     )

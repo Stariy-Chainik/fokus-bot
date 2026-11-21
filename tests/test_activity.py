@@ -33,7 +33,7 @@ def test_lessons_and_payments_are_recorded(feed, monkeypatch):
     texts = [e.text for e in feed.items]
     assert texts[0].startswith("Отмечено занятие: TCH-0001") and "STU-0002" in texts[0] and "за педагога" in texts[0]
     assert texts[1].startswith("Удалено занятие: TCH-0001") and "администратором" in texts[1]
-    assert texts[2] == "Оплата 2000 ₽: STU-0001 · " + YM + " · cash · отмечено вручную"
+    assert texts[2] == "Оплата 2 000 ₽: STU-0001 · " + YM + " · cash · отмечено вручную"
     assert [e.kind for e in feed.items] == ["lesson", "lesson", "payment"]
 
 

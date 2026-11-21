@@ -24,9 +24,10 @@ async def cancel_payout(payout_repo, bonus_repo, payout_id: str, by_tg_id: int) 
         raise BonusPayoutError(payout_id)
     if not await payout_repo.delete(payout_id):
         return None
+    from bot.utils.format import format_money
     await activity.record(
         activity.PAYOUT,
-        f"Выплата отменена {payout.amount} ₽: {payout.teacher_id} · {payout.period_month}"
+        f"Выплата отменена {format_money(payout.amount)}: {payout.teacher_id} · {payout.period_month}"
         + (f" · {payout.comment}" if payout.comment else ""),
         actor=by_tg_id, ref=payout_id,
     )

@@ -148,7 +148,8 @@ async def notify_payment_confirmed(notifier, student, period_month: str, credite
         return 0
     from bot.screens.parent_bills import bill_back_rows      # локально: screens тянут notifier
     from bot.utils.dates import period_label
-    text = f"✅ Оплата {credited} руб. за {period_label(period_month)} ({student.name}) подтверждена."
+    from bot.utils.format import format_money
+    text = f"✅ Оплата {format_money(credited)} за {period_label(period_month)} ({student.name}) подтверждена."
     try:
         return await notifier.send_many(student.parent_addrs, text,
                                         rows=bill_back_rows(student.student_id, period_month))

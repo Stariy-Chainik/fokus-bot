@@ -41,6 +41,7 @@ from bot.screens.parent_bills import (
 )
 from bot.services.cloudkassir_service import CloudKassirService
 from bot.states import ReceiptStates
+from bot.utils.format import format_money
 from config.settings import settings
 from bot.utils.callbacks import (
     CashNotifyCb,
@@ -203,7 +204,7 @@ async def cb_pay_lesson_apply(
     _total, unpaid = await unpaid_for(student, period_month, payment_service)
     sel = selected_from(await state.get_data(), student_id, period_month, unpaid)
     await _show_methods(callback, student_id, period_month, sel, data.get("pay_student_name") or "", student_group_repo)
-    await callback.answer("Оплатить всё" if whole else f"К оплате: {amount} руб.")
+    await callback.answer("Оплатить всё" if whole else f"К оплате: {format_money(amount)}")
 
 
 @router.callback_query(F.data.startswith("client_pay:"))
@@ -301,7 +302,7 @@ async def cb_pay_method(
             if png:
                 await callback.message.answer_photo(
                     BufferedInputFile(png, filename="qr.png"),
-                    caption=f"QR-код для оплаты — {total} руб., {student.name}",
+                    caption=f"QR-код для оплаты — {format_money(total)}, {student.name}",
                 )
             elif settings.payment_qr_image_url:
                 await callback.message.answer_photo(settings.payment_qr_image_url, caption="QR-код для оплаты")
@@ -577,7 +578,7 @@ async def cb_receipt_confirm_partial(
         return
 
     old_text = callback.message.caption or callback.message.text or ""
-    suffix = f"\n\n✅ Оплата подтверждена ({count} счёт(а), {confirmed_total} руб.)"
+    suffix = f"\n\n✅ Оплата подтверждена ({count} счёт(а), {format_money(confirmed_total)})"
     try:
         if callback.message.caption is not None:
             await callback.message.edit_caption(caption=old_text + suffix, reply_markup=None)
@@ -773,7 +774,7 @@ async def on_unbound_receipt(
         return
     await state.set_state(ReceiptStates.choosing_bill)
     await state.update_data(rc_kind=kind, rc_file_id=file_id)
-    rows = [[cb_btn(f"{s.name} · {_period_label(p)} — {t} руб.", f"rcpick:{s.student_id}:{p}")]
+    rows = [[cb_btn(f"{s.name} · {_period_label(p)} — {format_money(t)}", f"rcpick:{s.student_id}:{p}")]
             for s, p, t in bills]
     rows.append([cb_btn("« Отмена", "go:home")])
     await message.answer("📎 Чек получил. За какой счёт эта оплата?", reply_markup=to_aiogram_markup(rows))
@@ -876,15 +877,15 @@ async def cb_action_confirm(
     if claimed > rest and (not force or not user.is_admin):
         code = callback_code(method)
         rows = [
-            [cb_btn(f"✅ Зачесть остаток {rest} руб.", f"pact:{action_id}:{rest}:{code}:f") if rest
+            [cb_btn(f"✅ Зачесть остаток {format_money(rest)}", f"pact:{action_id}:{rest}:{code}:f") if rest
              else cb_btn("✅ Закрыть заявку — оплата уже отмечена", f"pact:{action_id}:0:{code}:f")],
-            *([[cb_btn(f"💸 Всё равно зачесть {claimed} руб. (переплата)", f"pact:{action_id}:{claimed}:{code}:f")]]
+            *([[cb_btn(f"💸 Всё равно зачесть {format_money(claimed)} (переплата)", f"pact:{action_id}:{claimed}:{code}:f")]]
               if user.is_admin else []),
             [cb_btn("❌ Не подтверждать", f"pnay:{action_id}")],
         ]
         await _edit_admin_msg(
             callback,
-            f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб."
+            f"\n\n⚠️ Заявлено {format_money(claimed)}, а к оплате осталось {format_money(rest)}."
             + ("\nСкорее всего, оплату уже отметили вручную." if not rest else "")
             + ("\nВыберите, что зачесть — переплата останется на счёте ученика." if user.is_admin
                else "\nЗачесть можно не больше остатка. Если родитель заплатил больше, сообщите администратору."),
@@ -909,7 +910,7 @@ async def cb_action_confirm(
     over = max(0, claimed - rest)
     await _edit_admin_msg(
         callback,
-        f"\n\n✅ Оплата подтверждена: {credited} руб." + (f" (в т.ч. переплата {over})" if over else "")
+        f"\n\n✅ Оплата подтверждена: {format_money(credited)}" + (f" (в т.ч. переплата {format_money(over)})" if over else "")
         if credited else "\n\n✅ Заявка закрыта: оплата уже была отмечена вручную",
     )
     logger.info("Админ %s подтвердил %s: %d руб. (%d строк)", callback.from_user.id, action_id, credited, count)
@@ -924,7 +925,7 @@ async def _after_credit(callback: CallbackQuery, action, student, credited: int,
     if addr is not None:
         await resolve_notifier(callback.bot).send(
             addr,
-            f"✅ Оплата {credited} руб. за {_period_label(action.period_month)} ({student.name}) подтверждена.",
+            f"✅ Оплата {format_money(credited)} за {_period_label(action.period_month)} ({student.name}) подтверждена.",
             rows=bill_back_rows(action.student_id, action.period_month),
         )
     else:                                       # наличные принял педагог — сообщаем всем родителям ученика
@@ -966,13 +967,19 @@ async def cb_action_advance(
     rest = rest_for_keys(await payment_service.ledger_for(student, action.period_month), action.keys)
     if claimed > rest and not force:
         rows = [
-            *([[cb_btn(f"💸 Зачесть остаток {rest} руб. — аванс {rest} руб.", f"padv:{action_id}:{rest}:f")]] if rest else []),
-            [cb_btn(f"💸 Зачесть {claimed} руб. (переплата) — аванс {claimed} руб.", f"padv:{action_id}:{claimed}:f")],
+            *([[cb_btn(
+                f"💸 Зачесть остаток {format_money(rest)} — аванс {format_money(rest)}",
+                f"padv:{action_id}:{rest}:f",
+            )]] if rest else []),
+            [cb_btn(
+                f"💸 Зачесть {format_money(claimed)} (переплата) — аванс {format_money(claimed)}",
+                f"padv:{action_id}:{claimed}:f",
+            )],
             [cb_btn("❌ Отклонить", f"pnay:{action_id}")],
         ]
         await _edit_admin_msg(
             callback,
-            f"\n\n⚠️ Заявлено {claimed} руб., а к оплате осталось {rest} руб. "
+            f"\n\n⚠️ Заявлено {format_money(claimed)}, а к оплате осталось {format_money(rest)}. "
             "Аванс педагогу будет на ту же сумму, что зачтётся ученику.",
             keep_rows=rows,
         )
@@ -994,8 +1001,8 @@ async def cb_action_advance(
                                    callback.from_user.id)
     await _edit_admin_msg(
         callback,
-        f"\n\n✅ Оплата подтверждена: {credited} руб.\n"
-        f"💸 Педагогу — аванс {payout.amount} руб. за {_period_label(payout.period_month).lower()}",
+        f"\n\n✅ Оплата подтверждена: {format_money(credited)}\n"
+        f"💸 Педагогу — аванс {format_money(payout.amount)} за {_period_label(payout.period_month).lower()}",
     )
     logger.info("Админ %s: %s — %d руб. зачтено, аванс педагогу %s", callback.from_user.id, action_id, credited,
                 action.held_by)

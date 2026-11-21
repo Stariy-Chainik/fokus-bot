@@ -150,10 +150,11 @@ def kb_teacher_card(teacher_id: str) -> InlineKeyboardMarkup:
 
 
 def kb_rate_select(teacher_id: str, rate_group: int, rate_teacher: int, rate_student: int) -> InlineKeyboardMarkup:
+    from bot.utils.format import format_money
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Групповое: {rate_group} руб.", callback_data=f"edit_rate:group:{teacher_id}")],
-        [InlineKeyboardButton(text=f"Инд. педагогу: {rate_teacher} руб.", callback_data=f"edit_rate:teacher:{teacher_id}")],
-        [InlineKeyboardButton(text=f"Инд. ученику: {rate_student} руб.", callback_data=f"edit_rate:student:{teacher_id}")],
+        [InlineKeyboardButton(text=f"Групповое: {format_money(rate_group)}", callback_data=f"edit_rate:group:{teacher_id}")],
+        [InlineKeyboardButton(text=f"Инд. педагогу: {format_money(rate_teacher)}", callback_data=f"edit_rate:teacher:{teacher_id}")],
+        [InlineKeyboardButton(text=f"Инд. ученику: {format_money(rate_student)}", callback_data=f"edit_rate:student:{teacher_id}")],
         [InlineKeyboardButton(text="« Отмена", callback_data=f"teacher_card:{teacher_id}")],
     ])
 

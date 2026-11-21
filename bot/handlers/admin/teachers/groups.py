@@ -62,14 +62,15 @@ async def _render_teacher_card(
         "\n".join(f"  • {branches.get(g.branch_id, '—')} / {g.name}" for g in groups)
         if groups else "  —"
     )
+    from bot.utils.format import format_money
     text = (
         f"👨‍🏫 <b>{teacher.name}</b>\n"
         f"ID: {teacher.teacher_id}\n"
         f"{tg_info}\n\n"
-        f"📊 Ставки (руб. за 45 мин):\n"
-        f"  Групповое: <b>{teacher.rate_group}</b>\n"
-        f"  Инд. педагогу: <b>{teacher.rate_for_teacher}</b>\n"
-        f"  Инд. ученику: <b>{teacher.rate_for_student}</b>\n\n"
+        f"📊 Ставки (за 45 мин):\n"
+        f"  Групповое: <b>{format_money(teacher.rate_group)}</b>\n"
+        f"  Инд. педагогу: <b>{format_money(teacher.rate_for_teacher)}</b>\n"
+        f"  Инд. ученику: <b>{format_money(teacher.rate_for_student)}</b>\n\n"
         f"🏢 Группы:\n{groups_block}"
     )
     await show_card(callback, text, reply_markup=kb_teacher_card(teacher_id))

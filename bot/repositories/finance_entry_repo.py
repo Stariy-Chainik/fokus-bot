@@ -36,7 +36,8 @@ class FinanceEntryRepository(BaseRepository):
             entry.title, entry.amount, entry.created_at,
         ])
         from bot.services import activity          # локально: репозитории грузятся раньше сервисов
-        await activity.record(activity.FINANCE, f"{'Доход' if kind == 'income' else 'Расход'} {amount} ₽: {title}"
+        from bot.utils.format import format_money
+        await activity.record(activity.FINANCE, f"{'Доход' if kind == 'income' else 'Расход'} {format_money(amount)}: {title}"
                               f" · {period_month}", ref=entry_id)
         return entry
 

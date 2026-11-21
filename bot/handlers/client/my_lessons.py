@@ -109,7 +109,8 @@ async def _show_lessons(
                 amount_part = " · оплата педагогу напрямую"
                 paid_icon = ""
             else:
-                amount_part = f" · {amount} ₽" if amount > 0 else ""
+                from bot.utils.format import format_money
+                amount_part = f" · {format_money(amount)}" if amount > 0 else ""
                 if amount > 0:
                     if month.mark(ls.lesson_id).paid:
                         paid_icon = " ✅"
@@ -129,7 +130,8 @@ async def _show_lessons(
     if total_lessons == 0:
         lines.append("\nЗанятий нет.")
     elif unpaid_total > 0:
-        lines.append(f"\n⬜ Не оплачено: <b>{unpaid_total} ₽</b>")
+        from bot.utils.format import format_money
+        lines.append(f"\n⬜ Не оплачено: <b>{format_money(unpaid_total)}</b>")
         if student_id == "all":
             lines.append("<i>Оплата — в разделе «💳 Оплата занятий».</i>")
     elif is_month:

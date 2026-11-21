@@ -146,11 +146,12 @@ async def archive_student(student_id: str, *, student_repo, student_group_repo, 
     if s.athlete_max_id:
         await student_repo.set_athlete_max_id(student_id, None)
     await student_repo.set_archived(student_id, today)
+    from bot.utils.format import format_money
     await activity.record(
         activity.STUDENT,
         f"Ученик {student_id} {s.name} ушёл из школы (в архив) с {period}"
         + (": " + ", ".join(g for g, _n in preview.groups) if preview.groups else "")
-        + (f"; неоплачено {preview.debt.total} ₽" if preview.debt.total else "")
+        + (f"; неоплачено {format_money(preview.debt.total)}" if preview.debt.total else "")
         + (f" ({who})" if who else ""),
         actor=actor, ref=student_id)
     logger.info("Ученик %s в архиве с %s: группы %s, родителей %d, партнёр %s, долг %d (%s)",

@@ -80,12 +80,13 @@ async def cb_lesson_detail(
             lines.extend(["", f"<b>Присутствовали ({len(entries)}):</b>"])
             total = 0
             students_by_id = {s.student_id: s for s in await student_repo.get_all(include_archived=True)}
+            from bot.utils.format import format_money
             for entry in entries:
                 student = students_by_id.get(entry.student_id)
                 name = student.name if student else entry.student_id
                 if entry.amount > 0:
                     lines.append(
-                        f"  • {name} · {entry.duration_min} мин · {entry.amount}₽"
+                        f"  • {name} · {entry.duration_min} мин · {format_money(entry.amount)}"
                     )
                     total += entry.amount
                 else:
@@ -94,7 +95,7 @@ async def cb_lesson_detail(
                         f"  • {name} · {entry.duration_min} мин · {free}"
                     )
             if total > 0:
-                lines.append(f"<b>Итого: {total} ₽</b>")
+                lines.append(f"<b>Итого: {format_money(total)}</b>")
 
     if locked:
         lines.append("")

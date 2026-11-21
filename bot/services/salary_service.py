@@ -175,7 +175,8 @@ class SalaryService:
             name, total = revenue.get(gid, (gid, 0))
             part = held[gid][teacher_id] / sum(held[gid].values()) if held[gid] else 1
             amount = round(total * percent / 100 * part)
-            label = f"{percent} % от абонементов: {name} — {total:,} ₽".replace(",", " ")
+            from bot.utils.format import format_money
+            label = f"{percent} % от абонементов: {name} — {format_money(total)}"
             if part < 1:
                 label += f" (ваши {held[gid][teacher_id]} из {sum(held[gid].values())} занятий)"
             out.append(SalaryLine(date=f"{month}-01", kind="share", label=label, minutes=0, amount=amount,

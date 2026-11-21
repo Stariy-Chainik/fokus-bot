@@ -185,16 +185,17 @@ async def _watch(
             payment_id, student_id, period_month, credited, count,
         )
         if count > 0:
+            from bot.utils.format import format_money
             if parent_addr:
                 await (notifier or resolve_notifier(bot)).send(
                     parent_addr,
-                    f"✅ Оплата получена! {student_name}, {period_month} — {amount} руб. Спасибо!",
+                    f"✅ Оплата получена! {student_name}, {period_month} — {format_money(amount)}. Спасибо!",
                 )
             msg = (
                 f"💰 Оплата через ЮКасса\n\n"
                 f"Ученик: {student_name} ({student_id})\n"
                 f"Период: {period_month}\n"
-                f"Сумма: {amount} руб."
+                f"Сумма: {format_money(amount)}"
             )
             for admin in await user_repo.get_admins():
                 try:

@@ -105,7 +105,7 @@ def test_teacher_archive_api_notifies_admins_and_other_teachers(api):  # noqa: F
     assert st == 200 and [g["id"] for g in r["groups"]] == ["GRP-0001", "GRP-0002"]     # снят и с чужой группы
     assert _student(dp, "STU-0002").archived and all(x.left_period == CUR for x in _rows(dp, "STU-0002").values())
     text = bot.sent[0][1]
-    assert "ушёл из школы" in text and "Петрова Анна" in text and "Неоплачено 6800 ₽" in text
+    assert "ушёл из школы" in text and "Петрова Анна" in text and "Неоплачено 6 800 ₽" in text
     assert "партнёр Иванов Иван отвязан" in text and ADMIN_TG in {x[0] for x in bot.sent}
     # ученик педагогу больше не виден
     assert _call(app, "GET", "/api/teacher/students/STU-0002/archive")[0] == 404

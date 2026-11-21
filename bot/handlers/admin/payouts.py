@@ -66,14 +66,17 @@ async def _render_period(
         paid = paid_by_teacher.get(t.teacher_id, 0)
         total_acc += acc
         total_paid += paid
+        from bot.utils.format import format_amount, format_money
         icon = "🟢" if paid >= acc else ("🟡" if paid > 0 else "🔴")
         rows.append([InlineKeyboardButton(
-            text=f"{icon} {t.name} — {paid}/{acc} ₽", callback_data=f"payout_t:{t.teacher_id}:{period}",
+            text=f"{icon} {t.name} — {format_amount(paid)}/{format_money(acc)}", callback_data=f"payout_t:{t.teacher_id}:{period}",
         )])
+    from bot.utils.format import format_money
     rows.append([InlineKeyboardButton(text="« Месяцы", callback_data="admin:payouts")])
     await callback.message.edit_text(
         f"<b>💸 Зарплата за {display_period(period)}</b>\n"
-        f"Начислено: {total_acc} ₽ · выплачено: {total_paid} ₽ · остаток: {total_acc - total_paid} ₽\n\n"
+        f"Начислено: {format_money(total_acc)} · выплачено: {format_money(total_paid)}"
+        f" · остаток: {format_money(total_acc - total_paid)}\n\n"
         f"🟢 выплачено · 🟡 частично · 🔴 нет. Формат: выплачено/начислено.",
         reply_markup=_kb(rows),
     )
@@ -104,25 +107,26 @@ async def _render_teacher(
     payouts = await payout_repo.get_by_teacher_period(teacher_id, period)
     paid = sum(p.amount for p in payouts)
     rest = acc - paid
+    from bot.utils.format import format_money
     lines = [
         f"<b>{teacher.name} — {display_period(period)}</b>",
-        f"Начислено: <b>{acc} ₽</b>",
-        f"Выплачено: <b>{paid} ₽</b>",
-        f"Остаток: <b>{rest} ₽</b>",
+        f"Начислено: <b>{format_money(acc)}</b>",
+        f"Выплачено: <b>{format_money(paid)}</b>",
+        f"Остаток: <b>{format_money(rest)}</b>",
     ]
     if payouts:
         lines.append("")
         for p in payouts:
             note = f" — {p.comment}" if p.comment else ""
-            lines.append(f"  • {p.paid_at[:10]}: {p.amount} ₽{note}")
+            lines.append(f"  • {p.paid_at[:10]}: {format_money(p.amount)}{note}")
     rows = []
     bonuses = await bonus_repo.get_for_teacher_period(teacher_id, period) if bonus_repo else []
     if bonuses:
         lines.append("\n<b>🎁 Премии</b> (уже в начислении и в выплатах):")
         for b in bonuses:
-            lines.append(f"  • {b.created_at[:10]}: {b.amount} ₽{(' — ' + b.comment) if b.comment else ''}")
+            lines.append(f"  • {b.created_at[:10]}: {format_money(b.amount)}{(' — ' + b.comment) if b.comment else ''}")
             rows.append([InlineKeyboardButton(
-                text=f"🗑 Отменить премию {b.amount} ₽",
+                text=f"🗑 Отменить премию {format_money(b.amount)}",
                 callback_data=f"payout_bon_del:{b.bonus_id}:{teacher_id}:{period}",
             )])
     overrides = await override_repo.get_for_teacher_period(teacher_id, period)
@@ -135,7 +139,7 @@ async def _render_teacher(
                 callback_data=f"payout_ovr_del:{o.override_id}:{teacher_id}:{period}",
             )])
     if rest > 0:
-        rows.append([InlineKeyboardButton(text=f"✅ Выплатить остаток {rest} ₽",
+        rows.append([InlineKeyboardButton(text=f"✅ Выплатить остаток {format_money(rest)}",
                                           callback_data=f"payout_all:{teacher_id}:{period}")])
     rows.append([InlineKeyboardButton(text="✏️ Другая сумма (аванс/часть)",
                                       callback_data=f"payout_custom:{teacher_id}:{period}")])
@@ -182,7 +186,8 @@ async def cb_payout_all(
         return
     await payout_repo.add(teacher_id, period, rest, callback.from_user.id, comment="остаток")
     await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
-    await callback.answer(f"Выплата {rest} ₽ записана")
+    from bot.utils.format import format_money
+    await callback.answer(f"Выплата {format_money(rest)} записана")
 
 
 @router.callback_query(F.data.startswith("payout_custom:"), AdminOnly())
@@ -358,7 +363,8 @@ async def on_bonus_comment(
         return
     comment = "" if (message.text or "").strip() == "-" else (message.text or "").strip()
     await grant_bonus(bonus_repo, payout_repo, teacher_id, period, int(amount), comment, message.from_user.id)
-    sent = await message.answer(f"✅ Премия {amount} ₽ начислена и выплачена.")
+    from bot.utils.format import format_money
+    sent = await message.answer(f"✅ Премия {format_money(amount)} начислена и выплачена.")
     await _render_teacher(sent, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
 
 
@@ -372,7 +378,8 @@ async def cb_bonus_delete(
     _, bonus_id, teacher_id, period = callback.data.split(":", 3)
     bonus = await revoke_bonus(bonus_repo, payout_repo, bonus_id, callback.from_user.id)
     await _render_teacher(callback.message, teacher_id, period, teacher_repo, salary_service, payout_repo, salary_override_repo, bonus_repo)
-    await callback.answer(f"Премия {bonus.amount} ₽ отменена" if bonus else "Премия уже отменена")
+    from bot.utils.format import format_money
+    await callback.answer(f"Премия {format_money(bonus.amount)} отменена" if bonus else "Премия уже отменена")
 
 
 # ─── Расшифровка начисления ──────────────────────────────────────────────────
@@ -415,6 +422,7 @@ async def _detail_lines(
             who = " + ".join(n for n in (ls.student_1_name, ls.student_2_name, ls.student_3_name, ls.student_4_name) if n)
             individual.append((f"{dd} {ls.duration_min}м {who}", ln.amount))
 
+    from bot.utils.format import format_money
     out: list[str] = []
     for bname in sorted(by_branch):
         out.append(f"🏢 <b>{bname}</b>")
@@ -422,24 +430,24 @@ async def _detail_lines(
             items = by_branch[bname][gname]
             gsum = sum(a for _, a, _ in items)
             in_shift = all(s for _, _, s in items)
-            out.append(f"  💃 {gname} — {len(items)} зан." + (f" ({items[0][2]})" if in_shift else f", {gsum} ₽"))
-            out.extend(f"     • {t}" + ("" if s else f" — {a} ₽") for t, a, s in items)
+            out.append(f"  💃 {gname} — {len(items)} зан." + (f" ({items[0][2]})" if in_shift else f", {format_money(gsum)}"))
+            out.extend(f"     • {t}" + ("" if s else f" — {format_money(a)}") for t, a, s in items)
     if day_lines:
         out.append("🕒 <b>Смены и корректировки</b>")
-        out.extend(f"  • {dd} {label} — {a} ₽" for dd, label, a in day_lines)
+        out.extend(f"  • {dd} {label} — {format_money(a)}" for dd, label, a in day_lines)
     if share_lines:
         out.append("💯 <b>Процент от абонементов за месяц</b>")
-        out.extend(f"  • {label} → {a} ₽" for label, a in share_lines)
+        out.extend(f"  • {label} → {format_money(a)}" for label, a in share_lines)
     if individual:
         isum = sum(a for _, a in individual)
-        out.append(f"👤 <b>Индивидуальные</b> — {len(individual)} зан., {isum} ₽")
-        out.extend(f"  • {t} — {a} ₽" for t, a in individual)
+        out.append(f"👤 <b>Индивидуальные</b> — {len(individual)} зан., {format_money(isum)}")
+        out.extend(f"  • {t} — {format_money(a)}" for t, a in individual)
     if bonus_lines:
         out.append("🎁 <b>Премии</b>")
-        out.extend(f"  • {dd} {label} — {a} ₽" for dd, label, a in bonus_lines)
+        out.extend(f"  • {dd} {label} — {format_money(a)}" for dd, label, a in bonus_lines)
     if not out:
         out.append("Занятий нет.")
-    out.append(f"\n<b>Итого начислено: {sum(ln.amount for ln in lines_all)} ₽</b>")
+    out.append(f"\n<b>Итого начислено: {format_money(sum(ln.amount for ln in lines_all))}</b>")
     return out
 
 

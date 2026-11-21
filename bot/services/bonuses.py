@@ -48,9 +48,10 @@ async def revoke_bonus(bonus_repo, payout_repo, bonus_id: str, by_tg_id: int) ->
     await bonus_repo.delete(bonus_id)
     if bonus.payout_id:
         await payout_repo.delete(bonus.payout_id)
+    from bot.utils.format import format_money
     await activity.record(
         activity.PAYOUT,
-        f"Премия отменена {bonus.amount} ₽: {bonus.teacher_id} · {bonus.period_month}"
+        f"Премия отменена {format_money(bonus.amount)}: {bonus.teacher_id} · {bonus.period_month}"
         + (f" · {bonus.comment}" if bonus.comment else ""),
         actor=by_tg_id, ref=bonus_id,
     )

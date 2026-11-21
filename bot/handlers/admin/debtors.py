@@ -52,13 +52,14 @@ async def _collect_debtors(
 
 
 def _format_line(idx: int, d: DebtorRow, current: str) -> str:
+    from bot.utils.format import format_amount, format_money
     parts = []
     for period, amt in d.periods.items():
         mark = "*" if period == current else ""
-        parts.append(f"{display_period(period)}{mark}: {amt}")
+        parts.append(f"{display_period(period)}{mark}: {format_amount(amt)}")
     detail = "; ".join(parts)
     no_bot = "" if d.has_parent else " 🔕"
-    return f"{idx}. <b>{d.student.name}</b> — {d.total} ₽{no_bot}\n   {detail}"
+    return f"{idx}. <b>{d.student.name}</b> — {format_money(d.total)}{no_bot}\n   {detail}"
 
 
 def _kb_debtors(pg: Page, can_remind: bool) -> InlineKeyboardMarkup:
@@ -95,12 +96,13 @@ async def _render_debtors(
     closed_grand = sum(d.closed_total for d in debtors)
     remind_targets = sum(1 for d in debtors if d.closed_total > 0 and d.has_parent)
 
+    from bot.utils.format import format_money
     since = settings.debtors_since_period
     lines = [
         "⚠️ <b>Должники</b>" + (f" · учёт с {display_period(since)}" if since else ""),
         "",
-        f"Всего: {len(debtors)} · Долг: <b>{grand_total} ₽</b> "
-        f"(закрытые месяцы: {closed_grand} ₽)",
+        f"Всего: {len(debtors)} · Долг: <b>{format_money(grand_total)}</b> "
+        f"(закрытые месяцы: {format_money(closed_grand)})",
         "",
     ]
     for i, d in enumerate(pg.items, start=pg.offset + 1):
@@ -146,11 +148,12 @@ async def cb_debtors_remind_confirm(
     if not targets:
         await callback.answer("Некому напоминать: нет должников с доступом к боту", show_alert=True)
         return
+    from bot.utils.format import format_money
     total = sum(d.closed_total for d in targets)
     text = (
         "📤 <b>Напомнить всем должникам?</b>\n\n"
         f"Родителям будет отправлено напоминание о долге за <b>закрытые месяцы</b>.\n\n"
-        f"Получателей: {len(targets)} · Сумма долгов: {total} ₽\n"
+        f"Получателей: {len(targets)} · Сумма долгов: {format_money(total)}\n"
         + (f"Без доступа к боту (не получат): {skipped}\n" if skipped else "")
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -181,15 +184,16 @@ async def cb_debtors_remind_go(
 
         sent_parents = 0
         failed = 0
+        from bot.utils.format import format_money
         for d in targets:
             period_lines = [
-                f"  • {display_period(p)}: {amt} ₽"
+                f"  • {display_period(p)}: {format_money(amt)}"
                 for p, amt in d.periods.items() if p < current
             ]
             text = (
                 "🔔 <b>Напоминание об оплате</b>\n\n"
                 f"Ученик: <b>{d.student.name}</b>\n"
-                f"Задолженность: <b>{d.closed_total} ₽</b>\n"
+                f"Задолженность: <b>{format_money(d.closed_total)}</b>\n"
                 + "\n".join(period_lines)
                 + "\n\nДетали и оплата — по кнопке ниже."
             )

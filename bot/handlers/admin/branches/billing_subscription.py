@@ -40,8 +40,9 @@ async def cb_group_billing_sub(
         return
     await state.set_state(GroupBillingStates.entering_sub_price)
     await state.update_data(group_id=group_id)
+    from bot.utils.format import format_money
     current = (
-        f"Текущая цена: {group.price_full} ₽/мес.\n"
+        f"Текущая цена: {format_money(group.price_full)}/мес.\n"
         if group.billing_mode == GroupBillingMode.SUBSCRIPTION else ""
     )
     await callback.message.edit_text(
@@ -78,8 +79,9 @@ async def group_billing_sub_price(
         for p in _override_periods()
     ]
     rows.append([InlineKeyboardButton(text="« Отмена", callback_data=f"group_billing:{group_id}")])
+    from bot.utils.format import format_money
     await message.answer(
-        f"<b>💳 Абонемент: {v} ₽/мес</b>\n\n"
+        f"<b>💳 Абонемент: {format_money(v)}/мес</b>\n\n"
         "С какого месяца действует новая цена?\n"
         "<i>Прошлые месяцы с занятиями будут автоматически зафиксированы "
         "по прежним условиям — цена меняется только вперёд.</i>",
@@ -249,7 +251,8 @@ async def cb_subovr_list(
             who = names.get(o.student_id, o.student_id)
         else:
             who = "вся группа"
-        amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
+        from bot.utils.format import format_money
+        amount = format_money(o.amount) if o.amount > 0 else "не начислять"
         sid_part = o.student_id or "-"
         period_label = "постоянно" if o.period_month == "*" else display_period(o.period_month)
         rows.append([InlineKeyboardButton(

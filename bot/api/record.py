@@ -193,7 +193,8 @@ def _rshare_amounts(csv: str | None, amounts, duration: int) -> str | None:
         except (TypeError, ValueError):
             raise RecordError("bad_request", "Сумма — целое число рублей") from None
         if not 0 <= value <= RSHARE_MAX_AMOUNT:
-            raise RecordError("bad_request", f"Сумма от 0 до {RSHARE_MAX_AMOUNT} ₽")
+            from bot.utils.format import format_money
+            raise RecordError("bad_request", f"Сумма от 0 до {format_money(RSHARE_MAX_AMOUNT)}")
         entries[i] = replace(e, amount=value)
     return serialize_attendees(entries)
 

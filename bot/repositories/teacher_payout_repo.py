@@ -56,7 +56,8 @@ class TeacherPayoutRepository(BaseRepository):
         ])
         logger.info("Выплата %s: %s %s %d руб.", payout.payout_id, teacher_id, period_month, amount)
         from bot.services import activity          # локально: репозитории грузятся раньше сервисов
-        await activity.record(activity.PAYOUT, f"Выплата зарплаты {amount} ₽: {teacher_id} · {period_month}"
+        from bot.utils.format import format_money
+        await activity.record(activity.PAYOUT, f"Выплата зарплаты {format_money(amount)}: {teacher_id} · {period_month}"
                               + (f" · {comment}" if comment else ""), actor=paid_by_tg_id, ref=payout.payout_id)
         return payout
 

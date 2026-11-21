@@ -28,8 +28,8 @@ def test_bill_text_unpaid():
 def test_bill_text_partially_paid_shows_remainder():
     text, total = build_bill_text("Иванов Иван", [], "2026-09", _bills(), paid=4600)
     assert total == 11600
-    assert "Начислено: 11600 ₽ · оплачено: 4600 ₽" in text
-    assert "<b>Остаток к оплате: 7000 ₽</b>" in text
+    assert "Начислено: 11 600 ₽ · оплачено: 4 600 ₽" in text
+    assert "<b>Остаток к оплате: 7 000 ₽</b>" in text
     assert "Группы:" not in text
     assert_golden("bill_text_paid_part", text)
 

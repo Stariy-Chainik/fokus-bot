@@ -86,7 +86,7 @@ def test_payouts_overrides_flow(api):
     assert status == 200 and r["amount"] == 2000
     assert _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]["paid"] == 0
     assert _call(app, "DELETE", "/api/admin/payouts/PO-000001")[0] == 404
-    assert [e.text for e in log.items] == [f"Выплата отменена 2000 ₽: TCH-0001 · {YM} · аванс"]
+    assert [e.text for e in log.items] == [f"Выплата отменена 2 000 ₽: TCH-0001 · {YM} · аванс"]
     status, r = _call(app, "POST", "/api/admin/payouts", json=body)        # после удаления аванс можно записать заново
     assert status == 200 and _call(app, "GET", f"/api/admin/payouts/TCH-0001?ym={YM}")[1]["paid"] == 2000
     assert _call(app, "POST", "/api/admin/payouts", json={"teacherId": "TCH-0001", "periodMonth": YM, "amount": 0})[0] == 400
@@ -124,7 +124,7 @@ def test_debtors_remind_sends_only_closed_months_to_linked_parents(api):
     status, r = _call(app, "POST", "/api/admin/debtors/remind")
     assert status == 200 and (r["sent"], r["skipped"], r["total"]) == (1, 0, 2000)
     addrs, text = dp["notifier"].sent[-1]
-    assert addrs == [("tg", PARENT_TG)] and "Петрова Анна" in text and "2000 ₽" in text and "08.2026" in text
+    assert addrs == [("tg", PARENT_TG)] and "Петрова Анна" in text and "2 000 ₽" in text and "08.2026" in text
 
 
 def test_debtors_remind_without_bot(api):

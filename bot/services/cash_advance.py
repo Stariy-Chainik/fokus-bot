@@ -14,6 +14,7 @@ import logging
 
 from bot.repositories.teacher_payout_repo import TeacherPayout
 from bot.utils.dates import current_period, period_label
+from bot.utils.format import format_money
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ async def keep_as_advance(payout_repo, user_repo, bot, action, student_name: str
     logger.info("Наличные %s (%d руб.) оставлены педагогу %s авансом за %s — админ %s",
                 action.action_id, amount, action.held_by, period, by_tg_id)
     if bot is not None and user_repo is not None:
-        text = (f"💸 Наличные {amount} ₽ от родителя ({student_name}, {period_label(action.period_month).lower()}) "
+        text = (f"💸 Наличные {format_money(amount)} от родителя ({student_name}, {period_label(action.period_month).lower()}) "
                 f"оставлены вам авансом в счёт зарплаты за {period_label(period).lower()}.\n"
                 f"Сдавать их в школу не нужно. Аванс виден в кабинете: «Зарплата» → «Выплаты школы».")
         for u in await user_repo.get_all():

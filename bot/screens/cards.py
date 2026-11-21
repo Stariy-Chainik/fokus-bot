@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from bot.models import GroupBillingMode, Student, StudentGroupTier
+from bot.utils.format import format_money
 
 if TYPE_CHECKING:
     from bot.services.student_service import StudentCard
@@ -50,7 +51,7 @@ def admin_student_card_view(card: StudentCard) -> AdminStudentCardView:
             if g:
                 mode_marker = ""
                 if g.billing_mode == GroupBillingMode.PER_VISIT:
-                    mode_marker = f" · 💰 {g.price_full}₽/{g.duration_full}м"
+                    mode_marker = f" · 💰 {format_money(g.price_full)}/{g.duration_full}м"
                 group_lines.append(f"  • <b>{g.name}</b> ({row.branch_name}){mode_marker}")
             else:
                 group_lines.append(f"  • (не найдена: {row.group_id})")
@@ -68,20 +69,20 @@ def admin_student_card_view(card: StudentCard) -> AdminStudentCardView:
         if student.group_tier == StudentGroupTier.SHORT:
             tier_line = (
                 f"\n🕐 Тариф: <b>короткий</b> — "
-                f"{primary_group.duration_short} мин / {primary_group.price_short}₽"
+                f"{primary_group.duration_short} мин / {format_money(primary_group.price_short)}"
             )
             tier_toggle = (
                 student.group_tier.value,
-                f"🕐 Переключить на полный ({primary_group.duration_full} мин / {primary_group.price_full}₽)",
+                f"🕐 Переключить на полный ({primary_group.duration_full} мин / {format_money(primary_group.price_full)})",
             )
         else:
             tier_line = (
                 f"\n🕐 Тариф: <b>полный</b> — "
-                f"{primary_group.duration_full} мин / {primary_group.price_full}₽"
+                f"{primary_group.duration_full} мин / {format_money(primary_group.price_full)}"
             )
             tier_toggle = (
                 student.group_tier.value,
-                f"🕐 Переключить на короткий ({primary_group.duration_short} мин / {primary_group.price_short}₽)",
+                f"🕐 Переключить на короткий ({primary_group.duration_short} мин / {format_money(primary_group.price_short)})",
             )
 
     # Блок клиента

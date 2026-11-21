@@ -58,7 +58,7 @@ def test_screens_say_group_instead_of_teacher():
     assert "👥 <b>БП Джаз</b>" in text and total == 800
 
     lines = _bill_detail_lines("Татаркина София", "2026-09", {"TCH-0002": agg}, [])
-    assert "👥 <b>БП Джаз</b> — 800 руб. — ⏳ Счёт не создан — 800 руб." in lines
+    assert "👥 <b>БП Джаз</b> — 800 ₽ — ⏳ Счёт не создан — 800 ₽" in lines
 
     ledger = TeacherLedger(teacher_id="TCH-0002", name="БП Джаз", accrued=800, paid=0, items=[item], group=True)
     detail = render_bill_detail("2026-09", [(STU, {"TCH-0002": ledger})])

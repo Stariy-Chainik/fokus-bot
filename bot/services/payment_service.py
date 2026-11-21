@@ -684,7 +684,8 @@ class PaymentService:
                 ref = f"{student_id} yk:{yk_id}"
             else:
                 ref = student_id
-            await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
+            from bot.utils.format import format_money
+            await activity.record(activity.PAYMENT, f"Оплата {format_money(credited)}: {student_id} · {period_month} · {payment_method}"
                                   + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id,
                                   ref=ref)
             payment_events.payment_received(student_id, period_month, credited, payment_method,
@@ -927,7 +928,8 @@ class PaymentService:
                 return None
             # строка-остаток должна вырасти сразу, а не при следующем открытии счёта
             await self.ledger_for(Student(student_id=row.student_id, name=row.student_name), row.period_month)
-        await activity.record(activity.PAYMENT, f"Снята оплата {row.total_amount} ₽: {row.student_id} · {row.period_month}"
+        from bot.utils.format import format_money
+        await activity.record(activity.PAYMENT, f"Снята оплата {format_money(row.total_amount)}: {row.student_id} · {row.period_month}"
                               f" · {row.teacher_name or row.teacher_id}" + (f" · {reason}" if reason else ""),
                               actor=actor_tg_id, ref=row.student_id)
         payment_events.payment_cancelled(row, actor_tg_id, reason)
@@ -954,7 +956,8 @@ class PaymentService:
                                               student_id=payment.student_id)
         if ok:
             logger.info("Счёт %s подтверждён", payment_id)
-            await activity.record(activity.PAYMENT, f"Оплата {payment.total_amount} ₽: {payment.student_id}"
+            from bot.utils.format import format_money
+            await activity.record(activity.PAYMENT, f"Оплата {format_money(payment.total_amount)}: {payment.student_id}"
                                   f" · {payment.period_month} · {payment_method} · {payment.teacher_id}",
                                   actor=confirmed_by_tg_id, ref=payment.student_id)
             payment_events.payment_received(payment.student_id, payment.period_month, payment.total_amount,

@@ -99,11 +99,12 @@ async def cb_fin_list(
     if not entries:
         await callback.answer("Записей нет", show_alert=True)
         return
+    from bot.utils.format import format_money
     rows = [
         [InlineKeyboardButton(
             text=(
                 f"✖ {'🏆' if entry.kind == 'income' else '📉'} "
-                f"{entry.title} — {entry.amount} ₽"
+                f"{entry.title} — {format_money(entry.amount)}"
             ),
             callback_data=f"fin:del:{entry.entry_id}:{period}",
         )]

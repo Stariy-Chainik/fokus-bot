@@ -53,58 +53,60 @@ def _format_profit(title: str, summary: ProfitSummary) -> str:
             parts.append(f"👤 {row.individual_lessons}")
         count_label = "  ".join(parts)
         lines.append(f"<b>{row.teacher_name}</b>  {count_label}")
+        from bot.utils.format import format_money
         lines.append(
-            f"  Выручка: {row.income} ₽  Зарплата: {row.salary} ₽"
+            f"  Выручка: {format_money(row.income)}  Зарплата: {format_money(row.salary)}"
         )
         if row.rent:
             lines.append(
-                f"  🏟 в т.ч. аренда зала: {row.rent} ₽ ({row.rent_lessons} зан.)"
+                f"  🏟 в т.ч. аренда зала: {format_money(row.rent)} ({row.rent_lessons} зан.)"
             )
         if row.owner:
             lines.append(
-                f"  👑 руководитель: {row.owner_income} ₽ остаются в прибыли"
+                f"  👑 руководитель: {format_money(row.owner_income)} остаются в прибыли"
             )
         lines.append(
-            f"  Прибыль: <b>{row.profit} ₽</b> ({row.margin_percent}%)"
+            f"  Прибыль: <b>{format_money(row.profit)}</b> ({row.margin_percent}%)"
         )
         lines.append("")
+    from bot.utils.format import format_money
     if summary.subscription_rows:
         lines.append("💳 <b>Абонементы</b>")
         for sub_row in summary.subscription_rows:
             lines.append(
-                f"  {sub_row.group_name}: {sub_row.income} ₽ ({sub_row.billed_students} уч.)"
+                f"  {sub_row.group_name}: {format_money(sub_row.income)} ({sub_row.billed_students} уч.)"
             )
         lines.append(
-            f"  <b>Итого абонементы: {summary.subscription_income} ₽</b>"
+            f"  <b>Итого абонементы: {format_money(summary.subscription_income)}</b>"
         )
         lines.append("")
     if incomes:
         lines.append("🏆 <b>Прочие доходы</b>")
         for entry in incomes:
-            lines.append(f"  {entry.title}: {entry.amount} ₽")
-        lines.append(f"  <b>Итого: {summary.manual_income} ₽</b>")
+            lines.append(f"  {entry.title}: {format_money(entry.amount)}")
+        lines.append(f"  <b>Итого: {format_money(summary.manual_income)}</b>")
         lines.append("")
     if expenses:
         lines.append("📉 <b>Расходы</b>")
         for entry in expenses:
-            lines.append(f"  {entry.title}: {entry.amount} ₽")
-        lines.append(f"  <b>Итого: {summary.manual_expenses} ₽</b>")
+            lines.append(f"  {entry.title}: {format_money(entry.amount)}")
+        lines.append(f"  <b>Итого: {format_money(summary.manual_expenses)}</b>")
         lines.append("")
     lines += [
         "──────────────",
-        f"Выручка:    {summary.total_income} ₽",
+        f"Выручка:    {format_money(summary.total_income)}",
     ]
     if summary.rent_income:
         lines.append(
-            f"  в т.ч. аренда зала: {summary.rent_income} ₽"
+            f"  в т.ч. аренда зала: {format_money(summary.rent_income)}"
             f" ({summary.rent_lessons} зан.)"
         )
-    lines.append(f"Зарплата: {summary.salary} ₽")
+    lines.append(f"Зарплата: {format_money(summary.salary)}")
     if summary.owner_income:
-        lines.append(f"  👑 руководитель в прибыли: {summary.owner_income} ₽")
+        lines.append(f"  👑 руководитель в прибыли: {format_money(summary.owner_income)}")
     if summary.manual_expenses:
-        lines.append(f"Расходы:   {summary.manual_expenses} ₽")
-    lines.append(f"<b>Прибыль:  {summary.profit} ₽</b>")
+        lines.append(f"Расходы:   {format_money(summary.manual_expenses)}")
+    lines.append(f"<b>Прибыль:  {format_money(summary.profit)}</b>")
     return "\n".join(lines)
 
 

@@ -110,12 +110,13 @@ def register_finance_routes(app: web.Application, dp, guard, prefix: str, bot=No
             targets = [d for d in rows if d.closed_total > 0 and d.has_parent]
             skipped = sum(1 for d in rows if d.closed_total > 0 and not d.has_parent)
             sent = failed = 0
+            from bot.utils.format import format_money
             for d in targets:
-                period_lines = [f"  • {display_period(p)}: {amt} ₽" for p, amt in d.periods.items() if p < current]
+                period_lines = [f"  • {display_period(p)}: {format_money(amt)}" for p, amt in d.periods.items() if p < current]
                 text = (
                     "🔔 <b>Напоминание об оплате</b>\n\n"
                     f"Ученик: <b>{d.student.name}</b>\n"
-                    f"Задолженность: <b>{d.closed_total} ₽</b>\n"
+                    f"Задолженность: <b>{format_money(d.closed_total)}</b>\n"
                     + "\n".join(period_lines)
                     + "\n\nДетали и оплата — по кнопке ниже."
                 )

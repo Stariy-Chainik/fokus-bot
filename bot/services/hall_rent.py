@@ -84,26 +84,29 @@ async def status(rent_repo, teacher_id: str, period: str, lessons: list) -> dict
 
 async def record_payment(rent_repo, teacher_id: str, period: str, amount: int, by_tg_id: int,
                          comment: str = "") -> HallRentPayment:
+    from bot.utils.format import format_money
     row = await rent_repo.add(teacher_id, period, amount, by_tg_id, comment)
-    await activity.record(activity.FINANCE, f"Аренда зала получена {amount} ₽: {teacher_id} · {period}"
+    await activity.record(activity.FINANCE, f"Аренда зала получена {format_money(amount)}: {teacher_id} · {period}"
                           + (f" · {comment}" if comment else ""), actor=by_tg_id, ref=row.rent_id)
     return row
 
 
 async def cancel_payment(rent_repo, rent_id: str, by_tg_id: int) -> HallRentPayment | None:
+    from bot.utils.format import format_money
     row = await rent_repo.get_by_id(rent_id)
     if row is None:
         return None
     await rent_repo.delete(rent_id)
-    await activity.record(activity.FINANCE, f"Отметка аренды снята {row.amount} ₽: {row.teacher_id} · {row.period_month}",
+    await activity.record(activity.FINANCE, f"Отметка аренды снята {format_money(row.amount)}: {row.teacher_id} · {row.period_month}",
                           actor=by_tg_id, ref=rent_id)
     return row
 
 
 def received_text(period: str, amount: int, rest: int) -> str:
     """Педагогу: школа получила аренду."""
-    text = f"✅ Школа получила аренду зала за {period_label(period).lower()}: {amount} ₽. Спасибо!"
-    return text + (f"\nОстаток за месяц: {rest} ₽." if rest else "")
+    from bot.utils.format import format_money
+    text = f"✅ Школа получила аренду зала за {period_label(period).lower()}: {format_money(amount)}. Спасибо!"
+    return text + (f"\nОстаток за месяц: {format_money(rest)}." if rest else "")
 
 
 async def notify_teacher(bot, user_repo, teacher_id: str, text: str) -> bool:

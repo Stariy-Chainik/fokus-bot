@@ -91,7 +91,7 @@ def test_mismatch_alerts_admins_with_receipt_amount_button(env):
     assert (a.receipt_amount, a.receipt_match, a.receipt_group) == (4250, False, False)
     assert [chat for chat, *_ in env.bot.sent] == ADMINS
     _, text, kb = env.bot.sent[0]
-    assert "В чеке: 4250 ₽" in text and "в заявке: 7650 ₽" in text and "Дата в чеке: 06.11.2026" in text
+    assert "В чеке: 4 250 ₽" in text and "в заявке: 7 650 ₽" in text and "Дата в чеке: 06.11.2026" in text
     assert "Мазилина Валерия · октябрь 2026" in text
     assert _buttons(kb) == [f"pact:{a.action_id}:4250:{callback_code('receipt_unknown')}", f"pnay:{a.action_id}"]
     assert env.bot.downloads == 1 and env.calls[0][1] == "image/jpeg"
@@ -144,7 +144,7 @@ def test_group_mismatch_alerts_once_without_button(env):
     assert a1.receipt_check == "diff:5000:g" and a2.receipt_check == "diff:5000:g"
     assert [chat for chat, *_ in env.bot.sent] == ADMINS          # одно сообщение на администратора, не два
     _, text, kb = env.bot.sent[0]
-    assert "в заявках: 7650 ₽ (3400 + 4250)" in text and "сентябрь 2026, октябрь 2026" in text
+    assert "в заявках: 7 650 ₽ (3 400 + 4 250)" in text and "сентябрь 2026, октябрь 2026" in text
     assert kb is None
 
 

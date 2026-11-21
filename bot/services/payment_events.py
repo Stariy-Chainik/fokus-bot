@@ -74,7 +74,8 @@ async def _send(student_id: str, period: str, amount: int, method: str, actor: i
         if not name:
             s = await _deps["students"].get_by_id(student_id)
             name = s.name if s else student_id
-        head = f"💳 Оплата {amount} ₽ — {name}, {period_label(period).lower()}"
+        from bot.utils.format import format_money
+        head = f"💳 Оплата {format_money(amount)} — {name}, {period_label(period).lower()}"
         if by_teacher and who is not None:
             tname = await teacher_name(who.teacher_id)
             how = ("💵 Наличные — деньги у педагога" if method == CASH
@@ -105,8 +106,9 @@ async def _send_cancelled(row, reason: str) -> None:
     user = await _deps["users"].get_by_tg_id(row.confirmed_by_tg_id)
     if user is None or not user.teacher_id or user.is_admin:
         return
+    from bot.utils.format import format_money
     text = (f"↩️ Администратор снял вашу отметку оплаты\nУченик: {row.student_name}\n"
-            f"Период: {period_label(row.period_month)}\nСумма: {row.total_amount} руб."
+            f"Период: {period_label(row.period_month)}\nСумма: {format_money(row.total_amount)}"
             + (f"\nПричина: {reason}" if reason else "") + "\n\nНачисление снова числится неоплаченным.")
     try:
         await _deps["bot"].send_message(row.confirmed_by_tg_id, text)
@@ -148,7 +150,8 @@ def held_rows(action) -> list:
     """Кнопки администратору по наличным у педагога: зачесть, когда деньги переданы, или оставить
     их педагогу авансом в счёт зарплаты (bot/services/cash_advance.py)."""
     from bot.screens import cb
-    return [[cb(f"✅ Деньги получены — зачесть {action.amount} ₽", f"pact:{action.action_id}:{action.amount}:c")],
+    from bot.utils.format import format_money
+    return [[cb(f"✅ Деньги получены — зачесть {format_money(action.amount)}", f"pact:{action.action_id}:{action.amount}:c")],
             [cb("💸 Оставить педагогу как аванс", f"padv:{action.action_id}:{action.amount}")],
             [cb("❌ Отклонить", f"pnay:{action.action_id}")]]
 
@@ -175,7 +178,8 @@ async def _send_held(action) -> None:
     from bot.utils.dates import period_label
     try:
         admins = [u.tg_id for u in await _deps["users"].get_all() if u.is_admin]
-        text = (f"💵 Наличные у педагога: {action.amount} ₽ — {action.student_name}, "
+        from bot.utils.format import format_money
+        text = (f"💵 Наличные у педагога: {format_money(action.amount)} — {action.student_name}, "
                 f"{period_label(action.period_month).lower()}\n"
                 f"Деньги у: {await teacher_name(action.held_by)}\n"
                 f"Зачтите оплату, когда педагог передаст деньги, или оставьте их ему авансом в счёт зарплаты. "
@@ -222,8 +226,9 @@ async def _send_request(action) -> None:
         to = await deciders(action.student_id)
         if not to:
             return
+        from bot.utils.format import format_money
         title = "💵 Оплата наличными" if action.kind == KIND_CASH else "🧾 Чек об оплате"
-        text = (f"{title}: {action.amount} ₽ — {action.student_name}, {period_label(action.period_month).lower()}\n"
+        text = (f"{title}: {format_money(action.amount)} — {action.student_name}, {period_label(action.period_month).lower()}\n"
                 + ("Если деньги у вас — нажмите «Деньги у меня», оплату зачтёт администратор, когда вы их передадите."
                    if action.kind == KIND_CASH else "Родитель ждёт подтверждения. Решение видно и в кабинете → «Ждут решения»."))
         kb = to_aiogram_markup(teacher_rows(action))

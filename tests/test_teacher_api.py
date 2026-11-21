@@ -501,7 +501,7 @@ def test_full_bill_teacher_sees_other_teachers_and_gets_payment_notice(api, monk
                                                    payment_method="cash")
         await asyncio.gather(*payment_events._tasks)
     asyncio.run(pay_and_wait(555))                                  # отметил администратор
-    assert sent and sent[0][0] == teacher_tg and "3000 ₽" in sent[0][1] and "Иванов Иван" in sent[0][1]
+    assert sent and sent[0][0] == teacher_tg and "3 000 ₽" in sent[0][1] and "Иванов Иван" in sent[0][1]
     sent.clear()
     asyncio.run(pay_and_wait(teacher_tg))                           # отметила сама — ей не дублируем,
     assert [c for c, _ in sent] == [ADMIN_TG]                       # а администратор узнаёт, что деньги у неё
@@ -649,7 +649,7 @@ def test_payment_request_copy_goes_to_full_bill_teacher_with_buttons(api, monkey
         await asyncio.gather(*payment_events._tasks)
         return a
     action = asyncio.run(run())
-    assert len(sent) == 1 and sent[0][0] == TEACHER_TG and "2000 ₽" in sent[0][1]
+    assert len(sent) == 1 and sent[0][0] == TEACHER_TG and "2 000 ₽" in sent[0][1]
     assert sent[0][2] == [f"pact:{action.action_id}:2000:c", f"pnay:{action.action_id}"]
     teacher = asyncio.run(dp["user_repo"].get_by_tg_id(TEACHER_TG))
     assert asyncio.run(payment_events.may_decide(teacher, "STU-0001"))
@@ -803,7 +803,7 @@ def test_billing_teacher_sets_subscription_amount_for_the_month(api, monkeypatch
     status, r = _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription", bot=bot,
                       json={"ym": YM, "groupId": "GRP-0001", "amount": 3000, "reason": "пришёл с 15 числа"})
     assert status == 200 and (r["old"], r["amount"]) == (6000, 3000)
-    assert bot.sent and "изменил абонемент" in bot.sent[0][1] and "6000 ₽ → стало 3000 ₽" in bot.sent[0][1]
+    assert bot.sent and "изменил абонемент" in bot.sent[0][1] and "6 000 ₽ → стало 3 000 ₽" in bot.sent[0][1]
     # повторное «Сохранить» с той же суммой — без записи и без второго сообщения (16.10.2026, три сообщения от Яковлевой)
     status, r = _call(app, "PUT", "/api/teacher/bills/student/STU-0001/subscription", bot=bot,
                       json={"ym": YM, "groupId": "GRP-0001", "amount": 3000})
@@ -846,7 +846,7 @@ def test_teacher_marks_student_left_only_without_debt(api, monkeypatch):
     status, r = _call(app, "PUT", "/api/teacher/groups/GRP-0001/members/STU-0002/leave", bot=bot, json={"leftPeriod": opts[1]["ym"]})
     assert status == 200 and r["result"] == "marked" and r["debt"] == 6800          # абонемент 6000 + занятие 800
     assert bot.sent and "уходит из группы" in bot.sent[0][1] and "Петрова Анна" in bot.sent[0][1]
-    assert "Неоплачено 6800 ₽" in bot.sent[0][1] and "остаётся за ним" not in bot.sent[0][1]
+    assert "Неоплачено 6 800 ₽" in bot.sent[0][1] and "остаётся за ним" not in bot.sent[0][1]
     row = next(x for x in asyncio.run(dp["student_group_repo"].get_all()) if x.student_id == "STU-0002" and x.group_id == "GRP-0001")
     assert row.left_period == opts[1]["ym"]
     assert _call(app, "PUT", "/api/teacher/groups/GRP-0099/members/STU-0001/leave", json={"leftPeriod": YM})[0] == 404
@@ -895,7 +895,7 @@ def test_payment_notify_teacher_gets_notice_without_full_bill(api, monkeypatch):
         await dp["payment_service"].record_payment("STU-0001", "Иванов Иван", YM, 2000, 555, None, payment_method="receipt_bank")
         await asyncio.gather(*payment_events._tasks)
     asyncio.run(pay_and_wait())
-    assert [c for c, _ in sent] == [teacher_tg] and "2000 ₽" in sent[0][1] and "реквизитам" in sent[0][1]
+    assert [c for c, _ in sent] == [teacher_tg] and "2 000 ₽" in sent[0][1] and "реквизитам" in sent[0][1]
     sent.clear()
     monkeypatch.setattr(settings, "payment_notify_teacher_ids", "")
     asyncio.run(pay_and_wait())
@@ -966,7 +966,7 @@ def test_teacher_telegram_buttons_have_no_overpay(api, monkeypatch):
     teacher = asyncio.run(dp["user_repo"].get_by_tg_id(TEACHER_TG))
     text, buttons = press(teacher, f"pact:{action.action_id}:9000:b:f")         # старая кнопка «переплата»
     assert "не больше остатка" in text and not any("переплата" in b for b in buttons)
-    assert any("Зачесть остаток 4800" in b for b in buttons)
+    assert any("Зачесть остаток 4 800" in b for b in buttons)
     assert dp["pending_repo"].items[0].status == OPEN
     assert not [p for p in dp["payment_repo"].rows if p.status == PaymentStatus.PAID]
     admin = asyncio.run(dp["user_repo"].get_by_tg_id(ADMIN_TG))

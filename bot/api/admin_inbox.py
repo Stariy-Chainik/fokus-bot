@@ -66,7 +66,8 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             if teacher_view:
                 note = "Деньги у вас — передайте администратору, он зачтёт оплату"
             else:
-                approve = f"✅ Деньги получены — зачесть{' ' + str(a.amount) + ' ₽' if a.amount else ''}"
+                from bot.utils.format import format_money
+                approve = f"✅ Деньги получены — зачесть{' ' + format_money(a.amount) if a.amount else ''}"
                 reject = "❌ Отклонить"
                 advance = "💸 Оставить педагогу как аванс"        # зачесть оплату + выплата педагогу (cash_advance)
         elif a.kind == KIND_CASH and teacher_view:
@@ -278,7 +279,8 @@ def register_inbox_routes(app: web.Application, dp, admin_only, prefix: str, bot
             text = (f"✅ Заявка одобрена: вы привязаны к ученику {student.name}."
                     if approved else "❌ Администратор отклонил вашу заявку.")
         else:
-            text = (f"✅ Оплата {credited or action.amount} руб. за {period_label(action.period_month)} "
+            from bot.utils.format import format_money
+            text = (f"✅ Оплата {format_money(credited or action.amount)} за {period_label(action.period_month)} "
                     f"({student.name}) подтверждена." if approved else
                     f"❌ Оплата за {period_label(action.period_month)} ({student.name}) не подтверждена. "
                     f"Проверьте сумму или свяжитесь со школой.")

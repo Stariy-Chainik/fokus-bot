@@ -432,7 +432,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
                     open_cash = []
                 if open_cash:
                     continue                                      # за этот месяц уже заявлено
-                breakdown = "\n".join(f"  • {v.name} — {v.remainder} руб." for v in ledgers.values() if v.remainder)
+                from bot.utils.format import format_money
+                breakdown = "\n".join(f"  • {v.name} — {format_money(v.remainder)}" for v in ledgers.values() if v.remainder)
                 pids = ".".join(str(v.pending_pid) for v in ledgers.values() if v.pending_pid)
                 action = await queue_action(pending_repo, KIND_CASH, student, ym, amount=amount, method=CASH,
                                             parent_addr=fmt_addr(addr))
@@ -500,7 +501,8 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         if amount <= 0:
             return _json({"error": "nothing_to_pay"}, status=409)
 
-        breakdown = "\n".join(f"  • {v.name} — {v.remainder} руб." for v in chosen.values() if v.remainder)
+        from bot.utils.format import format_money
+        breakdown = "\n".join(f"  • {v.name} — {format_money(v.remainder)}" for v in chosen.values() if v.remainder)
         if method == "cash":
             if bot is None:
                 return _json({"error": "bot_unavailable"}, status=503)

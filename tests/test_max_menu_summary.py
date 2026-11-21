@@ -57,9 +57,9 @@ def test_summary_text(monkeypatch):
                        pending=[("receipt", 9200, "2026-10")], accrued=20000, lessons=2, minutes=105,
                        last="2026-10-13")
     text = welcome_text([SimpleNamespace(name="Иванова Маша")], [kid])
-    assert "⚠️ Долг за сентябрь: <b>1600 руб.</b>" in text
-    assert "💳 Оплатить за октябрь: <b>9200 руб.</b>" in text
-    assert "⏳ Ждёт подтверждения школы: чек 9200 руб. за октябрь" in text
+    assert "⚠️ Долг за сентябрь: <b>1 600 ₽</b>" in text
+    assert "💳 Оплатить за октябрь: <b>9 200 ₽</b>" in text
+    assert "⏳ Ждёт подтверждения школы: чек 9 200 ₽ за октябрь" in text
     assert "📅 Октябрь: 2 занятия · 1 ч 45 мин, последнее 13.10" in text
     assert "Всё оплачено" not in text and text.endswith("Выберите раздел:")
     assert "<b>Иванова Маша</b>\n" not in text.split("\n\n", 1)[1]       # один ребёнок — имя не повторяется

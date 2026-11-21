@@ -5,6 +5,7 @@ from datetime import date
 from html import escape
 
 from bot.utils.dates import current_period, month_name_ru
+from bot.utils.format import format_money
 from .parent_lessons import _hours, _lessons_word
 from .types import cb, maxapp, webapp
 
@@ -30,11 +31,11 @@ def summary_text(summary: list, several: bool = False, today: str = "") -> str:
     for c in summary:
         lines = []
         for ym, rest in c.due:
-            lines.append(f"💳 Оплатить за {_month(ym)}: <b>{rest} руб.</b>" if ym >= current
-                         else f"⚠️ Долг за {_month(ym)}: <b>{rest} руб.</b>")
+            lines.append(f"💳 Оплатить за {_month(ym)}: <b>{format_money(rest)}</b>" if ym >= current
+                         else f"⚠️ Долг за {_month(ym)}: <b>{format_money(rest)}</b>")
         for kind, amount, ym in c.pending:
             what = "наличные" if kind == "cash" else "чек"
-            lines.append(f"⏳ Ждёт подтверждения школы: {what}" + (f" {amount} руб." if amount else "")
+            lines.append(f"⏳ Ждёт подтверждения школы: {what}" + (f" {format_money(amount)}" if amount else "")
                          + f" за {_month(ym)}")
         if not c.due and c.accrued:
             lines.append("✅ Всё оплачено")

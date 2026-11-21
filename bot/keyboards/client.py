@@ -104,8 +104,9 @@ def kb_lessons_month_filter(
     pay_amount > 0 — кнопка «Оплатить N ₽» (ведёт в счёт; при фильтре по педагогу — только он)."""
     rows = []
     if pay_amount > 0 and student_id != "all":
+        from bot.utils.format import format_money
         target = f"client_pay:{student_id}:{period}" + (f":{active}" if active != "all" else "")
-        rows.append([InlineKeyboardButton(text=f"💳 Оплатить {pay_amount} ₽", callback_data=target)])
+        rows.append([InlineKeyboardButton(text=f"💳 Оплатить {format_money(pay_amount)}", callback_data=target)])
     if len(teachers) > 1:
         mark = " ✓" if active == "all" else ""
         rows.append([InlineKeyboardButton(

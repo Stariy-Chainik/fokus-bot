@@ -72,26 +72,27 @@ def _billing_text(group_name: str, mode: GroupBillingMode,
         "",
         f"Режим: {_MODE_TITLES.get(mode, mode.value)}",
     ]
+    from bot.utils.format import format_money
     if mode == GroupBillingMode.PER_VISIT:
         lines += [""]
         if price_short > 0:
             lines += [
-                f"🕐 Короткий тариф: {duration_short} мин — {price_short}₽",
-                f"🕐 Полный тариф: {duration_full} мин — {price_full}₽",
+                f"🕐 Короткий тариф: {duration_short} мин — {format_money(price_short)}",
+                f"🕐 Полный тариф: {duration_full} мин — {format_money(price_full)}",
                 "",
                 "Тариф ученика выбирается в его карточке.",
                 "На занятии у педагога появятся отметки длительности.",
             ]
         else:
             lines += [
-                f"🕐 Посещение: {duration_full} мин — {price_full}₽",
+                f"🕐 Посещение: {duration_full} мин — {format_money(price_full)}",
                 "",
                 "Короткого тарифа в группе нет — у всех одна цена.",
             ]
     elif mode == GroupBillingMode.SUBSCRIPTION:
         lines += [
             "",
-            f"💳 Абонемент: <b>{price_full} ₽ в месяц</b> с ученика",
+            f"💳 Абонемент: <b>{format_money(price_full)} в месяц</b> с ученика",
             "",
             "Сумма фиксированная — количество занятий не влияет.",
             "Начисляется всем ученикам группы за месяц, в котором",
@@ -120,7 +121,8 @@ async def _overrides_block(
             who = names.get(o.student_id, o.student_id)
         else:
             who = "вся группа"
-        amount = f"{o.amount} ₽" if o.amount > 0 else "не начислять"
+        from bot.utils.format import format_money
+        amount = format_money(o.amount) if o.amount > 0 else "не начислять"
         period = "постоянно" if o.period_month == "*" else display_period(o.period_month)
         lines.append(f"  • {period} · {who} — {amount}")
     return "\n".join(lines)

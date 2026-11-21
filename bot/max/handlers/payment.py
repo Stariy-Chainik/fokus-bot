@@ -132,8 +132,9 @@ async def on_method(event: MessageCallback, context, max_uid, student_repo, paym
         text, rows = bank_screen(total, student_id, period_month, settings.payment_bank_details, student_name=student.name)
         png = qr_png(student.name, period_month, total)
         if png:
+            from bot.utils.format import format_money
             await edit_screen(event, text, [])
-            await send_screen(event.bot, max_uid, f"QR-код для оплаты — {total} руб., {student.name}", rows,
+            await send_screen(event.bot, max_uid, f"QR-код для оплаты — {format_money(total)}, {student.name}", rows,
                               media=InputMediaBuffer(png, filename="qr.png"))
         else:
             await edit_screen(event, text, rows)
@@ -559,7 +560,8 @@ async def on_unbound_receipt(event: MessageCreated, context, max_uid, student_re
         return
     await context.set_state(MaxParentStates.choosing_bill)
     await context.update_data(rc_kind=kind, rc_url=url, rc_filename=filename)
-    rows = [[cb(f"{s.name} · {period_label(p)} — {t} руб.", f"rcpick:{s.student_id}:{p}")] for s, p, t in bills]
+    from bot.utils.format import format_money
+    rows = [[cb(f"{s.name} · {period_label(p)} — {format_money(t)}", f"rcpick:{s.student_id}:{p}")] for s, p, t in bills]
     rows.append([cb("« Отмена", "go:home")])
     await send_screen(event.bot, max_uid, "📎 Чек получил. За какой счёт эта оплата?", rows)
 

@@ -74,14 +74,17 @@ async def bills_periods(students: list, payment_service, show_older: bool = Fals
             if not accrued:
                 suffix = " — нет занятий"
             elif remainder and paid:
-                suffix = f" — {accrued} руб., к доплате {remainder} (текущий)"
+                from bot.utils.format import format_money
+                suffix = f" — {format_money(accrued)}, к доплате {format_money(remainder)} (текущий)"
             else:
-                suffix = f" — {accrued} руб. (текущий)"
+                from bot.utils.format import format_money
+                suffix = f" — {format_money(accrued)} (текущий)"
         else:
             if accrued == 0:
                 continue
+            from bot.utils.format import format_money
             icon = "✅" if remainder == 0 else "⏳"
-            suffix = f" — {accrued} руб." + (f", к доплате {remainder}" if remainder and paid else "")
+            suffix = f" — {format_money(accrued)}" + (f", к доплате {format_money(remainder)}" if remainder and paid else "")
         rows.append(PeriodRow(period_month, f"{label}{suffix}", icon))
     return rows
 
@@ -187,24 +190,28 @@ def breakdown_lines(bills: dict, tids: list, limit: int = 850, ledgers: dict | N
     """Разбивка для админа: педагог/абонемент — сумма и даты занятий (bills: {ключ → BillAggregate}).
     ledgers (teacher_id → TeacherLedger) — показать «оплачено / к доплате» при частичной оплате.
     Если не влезает в подпись Telegram — короткий вариант (число занятий)."""
+    from bot.utils.format import format_money
     full, short = [], []
     for tid in tids:
         agg = bills.get(tid)
         if not agg:
             continue
         ledger = (ledgers or {}).get(tid)
-        paid_part = f" (оплачено {ledger.paid}, к доплате {ledger.remainder})" if ledger is not None and ledger.paid else ""
+        paid_part = (
+            f" (оплачено {format_money(ledger.paid)}, к доплате {format_money(ledger.remainder)})"
+            if ledger is not None and ledger.paid else ""
+        )
         items = sorted(agg.items, key=lambda b: b.date)
         if agg.subscription or not items:
-            full.append(f"• {agg.name} — {agg.total} руб.{paid_part}")
+            full.append(f"• {agg.name} — {format_money(agg.total)}{paid_part}")
             short.append(full[-1])
             continue
         dates = ", ".join(
             f"{b.date[8:10]}.{b.date[5:7]} ({b.duration_min}м{', группа' if b.lesson_type == 'group' else ''})"
             for b in items
         )
-        full.append(f"• {agg.name} — {agg.total} руб.{paid_part}: {dates}")
-        short.append(f"• {agg.name} — {agg.total} руб.{paid_part} ({len(items)} зан.)")
+        full.append(f"• {agg.name} — {format_money(agg.total)}{paid_part}: {dates}")
+        short.append(f"• {agg.name} — {format_money(agg.total)}{paid_part} ({len(items)} зан.)")
     return full if len("\n".join(full)) <= limit else short
 
 
@@ -237,22 +244,24 @@ def admin_confirm_rows(
 
 
 def receipt_caption(method: str, student_name: str, period_month: str, total: int, breakdown: str) -> str:
+    from bot.utils.format import format_money
     return (
         f"📎 Чек об оплате\n\n"
         f"Способ: {METHOD_LABELS.get(method, method)}\n"
         f"Ученик: {student_name}\n"
         f"Период: {period_label(period_month)}\n"
-        f"Сумма: {total} руб."
+        f"Сумма: {format_money(total)}"
         + (f"\n\n{breakdown}" if breakdown else "")
     )
 
 
 def cash_notice(student_name: str, period_month: str, total: int, breakdown: str) -> str:
+    from bot.utils.format import format_money
     return (
         f"💵 Клиент сообщает об оплате наличными\n\n"
         f"Ученик: {student_name}\n"
         f"Период: {period_label(period_month)}\n"
-        f"Сумма: {total} руб."
+        f"Сумма: {format_money(total)}"
         + (f"\n\n{breakdown}" if breakdown else "")
     )
 

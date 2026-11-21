@@ -162,6 +162,7 @@ async def cb_profit_detail(
     lines = [f"<b>{detail.teacher_name} — {period_label}</b>", ""]
     if detail.owner:
         lines += ["👑 Руководитель: зарплата не вычитается, остаётся в прибыли", ""]
+    from bot.utils.format import format_money
     for row in detail.lessons:
         date_prefix = (
             f"{format_date_short_with_wd(row.date)}  " if not is_day else ""
@@ -170,7 +171,7 @@ async def cb_profit_detail(
         rent_mark = "  🏟 аренда" if row.rent else ""
         lines.append(f"{date_prefix}{kind} {row.duration_min}мин{rent_mark}")
         lines.append(
-            f"  {row.income} ₽ − {row.salary} ₽ = <b>{row.profit} ₽</b>"
+            f"  {format_money(row.income)} − {format_money(row.salary)} = <b>{format_money(row.profit)}</b>"
         )
 
     if detail.income == 0:
@@ -179,11 +180,11 @@ async def cb_profit_detail(
         lines += [
             "",
             "──────────────",
-            f"Выручка: {detail.income} ₽  Зарплата: {detail.salary} ₽",
+            f"Выручка: {format_money(detail.income)}  Зарплата: {format_money(detail.salary)}",
         ]
         if detail.owner:
-            lines.append(f"👑 в т.ч. работа руководителя: {detail.owner_income} ₽")
-        lines.append(f"<b>Прибыль: {detail.profit} ₽ ({detail.margin_percent}%)</b>")
+            lines.append(f"👑 в т.ч. работа руководителя: {format_money(detail.owner_income)}")
+        lines.append(f"<b>Прибыль: {format_money(detail.profit)} ({detail.margin_percent}%)</b>")
 
     await callback.message.edit_text(
         "\n".join(lines),
