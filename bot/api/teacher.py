@@ -1635,8 +1635,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
                 logger.warning("Чек педагога не ушёл админу %s: %s", admin.tg_id, exc)
         if not sent:
             return _json({"error": "bot_unavailable"}, status=503)
+        now_ts = time.time()
+        for rid in [k for k, rec in _teacher_receipts.items() if now_ts - rec[2] >= 6 * 3600]:
+            _teacher_receipts.pop(rid, None)
         receipt_id = uuid.uuid4().hex
-        _teacher_receipts[receipt_id] = (teacher.teacher_id, sid, time.time(), file_id)
+        _teacher_receipts[receipt_id] = (teacher.teacher_id, sid, now_ts, file_id)
         logger.info("Mini App: педагог %s прикрепил чек %s — %s %s, админов: %d",
                     teacher.teacher_id, receipt_id, sid, period, sent)
         return _json({"receiptId": receipt_id, "notified": sent})

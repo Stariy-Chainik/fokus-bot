@@ -142,7 +142,9 @@ async def _add_guest(
         return
 
     group = await group_repo.get_by_id(lesson.group_id) if lesson.group_id else None
-    new_attendees = await lesson_service.add_guest(lesson, student_id, group, trial=trial)
+    new_attendees = await lesson_service.add_guest(
+        lesson, student_id, group, trial=trial, student_tier=student.group_tier,
+    )
     if new_attendees is None:
         await callback.answer("Этот ученик уже отмечен.", show_alert=True)
         return

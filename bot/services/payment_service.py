@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from contextvars import ContextVar
 import logging
 import uuid
 from dataclasses import dataclass
@@ -190,6 +191,7 @@ def debtors_summary(ledger: dict[tuple[str, str, str], tuple[int, int]], current
 
 
 _PAY_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+_YK_PAYMENT_REF: ContextVar[str] = ContextVar("_yk_payment_ref", default="")
 
 
 _missing_teachers_warned: set[str] = set()     # compute_ledger_map: о ком уже предупредили
@@ -199,7 +201,11 @@ def payment_lock(student_id: str, period_month: str) -> asyncio.Lock:
     """Один замок на ученика и месяц для всех, кто отмечает оплату (админ, педагог, очередь, бот):
     проверка остатка и зачёт идут под ним, поэтому одновременная отметка админом и педагогом
     не зачтёт деньги дважды — второй увидит уже уменьшенный остаток."""
-    return _PAY_LOCKS.setdefault((student_id, period_month), asyncio.Lock())
+    key = (student_id, period_month)
+    if len(_PAY_LOCKS) > 512:
+        for k in [k for k, lk in _PAY_LOCKS.items() if not lk.locked() and k != key]:
+            _PAY_LOCKS.pop(k, None)
+    return _PAY_LOCKS.setdefault(key, asyncio.Lock())
 
 
 class PaymentService:
@@ -671,9 +677,16 @@ class PaymentService:
         if credited > 0:
             await self.pin_paid_lessons(student_id, period_month, student_name)
         if credited > 0:
+            yk_id = _YK_PAYMENT_REF.get()
+            if receipt_file_id:
+                ref = f"{student_id} file:{receipt_file_id}"
+            elif yk_id:
+                ref = f"{student_id} yk:{yk_id}"
+            else:
+                ref = student_id
             await activity.record(activity.PAYMENT, f"Оплата {credited} ₽: {student_id} · {period_month} · {payment_method}"
                                   + (f" · {comment}" if comment else ""), actor=confirmed_by_tg_id,
-                                  ref=f"{student_id} file:{receipt_file_id}" if receipt_file_id else student_id)
+                                  ref=ref)
             payment_events.payment_received(student_id, period_month, credited, payment_method,
                                             confirmed_by_tg_id, student_name)
         return credited, rows

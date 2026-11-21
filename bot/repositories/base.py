@@ -99,6 +99,8 @@ class BaseRepository:
     _headers: dict[str, list[str]] = {}
     # Одно чтение листа на всех (single-flight): параллельные запросы ждут уже идущее чтение
     _inflight: dict[str, asyncio.Task] = {}
+    # Сильные ссылки на фоновые задачи stale-while-revalidate, чтобы GC не отменил их до завершения
+    _bg_tasks: set[asyncio.Task] = set()
     # Счётчик записей в лист: чтение, во время которого была запись, кеш не перезаписывает
     _writes: dict[str, int] = {}
 
@@ -369,7 +371,9 @@ class BaseRepository:
                 await self._load()
             except Exception as exc:
                 logger.warning("Фоновое обновление листа %s не удалось: %s", self._sheet_name, exc)
-        asyncio.get_running_loop().create_task(run())
+        task = asyncio.get_running_loop().create_task(run())
+        BaseRepository._bg_tasks.add(task)
+        task.add_done_callback(BaseRepository._bg_tasks.discard)
 
     async def _parsed_all(self, parse) -> list:
         """Все строки листа, разобранные `parse`, — один раз на версию листа (копия списка).
@@ -378,12 +382,15 @@ class BaseRepository:
         Объекты общие между вызовами — менять их можно только перед записью в лист.
         """
         records = await self._all_records()
-        gen = BaseRepository._gen.get(self._sheet_name, 0)
-        memo = BaseRepository._parsed.get(self._sheet_name)
+        sheet = getattr(self, "_sheet_name", None)
+        if sheet is None:
+            return [parse(r) for r in records]
+        gen = BaseRepository._gen.get(sheet, 0)
+        memo = BaseRepository._parsed.get(sheet)
         if memo is not None and memo[0] == gen and memo[1] == id(records):
             return list(memo[2])
         items = [parse(r) for r in records]
-        BaseRepository._parsed[self._sheet_name] = (gen, id(records), items)
+        BaseRepository._parsed[sheet] = (gen, id(records), items)
         return list(items)
 
     async def _all_records(self) -> list[dict[str, Any]]:

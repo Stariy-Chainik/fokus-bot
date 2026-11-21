@@ -1,7 +1,24 @@
+from datetime import date
 import json
+import re
 from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import BaseModel, Field
+
+_YM_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
+_SHIFT_RANGE_RE = re.compile(r"^(\d+)-(\d+)$")
+
+
+def _valid_iso_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _valid_ym_or_date(value: str) -> bool:
+    return bool(_YM_RE.match(value)) or _valid_iso_date(value)
 
 
 class SchedulePilotAccount(BaseModel):
@@ -527,6 +544,8 @@ class Settings(BaseSettings):
     # Пример: https://fokus-bot.railway.app
     # Если не задан — используется polling (удобно для локальной разработки).
     webhook_url: Optional[str] = Field(default=None, alias="WEBHOOK_URL")
+    # Секретный заголовок X-Telegram-Bot-Api-Secret-Token для webhook; пусто — вычисляется HMAC от BOT_TOKEN
+    webhook_secret: str = Field(default="", alias="WEBHOOK_SECRET")
     port: int = Field(default=8080, alias="PORT")  # Railway пробрасывает PORT автоматически
 
     # Redis (опционально)
@@ -537,6 +556,114 @@ class Settings(BaseSettings):
     @property
     def google_credentials_dict(self) -> dict:
         return json.loads(self.google_credentials_json)
+
+    def validate_dsl(self) -> list[str]:
+        """Проверяет синтаксис всех строковых DSL-настроек из .env.
+
+        Возвращает список человекочитаемых ошибок; пустой список — все правила распознаны.
+        Нужна, чтобы опечатка в .env (лишнее двоеточие, неверная дата/процент) не терялась молча.
+        """
+        errors: list[str] = []
+
+        def chunks(raw: str) -> list[str]:
+            return [c.strip() for c in raw.replace("|", ",").split(",") if c.strip()]
+
+        for chunk in chunks(self.subscription_share_groups):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (2, 3) and parts[0] and parts[1].isdigit() and 0 < int(parts[1]) <= 100
+                    and (len(parts) == 2 or not parts[2] or _YM_RE.match(parts[2]))):
+                errors.append(f"SUBSCRIPTION_SHARE_GROUPS: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.mergeable_groups):
+            gids = [g.strip() for g in chunk.split("+") if g.strip()]
+            if len(gids) < 2 or len(gids) != len(set(gids)):
+                errors.append(f"MERGEABLE_GROUPS: нужно ≥2 разных групп через '+', получено {chunk!r}")
+
+        for chunk in chunks(self.hall_rent_per_lesson):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) == 2 and parts[0] and parts[1].isdigit()):
+                errors.append(f"HALL_RENT_PER_LESSON: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.hall_rent_student_rates):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (3, 4) and parts[0] and parts[1] and parts[2].isdigit()
+                    and (len(parts) == 3 or not parts[3] or _valid_ym_or_date(parts[3]))):
+                errors.append(f"HALL_RENT_STUDENT_RATES: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.homework_grade_scales):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) == 2 and parts[0] and parts[1].isdigit() and 2 <= int(parts[1]) <= 100):
+                errors.append(f"HOMEWORK_GRADE_SCALE: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.shift_groups):
+            parts = [p.strip() for p in chunk.split(":")]
+            m = _SHIFT_RANGE_RE.match(parts[1]) if len(parts) == 2 else None
+            if not (len(parts) == 2 and parts[0] and m and int(m.group(1)) < int(m.group(2))):
+                errors.append(f"SHIFT_GROUPS: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.salary_duration_groups):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) == 2 and parts[0] and parts[1].isdigit() and int(parts[1]) > 0):
+                errors.append(f"SALARY_DURATION_GROUPS: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.student_lesson_rates):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (3, 4) and parts[0] and parts[1] and parts[2].isdigit()
+                    and (len(parts) == 3 or not parts[3] or _YM_RE.match(parts[3]))):
+                errors.append(f"STUDENT_LESSON_RATES: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.pair_lesson_prices):
+            parts = [p.strip() for p in chunk.split(":")]
+            ok = (
+                len(parts) in (6, 7) and all(parts[:6])
+                and parts[2].isdigit() and parts[4].isdigit() and _valid_iso_date(parts[5])
+                and (len(parts) == 6 or (parts[6].isdigit() and int(parts[6]) <= int(parts[2]) + int(parts[4])))
+            )
+            if not ok:
+                errors.append(f"PAIR_LESSON_PRICES: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.student_lesson_prices):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) == 4 and parts[0] and parts[1] and parts[2].isdigit() and _valid_iso_date(parts[3])):
+                errors.append(f"STUDENT_LESSON_PRICES: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.student_discounts):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (2, 3) and parts[0] and parts[1].isdigit() and 0 < int(parts[1]) < 100
+                    and (len(parts) == 2 or not parts[2] or _YM_RE.match(parts[2]))):
+                errors.append(f"STUDENT_DISCOUNTS: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.group_salary_rates):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (2, 3) and parts[0] and parts[1].isdigit()
+                    and (len(parts) == 2 or not parts[2] or _YM_RE.match(parts[2]))):
+                errors.append(f"GROUP_SALARY_RATES: некорректная запись {chunk!r}")
+
+        for chunk in chunks(self.group_headcount_rates):
+            parts = [p.strip() for p in chunk.split(":")]
+            if not (len(parts) in (3, 4) and parts[0] and parts[1].isdigit() and parts[2].isdigit()
+                    and int(parts[1]) > 0 and (len(parts) == 3 or not parts[3] or _YM_RE.match(parts[3]))):
+                errors.append(f"GROUP_HEADCOUNT_RATES: некорректная запись {chunk!r}")
+
+        for name, raw in (
+            ("SUBSCRIPTION_TWICE_PRICES", self.subscription_twice_prices),
+            ("REVENUE_SHARE_GROUPS", self.revenue_share_groups),
+        ):
+            for chunk in chunks(raw):
+                parts = [p.strip() for p in chunk.split(":")]
+                if not (len(parts) == 2 and parts[0] and parts[1].isdigit()):
+                    errors.append(f"{name}: некорректная запись {chunk!r}")
+
+        for name, raw in (
+            ("FULL_BILL_GROUPS", self.full_bill_groups),
+            ("SUBSCRIPTION_EDIT_GROUPS", self.subscription_edit_groups),
+        ):
+            for chunk in chunks(raw):
+                parts = [p.strip() for p in chunk.split(":")]
+                if not (len(parts) == 2 and parts[0] and parts[1]):
+                    errors.append(f"{name}: некорректная запись {chunk!r}")
+
+        return errors
 
     model_config = {"env_file": ".env", "populate_by_name": True}
 

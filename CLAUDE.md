@@ -51,7 +51,7 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
 6. Inject every repo / service into the dispatcher via `dp["key"]`. Handlers receive them as typed parameters — aiogram resolves the names automatically.
 7. Include four top-level routers: `common_router`, `admin_router`, `teacher_router`, `client_router`.
 8. Webhooks:
-   - Telegram: `/webhook/{bot_token}` if `WEBHOOK_URL` is set, otherwise polling.
+   - Telegram: `/webhook` (с заголовком `secret_token`, без `bot_token` в URL и логах) if `WEBHOOK_URL` is set, otherwise polling.
    - YooKassa: `/yookassa-webhook` always registered on `PAYMENT_WEBHOOK_PORT` (default 8081).
 
 > **Прогрев кеша.** `_cache_warmer` (в `bot/__main__.py`, раз в 240 с при TTL кеша 300 с) фоном **принудительно**
@@ -812,7 +812,7 @@ Optional — Mini App:
 - `MINIAPP_URL` — публичный HTTPS-адрес страницы кабинета (на проде `https://fokus.178-104-240-252.sslip.io/app/`, HTTPS через Caddy в `/opt/n8n/Caddyfile`); задан → `scripts/set_miniapp_menu.py` ставит кнопку меню «Кабинет» в чатах (по умолчанию всем: админам, педагогам, родителям, спортсменам; `--staff` / `--admins` — уже. Отдельной кнопки в меню бота нет: кабинет открывается только кнопкой меню чата).
 
 Optional — infrastructure:
-- `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook/{bot_token}` (currently unused in production)
+- `WEBHOOK_URL` — if set, bot runs in webhook mode at `/webhook` with `secret_token` (`WEBHOOK_SECRET` or HMAC of `BOT_TOKEN`; currently unused in production)
 - `PORT` — HTTP port (default `8080`; Railway sets automatically)
 - `REDIS_URL` — FSM state persistence across restarts (`MemoryStorage` if absent)
 

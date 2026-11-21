@@ -101,3 +101,55 @@ def test_watch_spreads_a_multi_month_payment_by_months():
     assert svc.confirmed == [("STU-1", "2026-09"), ("STU-1", "2026-10")]
     assert [a for a, _t, _m in svc.amounts] == [5000, 6000]
     assert any("2026-09, 2026-10" in text for _c, text in bot.sent)
+
+
+def test_watch_forwards_lesson_ids_from_metadata():
+    """Опрос ЮКассы передаёт выбранные lesson_ids из metadata так же, как вебхук."""
+    class _SvcWithLessons(_Service):
+        def __init__(self):
+            super().__init__()
+            self.lesson_ids = []
+
+        async def record_payment(
+            self, student_id, student_name, period, amount, by,
+            teacher_ids=None, comment=None, payment_method="", lesson_ids=None,
+        ):
+            self.lesson_ids.append(lesson_ids)
+            return await super().record_payment(
+                student_id, student_name, period, amount, by, teacher_ids, comment, payment_method,
+            )
+
+    async def fetch(pid):
+        p = _payment("succeeded")
+        p.metadata = {"lesson_ids": "LES-10|LES-12"}
+        return p
+
+    svc, bot = _SvcWithLessons(), _Bot()
+    asyncio.run(_watch("p-les-1", "STU-1", "Пупкин Вася", "2026-09",
+                       svc, bot, _Users(), None, interval=0, max_checks=2, fetch=fetch,
+                       teacher_ids=["TCH-1"]))
+    assert svc.lesson_ids == [["LES-10", "LES-12"]]
+
+
+def test_start_payment_watch_holds_strong_task_reference():
+    """start_payment_watch держит сильную ссылку на фоновую задачу до завершения и убирает после."""
+    from bot.services import payment_watcher
+
+    gate = asyncio.Event()
+
+    async def fetch(pid):
+        await gate.wait()
+        return _payment("canceled")
+
+    async def scenario():
+        task = payment_watcher.start_payment_watch(
+            "p-ref-1", "STU-1", "Пупкин Вася", "2026-09",
+            _Service(), _Bot(), _Users(), None, interval=0, max_checks=1, fetch=fetch,
+        )
+        assert task in payment_watcher._tasks
+        gate.set()
+        await task
+        await asyncio.sleep(0)
+        assert task not in payment_watcher._tasks
+
+    asyncio.run(scenario())

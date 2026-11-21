@@ -1,6 +1,7 @@
 """Раздача фронта Mini App (папка miniapp/ в корне репозитория) по адресу /app/."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -17,6 +18,18 @@ _NO_CACHE = {"Cache-Control": "no-store"}
 # не качать 180 КБ на каждое открытие кабинета (14.10.2026)
 _LONG_CACHE = {"Cache-Control": "public, max-age=604800"}
 _CACHED_DIRS = ("fonts", "vendor")
+_VERSION_EXTS = frozenset({".html", ".js"})
+
+
+def miniapp_version(directory: Path) -> str:
+    """Срез версий всех HTML/JS файлов кабинета (mtime_ns + size): меняется при правке любого файла,
+    а не только app.js — открытый в Telegram кабинет перегрузится после деплоя teacher.js/parent.js/index.html."""
+    h = hashlib.sha256()
+    for p in sorted(directory.iterdir()):
+        if p.is_file() and p.suffix in _VERSION_EXTS:
+            st = p.stat()
+            h.update(f"{p.name}:{st.st_mtime_ns}:{st.st_size};".encode())
+    return h.hexdigest()[:16]
 
 
 def register_miniapp_static(app: web.Application, directory: Path = MINIAPP_DIR) -> None:
@@ -26,6 +39,9 @@ def register_miniapp_static(app: web.Application, directory: Path = MINIAPP_DIR)
 
     async def index(_request: web.Request) -> web.StreamResponse:
         return web.FileResponse(directory / "index.html", headers=_NO_CACHE)
+
+    async def version(_request: web.Request) -> web.Response:
+        return web.json_response({"version": miniapp_version(directory)}, headers=_NO_CACHE)
 
     async def asset(request: web.Request) -> web.StreamResponse:
         """Файлы кабинета — без кеша: после деплоя у всех сразу новая версия."""
@@ -40,6 +56,7 @@ def register_miniapp_static(app: web.Application, directory: Path = MINIAPP_DIR)
 
     app.router.add_get("/app", index)
     app.router.add_get("/app/", index)
+    app.router.add_get("/app/version", version)
     app.router.add_get("/app/{name:[A-Za-z0-9_.-]+}", asset)
     app.router.add_get("/app/{name:(?:fonts|vendor)/[A-Za-z0-9_.-]+}", asset)     # шрифт и скрипт Telegram — свои копии
     logger.info("Mini App: фронт раздаётся из %s по /app/ (без кеша)", directory)

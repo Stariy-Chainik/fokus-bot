@@ -10,6 +10,8 @@ FSM storage:
   - Memory: иначе → состояния сбрасываются при перезапуске (только для dev)
 """
 import asyncio
+import hashlib
+import hmac
 import time
 import logging
 from pathlib import Path
@@ -325,31 +327,63 @@ async def _rate_history_refresher(dp: Dispatcher, interval_sec: int = 300) -> No
         await asyncio.sleep(interval_sec)
 
 
+def _register_health(app, dp: Dispatcher) -> None:
+    """Регистрирует /health (plain ok) и /health/status (состояние кеша листов) в обоих режимах запуска."""
+    from aiohttp import web
+    from bot.repositories.base import BaseRepository
+
+    async def health(_request: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    async def health_status(_request: web.Request) -> web.Response:
+        now = time.monotonic()
+        sheet_names = [
+            getattr(dp.workflow_data.get(key), "_sheet_name", None)
+            for key in _WARM_REPOS
+        ]
+        names = [n for n in sheet_names if n]
+        ages = [round(now - BaseRepository._cache[n][1], 1) for n in names if n in BaseRepository._cache]
+        return web.json_response({
+            "status": "ok",
+            "sheetsCached": len(ages),
+            "sheetsTotal": len(names),
+            "maxCacheAgeSec": max(ages, default=None),
+        })
+
+    app.router.add_get("/health", health)
+    app.router.add_get("/health/status", health_status)
+
+
+def _webhook_secret() -> str:
+    """Секрет заголовка X-Telegram-Bot-Api-Secret-Token (без передачи BOT_TOKEN в URL/логах)."""
+    if settings.webhook_secret:
+        return settings.webhook_secret
+    return hmac.new(settings.bot_token.encode(), b"telegram-webhook-secret", hashlib.sha256).hexdigest()
+
+
 async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
     from aiohttp import web
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
     assert settings.webhook_url, "WEBHOOK_URL пуст — режим webhook невозможен"
-    webhook_path = f"/webhook/{settings.bot_token}"
+    webhook_path = "/webhook"
     webhook_url = f"{settings.webhook_url.rstrip('/')}{webhook_path}"
+    secret = _webhook_secret()
 
     await bot.set_webhook(
         url=webhook_url,
+        secret_token=secret,
         drop_pending_updates=True,
         allowed_updates=_telegram_updates(dp),
     )
     logger.info("Webhook зарегистрирован: %s", webhook_url)
 
     app = web.Application(client_max_size=20 * 1024 ** 2)
-
-    async def health(_request: web.Request) -> web.Response:
-        return web.Response(text="ok")
-
-    app.router.add_get("/health", health)
+    _register_health(app, dp)
     _register_payment_webhook(app, dp, bot)
     _register_miniapp_api(app, dp, bot)
 
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=webhook_path)
+    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=secret).register(app, path=webhook_path)
     setup_application(app, dp, bot=bot)
 
     runner = web.AppRunner(app)
@@ -370,8 +404,9 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
     logger.info("Запуск в режиме polling")
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # Отдельный aiohttp-сервер: webhook ЮКассы + API Mini App
+    # Отдельный aiohttp-сервер: webhook ЮКассы + API Mini App + /health
     app = web.Application(client_max_size=20 * 1024 ** 2)
+    _register_health(app, dp)
     _register_payment_webhook(app, dp, bot)
     _register_miniapp_api(app, dp, bot)
     runner = web.AppRunner(app)
@@ -386,6 +421,8 @@ async def _run_polling(bot: Bot, dp: Dispatcher) -> None:
 
 
 async def main() -> None:
+    for err in settings.validate_dsl():
+        logger.error("Ошибка конфигурации .env: %s", err)
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),

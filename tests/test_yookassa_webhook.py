@@ -173,3 +173,152 @@ def test_selected_lessons_from_metadata_reach_the_ledger():
             extra_meta={"teacher_ids": "TCH-0001", "lesson_ids": "LES-5|LES-7"})),
     )) == 200
     assert svc.lesson_ids == [["LES-5", "LES-7"]]
+
+
+def test_duplicate_webhook_does_not_double_credit_or_create_overpayment():
+    """Повторный вебхук с тем же payment_id не создаёт дубль/переплату в реальном PaymentService."""
+    from bot.models.enums import LessonType, PaymentStatus
+    from bot.services.payment_service import PaymentService
+    from tests.fakes import LessonRepoFake, PaymentRepoFake, TeacherRepoFake, mk_lesson, mk_teacher
+
+    teacher = mk_teacher("TCH-0001", "Иванов Иван", rate_for_student=1000)
+    lesson = mk_lesson("LES-0001", teacher, "2026-09-10", 45, LessonType.INDIVIDUAL,
+                       students=[("STU-0001", "Петров Петя")])
+    pay_repo = PaymentRepoFake()
+    svc = PaymentService(pay_repo, LessonRepoFake([lesson]), TeacherRepoFake([teacher]))
+    api_payment = _api_payment(student_id="STU-0001", period="2026-09", amount="1000.00")
+
+    async def scenario():
+        s1 = await process_yookassa_event(
+            _event("pay-dup-1"), svc, bot=None, user_repo=_FakeUserRepo(),
+            fetch_payment=_fetch_returning(api_payment),
+        )
+        s2 = await process_yookassa_event(
+            _event("pay-dup-1"), svc, bot=None, user_repo=_FakeUserRepo(),
+            fetch_payment=_fetch_returning(api_payment),
+        )
+        return s1, s2
+
+    assert _run(scenario()) == (200, 200)
+    paid_rows = [p for p in _run(pay_repo.get_all()) if p.status == PaymentStatus.PAID]
+    assert len(paid_rows) == 1
+    assert paid_rows[0].total_amount == 1000
+
+
+def test_concurrent_webhook_and_watcher_credit_strictly_once():
+    """Одновременный приход вебхука и срабатывание watcher на один payment_id зачитывают оплату ровно раз."""
+    from bot.services.payment_watcher import _watch
+
+    class _SlowPaymentService(_FakePaymentService):
+        async def record_payment(
+            self, student_id, student_name, period_month, amount, confirmed_by_tg_id,
+            teacher_ids=None, comment=None, payment_method="", lesson_ids=None,
+        ):
+            await asyncio.sleep(0.05)
+            return await super().record_payment(
+                student_id, student_name, period_month, amount, confirmed_by_tg_id,
+                teacher_ids, comment, payment_method, lesson_ids,
+            )
+
+    class _CountingBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.sent.append((chat_id, text))
+
+    class _Admins:
+        async def get_admins(self):
+            return [SimpleNamespace(tg_id=777)]
+
+    svc = _SlowPaymentService()
+    bot = _CountingBot()
+    api_payment = _api_payment(student_id="STU-0001", period="2026-09", amount="1000.00")
+
+    async def scenario():
+        await asyncio.gather(
+            process_yookassa_event(
+                _event("pay-race-1"), svc, bot=bot, user_repo=_Admins(),
+                fetch_payment=_fetch_returning(api_payment),
+            ),
+            _watch(
+                "pay-race-1", "STU-0001", "Петров Петя", "2026-09",
+                svc, bot, _Admins(), parent_addr=None,
+                interval=0, max_checks=2, fetch=_fetch_returning(api_payment),
+            ),
+        )
+
+    _run(scenario())
+    assert svc.confirmed == [("STU-0001", "2026-09")]
+    assert len(bot.sent) == 1
+
+
+def test_restart_dedup_via_activity_log_skips_recredit():
+    """После перезапуска (новый PaymentService) повторный вебхук отсекается по маркеру yk:<id> в activity_log."""
+    from bot.models.enums import LessonType, PaymentStatus
+    from bot.services import activity
+    from bot.services.payment_service import PaymentService
+    from tests.fakes import ActivityRepoFake, LessonRepoFake, PaymentRepoFake, TeacherRepoFake, mk_lesson, mk_teacher
+
+    feed = ActivityRepoFake()
+    activity.setup(feed)
+    try:
+        teacher = mk_teacher("TCH-0001", "Иванов Иван", rate_for_student=1000)
+        lesson = mk_lesson("LES-0001", teacher, "2026-09-10", 45, LessonType.INDIVIDUAL,
+                           students=[("STU-0001", "Петров Петя")])
+        pay_repo = PaymentRepoFake()
+        api_payment = _api_payment(student_id="STU-0001", period="2026-09", amount="1000.00")
+
+        svc_before_restart = PaymentService(pay_repo, LessonRepoFake([lesson]), TeacherRepoFake([teacher]))
+        svc_after_restart = PaymentService(pay_repo, LessonRepoFake([lesson]), TeacherRepoFake([teacher]))
+
+        async def scenario():
+            await process_yookassa_event(
+                _event("pay-restart-1"), svc_before_restart, bot=None, user_repo=_FakeUserRepo(),
+                fetch_payment=_fetch_returning(api_payment),
+            )
+            await process_yookassa_event(
+                _event("pay-restart-1"), svc_after_restart, bot=None, user_repo=_FakeUserRepo(),
+                fetch_payment=_fetch_returning(api_payment),
+            )
+
+        _run(scenario())
+        paid_rows = [p for p in _run(pay_repo.get_all()) if p.status == PaymentStatus.PAID]
+        assert len(paid_rows) == 1
+        assert any("yk:pay-restart-1" in e.ref.split() for e in feed.items)
+    finally:
+        activity.setup(None)
+
+
+def test_failed_record_payment_is_not_marked_settled_and_can_retry():
+    """Если запись оплаты упала с ошибкой, payment_id не помечается обработанным и повтор срабатывает."""
+    class _FlakyPaymentService(_FakePaymentService):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        async def record_payment(self, *args, **kwargs):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("sheets unavailable")
+            return await super().record_payment(*args, **kwargs)
+
+    svc = _FlakyPaymentService()
+    api_payment = _api_payment(student_id="STU-0001", period="2026-09", amount="1000.00")
+
+    async def scenario():
+        try:
+            await process_yookassa_event(
+                _event("pay-flaky-1"), svc, bot=None, user_repo=_FakeUserRepo(),
+                fetch_payment=_fetch_returning(api_payment),
+            )
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError:
+            pass
+        return await process_yookassa_event(
+            _event("pay-flaky-1"), svc, bot=None, user_repo=_FakeUserRepo(),
+            fetch_payment=_fetch_returning(api_payment),
+        )
+
+    assert _run(scenario()) == 200
+    assert svc.confirmed == [("STU-0001", "2026-09")]

@@ -316,7 +316,8 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
     def _activity_link(e) -> dict:
         """Куда ведёт тап по событию: ученик (оплата — его счёт за месяц из текста), группа, педагог;
         `hasFile` — к событию приложен чек (ref `STU-… file:<file_id>`)."""
-        ref = (e.ref or "").split(" file:")[0]
+        raw_ref = (e.ref or "").strip()
+        ref = raw_ref.split()[0] if raw_ref else ""
         out: dict = {"hasFile": " file:" in (e.ref or "")}
         ym = _YM_RE.search(e.text or "")
         if ref.startswith("STU-"):

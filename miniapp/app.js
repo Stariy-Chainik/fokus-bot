@@ -81,7 +81,7 @@ const WD = ['вс','пн','вт','ср','чт','пт','сб'];
 const fdate = d => { if (!d) return ''; const x = new Date(d + 'T00:00:00'); return `${x.getDate()} ${MON_SHORT[x.getMonth()]}, ${WD[x.getDay()]}`; };
 const fmon = ym => `${MON_NOM[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`;
 const plural = (n, f) => { const m = n % 10, h = n % 100; return `${n} ${h > 10 && h < 20 ? f[2] : m === 1 ? f[0] : m > 1 && m < 5 ? f[1] : f[2]}`; };
-const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const initials = n => n.split(' ').map(x => x[0]).join('').slice(0, 2);
 /* Оплаченная строка с «❌ Убрать»: снимает ошибочную отметку оплаты (DELETE /payments/{id} — у админа любую,
    у педагога только свою). Это div, а не cell(): кнопка внутри кнопки ломает разметку. */
@@ -146,17 +146,24 @@ const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];
 let renderSeq = 0;
 function go(n, p = {}) { state.stack.push({ n, p }); render(); checkFresh(); }
-/* Telegram держит кабинет открытым сутками: после деплоя на телефоне крутился старый app.js, пока его
-   не закрыли вручную. Раз в минуту при переходе (и при возврате в приложение) сверяем ETag app.js —
-   изменился → перезагрузка на тот же экран. */
+/* Telegram держит кабинет открытым сутками: после деплоя на телефоне крутились старые скрипты, пока их
+   не закрыли вручную. Раз в минуту при переходе (и при возврате в приложение) сверяем /app/version
+   (срез всех JS/HTML файлов кабинета, с откатом на HEAD app.js) — изменился → перезагрузка на тот же экран. */
 let _etag = null, _etagAt = 0;
 async function checkFresh(force) {
   const now = Date.now();
   if (!force && now - _etagAt < 60000) return;
   _etagAt = now;
   try {
-    const r = await fetch('app.js', { method: 'HEAD', cache: 'no-store' });
-    const tag = r.headers.get('etag') || r.headers.get('last-modified');
+    let tag = null;
+    const vr = await fetch('version', { cache: 'no-store' });
+    if (vr.ok) {
+      const d = await vr.json();
+      tag = d && d.version;
+    } else {
+      const r = await fetch('app.js', { method: 'HEAD', cache: 'no-store' });
+      tag = r.headers.get('etag') || r.headers.get('last-modified');
+    }
     if (!tag) return;
     if (_etag && tag !== _etag) location.reload();
     _etag = tag;

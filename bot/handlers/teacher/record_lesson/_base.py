@@ -28,7 +28,7 @@ from bot.services.rosters import group_members
 logger = logging.getLogger(__name__)
 router = Router(name="teacher_record_lesson")
 
-_KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло"}
+_KIND_LABEL = {"group": "Группа", "pair": "Пара", "soloist": "Соло", "shared": "Совместное"}
 
 
 

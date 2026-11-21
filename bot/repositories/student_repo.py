@@ -1,3 +1,4 @@
+from dataclasses import replace
 import logging
 from typing import Any, Optional
 from bot.models import Student, StudentGroupTier
@@ -85,8 +86,10 @@ class StudentRepository(BaseRepository):
         """Ученики школы. Архивные (ушедшие, `archived` заполнен) по умолчанию не отдаются — их нет ни в
         списках, ни в поиске, ни в начислениях; `include_archived=True` — для карт имён в истории
         (занятия, оплаты, лента) и для выдачи номеров."""
-        return [s for s in (_row_to_student(r) for r in await self._all_records())
-                if include_archived or not s.archived]
+        # Строки парсятся один раз на версию листа; отдаём поверхностную копию со свежим group_ids,
+        # т.к. сервисы видимости (visibility/diary/student_service) заполняют student.group_ids на лету.
+        parsed = await self._parsed_all(_row_to_student)
+        return [replace(s, group_ids=[]) for s in parsed if include_archived or not s.archived]
 
     async def get_by_id(self, student_id: str) -> Optional[Student]:
         """По номеру — и архивный тоже: карточка из истории открывается."""

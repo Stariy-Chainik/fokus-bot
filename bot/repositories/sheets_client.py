@@ -3,6 +3,7 @@
 Кешируем объекты листов, чтобы не делать лишних API-вызовов.
 """
 import logging
+import threading
 from typing import Optional
 
 import gspread
@@ -21,6 +22,7 @@ SCOPES = [
 class SheetsClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._lock = threading.Lock()
         self._client: Optional[gspread.Client] = None
         self._spreadsheet: Optional[gspread.Spreadsheet] = None
         self._worksheets: dict[str, gspread.Worksheet] = {}
@@ -39,15 +41,22 @@ class SheetsClient:
             logger.info("Spreadsheet opened: %s", self._settings.spreadsheet_id)
 
     def get_worksheet(self, sheet_name: str) -> gspread.Worksheet:
-        if sheet_name not in self._worksheets:
-            self._ensure_connected()
-            assert self._spreadsheet is not None
-            self._worksheets[sheet_name] = self._spreadsheet.worksheet(sheet_name)
-        return self._worksheets[sheet_name]
+        ws = self._worksheets.get(sheet_name)
+        if ws is not None:
+            return ws
+        with self._lock:
+            ws = self._worksheets.get(sheet_name)
+            if ws is None:
+                self._ensure_connected()
+                assert self._spreadsheet is not None
+                ws = self._spreadsheet.worksheet(sheet_name)
+                self._worksheets[sheet_name] = ws
+            return ws
 
     def invalidate_cache(self, sheet_name: Optional[str] = None) -> None:
         """Сбрасываем кеш листа (или всех листов) при необходимости переподключения."""
-        if sheet_name:
-            self._worksheets.pop(sheet_name, None)
-        else:
-            self._worksheets.clear()
+        with self._lock:
+            if sheet_name:
+                self._worksheets.pop(sheet_name, None)
+            else:
+                self._worksheets.clear()

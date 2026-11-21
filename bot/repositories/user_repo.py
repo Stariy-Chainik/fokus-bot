@@ -32,20 +32,20 @@ def _row_to_user(row: dict) -> User:
 
 class UserRepository(BaseRepository):
     async def get_by_tg_id(self, tg_id: int) -> Optional[User]:
-        records = await self._all_records()
-        for row in records:
-            if _parse_tg_id(row.get("tg_id")) == tg_id:
-                return _row_to_user(row)
+        for u in await self.get_all():
+            if u.tg_id == tg_id:
+                return u
         return None
 
     async def get_all(self) -> list[User]:
-        return [_row_to_user(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_user)
 
     async def add(self, tg_id: int, teacher_id: Optional[str] = None, is_admin: bool = False) -> User:
         """Создаёт нового пользователя. При добавлении педагога сразу привязываем teacher_id."""
-        existing_ids = [u.user_id for u in await self.get_all()]
-        user_id = generate_user_id(existing_ids)
-        await self._append_row([user_id, tg_id, is_admin, teacher_id or ""])
+        async with self._sheet_lock():
+            existing_ids = [u.user_id for u in await self.get_all()]
+            user_id = generate_user_id(existing_ids)
+            await self._append_row([user_id, tg_id, is_admin, teacher_id or ""])
         return User(user_id=user_id, tg_id=tg_id, is_admin=is_admin, teacher_id=teacher_id)
 
     async def update_teacher_id(self, tg_id: int, teacher_id: str) -> bool:

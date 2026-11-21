@@ -8,12 +8,12 @@ from tests.fakes import (
 )
 
 
-def test_b2_wizard_header_shows_raw_shared_kind():
-    """B2: для типа «shared» в шапке мастера печатается сырой ключ."""
+def test_b2_wizard_header_shows_russian_shared_kind():
+    """B2 (исправлен 21.11.2026): для типа «shared» в шапке мастера печатается русская подпись."""
     from bot.handlers.teacher.record_lesson._base import _header
     assert _header({"lesson_date": "2026-09-01", "kind": "pair", "duration_min": 45}) == \
         "<b>Дата: 01.09.2026 | Тип: Пара | 45 мин</b>\n\n"
-    assert _header({"lesson_date": "2026-09-01", "kind": "shared"}) == "<b>Дата: 01.09.2026 | Тип: shared</b>\n\n"
+    assert _header({"lesson_date": "2026-09-01", "kind": "shared"}) == "<b>Дата: 01.09.2026 | Тип: Совместное</b>\n\n"
     assert _header({}) == ""
 
 

@@ -64,34 +64,29 @@ def register_miniapp_api(app: web.Application, dp, bot=None) -> None:
         out = []
         for student in students:
             for period in periods:
-                bill_map = await payment_service.compute_bills_for_student_period(
-                    student.student_id, period,
-                )
-                if not bill_map:
+                ledgers = await payment_service.ledger_for(student, period, sync=False)
+                if not ledgers:
                     continue
-                paid_sums = payment_ledger.paid_sums(
-                    await payment_repo.get_by_student_and_period(student.student_id, period),
-                )
                 teachers = []
                 to_pay = 0
-                for teacher_id, agg in bill_map.items():
-                    paid_amount = paid_sums.get(teacher_id, 0)
-                    remainder = max(agg.total - paid_amount, 0)
+                for teacher_id, ledger in ledgers.items():
+                    remainder = ledger.remainder
                     to_pay += remainder
                     teachers.append({
                         "teacherId": teacher_id,
-                        "teacherName": agg.name,
-                        "total": agg.total,
-                        "paid": paid_amount,
+                        "teacherName": ledger.name,
+                        "total": ledger.accrued,
+                        "paid": ledger.paid,
                         "toPay": remainder,
-                        "status": "PAID" if remainder == 0 else ("PARTIAL" if paid_amount else "UNPAID"),
+                        "overpaid": ledger.overpaid,
+                        "status": "PAID" if remainder == 0 else ("PARTIAL" if ledger.paid else "UNPAID"),
                     })
                 out.append({
                     "studentId": student.student_id,
                     "studentName": student.name,
                     "period": period,
                     "teachers": teachers,
-                    "total": sum(agg.total for agg in bill_map.values()),
+                    "total": sum(ledger.accrued for ledger in ledgers.values()),
                     "toPay": to_pay,
                 })
         return _json({"bills": out})

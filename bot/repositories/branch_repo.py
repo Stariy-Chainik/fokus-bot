@@ -16,7 +16,7 @@ def _row_to_branch(row: dict) -> Branch:
 
 class BranchRepository(BaseRepository):
     async def get_all(self) -> list[Branch]:
-        return [_row_to_branch(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_branch)
 
     async def get_by_id(self, branch_id: str) -> Optional[Branch]:
         for b in await self.get_all():
@@ -25,18 +25,18 @@ class BranchRepository(BaseRepository):
         return None
 
     async def add(self, name: str) -> Branch:
-        existing_ids = [b.branch_id for b in await self.get_all()]
-        branch_id = generate_branch_id(existing_ids)
-        now = now_str()
-        await self._append_row([branch_id, name, now, now])
+        async with self._sheet_lock():
+            existing_ids = [b.branch_id for b in await self.get_all()]
+            branch_id = generate_branch_id(existing_ids)
+            now = now_str()
+            await self._append_row([branch_id, name, now, now])
         return Branch(branch_id=branch_id, name=name, created_at=now, updated_at=now)
 
     async def update_name(self, branch_id: str, name: str) -> bool:
         async with self._locked_row(branch_id=branch_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 2, name)
-            await self._update_cell(row_idx, 4, now_str())
+            await self._update_cells(row_idx, {2: name, 4: now_str()})
             return True
 
     async def delete(self, branch_id: str) -> bool:

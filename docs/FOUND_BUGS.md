@@ -17,11 +17,10 @@
   `record_lesson/entry.py`. Запись за педагога осталась только у админа (независимый флоу
   `admin:record_lesson` → `admin_rl_tch:`, гейт `is_admin`). Уязвимый путь больше не существует.
 
-## B2. В хлебных крошках wizard'а тип «shared» показывается сырым словом
-- **Где:** [record_lesson/_base.py](../bot/handlers/teacher/record_lesson/_base.py) — `_KIND_LABEL` (нет ключа `shared`) + `_header()`.
-- **Симптом:** при записи разового совместного занятия в заголовке экранов выбора показывается «shared» вместо русской подписи (у group/pair/soloist — «Группа/Пара/Соло»).
-- **Почему баг:** `_KIND_LABEL.get(kind, kind)`-семантика подставляет сам ключ, словарь не пополнили при добавлении типа shared.
-- **Репро:** запись занятия → тип «Разовое совместное» → на экране длительности/выбора в шапке виден англ. «shared».
+## B2. В хлебных крошках wizard'а тип «shared» показывается сырым словом — ✅ ИСПРАВЛЕНО (21.11.2026)
+- **Где:** [record_lesson/_base.py](../bot/handlers/teacher/record_lesson/_base.py) — `_KIND_LABEL` + `_header()`.
+- **Было:** при записи разового совместного занятия в заголовке экранов выбора показывалось «shared» вместо русской подписи.
+- **Исправлено:** добавлен ключ `"shared": "Совместное"` в `_KIND_LABEL`; обновлён тест в `tests/test_known_bugs.py`.
 
 ## B3. Мёртвая ветка pair_from_soloists и перекрытый cb_noop — ✅ УДАЛЕНА (2026-07)
 - **Была:** недостижимая цепочка «пара из солистов» (флаг ставился только в `False`) —
@@ -53,20 +52,15 @@
 - **Репро:** ученик с pending-строкой за 2026-05 при `DEBTORS_SINCE_PERIOD=2026-07`.
 - Возможно, так и задумано (история — не долг); решить при выносе расчёта в сервис (план, шаг 3.2).
 
-## B6. Mini App считает остаток мимо ledger — 🟡 ОТКРЫТ (аудит 2026-09-13)
-- **Где:** [bot/api/miniapp.py](../bot/api/miniapp.py) — `bills()` (стр. 66–80).
-- **Симптом:** остаток по педагогу = `total − paid_sums` вручную; `PaymentService.ledger_for` не вызывается —
-  строка-остаток в листе не создаётся/не синхронизируется при просмотре из Mini App, переплата не показывается.
-- **Почему:** дубль формулы вместо переиспользования `ledger_for`/`unpaid_for` (как в Telegram и MAX).
-- **Риск:** расхождение между фронтами после изменения правил в `payment_ledger`.
+## B6. Mini App считает остаток мимо ledger — ✅ ИСПРАВЛЕНО (21.11.2026)
+- **Где:** [bot/api/miniapp.py](../bot/api/miniapp.py) — `bills()`.
+- **Было:** остаток по педагогу считался вручную `total − paid_sums` мимо `PaymentService.ledger_for`, переплата не отдавалась.
+- **Исправлено:** `bills()` переведён на `payment_service.ledger_for(student, period, sync=False)` (как в `bot/api/parent.py`) и отдаёт `overpaid`.
 
-## B7. Гость в PER_VISIT-группе всегда по полному тарифу — 🟡 ОТКРЫТ (аудит 2026-09-13)
-- **Где:** [teacher/my_lessons/guests.py](../bot/handlers/teacher/my_lessons/guests.py) — стр. 110–113.
-- **Симптом:** ученик с тарифом SHORT, добавленный в сохранённое групповое занятие кнопкой «добавить»,
-  получает `price_full`; при записи занятия тот же ученик получил бы `price_short`
-  (`utils/attendees.build_group_attendees_csv` учитывает `student.group_tier`).
-- **Почему:** цена гостя считается в хендлере отдельной формулой без тарифа.
-- **Репро:** детсадовская группа ЮБ/БП, ученик SHORT → «➕ добавить» в занятие → в `attendees` 850 вместо цены short.
+## B7. Гость в PER_VISIT-группе всегда по полному тарифу — ✅ ИСПРАВЛЕНО (21.11.2026)
+- **Где:** [bot/services/lesson_service.py](../bot/services/lesson_service.py) (`add_guest`) и [teacher/my_lessons/guests.py](../bot/handlers/teacher/my_lessons/guests.py).
+- **Было:** ученик с тарифом `SHORT`, добавленный в сохранённое групповое занятие кнопкой «добавить», получал `price_full` вместо `price_short`.
+- **Исправлено:** `LessonService.add_guest` принимает `student_tier` и применяет `price_short`/`duration_short` при `StudentGroupTier.SHORT` и `price_short > 0` (единообразно с `build_group_attendees_csv`); хендлер передаёт `student.group_tier`. Покрыто тестом в `tests/test_lesson_service_lifecycle.py`.
 
 ## B8. Экран «📅 Месяцы членства» падает с NameError — ✅ ИСПРАВЛЕН (2026-09-13)
 - **Где:** [admin/branches/joined.py](../bot/handlers/admin/branches/joined.py) — `_render_joined`, переменная `membership`.

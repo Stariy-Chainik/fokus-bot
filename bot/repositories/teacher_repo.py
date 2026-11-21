@@ -17,7 +17,7 @@ def _row_to_teacher(row: dict) -> Teacher:
 
 class TeacherRepository(BaseRepository):
     async def get_all(self) -> list[Teacher]:
-        return [_row_to_teacher(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_teacher)
 
     async def get_by_id(self, teacher_id: str) -> Optional[Teacher]:
         for t in await self.get_all():
@@ -39,16 +39,17 @@ class TeacherRepository(BaseRepository):
         rate_for_teacher: int,
         rate_for_student: int,
     ) -> Teacher:
-        existing_ids = [t.teacher_id for t in await self.get_all()]
-        teacher_id = generate_teacher_id(existing_ids)
-        await self._append_row([
-            teacher_id,
-            tg_id if tg_id is not None else "",
-            name,
-            rate_group,
-            rate_for_teacher,
-            rate_for_student,
-        ])
+        async with self._sheet_lock():
+            existing_ids = [t.teacher_id for t in await self.get_all()]
+            teacher_id = generate_teacher_id(existing_ids)
+            await self._append_row([
+                teacher_id,
+                tg_id if tg_id is not None else "",
+                name,
+                rate_group,
+                rate_for_teacher,
+                rate_for_student,
+            ])
         from bot.services import activity          # локально: репозитории грузятся раньше сервисов
         await activity.record(activity.TEACHER, f"Новый педагог: {teacher_id} {name} · ставки {rate_group}/"
                               f"{rate_for_teacher}/{rate_for_student}", ref=teacher_id)
@@ -80,9 +81,7 @@ class TeacherRepository(BaseRepository):
         async with self._locked_row(teacher_id=teacher_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 4, rate_group)
-            await self._update_cell(row_idx, 5, rate_for_teacher)
-            await self._update_cell(row_idx, 6, rate_for_student)
+            await self._update_cells(row_idx, {4: rate_group, 5: rate_for_teacher, 6: rate_for_student})
         from bot.services import activity
         await activity.record(activity.TEACHER, f"Ставки {teacher_id}: группа {rate_group} · инд. {rate_for_teacher}"
                               f" · ученику {rate_for_student}", ref=teacher_id)

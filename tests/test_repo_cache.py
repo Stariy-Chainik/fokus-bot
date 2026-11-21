@@ -150,3 +150,105 @@ def test_worksheet_lookup_is_retried_on_quota(monkeypatch):
             return ws
     repo = GroupRepository(Client(), "groups")
     assert len(asyncio.run(repo.get_all())) == 1 and Client.calls == 2
+
+
+def test_background_refresh_tracks_strong_task_reference():
+    """Фоновое обновление кеша хранит сильную ссылку на задачу до завершения и чистит после."""
+    repo, _ws = _repo(delay=0.15)
+
+    async def run():
+        await repo.get_all()
+        recs, _ = BaseRepository._cache["groups"]
+        BaseRepository._cache["groups"] = (recs, time.monotonic() - base_mod._CACHE_TTL - 1)
+        await repo.get_all()
+        active_during = len(BaseRepository._bg_tasks)
+        await asyncio.gather(*list(BaseRepository._bg_tasks))
+        await asyncio.sleep(0)
+        return active_during, len(BaseRepository._bg_tasks)
+
+    during, after = asyncio.run(run())
+    assert during == 1 and after == 0
+
+
+def test_sheets_client_initializes_once_under_parallel_threads(monkeypatch):
+    """Параллельный прогрев (4+ потока) не должен вызывать authorize()/open_by_key() несколько раз."""
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from bot.repositories import sheets_client as sc_mod
+
+    counts = {"creds": 0, "auth": 0, "open": 0, "ws": 0}
+    cnt_lock = threading.Lock()
+
+    class FakeSpreadsheet:
+        def worksheet(self, name):
+            time.sleep(0.05)
+            with cnt_lock:
+                counts["ws"] += 1
+            return SimpleNamespace(title=name)
+
+    class FakeGspreadClient:
+        def open_by_key(self, key):
+            time.sleep(0.05)
+            with cnt_lock:
+                counts["open"] += 1
+            return FakeSpreadsheet()
+
+    def fake_creds(info, scopes):
+        with cnt_lock:
+            counts["creds"] += 1
+        return SimpleNamespace()
+
+    def fake_authorize(creds):
+        time.sleep(0.05)
+        with cnt_lock:
+            counts["auth"] += 1
+        return FakeGspreadClient()
+
+    monkeypatch.setattr(sc_mod.Credentials, "from_service_account_info", fake_creds)
+    monkeypatch.setattr(sc_mod.gspread, "authorize", fake_authorize)
+
+    cfg = SimpleNamespace(google_credentials_dict={}, spreadsheet_id="sheet-1")
+    client = sc_mod.SheetsClient(cfg)  # type: ignore[arg-type]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: client.get_worksheet("groups"), range(8)))
+
+    assert len({id(w) for w in results}) == 1
+    assert counts == {"creds": 1, "auth": 1, "open": 1, "ws": 1}
+
+
+def test_student_repo_parsed_cache_isolates_group_ids_mutation():
+    """StudentRepository кеширует разбор, но мутация s.group_ids не должна утекать между вызовами."""
+    from bot.repositories.student_repo import StudentRepository
+
+    headers = ["student_id", "name", "partner_id", "group_id", "group_tier", "client_id", "parent_tg_ids"]
+    ws = FakeWorksheet(headers, [["STU-0001", "Иванов Иван", "", "", "full", "", ""]])
+    repo = StudentRepository(FakeSheetsClient(ws), "students")
+
+    async def run():
+        first = await repo.get_all()
+        first[0].group_ids = ["GRP-9999"]
+        second = await repo.get_all()
+        return second[0].group_ids
+
+    assert asyncio.run(run()) == []
+
+
+def test_group_repo_add_does_not_collide_with_archived_group_id():
+    """Архивная группа GRP-0001 не должна приводить к выдаче того же номера новой группе."""
+    ws = FakeWorksheet(GROUP_HEADERS, [_group_row("GRP-0001", "Старая", archived="1")])
+    repo = GroupRepository(FakeSheetsClient(ws), "groups")
+    created = asyncio.run(repo.add("BRN-0001", "Новая"))
+    assert created.group_id == "GRP-0002"
+
+
+def test_group_repo_update_billing_uses_single_batch_update():
+    """Обновление биллинга группы идёт одним batch_update вместо 6 последовательных update_cell."""
+    from bot.models.enums import GroupBillingMode
+
+    ws = FakeWorksheet(GROUP_HEADERS, [_group_row("GRP-0001", "Первая")])
+    repo = GroupRepository(FakeSheetsClient(ws), "groups")
+    assert asyncio.run(repo.update_billing("GRP-0001", GroupBillingMode.PER_VISIT, 500, 35, 850, 60)) is True
+    batches = [c for c in ws.calls if c[0] == "batch_update"]
+    assert len(batches) == 1 and len(batches[0][1]) == 6

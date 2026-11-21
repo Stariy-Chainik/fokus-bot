@@ -18,7 +18,7 @@ def _row_to_sg(row: dict) -> StudentGroup:
 
 class StudentGroupRepository(BaseRepository):
     async def get_all(self) -> list[StudentGroup]:
-        return [_row_to_sg(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_sg)
 
     async def get_groups_for_student(self, student_id: str, include_left: bool = False) -> list[str]:
         """Группы ученика; include_left=True — вместе с теми, откуда он ушёл (для начислений)."""

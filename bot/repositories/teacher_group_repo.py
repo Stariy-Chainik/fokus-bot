@@ -12,7 +12,7 @@ def _row_to_tg(row: dict) -> TeacherGroup:
 
 class TeacherGroupRepository(BaseRepository):
     async def get_all(self) -> list[TeacherGroup]:
-        return [_row_to_tg(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_tg)
 
     async def get_groups_for_teacher(self, teacher_id: str) -> list[str]:
         return [tg.group_id for tg in await self.get_all() if tg.teacher_id == teacher_id]

@@ -12,7 +12,8 @@ from bot.models.enums import PaymentStatus
 from bot.repositories import UserRepository
 from bot.repositories.payment_repo import PaymentRepository
 from bot.services import PaymentService
-from bot.services.payment_methods import PROVIDER_ONLINE, yookassa_method
+from bot.services.payment_methods import PROVIDER_ONLINE
+from bot.services.payment_watcher import settle_yookassa_payment
 
 logger = logging.getLogger(__name__)
 router = Router(name="client_payments")
@@ -87,16 +88,14 @@ async def process_yookassa_event(
     except (TypeError, ValueError):
         amount_int = 0
     periods = [x for x in (meta.get("periods") or "").split(",") if x]
-    if len(periods) >= 2:                                 # «Оплатить всё»: сумма разносится по месяцам
-        _, count = await payment_service.record_payment_periods(
-            student_id, student_name, periods, amount_int, 0, "ЮКасса", yookassa_method(payment),
-        )
+    _, count = await settle_yookassa_payment(
+        payment_id, payment, payment_service,
+        student_id=student_id, student_name=student_name, period_month=period_month,
+        amount=amount_int, teacher_ids=teacher_ids or None, lesson_ids=lesson_ids or None,
+        periods=periods or None,
+    )
+    if len(periods) >= 2:
         period_month = ", ".join(sorted(periods))
-    else:
-        _, count = await payment_service.record_payment(
-            student_id, student_name, period_month, amount_int, 0, teacher_ids or None, "ЮКасса",
-            yookassa_method(payment), lesson_ids=lesson_ids or None,
-        )
     if count > 0:
         msg = (
             f"💰 Оплата через ЮКасса\n\n"

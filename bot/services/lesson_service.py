@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from bot.models import Group, Lesson, Teacher
-from bot.models.enums import GroupBillingMode, LessonType
+from bot.models.enums import GroupBillingMode, LessonType, StudentGroupTier
 from bot.repositories import (
     LessonRepository, TeacherRepository, TeacherPeriodSubmissionRepository,
 )
@@ -207,20 +207,23 @@ class LessonService:
 
     async def add_guest(
         self, lesson: Lesson, student_id: str, group: Group | None, trial: bool = False,
+        student_tier: StudentGroupTier = StudentGroupTier.FULL,
     ) -> str | None:
         """Добавить ученика в сохранённое групповое занятие; None — уже отмечен.
 
-        Цена гостя — price_full PER_VISIT-группы, иначе 0; `trial=True` — пробное,
-        всегда 0 ₽. Тариф SHORT ученика не учитывается (B7 в docs/FOUND_BUGS.md) —
-        поведение сохранено при переносе из хендлера. Возвращает новую строку attendees.
+        В PER_VISIT-группе учитывается тариф ученика (`StudentGroupTier.SHORT` при price_short > 0,
+        как в `build_group_attendees_csv`); `trial=True` — пробное, всегда 0 ₽. Возвращает новую строку attendees.
         """
-        amount = 0 if trial else (
-            group.price_full if group and group.billing_mode == GroupBillingMode.PER_VISIT else 0
-        )
+        if trial or not group or group.billing_mode != GroupBillingMode.PER_VISIT:
+            dur, amount = lesson.duration_min, 0
+        elif student_tier == StudentGroupTier.SHORT and group.price_short > 0:
+            dur, amount = group.duration_short, group.price_short
+        else:
+            dur, amount = lesson.duration_min, group.price_full
         existing = parse_attendees(lesson.attendees or "", default_duration=lesson.duration_min)
         if any(entry.student_id == student_id for entry in existing):
             return None
-        existing.append(AttendeeEntry(student_id=student_id, duration_min=lesson.duration_min, amount=amount))
+        existing.append(AttendeeEntry(student_id=student_id, duration_min=dur, amount=amount))
         new_attendees = serialize_attendees(existing)
         await self._lesson_repo.update_attendees(lesson.lesson_id, new_attendees)
         await activity.record(activity.LESSON, f"Гость в занятии: {student_id} · {lesson.teacher_id} · {lesson.date}"

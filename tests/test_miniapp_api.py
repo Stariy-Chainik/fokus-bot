@@ -2,7 +2,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from bot.services.payment_ledger import BillAggregate
+from bot.services.payment_ledger import BillAggregate, TeacherLedger
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -39,6 +39,14 @@ class _PaymentService:
         return {
             "TCH-0001": BillAggregate("Оплаченный", 1000),
             "TCH-0009": BillAggregate("Контарева", 700),
+        }
+
+    async def ledger_for(self, student, period, sync=True):
+        if period != PERIOD:
+            return {}
+        return {
+            "TCH-0001": TeacherLedger("TCH-0001", "Оплаченный", accrued=1000, paid=1200, items=[], paid_rows=[]),
+            "TCH-0009": TeacherLedger("TCH-0009", "Контарева", accrued=700, paid=0, items=[], paid_rows=[]),
         }
 
     async def get_or_create_invoices_for_student_period(self, student, period):
@@ -96,7 +104,9 @@ def test_bills_returns_unpaid_remainder(api):
     assert bill["studentId"] == "STU-0001" and bill["period"] == PERIOD
     assert bill["total"] == 1700 and bill["toPay"] == 700  # оплаченный педагог исключён
     statuses = {t["teacherId"]: t["status"] for t in bill["teachers"]}
+    overpaid = {t["teacherId"]: t["overpaid"] for t in bill["teachers"]}
     assert statuses == {"TCH-0001": "PAID", "TCH-0009": "UNPAID"}
+    assert overpaid == {"TCH-0001": 200, "TCH-0009": 0}
 
 
 def test_pay_creates_payment_for_unpaid_only(api):

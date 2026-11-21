@@ -35,7 +35,7 @@ def _row_to_client(row: dict) -> Client:
 
 class ClientRepository(BaseRepository):
     async def get_all(self) -> list[Client]:
-        return [_row_to_client(r) for r in await self._all_records()]
+        return await self._parsed_all(_row_to_client)
 
     async def get_by_id(self, client_id: str) -> Optional[Client]:
         for c in await self.get_all():
@@ -63,13 +63,14 @@ class ClientRepository(BaseRepository):
         self, name: str, created_by_tg_id: int, phone: str = "",
         tg_id: Optional[int] = None, max_id: Optional[int] = None,
     ) -> Client:
-        existing_ids = [c.client_id for c in await self.get_all()]
-        client_id = generate_client_id(existing_ids)
-        created_at = now_str()
-        await self._append_row([
-            client_id, name, str(tg_id) if tg_id else "", created_at, phone, "",
-            str(max_id) if max_id else "",
-        ])
+        async with self._sheet_lock():
+            existing_ids = [c.client_id for c in await self.get_all()]
+            client_id = generate_client_id(existing_ids)
+            created_at = now_str()
+            await self._append_row([
+                client_id, name, str(tg_id) if tg_id else "", created_at, phone, "",
+                str(max_id) if max_id else "",
+            ])
         return Client(
             client_id=client_id, name=name, tg_id=tg_id,
             created_at=created_at, phone=phone or None, max_id=max_id,

@@ -77,7 +77,9 @@ def test_preview_period_with_salary_service_and_unknown_teacher():
 
 
 def test_add_guest_prices_and_duplicates():
-    """Гость: price_full для PER_VISIT (тариф SHORT не учитывается — B7), 0 иначе, дубль → None."""
+    """Гость: PER_VISIT учитывает тариф SHORT (B7 исправлен) и price_full, 0 иначе, дубль → None."""
+    from bot.models.enums import StudentGroupTier
+
     t = mk_teacher()
     lesson = mk_lesson("LES-1", t, "2026-09-01", 60, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:60:850")
     svc, _ = _svc([lesson])
@@ -91,6 +93,12 @@ def test_add_guest_prices_and_duplicates():
     # Пробное: гость отмечен в занятии, но не начислен даже в PER_VISIT-группе.
     trial_lesson = mk_lesson("LES-3", t, "2026-09-03", 60, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:60:850")
     assert run(svc.add_guest(trial_lesson, "STU-5", per_visit, trial=True)) == "STU-1:60:850,STU-5:60:0"
+    # B7: ученик с тарифом SHORT в группе с price_short > 0 получает price_short и duration_short.
+    short_lesson = mk_lesson("LES-4", t, "2026-09-04", 60, LessonType.GROUP, group_id="GRP-1", attendees="STU-1:60:850")
+    assert run(svc.add_guest(short_lesson, "STU-6", per_visit, student_tier=StudentGroupTier.SHORT)) == "STU-1:60:850,STU-6:35:600"
+    # Если у группы короткого тарифа нет (price_short == 0), SHORT не обнуляет цену.
+    no_short = mk_group("GRP-3", billing_mode=GroupBillingMode.PER_VISIT, price_full=850, price_short=0)
+    assert run(svc.add_guest(short_lesson, "STU-7", no_short, student_tier=StudentGroupTier.SHORT)) == "STU-1:60:850,STU-7:60:850"
 
 
 def test_can_submit_period_from_25th():

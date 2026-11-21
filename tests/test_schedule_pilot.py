@@ -530,3 +530,33 @@ def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, 
     dp["schedule_pilots"] = SchedulePilots([SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)])
     assert mark_held()["lessonId"] == repo.items[0].lesson_id
     assert len(repo.items) == 1
+
+
+def test_sqlite_uses_wal_and_drafts_reads_in_single_connection(monkeypatch, tmp_path):
+    """SQLite работает в режиме WAL, а drafts() читает черновики и их результаты за одно открытие БД (без N+1)."""
+    import sqlite3
+
+    database = tmp_path / "wal.db"
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)
+    for mid in (101, 102, 103):
+        msg = _message("Расписание со мной\n17:00 Иванов Иван 45", chat=CHAT).model_copy(update={"message_id": mid})
+        asyncio.run(pilot.receive(msg, mid, edited=False))
+        asyncio.run(pilot.set_outcome(mid, "17:00", "held", f"LES-{mid}"))
+
+    with sqlite3.connect(database) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
+
+    opens = 0
+    orig_open = pilot._open
+
+    def counting_open():
+        nonlocal opens
+        opens += 1
+        return orig_open()
+
+    monkeypatch.setattr(pilot, "_open", counting_open)
+    drafts = asyncio.run(pilot.drafts([]))
+    assert len(drafts) == 3
+    assert all(d["slots"][0]["status"] == "held" for d in drafts)
+    assert opens == 1

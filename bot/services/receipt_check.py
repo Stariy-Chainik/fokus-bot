@@ -69,6 +69,9 @@ def schedule(action, file_id: str = "", file_type: str = "", delay: float | None
 
 
 def _lock(student_id: str) -> asyncio.Lock:
+    if len(_locks) > 512:
+        for k in [k for k, lk in _locks.items() if not lk.locked() and k != student_id]:
+            _locks.pop(k, None)
     lock = _locks.get(student_id)
     if lock is None:
         lock = _locks[student_id] = asyncio.Lock()

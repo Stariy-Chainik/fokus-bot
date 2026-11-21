@@ -453,24 +453,33 @@ class SchedulePilot:
             logger.info("Черновик расписания получен: чат %s, пост %s, педагог %s",
                         self.chat_id, message.message_id, self.teacher_id)
 
+    _INITIALIZED_DBS: set[Path] = set()
+
     def _open(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        conn = sqlite3.connect(self.path)
-        conn.execute("""CREATE TABLE IF NOT EXISTS drafts (
-            chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER,
-            version INTEGER, update_id INTEGER, payload TEXT,
-            PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
-        )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS draft_edits (
-            chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER,
-            revision INTEGER NOT NULL, source_revision TEXT NOT NULL, payload TEXT NOT NULL,
-            PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
-        )""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS draft_results (
-            chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER, time TEXT,
-            status TEXT NOT NULL, lesson_id TEXT NOT NULL, request TEXT,
-            PRIMARY KEY (chat_id, sender_id, teacher_id, message_id, time)
-        )""")
+        resolved = self.path.resolve()
+        existed = resolved.exists()
+        conn = sqlite3.connect(self.path, timeout=15.0)
+        conn.execute("PRAGMA busy_timeout = 15000")
+        if resolved not in self._INITIALIZED_DBS or not existed:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("""CREATE TABLE IF NOT EXISTS drafts (
+                chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER,
+                version INTEGER, update_id INTEGER, payload TEXT,
+                PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS draft_edits (
+                chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER,
+                revision INTEGER NOT NULL, source_revision TEXT NOT NULL, payload TEXT NOT NULL,
+                PRIMARY KEY (chat_id, sender_id, teacher_id, message_id)
+            )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS draft_results (
+                chat_id INTEGER, sender_id INTEGER, teacher_id TEXT, message_id INTEGER, time TEXT,
+                status TEXT NOT NULL, lesson_id TEXT NOT NULL, request TEXT,
+                PRIMARY KEY (chat_id, sender_id, teacher_id, message_id, time)
+            )""")
+            conn.commit()
+            self._INITIALIZED_DBS.add(resolved)
         return conn
 
     def _save(self, message_id: int, version: int, update_id: int, payloads: dict[int, str]) -> bool:
@@ -587,17 +596,39 @@ class SchedulePilot:
         raw = json.dumps(body) if body is not None else None
         await asyncio.to_thread(self._change_outcome, message_id, time, status, lesson_id, raw)
 
+    def _latest_with_outcomes(self) -> tuple[list[tuple], dict[int, dict[str, tuple[str, str, str | None]]]]:
+        """Одним подключением читаем последние 10 черновиков и все их результаты (без N+1)."""
+        with closing(self._open()) as conn:
+            rows = list(conn.execute("""SELECT message_id, d.version, d.update_id, d.payload,
+                    e.revision, e.source_revision, e.payload
+                FROM drafts AS d LEFT JOIN draft_edits AS e USING (chat_id, sender_id, teacher_id, message_id)
+                WHERE chat_id=? AND sender_id=? AND teacher_id=? AND (d.payload IS NOT NULL OR e.payload IS NOT NULL)
+                ORDER BY CASE WHEN message_id < 0 THEN -message_id / ? ELSE message_id END DESC, message_id DESC
+                LIMIT 10""", (self.chat_id, self.tg_id, self.teacher_id, _WEEK_DRAFT_STRIDE)))
+            outcomes_by_mid: dict[int, dict[str, tuple[str, str, str | None]]] = {}
+            if rows:
+                mids = [r[0] for r in rows]
+                placeholders = ",".join("?" for _ in mids)
+                for mid, slot_time, status, lesson, body in conn.execute(
+                    f"""SELECT message_id, time, status, lesson_id, request FROM draft_results
+                        WHERE chat_id=? AND sender_id=? AND teacher_id=? AND message_id IN ({placeholders})""",
+                    (self.chat_id, self.tg_id, self.teacher_id, *mids),
+                ):
+                    outcomes_by_mid.setdefault(mid, {})[slot_time] = (status, lesson, body)
+            return rows, outcomes_by_mid
+
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)
         chat_slug = str(self.chat_id).removeprefix("-100")
+        rows, outcomes_by_mid = await asyncio.to_thread(self._latest_with_outcomes)
         result = []
-        for message_id, version, update_id, source, revision, base, edit in await asyncio.to_thread(self._latest):
+        for message_id, version, update_id, source, revision, base, edit in rows:
             source_id = -message_id // _WEEK_DRAFT_STRIDE if message_id < 0 else message_id
             latest = self._source_revision(version, update_id)
             plan = self._view(_telegram_plan(edit or source, source), names)
             plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
                         source=f"https://t.me/c/{chat_slug}/{source_id}", sourceUpdated=bool(edit and base != latest))
-            outcomes = await self.outcomes(message_id)
+            outcomes = outcomes_by_mid.get(message_id, {})
             for slot in plan["slots"]:
                 status, lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))
                 slot.update(status=status, lessonId=lesson_id if status == "held" else "")

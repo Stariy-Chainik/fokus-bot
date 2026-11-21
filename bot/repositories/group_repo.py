@@ -54,7 +54,7 @@ class GroupRepository(BaseRepository):
         История (счета, зарплаты, карточки) читает группу через ``get_by_id``
         либо передаёт ``include_archived=True``.
         """
-        groups = [_row_to_group(r) for r in await self._all_records()]
+        groups = await self._parsed_all(_row_to_group)
         if include_archived:
             return groups
         return [g for g in groups if not g.archived]
@@ -74,13 +74,14 @@ class GroupRepository(BaseRepository):
         ]
 
     async def add(self, branch_id: str, name: str) -> Group:
-        existing_ids = [g.group_id for g in await self.get_all()]
-        group_id = generate_group_id(existing_ids)
-        now = now_str()
-        await self._append_row([
-            group_id, branch_id, name, now, now, 0,
-            GroupBillingMode.NONE.value, 0, 35, 0, 60, "",
-        ])
+        async with self._sheet_lock():
+            existing_ids = [g.group_id for g in await self.get_all(include_archived=True)]
+            group_id = generate_group_id(existing_ids)
+            now = now_str()
+            await self._append_row([
+                group_id, branch_id, name, now, now, 0,
+                GroupBillingMode.NONE.value, 0, 35, 0, 60, "",
+            ])
         from bot.services import activity          # локально: репозитории грузятся раньше сервисов
         await activity.record(activity.GROUP, f"Новая группа: {group_id} {name}", ref=group_id)
         return Group(
@@ -92,8 +93,7 @@ class GroupRepository(BaseRepository):
         async with self._locked_row(group_id=group_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, 3, name)
-            await self._update_cell(row_idx, 5, now_str())
+            await self._update_cells(row_idx, {3: name, 5: now_str()})
         from bot.services import activity
         await activity.record(activity.GROUP, f"Переименована группа {group_id}: {name}", ref=group_id)
         return True
@@ -107,12 +107,14 @@ class GroupRepository(BaseRepository):
         async with self._locked_row(group_id=group_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, _BILLING_MODE_COL, billing_mode.value)
-            await self._update_cell(row_idx, _PRICE_SHORT_COL, price_short)
-            await self._update_cell(row_idx, _DUR_SHORT_COL, duration_short)
-            await self._update_cell(row_idx, _PRICE_FULL_COL, price_full)
-            await self._update_cell(row_idx, _DUR_FULL_COL, duration_full)
-            await self._update_cell(row_idx, 5, now_str())
+            await self._update_cells(row_idx, {
+                _BILLING_MODE_COL: billing_mode.value,
+                _PRICE_SHORT_COL: price_short,
+                _DUR_SHORT_COL: duration_short,
+                _PRICE_FULL_COL: price_full,
+                _DUR_FULL_COL: duration_full,
+                5: now_str(),
+            })
         from bot.services import activity
         await activity.record(activity.GROUP, f"Биллинг группы {group_id}: {billing_mode.value} · {price_full} ₽"
                               + (f" · короткий {price_short} ₽" if price_short else ""), ref=group_id)
@@ -123,8 +125,7 @@ class GroupRepository(BaseRepository):
         async with self._locked_row(group_id=group_id) as row_idx:
             if row_idx is None:
                 return False
-            await self._update_cell(row_idx, _ARCHIVED_COL, "1" if archived else "")
-            await self._update_cell(row_idx, 5, now_str())
+            await self._update_cells(row_idx, {_ARCHIVED_COL: "1" if archived else "", 5: now_str()})
         from bot.services import activity
         await activity.record(activity.GROUP, f"Группа {group_id} {'в архиве' if archived else 'возвращена из архива'}", ref=group_id)
         return True

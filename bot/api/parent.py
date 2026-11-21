@@ -462,6 +462,9 @@ def register_parent_api(app: web.Application, dp, bot=None) -> None:
         except Exception:
             return _json({"error": "bad_request"}, status=400)
         sid = str((body or {}).get("studentId") or "")
+        if len(_pay_locks) > 512:
+            for k in [k for k, lk in _pay_locks.items() if not lk.locked() and k != sid]:
+                _pay_locks.pop(k, None)
         lock = _pay_locks.setdefault(sid, asyncio.Lock())
         async with lock:
             return await _pay(body, addr, children)

@@ -116,3 +116,41 @@ def test_webp_served_as_image(tmp_path):
             r = await c.get("/app/logo-loop.webp")
             return r.status, r.headers.get("Content-Type")
     assert asyncio.run(run()) == (200, "image/webp")
+
+
+def test_esc_escapes_single_quotes_for_data_p_attributes() -> None:
+    """data-p='...' во всех экранах обёрнут в одинарные кавычки — esc() обязан экранировать '."""
+    src = APP.read_text(encoding="utf-8")
+    match = re.search(r"const esc = .*;", src)
+    assert match is not None
+    line = match.group(0)
+    assert "'" in line and "&#39;" in line
+    for ch in ("&amp;", "&lt;", "&gt;", "&quot;", "&#39;"):
+        assert ch in line
+
+
+def test_version_changes_when_any_role_js_or_html_changes(tmp_path) -> None:
+    """Версия кабинета (/app/version) меняется при правке любого JS/HTML файла, а не только app.js."""
+    import asyncio
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot.api.static import miniapp_version, register_miniapp_static
+
+    (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (tmp_path / "app.js").write_text("const a = 1;", encoding="utf-8")
+    (tmp_path / "teacher.js").write_text("const t = 1;", encoding="utf-8")
+
+    v1 = miniapp_version(tmp_path)
+    (tmp_path / "teacher.js").write_text("const t = 22;", encoding="utf-8")
+    v2 = miniapp_version(tmp_path)
+    assert v1 != v2
+
+    async def run():
+        app = web.Application()
+        register_miniapp_static(app, tmp_path)
+        async with TestClient(TestServer(app)) as c:
+            r = await c.get("/app/version")
+            return r.status, r.headers.get("Cache-Control"), await r.json()
+
+    status, cache, body = asyncio.run(run())
+    assert status == 200 and cache == "no-store" and body == {"version": v2}
