@@ -153,6 +153,7 @@ const groupsShort = (groups, limit = 1) => {
 };
 /* Панель поиска и фильтров, закреплённая при прокрутке списка. */
 const stickyFilters = inner => `<div class="filters">${inner}</div>`;
+const searchBox = (id, placeholder, value = '', extra = '') => `<div class="search-box"><input class="search" id="${id}" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off" ${extra}><button type="button" class="search-x${value ? ' on' : ''}" data-act="searchClear" data-p='${esc(JSON.stringify({ id }))}' aria-label="Очистить">×</button></div>`;
 const attr = (go, p) => go ? `data-go="${go}" data-p='${esc(JSON.stringify(p || {}))}'` : '';
 const cell = ({ lead, t, s, r, go, p, act, plain, cls = '' }) => `<button class="cell ${lead === undefined ? 'nolead' : ''} ${go || act ? '' : 'static'} ${cls}" ${go ? attr(go, p) : act ? `data-act="${act}" data-p='${esc(JSON.stringify(p || {}))}'` : ''}>${lead !== undefined ? `<span class="lead ${plain ? 'plain' : ''}">${lead}</span>` : ''}<span><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ''}</span><span class="r">${r || ''}${go ? '<span class="chev">›</span>' : ''}</span></button>`;
 const list = rows => `<div class="list">${rows.join('')}</div>`;
@@ -166,15 +167,42 @@ const empty = (text, action = '') => `<div class="empty"><div>${text}</div>${act
 const skeleton = () => '<div class="skeleton w60"></div><div class="skeleton tall"></div><div class="skeleton"></div><div class="skeleton tall"></div>';
 
 /* ── навигация ───────────────────────────────────────────────────────── */
-/* Нижнее меню — эмодзи вместо контурных иконок; у администратора шесть вкладок по сущностям
-   (как в референсе владельца 27.09.2026): деньги — одной вкладкой, «Школа» разошлась по «Группам» и «Педагогам». */
-const TABS = {
-  admin: [['a.home', 'Сводка', '📊'], ['a.students', 'Ученики', '👥'], ['a.branches', 'Группы', '🏷️'], ['a.teachers', 'Педагоги', '👩‍🏫'], ['a.lessons.day', 'Занятия', '📅'], ['a.money', 'Деньги', '💰']],
-  teacher: [['t.home', 'Сводка', '📊'], ['t.lessons', 'Занятия', '📅'], ['t.groups', 'Группы', '👥'], ['t.diary', 'Дневник', '📓'], ['t.money', 'Зарплата', '💰']],
-  parent: [['p.home', 'Мои дети', '🏠'], ['p.bills', 'Счета', '🧾'], ['p.lessons', 'Занятия', '📅'], ['p.diary', 'Дневник', '📓']],
-  athlete: [['s.home', 'Дневник', '📓'], ['s.entries', 'Тренировки', '🏃'], ['s.tasks', 'Задания', '📋'], ['s.rating', 'Рейтинг', '🏆']],
+/* Нижнее меню — единые контурные SVG-иконки (окрашиваются в акцент активной вкладки, с бейджами). */
+const TAB_ICONS = {
+  chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19v-6M12 19V5M19 19v-9M3 19h18"/></svg>',
+  users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="3.5"/><path d="M22 20v-2a4 4 0 0 0-3-3.85"/><path d="M16 3.6a3.5 3.5 0 0 1 0 6.8"/></svg>',
+  layers: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>',
+  teacher: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/><path d="M22 10v5"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2.5 2.5 0 0 1 2.5-2.5H18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5.5A2.5 2.5 0 0 1 3 17V7Z"/><path d="M16 12h5v3h-5a1.5 1.5 0 0 1 0-3Z"/></svg>',
+  book: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H19v18H7.5A2.5 2.5 0 0 0 5 22V4.5Z"/><path d="M5 20a2 2 0 0 1 2-2h12"/><path d="M9 7h6M9 11h4"/></svg>',
+  home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4.5v-6h3v6H18a1 1 0 0 0 1-1V9.5"/></svg>',
+  receipt: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18l2.5-1.5L10 21l2-1.5L14 21l2.5-1.5L19 21V3H5Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',
+  activity: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"/></svg>',
+  clipboard: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11l2 2 4-4M9 16h6"/></svg>',
+  trophy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/></svg>',
 };
-const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
+const TABS = {
+  admin: [['a.home', 'Сводка', 'chart'], ['a.students', 'Ученики', 'users'], ['a.branches', 'Группы', 'layers'], ['a.teachers', 'Педагоги', 'teacher'], ['a.lessons.day', 'Занятия', 'calendar'], ['a.money', 'Деньги', 'wallet']],
+  teacher: [['t.home', 'Сводка', 'chart'], ['t.lessons', 'Занятия', 'calendar'], ['t.groups', 'Группы', 'users'], ['t.diary', 'Дневник', 'book'], ['t.money', 'Зарплата', 'wallet']],
+  parent: [['p.home', 'Мои дети', 'home'], ['p.bills', 'Счета', 'receipt'], ['p.lessons', 'Занятия', 'calendar'], ['p.diary', 'Дневник', 'book']],
+  athlete: [['s.home', 'Дневник', 'book'], ['s.entries', 'Тренировки', 'activity'], ['s.tasks', 'Задания', 'clipboard'], ['s.rating', 'Рейтинг', 'trophy']],
+};
+const state = { stack: [{ n: 'a.home' }], ui: {}, me: null, badges: {} };
+const badgeHtml = v => {
+  const n = typeof v === 'object' && v ? (v.n || 0) : (v || 0);
+  if (!n) return '';
+  const cls = typeof v === 'object' && v && v.cls ? ' ' + v.cls : '';
+  return `<span class="badge${cls}">${n > 99 ? '99+' : n}</span>`;
+};
+function renderTabs() {
+  const el = document.getElementById('tabs');
+  if (!el) return;
+  const rootN = state.stack[0].n;
+  el.innerHTML = (state.joining ? [] : TABS[ROLE]).map(([n, label, ic]) =>
+    `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${TAB_ICONS[ic] || ic}${badgeHtml(state.badges[n])}</span>${label}</button>`).join('');
+}
+function setBadges(patch) { Object.assign(state.badges, patch || {}); renderTabs(); }
 const cur = () => state.stack[state.stack.length - 1];
 let renderSeq = 0;
 function go(n, p = {}) {
@@ -361,6 +389,7 @@ const planChart = (s, ym, kind) => {
 SCREENS['a.home'] = async ({ ym } = {}) => {
   const q = [ym ? `ym=${ym}` : '', actSeen() ? `seen=${encodeURIComponent(actSeen())}` : ''].filter(Boolean).join('&');
   const [h, inbox] = await Promise.all([api(`/home${q ? `?${q}` : ''}`), api('/inbox').catch(() => ({ total: 0 }))]);
+  setBadges({ 'a.money': inbox.total || 0 });
   const past = h.currentPeriod && h.period !== h.currentPeriod;      // плитки за прошлый месяц
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1].toLowerCase();
   const c = h.collected;
@@ -384,13 +413,13 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     </div>`;
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
+    ${attention.length ? `<div class="eyebrow" style="margin-top:2px">Требует внимания</div><div class="list attn" style="margin-bottom:12px">${attention.join('')}</div>` : ''}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
     ${flowTiles}
     ${planChart(h.subscriptions, h.period, 'subs')}
     ${planChart(h.lessons, h.period, 'lessons')}
-    <div class="eyebrow">Требует внимания</div>
-    ${attention.length ? list(attention) : '<div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
+    ${attention.length ? '' : '<div class="eyebrow">Требует внимания</div><div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
     <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' }), cell({ lead: '🏆', plain: true, t: 'Турниры', s: h.competitions && h.competitions.count ? `${fmon(h.period).toLowerCase()}: ${plural(h.competitions.count, ['турнир', 'турнира', 'турниров'])} · ${plural(h.competitions.pairs, ['выступление', 'выступления', 'выступлений'])}` : 'результаты наших пар из базы ФТСАРР', go: 'a.competitions', p: { ym: h.period } })])}</div>
@@ -429,6 +458,7 @@ SCREENS['a.flow'] = async ({ ym, tab }) => {
 /* «Деньги»: всё про оплаты и финансы одной вкладкой (раньше — «Оплаты» и «Финансы»). */
 SCREENS['a.money'] = async () => {
   const inbox = await api('/inbox').catch(() => ({ total: 0 }));
+  setBadges({ 'a.money': inbox.total || 0 });
   return { title: 'Деньги', html: `
     ${inbox.total ? list([cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'чеки, наличные, заявки', r: pill(inbox.total, 'warn'), go: 'a.inbox' })]) : ''}
     <div class="eyebrow">Оплаты</div>${list([
@@ -474,6 +504,7 @@ SCREENS['a.activity'] = async ({ days, kind }) => {
 /* Очередь решений: чеки, наличные и заявки, которые ждут администратора. */
 SCREENS['a.inbox'] = async () => {
   const d = await api('/inbox');
+  setBadges({ [ROLE === 'teacher' ? 't.home' : 'a.money']: d.items.length || 0 });
   const card = a => `<div class="card pad" style="margin-bottom:10px">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
       <div><div style="font-weight:700">${esc(a.title)}</div>
@@ -602,7 +633,7 @@ SCREENS['a.debtors'] = async () => {
   const total = rows.reduce((a, r) => a + amount(r), 0);
   const targets = rows.filter(r => r.closedTotal && r.hasParent);
   const chip = (label, on, act, p = {}) => `<button class="chip" aria-pressed="${on}" data-act="${act}" data-p='${esc(JSON.stringify(p))}'>${label}</button>`;
-  const filters = `<input class="search" id="q5" placeholder="🔍 Фамилия ученика" value="${esc(state.ui.q5 || '')}">
+  const filters = `${searchBox('q5', '🔍 Фамилия ученика', state.ui.q5 || '')}
     ${groupFilter(state.ui.groupsCache, f.group, 'debtGroup', 'gfBranchDebt')}
     <div class="chips scroll">${chip('Прошлые месяцы', !f.current, 'debtOpt', { k: 'current', v: false })}${chip('+ текущий*', f.current, 'debtOpt', { k: 'current', v: true })}${chip('Без родителя', f.noparent, 'debtOpt', { k: 'noparent', v: !f.noparent })}${chip('По сумме', f.sort === 'sum', 'debtOpt', { k: 'sort', v: 'sum' })}${chip('По фамилии', f.sort === 'name', 'debtOpt', { k: 'sort', v: 'name' })}</div>`;
   return { title: 'Должники', html: `${stickyFilters(filters)}
@@ -632,7 +663,7 @@ SCREENS['a.students'] = async () => {
   const flat = !!(q || f.noparent || f.debt || f.archived);            // ищем по всей школе, мимо филиалов
   const d = await api(`/students?q=${encodeURIComponent(q)}${f.noparent ? '&noparent=1' : ''}${f.debt ? '&debt=1' : ''}${f.archived ? '&archived=1' : ''}`);
   const head = stickyFilters(`
-    <input class="search" id="q" placeholder="Поиск по фамилии" value="${esc(q)}" autocomplete="off">
+    ${searchBox('q', 'Поиск по фамилии', q)}
     <div class="chips" style="margin-bottom:8px"><button class="chip" aria-pressed="${f.noparent}" data-act="sfToggle" data-p='{"k":"noparent"}'>Без родителя</button><button class="chip" aria-pressed="${f.debt}" data-act="sfToggle" data-p='{"k":"debt"}'>С долгом</button><button class="chip" aria-pressed="${f.archived}" data-act="sfToggle" data-p='{"k":"archived"}'>📦 Архив</button>${flat ? '<button class="chip" data-act="sfReset" data-p=\'{}\'>✕ Сбросить</button>' : ''}</div>`);
   const body = flat
     ? `<p class="hint" style="margin:0 0 8px">Показано ${d.students.length} из ${d.total}</p>
@@ -1002,7 +1033,7 @@ const payoutLists = t => `
 SCREENS['a.payhist.search'] = async () => {
   const q = state.ui.q2 || '';
   const d = await api(`/payhist?q=${encodeURIComponent(q)}`);
-  return { title: 'История оплат', html: `${stickyFilters(`<input class="search" id="q2" placeholder="Фамилия ученика" value="${esc(q)}" autocomplete="off">`)}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: plural(s.payments, ['оплата', 'оплаты', 'оплат']), go: 'a.payhist.months', p: { sid: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
+  return { title: 'История оплат', html: `${stickyFilters(searchBox('q2', 'Фамилия ученика', q))}${d.students.length ? list(d.students.map(s => cell({ lead: initials(s.name), t: esc(s.name), s: plural(s.payments, ['оплата', 'оплаты', 'оплат']), go: 'a.payhist.months', p: { sid: s.id } }))) : '<div class="empty">Никого не нашли</div>'}` };
 };
 SCREENS['a.payhist.months'] = async ({ sid }) => {
   const d = await api(`/payhist/${sid}`);
@@ -1221,7 +1252,7 @@ SCREENS['a.group.addst'] = async ({ id, name }) => {
   const d = await api(`/students?q=${encodeURIComponent(q)}`);
   const g = await api(`/groups/${id}`); const inGroup = new Set(g.members.filter(m => !m.left).map(m => m.id));
   const sts = d.students.filter(s => !inGroup.has(s.id));
-  return { title: 'Добавить в группу', html: `<div class="hint" style="margin-bottom:8px">${esc(name || g.name)}</div><input class="search" id="q3" placeholder="Фамилия ученика" value="${esc(q)}" autocomplete="off">${sts.length ? list(sts.slice(0, 40).map(s => `<button class="cell" data-act="memberAdd" data-p='${esc(JSON.stringify({ gid: id, sid: s.id, name: s.name }))}'><span class="lead">${initials(s.name)}</span><span><div class="t">${esc(s.name)}</div><div class="s">${esc(s.groups.join(', ')) || 'без группы'}</div></span><span class="r">➕</span></button>`)) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('Нового ученика — создать', 'a.student.add', { groupId: id }, 'ghost')}</div>` };
+  return { title: 'Добавить в группу', html: `<div class="hint" style="margin-bottom:8px">${esc(name || g.name)}</div>${searchBox('q3', 'Фамилия ученика', q)}${sts.length ? list(sts.slice(0, 40).map(s => `<button class="cell" data-act="memberAdd" data-p='${esc(JSON.stringify({ gid: id, sid: s.id, name: s.name }))}'><span class="lead">${initials(s.name)}</span><span><div class="t">${esc(s.name)}</div><div class="s">${esc(s.groups.join(', ')) || 'без группы'}</div></span><span class="r">➕</span></button>`)) : '<div class="empty">Никого не нашли</div>'}<div style="margin-top:12px">${goBtn('Нового ученика — создать', 'a.student.add', { groupId: id }, 'ghost')}</div>` };
 };
 
 SCREENS['a.group.teachers'] = async ({ id }) => {
@@ -1265,7 +1296,7 @@ SCREENS['a.student.groups'] = async ({ id, name }) => {
 SCREENS['a.parent.link'] = async ({ id, name }) => {
   const q = state.ui.q4 || '';
   const d = await api(`/clients?q=${encodeURIComponent(q)}`);
-  return { title: 'Родитель', html: `<div class="hint" style="margin-bottom:8px">${esc(name)} · карточка клиента: имя и телефон для связи. Доступ в бот родитель получает сам — по ссылке группы.</div><div class="eyebrow">Из списка</div><input class="search" id="q4" placeholder="Имя или телефон" value="${esc(q)}" autocomplete="off">${d.clients.length ? list(d.clients.slice(0, 30).map(c => `<button class="cell" data-act="clientLink" data-p='${esc(JSON.stringify({ sid: id, cid: c.id, name: c.name }))}'><span class="lead">${initials(c.name)}</span><span><div class="t">${esc(c.name)}</div><div class="s">${esc(c.phone || 'без телефона')}${c.students.length ? ' · ' + esc(c.students.map(n => n.split(' ')[0]).join(', ')) : ''}</div></span><span class="r">🔗</span></button>`)) : '<div class="empty">Никого не нашли</div>'}<div class="eyebrow">Новый родитель</div>${field('np-name', 'Имя', '', 'placeholder="как обращаться"')}${field('np-phone', 'Телефон', '', 'placeholder="+7 ••• ••• •• ••" inputmode="tel"')}<div style="margin-top:12px">${btn('➕ Создать и привязать', 'clientCreate', { sid: id }, 'sec')}</div>` };
+  return { title: 'Родитель', html: `<div class="hint" style="margin-bottom:8px">${esc(name)} · карточка клиента: имя и телефон для связи. Доступ в бот родитель получает сам — по ссылке группы.</div><div class="eyebrow">Из списка</div>${searchBox('q4', 'Имя или телефон', q)}${d.clients.length ? list(d.clients.slice(0, 30).map(c => `<button class="cell" data-act="clientLink" data-p='${esc(JSON.stringify({ sid: id, cid: c.id, name: c.name }))}'><span class="lead">${initials(c.name)}</span><span><div class="t">${esc(c.name)}</div><div class="s">${esc(c.phone || 'без телефона')}${c.students.length ? ' · ' + esc(c.students.map(n => n.split(' ')[0]).join(', ')) : ''}</div></span><span class="r">🔗</span></button>`)) : '<div class="empty">Никого не нашли</div>'}<div class="eyebrow">Новый родитель</div>${field('np-name', 'Имя', '', 'placeholder="как обращаться"')}${field('np-phone', 'Телефон', '', 'placeholder="+7 ••• ••• •• ••" inputmode="tel"')}<div style="margin-top:12px">${btn('➕ Создать и привязать', 'clientCreate', { sid: id }, 'sec')}</div>` };
 };
 
 SCREENS['a.teacher.add'] = async () => ({ title: 'Новый педагог', html: `${field('nt-tg', 'Telegram ID (можно позже)', '', 'inputmode="numeric" placeholder="число из @userinfobot"')}${field('nt-name', 'Фамилия и имя')}<div class="eyebrow">Ставки за 45 минут</div>${field('nt-g', 'Группа, ₽', '', 'inputmode="numeric"')}${field('nt-t', 'Индивидуальное — педагогу, ₽', '', 'inputmode="numeric"')}${field('nt-s', 'Индивидуальное — цена для ученика, ₽', '', 'inputmode="numeric"')}<div style="margin-top:12px">${btn('💾 Создать педагога', 'teacherAdd', {})}</div><p class="hint" style="margin-top:8px">С Telegram ID педагог сразу получит доступ к своему кабинету в боте.</p>` });
@@ -1528,8 +1559,7 @@ async function render() {
   const seq = ++renderSeq; const s = cur();
   const content = document.getElementById('content');
   const rbtn = document.getElementById('refresh-btn');
-  const rootN = state.stack[0].n;
-  document.getElementById('tabs').innerHTML = (state.joining ? [] : TABS[ROLE]).map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${ic}</span>${label}</button>`).join('');
+  renderTabs();
   syncBackBtn();
   const sameScreen = state.ui.lastScreen === s.n;
   state.ui.lastScreen = s.n;
@@ -1566,6 +1596,8 @@ async function render() {
     let t;
     q.addEventListener('input', e => {
       state.ui[qkey] = e.target.value;
+      const xb = q.parentElement && q.parentElement.querySelector('.search-x');
+      if (xb) xb.classList.toggle('on', !!e.target.value);
       clearTimeout(t);
       if (e.isComposing) return;                         // ввод через подсказки клавиатуры ещё не закончен
       t = setTimeout(() => render(), 300);
@@ -1610,9 +1642,9 @@ ACT.inboxDecide = async ({ id, approve, amount, force, advance }) => {
   try {
     const r = await api(`/inbox/${id}/decide`, { method: 'POST', body: { approve, amount, force, advance } });
     closeSheet(); render();
-    if (r.status === 'held') { toast('Передано администратору — он зачтёт, когда получит деньги'); return; }
-    if (r.advance) { toast(`Оплата ${fmt(r.credited)} зачтена, педагогу — аванс ${fmt(r.advance)}`); return; }
-    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : (r.status === 'done' ? 'Заявка закрыта — оплата уже была отмечена' : 'Готово')) : 'Отклонено');
+    if (r.status === 'held') { toast('Передано администратору — он зачтёт, когда получит деньги', 'ok'); return; }
+    if (r.advance) { toast(`Оплата ${fmt(r.credited)} зачтена, педагогу — аванс ${fmt(r.advance)}`, 'ok'); return; }
+    toast(approve ? (r.credited ? `Оплата ${fmt(r.credited)} зачтена${r.overpaid ? ` (переплата ${fmt(r.overpaid)})` : ''}` : (r.status === 'done' ? 'Заявка закрыта — оплата уже была отмечена' : 'Готово')) : 'Отклонено', 'ok');
   } catch (e) {
     // сумма больше остатка — спрашиваем, что зачесть; повтор решения — сообщаем и обновляем
     if (e.status === 409 && e.data && e.data.needsConfirm) return overpaySheet(e.data, 'inboxDecide', { id, approve: true, advance });
@@ -1720,6 +1752,13 @@ ACT.payGroupPick = ({ v }) => {
 /* Быстрые фильтры на экране «Ученики»: показывают плоский список по всей школе. */
 ACT.sfToggle = ({ k }) => { state.ui.sf[k] = !state.ui.sf[k]; render(); };
 ACT.sfReset = () => { state.ui.sf = { group: '', noparent: false, debt: false, archived: false }; state.ui.q = ''; render(); };
+ACT.searchClear = ({ id }) => {
+  state.ui[id] = '';
+  const el = document.getElementById(id);
+  if (el) el.value = '';
+  haptic('light');
+  render();
+};
 
 document.addEventListener('click', e => {
   const stop = e.target.closest('[data-stop]'); const wrap = e.target.closest('.sheet-wrap');
@@ -1739,8 +1778,8 @@ if (MAXAPP && MAXAPP.back) { try { MAXAPP.back.onClick(handleBack); } catch (_) 
 
 ACT.switchRole = async ({ to }) => {
   const prev = ROLE; ROLE = to;
-  try { state.me = await api('/me'); state.ui = {}; root(ROLE_HOME[ROLE]); }
-  catch (e) { ROLE = prev; toast(errText(e)); }
+  try { state.me = await api('/me'); state.ui = {}; state.badges = {}; root(ROLE_HOME[ROLE]); }
+  catch (e) { ROLE = prev; toast(errText(e), 'bad'); }
 };
 
 (async () => {

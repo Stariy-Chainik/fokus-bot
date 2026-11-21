@@ -20,6 +20,9 @@ const firstName = n => plainName(n).split(' ')[1] || plainName(n);   // «Ива
 const pHours = m => `${Math.floor(m / 60)} ч${m % 60 ? ` ${m % 60} мин` : ''}`;
 SCREENS['p.home'] = async () => {
   const h = await api('/home');
+  const unpaidCount = h.children.reduce((n, c) => n + c.unpaid.length, 0);
+  const gradesCount = h.children.reduce((n, c) => n + c.grades.length, 0);
+  setBadges({ 'p.bills': unpaidCount, 'p.diary': gradesCount ? { n: gradesCount, cls: 'acc' } : 0 });
   const mon = ym => MON_NOM[+ym.slice(5) - 1];
   const many = h.children.length > 1;
   const who = c => many ? ` · ${esc(firstName(c.name))}` : '';   // имя ребёнка — только если детей несколько

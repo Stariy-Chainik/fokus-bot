@@ -19,6 +19,7 @@ const sEntryCell = e => cell({
 /* ── Сводка ──────────────────────────────────────────────────────────── */
 SCREENS['s.home'] = async () => {
   const h = await api('/home');
+  setBadges({ 's.tasks': h.openTasks.length ? { n: h.openTasks.length, cls: 'acc' } : 0 });
   const st = h.stats;
   return { title: 'Мой дневник', html: `
     ${hero(`${esc(h.student.name)} · ${fmon(h.period)}`)}
@@ -108,6 +109,7 @@ SCREENS['s.entries'] = async ({ ym }) => {
 const sCanVideo = () => !!(tg && tg.initData) || DEV;
 SCREENS['s.tasks'] = async () => {
   const d = await api('/tasks');
+  setBadges({ 's.tasks': d.tasks.length ? { n: d.tasks.length, cls: 'acc' } : 0 });
   const taskCell = t => cell({
     lead: '📋', plain: true, cls: 'wrap', t: esc(t.exercise),
     s: `${[t.minutes ? `${t.minutes} мин` : '', t.comment ? esc(t.comment) : ''].filter(Boolean).join(' · ') || 'задание педагога'}${t.done ? `<br>сделано ${t.done} раз${t.last ? `, последний ${fdate(t.last)}` : ''}` : '<br>ещё не отрабатывали'}${t.videos ? `<br>📹 отправлено видео: ${t.videos}` : ''}`,
@@ -168,7 +170,7 @@ SCREENS['s.join'] = async () => {
     ${hero('Дневник тренировок, задания педагога и рейтинг')}
     <div class="card pad"><div style="font-weight:700">Найдите себя</div>
       <div class="hint" style="margin-top:4px">Кабинет — для учеников спортивной группы. Введите фамилию (от ${min} букв) и выберите себя.</div></div>
-    <input class="search" id="q6" placeholder="Фамилия" value="${esc(q)}" autocomplete="off" style="margin-top:10px">
+    <div style="margin-top:10px">${searchBox('q6', 'Фамилия', q)}</div>
     ${found}
     <p class="hint" style="margin-top:12px">Вы родитель? Подключитесь по ссылке группы от педагога — откройте её в MAX, и здесь появится кабинет родителя.</p>` };
 };

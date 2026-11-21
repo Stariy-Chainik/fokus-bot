@@ -11,6 +11,11 @@ const teacherRecordButton = (label = '✏️ Отметить занятие', k
    как идёт месяц. «Разделов» нет: занятия, группы и зарплата — это вкладки внизу. */
 SCREENS['t.home'] = async () => {
   const h = await api('/home');
+  setBadges({
+    't.home': h.inbox || 0,
+    't.diary': h.unrated ? { n: h.unrated, cls: 'warn' } : 0,
+    't.groups': h.newChild ? { n: h.newChild, cls: 'warn' } : 0,
+  });
   const mon = MON_NOM[+h.period.slice(5) - 1], prevMon = MON_NOM[+h.prevPeriod.slice(5) - 1];
   const attention = [
     h.inbox ? cell({ lead: '📥', plain: true, t: 'Ждут решения', s: 'наличные и чеки родителей', r: pill(h.inbox, 'warn'), go: 'a.inbox' }) : '',
@@ -818,6 +823,8 @@ SCREENS['t.money'] = async ({ ym }) => {
 /* ── Дневники спортсменов ────────────────────────────────────────────── */
 SCREENS['t.diary'] = async () => {
   const d = await api('/diary');
+  const unrated = d.athletes.reduce((n, a) => n + (a.unrated || 0), 0);
+  setBadges({ 't.diary': unrated ? { n: unrated, cls: 'warn' } : 0 });
   return { title: 'Дневники', html: `
     <div class="chips"><button class="chip" data-go="t.hw" data-p='{}'>📋 Домашние задания</button><button class="chip" data-go="t.rating" data-p='${esc(JSON.stringify({ ym: d.period }))}'>🏆 Рейтинг</button></div>
     ${d.athletes.length ? list(d.athletes.map(a => cell({
@@ -884,6 +891,7 @@ SCREENS['t.rating'] = async ({ ym }) => {
 /* Заявки родителей «ребёнка нет в списке» по своим группам — те же решения, что кнопками в Telegram (22.10.2026). */
 SCREENS['t.nchild'] = async () => {
   const d = await api('/newchild');
+  setBadges({ 't.groups': d.items.length ? { n: d.items.length, cls: 'warn' } : 0 });
   return { title: 'Заявки на детей', html: d.items.length ? d.items.map(a => `<div class="card pad" style="margin-bottom:10px">
       <div style="font-weight:800;font-size:16px">${esc(a.name)}</div>
       <div class="hint">${esc(plainName(a.groupName))} · родитель ${a.parent}${a.sender ? ` · ${esc(a.sender)}` : ''} · ${fdate(a.createdAt.slice(0, 10))}</div>
