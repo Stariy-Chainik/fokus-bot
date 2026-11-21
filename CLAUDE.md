@@ -366,6 +366,7 @@ All inherit `BaseRepository` ([bot/repositories/base.py](bot/repositories/base.p
 | `TeacherVisibilityService` | Who can see whom: `students_for_teacher()`, `students_in_group_for_teacher()`, `teachers_for_student()`, `is_visible()`. Pure intersection of `teacher_groups` and `student_groups`. |
 | `DiaryService` ([diary_service.py](bot/services/diary_service.py)) | Кабинет спортсмена: записи тренировок, задания, оценки, статистика и рейтинг. Чистые функции `compute_stats()`, `compute_leaderboard()`: **очки = минуты × оценка** (без оценки — коэффициент 3), при фильтре по танцу минуты записи делятся поровну между её темами; места плотные. Темы — [bot/utils/diary_topics.py](bot/utils/diary_topics.py) (бальные танцы / предметы ХГ по названию группы). |
 | `DiagnosticsService` | `run_consistency_check()` → `DiagnosticsReport` (orphan lessons referencing missing teachers/students). |
+| `BgHealth` ([bg_health.py](bot/services/bg_health.py)) | Мониторинг фоновых задач (`cache_warmer`, `rate_history`, `lesson_reminders`, `competition_results`) для `/health/status`; автоалерт администраторам в Telegram после 3 подряд ошибок и уведомление о восстановлении (кэширует `admin_tg_ids` в памяти на случай сбоя Sheets). |
 | `CloudKassirService` | `send_income_receipt(phone, student_name, period_month, amount)` — fires a fiscal receipt; phone is normalized to `+7…`. No-op if `CLOUDKASSIR_PUBLIC_ID` is empty. |
 
 ### Models & enums
@@ -386,6 +387,7 @@ Enums in [bot/models/enums.py](bot/models/enums.py):
   - New: `STU-001:60:700,STU-002:60:700` (with `duration_min:amount` snapshot → billed)
   - `parse_attendees()`, `serialize_attendees()`, `attendee_ids()`, `AttendeeEntry` dataclass.
 - [bot/utils/bill_format.py](bot/utils/bill_format.py) — `build_bill_text()`. Shared parent-facing bill renderer used by the `admin/bills/` package.
+- [bot/utils/format.py](bot/utils/format.py) — `format_money()` («1 200 ₽») и `format_amount()` («1 200»): единый формат денежных сумм с пробелом разрядов для пользовательских экранов и уведомлений.
 - [bot/utils/dates.py](bot/utils/dates.py) — date helpers (`now_str`, `format_date_display`, `period_month_from_date`, `display_period`, `format_date_short_with_wd`). Formats: storage `YYYY-MM-DD` / `YYYY-MM`, display `ДД.ММ.ГГГГ` / `ММ.ГГГГ`.
 - [bot/utils/ids.py](bot/utils/ids.py) — sequential ID generators: `TCH-XXXX`, `STU-XXXX`, `LES-XXXXXX`, `GRP-XXXX`, `BRN-XXXX`, `PAY-XXXXXX`, `SUB-XXXXXX`, `USR-XXXX`, `CLT-XXXX`, `FIN-XXXXXX`. Each scans existing rows for the current max.
 - [bot/utils/lesson_stats.py](bot/utils/lesson_stats.py) — `format_lesson_breakdown(lessons) → (group_count, ind_count, group_line, ind_line)` for stats screens.
@@ -704,6 +706,8 @@ Receipt upload uses FSM `ReceiptStates.waiting_for_receipt` ([bot/states/client_
 | File | Purpose |
 |---|---|
 | `deploy.sh` | Production deploy — rsync working tree to `root@178.104.240.252:/opt/fokus-bot/` (excludes `.git`, `.venv`, `.env`, credentials, `bot.log`, `__pycache__`), then `systemctl restart fokus-bot && journalctl -n 20`. Standard deploy command for this repo. |
+| `backup_schedule_db.sh` | Онлайн-бэкап SQLite расписания (WAL `.backup`) с ротацией 14 копий; cron на проде `15 3 * * *`. |
+| `backup_sheets.py` / `backup_sheets.sh` | Ночной бэкап всех листов Google Sheets одним `values_batch_get` в `/var/backups/fokus-bot/sheets-YYYYMMDD-HHMMSS.json.gz` (атомарная запись, ротация 30 дней; cron на проде `30 3 * * *`). |
 | `audit_teacher_students.py` | Read-only consistency check: every student's visibility to each teacher matches `teacher_groups ∩ student_groups`. |
 | `migrate_student_groups.py` | One-shot migration from legacy `students.group_id` column to the `student_groups` join table. Idempotent. |
 | `bulk_seed_2026_04.py` | One-shot seeding of students + group assignments for a specific intake (April 2026). Has `--dry-run` and `--apply` flags. |
