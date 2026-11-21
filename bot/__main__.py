@@ -22,7 +22,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from bot.services import activity, pending_queue
+from bot.services import activity, bg_health, pending_queue
 from bot.services.schedule_pilot import SchedulePilot, SchedulePilots
 from config.settings import settings
 from bot.repositories import (
@@ -294,21 +294,26 @@ async def _cache_warmer(dp: Dispatcher, interval_sec: int = 240) -> None:
     """
     sem = asyncio.Semaphore(_WARM_PARALLEL)
 
-    async def one(key: str) -> None:
+    async def one(key: str) -> bool:
         repo = dp.workflow_data.get(key)
         if repo is None:
-            return
+            return True
         async with sem:
             try:
                 await repo.refresh()
+                return True
             except Exception as exc:                     # прогрев не критичен
                 logger.warning("Прогрев кеша %s: %s", key, exc)
+                bg_health.mark_err("cache_warmer", exc)
+                return False
 
     while True:
         t0 = time.monotonic()
         # по несколько листов сразу: после рестарта кеш готов за ~5 с, а не за 14–42 (14.10.2026);
         # больше 4 параллельно не надо — упрёмся в минутную квоту Google на чтение
-        await asyncio.gather(*(one(key) for key in _WARM_REPOS))
+        results = await asyncio.gather(*(one(key) for key in _WARM_REPOS))
+        if all(results):
+            bg_health.mark_ok("cache_warmer")
         logger.info("Прогрев кеша: %d листов за %.1f с", len(_WARM_REPOS), time.monotonic() - t0)
         await asyncio.sleep(interval_sec)
 
@@ -321,14 +326,16 @@ async def _rate_history_refresher(dp: Dispatcher, interval_sec: int = 300) -> No
         try:
             rows = await repo.get_all()
             rate_history.load(rows)
+            bg_health.mark_ok("rate_history")
             logger.debug("История ставок загружена: %d строк", len(rows))
         except Exception as exc:  # лист может отсутствовать — работаем по карточкам
+            bg_health.mark_err("rate_history", exc)
             logger.warning("История ставок недоступна (%s) — используются текущие ставки", exc)
         await asyncio.sleep(interval_sec)
 
 
 def _register_health(app, dp: Dispatcher) -> None:
-    """Регистрирует /health (plain ok) и /health/status (состояние кеша листов) в обоих режимах запуска."""
+    """Регистрирует /health (plain ok) и /health/status (состояние кеша листов и фоновых задач) в обоих режимах запуска."""
     from aiohttp import web
     from bot.repositories.base import BaseRepository
 
@@ -348,6 +355,7 @@ def _register_health(app, dp: Dispatcher) -> None:
             "sheetsCached": len(ages),
             "sheetsTotal": len(names),
             "maxCacheAgeSec": max(ages, default=None),
+            "background": bg_health.snapshot(),
         })
 
     app.router.add_get("/health", health)

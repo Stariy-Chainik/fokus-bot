@@ -41,7 +41,7 @@ Python 3.12+ (прод 3.12.3; локальный `.venv` тоже 3.12 — `max
 `bot/__main__.py` is the single DI container. Order matters:
 
 1. Build **`SheetsClient`** from settings (one shared gspread client, caches Worksheet handles).
-2. Construct **14 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
+2. Construct **26 repositories** (one per Google Sheets tab), all inheriting `BaseRepository`.
 3. Construct **8 services**: `LessonService`, `PaymentService`, `ProfitService`, `DiagnosticsService`, `TeacherVisibilityService` (via [bot/services/visibility.py](bot/services/visibility.py)), `StudentService`, `StudentRequestService`, `CloudKassirService`. (`BillingService` is a pure-functions module — not instantiated.)
 4. Pick **FSM storage**: `RedisStorage` if `REDIS_URL` is set, else `MemoryStorage`.
 5. Register middlewares (in this order):

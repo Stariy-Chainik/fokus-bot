@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import settings
 
-from . import activity
+from . import activity, bg_health
 
 logger = logging.getLogger(__name__)
 WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
@@ -184,6 +184,8 @@ async def run(dp, bot, interval_sec: int = 60) -> None:
                     if ref not in done and not await _already(ref):
                         await send_admin_digest(dp, bot, y)
                     done.add(ref)
+            bg_health.mark_ok("lesson_reminders")
         except Exception as exc:
+            bg_health.mark_err("lesson_reminders", exc)
             logger.exception("Напоминания педагогам: %s", exc)
         await asyncio.sleep(interval_sec)

@@ -390,6 +390,10 @@ async def run(dp, bot, interval_sec: int = 60) -> None:
                                 stats.added, stats.updated)
                     if len(done) > 7:                   # не копить даты
                         done.intersection_update({key, (now.date() - timedelta(days=1)).isoformat()})
+            from . import bg_health
+            bg_health.mark_ok("competition_results")
         except Exception as exc:
+            from . import bg_health
+            bg_health.mark_err("competition_results", exc)
             logger.exception("ФТСАРР обход: %s", exc)
         await asyncio.sleep(interval_sec)

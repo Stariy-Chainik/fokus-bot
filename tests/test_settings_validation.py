@@ -70,6 +70,11 @@ def test_validate_dsl_reports_malformed_entries():
 
 
 def test_health_and_health_status_endpoints():
+    from bot.services import bg_health
+
+    bg_health.clear()
+    bg_health.mark_err("cache_warmer", RuntimeError("429 quota"))
+    bg_health.mark_ok("rate_history")
     app = web.Application()
     dp = SimpleNamespace(workflow_data={"lesson_repo": SimpleNamespace(_sheet_name="lessons")})
     main_mod._register_health(app, dp)  # type: ignore[arg-type]
@@ -83,3 +88,7 @@ def test_health_and_health_status_endpoints():
     s1, t1, s2, j2 = asyncio.run(run())
     assert (s1, t1) == (200, "ok")
     assert s2 == 200 and j2["status"] == "ok" and j2["sheetsTotal"] == 1
+    assert j2["background"]["cache_warmer"]["consecutiveErrors"] == 1
+    assert "429 quota" in j2["background"]["cache_warmer"]["lastError"]
+    assert j2["background"]["rate_history"]["consecutiveErrors"] == 0
+    bg_health.clear()
