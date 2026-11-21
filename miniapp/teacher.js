@@ -274,13 +274,20 @@ ACT.scheduleDateDone = async ({ id }) => {
   }
 };
 
-ACT.scheduleUseSource = async ({ id }) => {
+ACT.scheduleUseSource = ({ id }) => {
   const d = schedulePlan(id);
-  if (!d?.telegram || !confirm('Обновить незакрытые строки из Telegram? Отметки занятий сохранятся.')) return;
-  if (await scheduleWrite(d, { sourceRevision: d.telegram.sourceRevision, useTelegram: true })) {
-    back();
-    toast('Версия Telegram применена');
-  }
+  if (!d?.telegram) return;
+  confirmSheet({
+    title: 'Применить версию Telegram?',
+    text: 'Незакрытые строки обновятся из поста, уже отмеченные занятия сохранятся.',
+    okText: 'Обновить',
+    onOk: async () => {
+      if (await scheduleWrite(d, { sourceRevision: d.telegram.sourceRevision, useTelegram: true })) {
+        back();
+        toast('Версия Telegram применена', 'ok');
+      }
+    },
+  });
 };
 
 async function sendScheduleActions(plan, actions) {
@@ -584,15 +591,24 @@ ACT.tKgDo = async ({ sid }) => {
 ACT.tRenameAsk = ({ sid, name }) => sheet(`<h3>Изменить имя ученика</h3>${field('t-rn', 'Фамилия и имя', name, 'maxlength="60" autocomplete="off"')}
   <p class="hint">Сначала фамилия, потом имя. В уже записанных индивидуальных занятиях останется старое написание. Администратор получит сообщение.</p>
   <div style="margin-top:12px">${btn('💾 Сохранить', 'tRenameDo', { sid })}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
-ACT.tRenameDo = async ({ sid, force }) => {
-  const name = val('t-rn').trim().replace(/\s+/g, ' ');
-  if (name.length < 3) { toast('Введите фамилию и имя'); return; }
+ACT.tRenameDo = async ({ sid, force, name: forcedName }) => {
+  const name = (forcedName !== undefined ? forcedName : val('t-rn')).trim().replace(/\s+/g, ' ');
+  if (name.length < 3) { toast('Введите фамилию и имя', 'bad'); return; }
   try {
     const r = await api(`/students/${sid}`, { method: 'PATCH', body: { name, force: !!force } });
-    closeSheet(); render(); toast(r.unchanged ? 'Имя не изменилось' : 'Имя исправлено');
+    closeSheet(); render(); toast(r.unchanged ? 'Имя не изменилось' : 'Имя исправлено', 'ok');
   } catch (e) {
-    if (e.code === 'duplicate' && confirm(`Ученик «${e.data.students.map(x => x.name).join('», «')}» уже есть в базе. Всё равно сохранить такое имя?`)) { ACT.tRenameDo({ sid, force: true }); return; }
-    if (e.code !== 'duplicate') toast(e.data && e.data.message ? e.data.message : errText(e));
+    if (e.code === 'duplicate') {
+      const names = e.data.students.map(x => x.name).join('», «');
+      confirmSheet({
+        title: 'Сохранить дубликат имени?',
+        text: `Ученик «${names}» уже есть в базе. Всё равно сохранить такое имя?`,
+        okText: 'Всё равно сохранить',
+        onOk: () => ACT.tRenameDo({ sid, force: true, name }),
+      });
+      return;
+    }
+    toast(e.data && e.data.message ? e.data.message : errText(e), 'bad');
   }
 };
 /* «🔄 Перевести в другую группу» (решение владельца 16.10.2026): из своей группы в свою одним действием —

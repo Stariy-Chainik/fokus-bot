@@ -154,3 +154,13 @@ def test_version_changes_when_any_role_js_or_html_changes(tmp_path) -> None:
 
     status, cache, body = asyncio.run(run())
     assert status == 200 and cache == "no-store" and body == {"version": v2}
+
+
+def test_no_native_browser_confirm_or_alert_in_miniapp() -> None:
+    """Системные confirm()/alert() в WebView MAX на Android могут не показываться — используем confirmSheet()."""
+    for name in ("app.js", *ROLE_FILES):
+        src = (MINIAPP / name).read_text(encoding="utf-8")
+        # Убираем комментарии перед проверкой
+        code = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+        code = re.sub(r"//.*", "", code)
+        assert not re.search(r"(?<![.\w])(?:confirm|alert)\s*\(", code), f"найден нативный confirm/alert в {name}"

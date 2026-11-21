@@ -41,8 +41,26 @@ function openExternal(url) {
 }
 const authHeader = () => tg && tg.initData ? `tma ${tg.initData}` : MAXAPP ? `max ${MAXAPP.initData}` : DEV_MAX ? 'devmax' : DEV ? 'dev' : '';
 if (tg) { try { tg.ready(); tg.expand(); } catch (_) { /* старый клиент */ } }
-function applyTheme() { document.documentElement.dataset.theme = tg && tg.colorScheme === 'dark' ? 'dark' : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+function applyTheme() {
+  const dark = tg && tg.colorScheme === 'dark' ? true : (tg && tg.colorScheme === 'light' ? false : matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  if (tg) {
+    try { if (tg.setHeaderColor) tg.setHeaderColor(dark ? '#231B20' : '#FFFFFF'); } catch (_) { /* старый клиент */ }
+    try { if (tg.setBackgroundColor) tg.setBackgroundColor(dark ? '#171215' : '#F4F1F3'); } catch (_) { /* старый клиент */ }
+  }
+}
 applyTheme(); if (tg) tg.onEvent('themeChanged', applyTheme);
+/* Тактильный отклик (Telegram и MAX): мягкий щелчок на вкладках/чипах, подтверждение/ошибка на тостах. */
+function haptic(kind = 'select') {
+  const hf = (tg && tg.HapticFeedback) || (MAXAPP && window.WebApp && window.WebApp.HapticFeedback) || null;
+  if (!hf) return;
+  try {
+    if (kind === 'ok') hf.notificationOccurred('success');
+    else if (kind === 'bad' || kind === 'err') hf.notificationOccurred('error');
+    else if (kind === 'light') hf.impactOccurred('light');
+    else hf.selectionChanged();
+  } catch (_) { /* старый клиент */ }
+}
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 /* Роль задаёт и префикс API, и набор вкладок: администратор (a.*), педагог (t.*),
@@ -51,12 +69,26 @@ let ROLE = 'admin';
 const API_BASE = { admin: '/api/admin', teacher: '/api/teacher', parent: '/api/parent', athlete: '/api/athlete' };
 const ROLE_TITLE = { admin: 'Администратор', teacher: 'Педагог', parent: 'Родитель', athlete: 'Спортсмен' };
 const ROLE_HOME = { admin: 'a.home', teacher: 't.home', parent: 'p.home', athlete: 's.home' };
+const API_TIMEOUT_MS = 20000;
+const UPLOAD_TIMEOUT_MS = 45000;
 class ApiError extends Error { constructor(status, code, data) { super(code || `HTTP ${status}`); this.status = status; this.code = code; this.data = data; } }
+async function _fetchWithTimeout(url, opts, timeoutMs) {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    return await fetch(url, ctrl ? { ...opts, signal: ctrl.signal } : opts);
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new ApiError(0, 'timeout', null);
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'Accept': 'application/json' };
   if (authHeader()) headers.Authorization = authHeader();
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const resp = await fetch(API_BASE[ROLE] + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const resp = await _fetchWithTimeout(API_BASE[ROLE] + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, API_TIMEOUT_MS);
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
   if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);   // тело нужно, напр. при переплате
   return data;
@@ -65,12 +97,12 @@ async function api(path, { method = 'GET', body } = {}) {
 async function apiForm(path, form) {
   const headers = { 'Accept': 'application/json' };
   if (authHeader()) headers.Authorization = authHeader();
-  const resp = await fetch(API_BASE[ROLE] + path, { method: 'POST', headers, body: form });
+  const resp = await _fetchWithTimeout(API_BASE[ROLE] + path, { method: 'POST', headers, body: form }, UPLOAD_TIMEOUT_MS);
   let data = null; try { data = await resp.json(); } catch (_) { /* не JSON */ }
   if (!resp.ok) throw new ApiError(resp.status, data && data.error, data);
   return data;
 }
-const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram или MAX — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.', receipt_required: 'Прикрепите чек перевода — без него оплату отметить нельзя.' };
+const ERR_TEXT = { unauthorized: 'Откройте приложение из Telegram или MAX — подпись не подтверждена.', forbidden: 'Доступ только для администраторов школы.', not_found: 'Не найдено — возможно, запись удалена.', file_too_big: 'Файл больше 15 МБ — сожмите фото.', bad_file_type: 'Нужно фото или PDF.', in_progress: 'Операция уже выполняется, подождите.', nothing_to_send: 'Начислений нет — отправлять нечего.', bot_unavailable: 'Бот недоступен, попробуйте позже.', receipt_required: 'Прикрепите чек перевода — без него оплату отметить нельзя.', timeout: 'Сервер долго не отвечает — проверьте связь и повторите.' };
 const errText = e => e instanceof ApiError ? (ERR_TEXT[e.code] || `Ошибка сервера (${e.status})`) : 'Нет связи с сервером';
 
 /* ── форматирование ──────────────────────────────────────────────────── */
@@ -145,7 +177,13 @@ const TABS = {
 const state = { stack: [{ n: 'a.home' }], ui: {}, me: null };
 const cur = () => state.stack[state.stack.length - 1];
 let renderSeq = 0;
-function go(n, p = {}) { state.stack.push({ n, p }); render(); checkFresh(); }
+function go(n, p = {}) {
+  const c = document.getElementById('content');
+  if (c && cur()) cur().scroll = c.scrollTop;
+  state.stack.push({ n, p, scroll: 0 });
+  render();
+  checkFresh();
+}
 /* Telegram держит кабинет открытым сутками: после деплоя на телефоне крутились старые скрипты, пока их
    не закрыли вручную. Раз в минуту при переходе (и при возврате в приложение) сверяем /app/version
    (срез всех JS/HTML файлов кабинета, с откатом на HEAD app.js) — изменился → перезагрузка на тот же экран. */
@@ -172,11 +210,65 @@ async function checkFresh(force) {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFresh(true); });
 checkFresh(true);
 function back() { if (state.stack.length > 1) { state.stack.pop(); render(); } }
-function root(n) { state.stack = [{ n }]; render(); }
+function root(n) { state.stack = [{ n, scroll: 0 }]; render(); }
 function refresh() { render(); }
-function toast(msg) { const el = document.createElement('div'); el.className = 'toast fade'; el.textContent = msg; document.getElementById('overlay').appendChild(el); setTimeout(() => el.remove(), 2400); }
-function sheet(html) { document.getElementById('overlay').insertAdjacentHTML('beforeend', `<div class="sheet-wrap" data-act="closeSheet"><div class="sheet fade" data-stop="1"><div class="grab"></div>${html}</div></div>`); }
-function closeSheet() { document.querySelectorAll('.sheet-wrap').forEach(w => w.remove()); }
+let _toastTimer = null;
+function toast(msg, kind = '') {
+  const overlay = document.getElementById('overlay');
+  overlay.querySelectorAll('.toast').forEach(t => t.remove());
+  if (_toastTimer) clearTimeout(_toastTimer);
+  const el = document.createElement('div');
+  el.className = `toast fade${kind ? ' ' + kind : ''}`;
+  el.textContent = msg;
+  overlay.appendChild(el);
+  if (kind === 'ok' || kind === 'bad') haptic(kind);
+  _toastTimer = setTimeout(() => el.remove(), 2600);
+}
+const hasSheet = () => !!document.querySelector('.sheet-wrap');
+function syncBackBtn() {
+  const show = state.stack.length > 1 || hasSheet();
+  document.getElementById('back').classList.toggle('on', show && (MAXAPP ? !MAXAPP.back : !tg));
+  if (MAXAPP && MAXAPP.back) { try { show ? MAXAPP.back.show() : MAXAPP.back.hide(); } catch (_) { /* старый клиент MAX */ } }
+  else if (tg) { try { show ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
+}
+function _bindSheetSwipe(wrap) {
+  const sh = wrap && wrap.querySelector('.sheet');
+  if (!sh) return;
+  let y0 = null, dy = 0;
+  sh.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || sh.scrollTop > 0) { y0 = null; return; }
+    y0 = e.touches[0].clientY; dy = 0; sh.style.transition = 'none';
+  }, { passive: true });
+  sh.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy > 0) sh.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  const end = () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (dy > 75) { closeSheet(); return; }
+    sh.style.transition = 'transform .18s ease-out';
+    sh.style.transform = '';
+    setTimeout(() => { sh.style.transition = ''; }, 200);
+  };
+  sh.addEventListener('touchend', end, { passive: true });
+  sh.addEventListener('touchcancel', end, { passive: true });
+}
+function sheet(html) {
+  const overlay = document.getElementById('overlay');
+  overlay.insertAdjacentHTML('beforeend', `<div class="sheet-wrap" data-act="closeSheet"><div class="sheet" data-stop="1"><div class="grab"></div>${html}</div></div>`);
+  const wraps = overlay.querySelectorAll('.sheet-wrap');
+  _bindSheetSwipe(wraps[wraps.length - 1]);
+  syncBackBtn();
+}
+let _confirmFn = null;
+/* Единое подтверждение в нижней шторке вместо браузерного confirm() — надёжно работает в Telegram и MAX. */
+function confirmSheet({ title = 'Подтвердите действие', text = '', okText = 'Подтвердить', kind = '', onOk }) {
+  _confirmFn = onOk || null;
+  sheet(`<h3>${esc(title)}</h3>${text ? `<div class="hint">${esc(text)}</div>` : ''}<div style="margin-top:12px">${btn(esc(okText), 'confirmOk', {}, kind)}${btn('Отмена', 'closeSheet', {}, 'ghost')}</div>`);
+}
+function closeSheet() { _confirmFn = null; document.querySelectorAll('.sheet-wrap').forEach(w => w.remove()); syncBackBtn(); }
 const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
 
 /* ── экраны ──────────────────────────────────────────────────────────── */
@@ -1427,29 +1519,30 @@ Object.assign(ACT, {
   // кнопка заблокирована, пока идёт запрос: второе касание на iPhone отправляло второй «Сохранить» (10.10.2026)
   // requestId — номер нажатия: сервер отличает сетевой повтор от нового такого же занятия; второе соло в тот же день —
   // по подтверждению (решение владельца 10.10.2026)
-  rwSave: async ({ confirmSameDay } = {}) => { const w = rw(); if (w.saving) return; const amounts = {}; if (w.kind === 'rshare') { document.querySelectorAll('[data-amt]').forEach(el => { const v = el.value.trim(); if (v !== '') { amounts[el.dataset.amt] = +v; w.amounts[el.dataset.amt] = +v; } }); } if (Object.values(amounts).some(v => !Number.isInteger(v) || v < 0)) { toast('Сумма — целое число рублей'); return; } if (Object.values(amounts).some(v => v === 0) && !confirm('Сумма 0 ₽ — занятие будет бесплатным для ученицы и без оплаты педагогу. Сохранить?')) return; w.saving = true; render(); const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, mergeGroupIds: [...(w.merge || [])], studentIds: [...w.ids], tiers: w.tiers, amounts, requestId, confirmSameDay: !!confirmSameDay }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.repeat ? 'Уже сохранено — второй раз не записываю' : r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`); } catch (e) { w.saving = false; render(); if (e instanceof ApiError && e.code === 'same_day') { if (confirm(e.data && e.data.message ? e.data.message : 'В этот день уже есть такое занятие. Записать ещё одно?')) ACT.rwSave({ confirmSameDay: true }); return; } toast(e instanceof ApiError && e.code === 'conflict' ? (e.data && e.data.message) || 'Такое занятие уже записано' : errText(e)); } },
+  rwSave: async ({ confirmSameDay, confirmZero } = {}) => { const w = rw(); if (w.saving) return; const amounts = {}; if (w.kind === 'rshare') { document.querySelectorAll('[data-amt]').forEach(el => { const v = el.value.trim(); if (v !== '') { amounts[el.dataset.amt] = +v; w.amounts[el.dataset.amt] = +v; } }); } if (Object.values(amounts).some(v => !Number.isInteger(v) || v < 0)) { toast('Сумма — целое число рублей', 'bad'); return; } if (!confirmZero && Object.values(amounts).some(v => v === 0)) { confirmSheet({ title: 'Сохранить с суммой 0 ₽?', text: 'Занятие будет бесплатным для ученицы и без оплаты педагогу.', okText: 'Сохранить', onOk: () => ACT.rwSave({ confirmSameDay, confirmZero: true }) }); return; } w.saving = true; render(); const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, mergeGroupIds: [...(w.merge || [])], studentIds: [...w.ids], tiers: w.tiers, amounts, requestId, confirmSameDay: !!confirmSameDay }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.repeat ? 'Уже сохранено — второй раз не записываю' : r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`, 'ok'); } catch (e) { w.saving = false; render(); if (e instanceof ApiError && e.code === 'same_day') { confirmSheet({ title: 'Записать ещё одно?', text: e.data && e.data.message ? e.data.message : 'В этот день уже есть такое занятие.', okText: 'Записать ещё одно', onOk: () => ACT.rwSave({ confirmSameDay: true, confirmZero }) }); return; } toast(e instanceof ApiError && e.code === 'conflict' ? (e.data && e.data.message) || 'Такое занятие уже записано' : errText(e), 'bad'); } },
+  confirmOk: () => { const fn = _confirmFn; _confirmFn = null; closeSheet(); if (fn) fn(); },
 });
 
 /* ── рендер ─────────────────────────────────────────────────────────── */
 async function render() {
   const seq = ++renderSeq; const s = cur();
   const content = document.getElementById('content');
+  const rbtn = document.getElementById('refresh-btn');
   const rootN = state.stack[0].n;
   document.getElementById('tabs').innerHTML = (state.joining ? [] : TABS[ROLE]).map(([n, label, ic]) => `<button role="tab" aria-selected="${rootN === n}" data-root="${n}"><span class="ic">${ic}</span>${label}</button>`).join('');
-  const deep = state.stack.length > 1;
-  document.getElementById('back').classList.toggle('on', deep && (MAXAPP ? !MAXAPP.back : !tg));
-  if (MAXAPP && MAXAPP.back) { try { deep ? MAXAPP.back.show() : MAXAPP.back.hide(); } catch (_) { /* старый клиент MAX */ } }
-  else if (tg) { try { deep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (_) { /* нет BackButton */ } }
+  syncBackBtn();
   const sameScreen = state.ui.lastScreen === s.n;
   state.ui.lastScreen = s.n;
+  if (rbtn) rbtn.classList.add('spin');
   if (sameScreen && content.firstElementChild) content.classList.add('stale');
   else content.innerHTML = skeleton();
   let scr;
   try { scr = await SCREENS[s.n](s.p || {}); }
   catch (e) { scr = { title: 'Ошибка', html: `<div class="card pad"><div style="font-weight:700">${esc(errText(e))}</div></div><div style="margin-top:12px">${btn('Повторить', 'retry', {}, 'sec')}</div>` }; }
   if (seq !== renderSeq) return;
+  if (rbtn) rbtn.classList.remove('spin');
   document.getElementById('title').innerHTML = `${esc(scr.title)}<span class="sub">${ROLE_TITLE[ROLE]}</span>`;
-  const keepScroll = sameScreen ? content.scrollTop : 0;
+  const keepScroll = sameScreen ? content.scrollTop : (s.scroll || 0);
   content.classList.remove('stale');
   // Поиск «на лету»: поле ввода, в котором человек печатает, не пересоздаём — меняем всё вокруг него.
   // Раньше экран перерисовывался целиком: буквы, набранные за время запроса, пропадали, курсор прыгал,
@@ -1633,14 +1726,16 @@ document.addEventListener('click', e => {
   if (wrap && !stop) { closeSheet(); return; }
   if (e.target.closest('select') || e.target.closest('input') || e.target.closest('label')) return;
   const el = e.target.closest('[data-go],[data-act],[data-root]'); if (!el) return;
-  if (el.dataset.root) { closeSheet(); root(el.dataset.root); return; }
+  if (el.dataset.root) { haptic('select'); closeSheet(); root(el.dataset.root); return; }
   const p = el.dataset.p ? JSON.parse(el.dataset.p) : {};
-  if (el.dataset.go) { if (el.dataset.replace) state.stack.pop(); go(el.dataset.go, p); return; }
-  if (el.dataset.act && ACT[el.dataset.act]) ACT[el.dataset.act](p);
+  if (el.dataset.go) { if (el.dataset.replace) { haptic('select'); state.stack.pop(); } go(el.dataset.go, p); return; }
+  if (el.dataset.act && ACT[el.dataset.act]) { if (el.classList.contains('chip')) haptic('select'); ACT[el.dataset.act](p); }
 });
-document.getElementById('back').addEventListener('click', () => { closeSheet(); back(); });
-if (tg) { try { tg.BackButton.onClick(() => { closeSheet(); back(); }); } catch (_) { /* нет BackButton */ } }
-if (MAXAPP && MAXAPP.back) { try { MAXAPP.back.onClick(() => { closeSheet(); back(); }); } catch (_) { /* старый клиент MAX */ } }
+const handleBack = () => { if (hasSheet()) { closeSheet(); return; } back(); };
+document.getElementById('back').addEventListener('click', handleBack);
+document.getElementById('refresh-btn').addEventListener('click', () => { haptic('light'); render(); checkFresh(true); });
+if (tg) { try { tg.BackButton.onClick(handleBack); } catch (_) { /* нет BackButton */ } }
+if (MAXAPP && MAXAPP.back) { try { MAXAPP.back.onClick(handleBack); } catch (_) { /* старый клиент MAX */ } }
 
 ACT.switchRole = async ({ to }) => {
   const prev = ROLE; ROLE = to;
