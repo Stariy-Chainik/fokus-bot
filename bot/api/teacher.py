@@ -32,7 +32,7 @@ from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
 from bot.services import hall_rent, schedule_pilot
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
-from bot.services.schedule_pilot import DraftConflict, edited_schedule, is_draft_completed
+from bot.services.schedule_pilot import DraftConflict, active_draft_dates, edited_schedule, is_draft_completed
 from bot.services.salary_summary import summarize, summary_dicts
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from bot.utils.dates import current_period, last_periods, now_str
@@ -271,13 +271,16 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         pilot = schedule_for(user)
         if pilot is None:
             return _json({"error": "not_found"}, status=404)
-        today_iso = schedule_pilot.moscow_today().isoformat()
+        today_iso, yesterday_iso = active_draft_dates(schedule_pilot.moscow_today())
         all_drafts = await pilot.drafts(await schedule_students(user, teacher))
-        active_today = [d for d in all_drafts if d["date"] == today_iso and not is_draft_completed(d)]
-        completed_today = any(d["date"] == today_iso and is_draft_completed(d) for d in all_drafts)
+        active = sorted(
+            (d for d in all_drafts if d["date"] in (today_iso, yesterday_iso) and not is_draft_completed(d)),
+            key=lambda d: (0 if d["date"] == today_iso else 1, -abs(d["id"])),
+        )
+        completed_today = not active and any(d["date"] == today_iso and is_draft_completed(d) for d in all_drafts)
         upcoming_dates = sorted({d["date"] for d in all_drafts if d["date"] > today_iso and not is_draft_completed(d)})
         return _json({
-            "drafts": active_today,
+            "drafts": active,
             "today": today_iso,
             "completedToday": completed_today,
             "upcomingDates": upcoming_dates,

@@ -119,13 +119,14 @@ function syncScheduleMarks(drafts) {
 }
 
 async function loadSchedule() {
-  const { drafts, completedToday, upcomingDates, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts');
+  const { drafts, today, completedToday, upcomingDates, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts');
   const titleExample = acceptOwnerInitials ? '«С.А. Понедельник» или «С.А. Пн»' :
     acceptPlainTitle ? '«Расписание на четверг»' :
     acceptWeekday !== false ? '«Четверг:»' : '«Расписание со мной на четверг»';
   state.ui.scheduleEmptyHint = acceptWeekly
     ? 'Опубликуй в группе пост со словом «Расписание». Для недели укажи каждый день отдельной строкой.'
     : `Опубликуй в группе расписание на сегодня с заголовком ${titleExample}.`;
+  state.ui.scheduleToday = today || '';
   state.ui.scheduleCompletedToday = !!completedToday;
   state.ui.scheduleUpcomingDates = upcomingDates || [];
   syncScheduleMarks(drafts);
@@ -135,14 +136,16 @@ function renderScheduleCard(d) {
   const tid = d.teacherId || '';
   const hasMarks = d.slots.some(s => s.status && s.status !== 'planned');
   const date = esc(fdate(d.date));
+  const isYesterday = !!(state.ui.scheduleToday && d.date < state.ui.scheduleToday);
+  const dayLabel = isYesterday ? 'Расписание за вчера' : 'Расписание на сегодня';
   const toMark = d.slots.some(canMarkSchedule);
   const marks = scheduleMarks(d.id, tid);
   const pRef = tid ? { id: d.id, tid } : { id: d.id };
   const heading = tid
-    ? `<h2>${esc(d.teacherName || tid)}</h2><div class="hint">${date} · расписание на сегодня</div>`
+    ? `<h2>${esc(d.teacherName || tid)}</h2><div class="hint">${date} · ${dayLabel.toLowerCase()}</div>`
     : `<h2>${hasMarks ? date :
         `<button type="button" class="schedule-date-link" data-act="scheduleChangeDate" data-p='${esc(JSON.stringify(pRef))}'>${date}</button>`}</h2>
-        <div class="hint">Расписание на сегодня</div>`;
+        <div class="hint">${dayLabel}</div>`;
   return `<section class="card schedule-day" data-schedule-draft="${d.id}" data-schedule-tid="${esc(tid)}">
     <div class="schedule-head"><div>${heading}</div></div>
     ${toMark ? '<p class="hint schedule-mark-guide">Поставь галочки у проведённых занятий, чтобы внести их в журнал.</p>' : ''}
@@ -172,7 +175,8 @@ SCREENS['t.schedule.drafts'] = async () => {
 };
 
 SCREENS['a.schedule.drafts'] = async ({ tid } = {}) => {
-  const { drafts, upcoming } = await api(tid ? `/schedule-drafts?tid=${encodeURIComponent(tid)}` : '/schedule-drafts');
+  const { drafts, today, upcoming } = await api(tid ? `/schedule-drafts?tid=${encodeURIComponent(tid)}` : '/schedule-drafts');
+  state.ui.scheduleToday = today || '';
   syncScheduleMarks(drafts);
   const upLines = (upcoming || []).map(u => `${esc(u.teacherName)}: ${esc(u.dates.map(fdate).join(', '))}`);
   const upHint = upLines.length

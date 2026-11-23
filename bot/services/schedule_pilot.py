@@ -57,6 +57,11 @@ def moscow_today() -> date:
     return datetime.now(_MOSCOW).date()
 
 
+def active_draft_dates(today: date) -> tuple[str, str]:
+    """Даты, черновики за которые предлагаются к отметке: сегодня и вчера (если не внесено до полуночи)."""
+    return today.isoformat(), (today - timedelta(days=1)).isoformat()
+
+
 def is_draft_completed(plan: dict) -> bool:
     """True, если все рабочие занятия черновика уже внесены в журнал или отменены."""
     active = [slot for slot in plan["slots"] if slot["kind"] != "free"]
@@ -98,14 +103,17 @@ def _clean_day_label(label: str) -> str:
     return text.rstrip(".!:")
 
 
-def _plan_day(label: str, published: date) -> date | None:
+def _plan_day(label: str, published: date, *, allow_yesterday: bool = False) -> date | None:
     label = _clean_day_label(label)
     if label in ("", "сегодня"):
         return published
     if label == "завтра":
         return published + timedelta(days=1)
     if label in _WEEKDAYS:
-        return published + timedelta(days=(_WEEKDAYS[label] - published.weekday()) % 7)
+        target_wd = _WEEKDAYS[label]
+        if allow_yesterday and target_wd == (published.weekday() - 1) % 7:
+            return published - timedelta(days=1)
+        return published + timedelta(days=(target_wd - published.weekday()) % 7)
     explicit = re.fullmatch(r"(?:(\w+) )?(\d{1,2})[./](\d{1,2})(?:[./](\d{4}))?", label)
     if explicit:
         weekday, day, month, year = explicit.groups()
@@ -194,7 +202,9 @@ def _parse_slots(lines: list[str]) -> list[Slot] | None:
     return slots or None
 
 
-def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tuple[date, list[Slot]] | None:
+def _parse_owner_schedule(
+    title: str, lines: list[str], published: date, *, allow_yesterday: bool = False,
+) -> tuple[date, list[Slot]] | None:
     has_initials = False
     day = None
     intro_and_slots = [title, *lines]
@@ -219,12 +229,12 @@ def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tupl
             header = _HEADER.fullmatch(line) or _PLAIN_HEADER.fullmatch(line)
             if header:
                 label = header[1] or ""
-            elif line and _plan_day(line, published) is not None:
+            elif line and _plan_day(line, published, allow_yesterday=allow_yesterday) is not None:
                 label = line
             else:
                 break
         if label:
-            candidate = _plan_day(label, published)
+            candidate = _plan_day(label, published, allow_yesterday=allow_yesterday)
             if candidate is None or (day and day != candidate):
                 return None
             day = candidate
@@ -238,18 +248,18 @@ def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tupl
 
 def parse_schedule(
     text: str, published: date, *, accept_weekday: bool = True, accept_plain_title: bool = False,
-    accept_owner_initials: bool = False,
+    accept_owner_initials: bool = False, allow_yesterday: bool = False,
 ) -> tuple[date, list[Slot]] | None:
     title, lines = _schedule_lines(text)
     if accept_owner_initials:
-        owner_plan = _parse_owner_schedule(title, lines, published)
+        owner_plan = _parse_owner_schedule(title, lines, published, allow_yesterday=allow_yesterday)
         if owner_plan is not None:
             return owner_plan
     title = _plain(title)
     header = _HEADER.fullmatch(title)
     plain_header = _PLAIN_HEADER.fullmatch(title) if accept_plain_title and header is None else None
     if header:
-        day = _plan_day(header[1] or "", published)
+        day = _plan_day(header[1] or "", published, allow_yesterday=allow_yesterday)
     elif plain_header:
         label = plain_header[1] or ""
         if not label and lines:
@@ -257,9 +267,12 @@ def parse_schedule(
             if _DAY_HEADER.fullmatch(next_line) or next_line in ("сегодня", "завтра"):
                 label = next_line
                 lines = lines[1:]
-        day = _plan_day(label, published)
+        day = _plan_day(label, published, allow_yesterday=allow_yesterday)
     else:
-        day = _plan_day(title, published) if accept_weekday and _DAY_HEADER.fullmatch(title) else None
+        day = (
+            _plan_day(title, published, allow_yesterday=allow_yesterday)
+            if accept_weekday and _DAY_HEADER.fullmatch(title) else None
+        )
     if day is None:
         return None
     slots = _parse_slots(lines)
@@ -488,17 +501,20 @@ class SchedulePilot:
     def owns(self, user: User) -> bool:
         return user.tg_id == self.tg_id and user.teacher_id == self.teacher_id
 
-    def parse_local(self, text: str, published: date, message_id: int) -> dict[int, tuple[date, list[Slot]]]:
+    def parse_local(self, text: str, published: date | datetime, message_id: int) -> dict[int, tuple[date, list[Slot]]]:
         """Локальный бесплатный разбор дневного или недельного расписания."""
+        pub_date = published.date() if isinstance(published, datetime) else published
+        # После полуночи (00:00–04:59) вчерашний день недели («Понедельник» в 00:42 вторника) = вчера.
+        allow_yesterday = isinstance(published, datetime) and published.hour < 5
         parsed = parse_schedule(
-            text, published, accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title,
-            accept_owner_initials=self.accept_owner_initials,
+            text, pub_date, accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title,
+            accept_owner_initials=self.accept_owner_initials, allow_yesterday=allow_yesterday,
         )
         plans: dict[int, tuple[date, list[Slot]]] = {}
         if parsed is not None:
             plans[message_id] = parsed
         elif self.accept_weekly:
-            for day, slots in _parse_week_schedule(text, published, accept_plain_title=self.accept_plain_title).items():
+            for day, slots in _parse_week_schedule(text, pub_date, accept_plain_title=self.accept_plain_title).items():
                 draft_id = -(message_id * _WEEK_DRAFT_STRIDE + day.weekday())
                 plans[draft_id] = (day, slots)
         return plans
@@ -539,7 +555,7 @@ class SchedulePilot:
                 or sender.is_bot or message.sender_chat is not None or message.forward_origin is not None):
             return
         published = message.date.astimezone(_MOSCOW)
-        plans = self.parse_local(message.text or "", published.date(), message.message_id)
+        plans = self.parse_local(message.text or "", published, message.message_id)
         if not plans and not edited:
             return
         modified = message.edit_date
@@ -767,16 +783,16 @@ class SchedulePilot:
             return rows, outcomes_by_mid
 
     async def today_summary(self, day: date) -> tuple[int, bool]:
-        """Возвращает (сколько незаписанных занятий на день, есть ли полностью внесённый черновик на этот день)."""
-        day_iso = day.isoformat()
+        """Возвращает (сколько незаписанных занятий за сегодня/вчера, есть ли полностью внесённый черновик за сегодня)."""
+        today_iso, yesterday_iso = active_draft_dates(day)
         rows, outcomes_by_mid = await asyncio.to_thread(self._latest_with_outcomes)
         pending = 0
-        completed = False
+        completed_today = False
         empty_names = StudentNames([])
         for message_id, version, update_id, source, _revision, base, edit in rows:
             latest = self._source_revision(version, update_id)
             plan = self._view(_telegram_plan(edit or source, source), empty_names)
-            if plan["date"] != day_iso:
+            if plan["date"] not in (today_iso, yesterday_iso):
                 continue
             plan["sourceUpdated"] = bool(edit and base != latest)
             outcomes = outcomes_by_mid.get(message_id, {})
@@ -786,13 +802,14 @@ class SchedulePilot:
             if plan["sourceUpdated"] and source:
                 plan["telegram"] = self._view(_telegram_plan(source, source), empty_names)
             if is_draft_completed(plan):
-                completed = True
+                if plan["date"] == today_iso:
+                    completed_today = True
             else:
                 pending += sum(
                     1 for slot in plan["slots"]
                     if slot["kind"] != "free" and slot["status"] not in ("held", "cancelled")
                 )
-        return pending, completed
+        return pending, completed_today and pending == 0
 
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)
@@ -921,7 +938,7 @@ class SchedulePilots:
         modified = message.edit_date
         version = int(modified.timestamp()) if isinstance(modified, datetime) else modified or int(message.date.timestamp())
 
-        local_plans = pilot.parse_local(text, published.date(), message.message_id)
+        local_plans = pilot.parse_local(text, published, message.message_id)
         if local_plans:
             await pilot.store_plans(message.message_id, version, update_id, published, local_plans)
             return

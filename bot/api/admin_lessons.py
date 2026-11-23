@@ -13,7 +13,7 @@ from bot.models.enums import LessonType
 from bot.services import schedule_pilot
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.profit_service import is_owner, lesson_rent
-from bot.services.schedule_pilot import DraftConflict, edited_schedule, is_draft_completed
+from bot.services.schedule_pilot import DraftConflict, active_draft_dates, edited_schedule, is_draft_completed
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from bot.utils.groups import lesson_group_title
 from config.settings import settings
@@ -190,14 +190,14 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         return _dp_get(dp, "schedule_pilots")
 
     async def schedule_drafts_view(request: web.Request, user) -> web.Response:
-        today_iso = schedule_pilot.moscow_today().isoformat()
+        today_iso, yesterday_iso = active_draft_dates(schedule_pilot.moscow_today())
         pilots = _pilots()
         if pilots is None:
             return _json({"drafts": [], "today": today_iso, "upcoming": []})
         tid_filter = request.query.get("tid") or ""
         teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
         students = await student_repo.get_all()
-        active_today: list[dict] = []
+        active_drafts: list[dict] = []
         upcoming: list[dict] = []
         ordered = sorted(
             pilots.by_teacher.values(),
@@ -209,12 +209,15 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
             tname = teachers.get(pilot.teacher_id, pilot.teacher_id)
             all_drafts = await pilot.drafts(students)
             for d in all_drafts:
-                if d["date"] == today_iso and not is_draft_completed(d):
-                    active_today.append({**d, "teacherId": pilot.teacher_id, "teacherName": tname})
+                if d["date"] in (today_iso, yesterday_iso) and not is_draft_completed(d):
+                    active_drafts.append({**d, "teacherId": pilot.teacher_id, "teacherName": tname})
             future_dates = sorted({d["date"] for d in all_drafts if d["date"] > today_iso and not is_draft_completed(d)})
             if future_dates:
                 upcoming.append({"teacherId": pilot.teacher_id, "teacherName": tname, "dates": future_dates})
-        return _json({"drafts": active_today, "today": today_iso, "upcoming": upcoming})
+        active_drafts.sort(
+            key=lambda d: (0 if d["date"] == today_iso else 1, 0 if d["teacherId"] == user.teacher_id else 1, d["teacherName"]),
+        )
+        return _json({"drafts": active_drafts, "today": today_iso, "upcoming": upcoming})
 
     async def schedule_save_view(request: web.Request, user) -> web.Response:
         pilots = _pilots()

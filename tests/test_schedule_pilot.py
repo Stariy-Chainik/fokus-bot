@@ -351,7 +351,7 @@ def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, 
     tuesday = tue_resp["drafts"][0]
     today[0] = date(2026, 11, 18)
     wed_resp = current()
-    assert len(wed_resp["drafts"]) == 1 and wed_resp["upcomingDates"] == []
+    assert [d["date"] for d in wed_resp["drafts"]] == ["2026-11-18", "2026-11-17"] and wed_resp["upcomingDates"] == []
     wednesday = wed_resp["drafts"][0]
     assert (tuesday["date"], wednesday["date"]) == ("2026-11-17", "2026-11-18")
     assert tuesday["id"] != wednesday["id"]
@@ -770,3 +770,27 @@ def test_real_angelina_weekly_post_with_emoji_greeting_and_trailing_note():
     assert [s.time for s in plans[date(2026, 11, 24)]] == ["16:00", "16:45", "17:30", "20:30"]
     assert plans[date(2026, 11, 25)][0].duration == 60
     assert [s.time for s in plans[date(2026, 11, 27)]] == ["12:00", "19:30", "20:30"]
+
+
+def test_after_midnight_yesterday_weekday_resolves_to_yesterday_and_shows(monkeypatch, tmp_path):
+    """Пост с «Понедельник» в 00:42 вторника (24.11) считается за понедельник 23.11 и виден до отметки."""
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: date(2026, 11, 24))
+    app, dp = make_api(monkeypatch)
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "night.db", accept_owner_initials=True)
+    dp["schedule_pilots"] = SchedulePilots([pilot])
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+
+    # 21:42 UTC 23.11 = 00:42 МСК 24.11 (вторник, после полуночи)
+    late_night = datetime(2026, 11, 23, 21, 42, tzinfo=timezone.utc)
+    msg = _message("С.А.:\nПонедельник: (если нет Власова)\n♦️ 16.00 Иванов Иван 45").model_copy(
+        update={"message_id": 1465, "date": late_night},
+    )
+    asyncio.run(pilot.receive(msg, 1, edited=False))
+
+    view = call_teacher(app, "GET", "/api/teacher/schedule-drafts", tg_id=ADMIN_TG)[1]
+    assert [d["date"] for d in view["drafts"]] == ["2026-11-23"]
+    draft = view["drafts"][0]
+    body = {"revision": draft["revision"], "sourceRevision": draft["sourceRevision"],
+            "actions": [{"time": "16:00", "status": "held"}]}
+    assert call_teacher(app, "POST", "/api/teacher/schedule-drafts/1465/attendance", tg_id=ADMIN_TG, json=body)[0] == 200
+    assert call_teacher(app, "GET", "/api/teacher/schedule-drafts", tg_id=ADMIN_TG)[1]["drafts"] == []
