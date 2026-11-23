@@ -241,5 +241,5 @@ def test_schedule_ai_routes_aq_key_to_gemini_native(monkeypatch):
         "TCH-0001",
         [{"id": "TCH-0005", "name": "Никишин Влад"}],
     ))
-    assert seen == [("AQ.fake-ai-studio-key", "gemini-flash-latest")]
+    assert seen == [("AQ.fake-ai-studio-key", "gemini-flash-lite-latest")]
     assert "TCH-0005" in res and date(2026, 11, 23) in res["TCH-0005"]

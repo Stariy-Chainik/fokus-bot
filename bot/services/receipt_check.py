@@ -204,12 +204,13 @@ _GEMINI_RECEIPT_SCHEMA: dict[str, Any] = {
     "required": ["is_receipt", "amount", "date", "confidence"],
 }
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_GEMINI_RECEIPT_FALLBACKS = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.8-flash")
 
 
 def _effective_receipt_model(api_key: str) -> str:
     model = settings.openai_receipt_model
     if api_key.startswith(("AQ.", "AIza")) and model.startswith("gpt-"):
-        return "gemini-flash-latest"
+        return _GEMINI_RECEIPT_FALLBACKS[0]
     return model
 
 
@@ -218,7 +219,7 @@ async def recognize_gemini(data: bytes, mime: str) -> Optional[ReceiptInfo]:
     import aiohttp
 
     api_key = settings.openai_api_key.strip()
-    model = _effective_receipt_model(api_key)
+    candidates = list(dict.fromkeys([_effective_receipt_model(api_key), *_GEMINI_RECEIPT_FALLBACKS]))
     b64 = base64.standard_b64encode(data).decode("ascii")
     payload = {
         "systemInstruction": {"parts": [{"text": _SYSTEM}]},
@@ -235,17 +236,23 @@ async def recognize_gemini(data: bytes, mime: str) -> Optional[ReceiptInfo]:
             "maxOutputTokens": 512,
         },
     }
-    url = _GEMINI_API_URL.format(model=model)
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    last_err = ""
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status >= 400:
-                body = (await resp.text())[:300]
-                raise RuntimeError(f"Gemini receipt check HTTP {resp.status}: {body}")
-            result = await resp.json()
-    parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-    text = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
-    return _parse_receipt_json(json.loads(text)) if text else None
+        for idx, candidate in enumerate(candidates):
+            url = _GEMINI_API_URL.format(model=candidate)
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status in (404, 429, 503) and idx + 1 < len(candidates):
+                    last_err = f"{candidate}: HTTP {resp.status}"
+                    continue
+                if resp.status >= 400:
+                    body = (await resp.text())[:300]
+                    raise RuntimeError(f"Gemini receipt check ({candidate}) HTTP {resp.status}: {body}")
+                result = await resp.json()
+                parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                text = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
+                return _parse_receipt_json(json.loads(text)) if text else None
+    raise RuntimeError(f"Gemini receipt check unavailable ({last_err})")
 
 
 async def recognize_openai(data: bytes, mime: str) -> Optional[ReceiptInfo]:

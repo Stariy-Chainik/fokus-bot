@@ -234,19 +234,20 @@ _GEMINI_SCHEDULE_SCHEMA: dict[str, Any] = {
 }
 
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_GEMINI_SCHEDULE_FALLBACKS = ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.8-flash")
 
 
 def _effective_schedule_model(api_key: str) -> str:
     model = settings.openai_schedule_model
     if api_key.startswith(("AQ.", "AIza")) and model.startswith("gpt-"):
-        return "gemini-flash-latest"
+        return _GEMINI_SCHEDULE_FALLBACKS[0]
     return model
 
 
 async def _call_gemini_native(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
     import aiohttp
 
-    url = _GEMINI_API_URL.format(model=model)
+    candidates = list(dict.fromkeys([model, *_GEMINI_SCHEDULE_FALLBACKS]))
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
@@ -257,15 +258,22 @@ async def _call_gemini_native(api_key: str, model: str, user_prompt: str) -> dic
             "maxOutputTokens": 2048,
         },
     }
+    last_err = ""
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status >= 400:
-                body = (await resp.text())[:300]
-                raise RuntimeError(f"Gemini schedule parse HTTP {resp.status}: {body}")
-            result = await resp.json()
-    parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-    content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
-    return json.loads(content) if content else {}
+        for idx, candidate in enumerate(candidates):
+            url = _GEMINI_API_URL.format(model=candidate)
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status in (404, 429, 503) and idx + 1 < len(candidates):
+                    last_err = f"{candidate}: HTTP {resp.status}"
+                    continue
+                if resp.status >= 400:
+                    body = (await resp.text())[:300]
+                    raise RuntimeError(f"Gemini schedule parse ({candidate}) HTTP {resp.status}: {body}")
+                result = await resp.json()
+                parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
+                return json.loads(content) if content else {}
+    raise RuntimeError(f"Gemini schedule parse unavailable ({last_err})")
 
 
 async def _call_openai_compat(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
