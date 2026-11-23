@@ -7,7 +7,7 @@ import pytest
 from bot.models.enums import GroupBillingMode, LessonType, PaymentStatus
 from bot.services.subscription_recalculation import SubscriptionRecalculations
 from config.settings import settings
-from tests.fakes import FakeBot, mk_group, mk_lesson, mk_payment
+from tests.fakes import FakeBot, mk_group, mk_lesson, mk_payment, mk_student
 from tests.test_admin_api import ADMIN_TG, YM
 from tests.test_teacher_api import _call, api, _receipt_rc  # noqa: F401  (фикстуры)
 
@@ -119,3 +119,25 @@ def test_certificate_pilot_access_and_paid_check(pilot, monkeypatch):
     monkeypatch.setattr(settings, "subscription_recalc_teacher_ids", "TCH-0002")
     assert _call(dp, "POST", RECALC, json=CERTIFICATE)[0] == 403
     assert _call(dp, "GET", "/api/teacher/students/STU-0001")[1]["subscriptions"] == []
+
+
+def test_recalculation_search_scopes_students_and_groups(pilot, monkeypatch):
+    dp = pilot
+    dp["group_repo"].items.append(mk_group("GRP-0032", "Чужая группа", billing_mode=GroupBillingMode.SUBSCRIPTION))
+    dp["student_repo"].items.extend([
+        mk_student("STU-0003", "Иванова Мария"),
+        mk_student("STU-0004", "Иванова Анна"),
+    ])
+    for sid, gid in (("STU-0001", "GRP-0032"), ("STU-0003", "GRP-0025"), ("STU-0004", "GRP-0032")):
+        asyncio.run(dp["student_group_repo"].add(sid, gid))
+    route = "/api/teacher/students/recalculation-search"
+    assert _call(dp, "GET", "/api/teacher/home")[1]["canRecalculate"] is True
+    assert _call(dp, "GET", route)[1]["students"] == []
+    status, results = _call(dp, "GET", route + "?q=ИВАНОВ")
+    assert status == 200
+    assert {s["id"]: {g["id"] for g in s["groups"]} for s in results["students"]} == {
+        "STU-0001": {"GRP-0025", "GRP-0031"}, "STU-0003": {"GRP-0025"},
+    }
+    monkeypatch.setattr(settings, "subscription_recalc_teacher_ids", "TCH-0002")
+    assert _call(dp, "GET", "/api/teacher/home")[1]["canRecalculate"] is False
+    assert _call(dp, "GET", route + "?q=ИВАНОВ")[0] == 403

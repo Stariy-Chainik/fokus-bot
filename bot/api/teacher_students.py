@@ -115,6 +115,32 @@ def student_routes(
         found.sort(key=lambda x: x["name"])
         return _json({"students": found[:10]})
 
+    async def recalculation_search(request: web.Request, user, teacher) -> web.Response:
+        """Поиск по фамилии только среди учеников своих абонементных групп."""
+        if not bill_ctx.can_recalculate(teacher):
+            return _json({"error": "forbidden"}, status=403)
+        q = _norm_name(request.query.get("q") or "")
+        if not q:
+            return _json({"students": []})
+        own = await own_group_ids(teacher)
+        groups = {g.group_id: g.name for g in await group_repo.get_all()
+                  if g.group_id in own and g.billing_mode == GroupBillingMode.SUBSCRIPTION}
+        if not groups:
+            return _json({"students": []})
+        memberships = await student_group_repo.get_map_by_student()
+        matches = [(_norm_name(s.name), s) for s in await student_repo.get_all()]
+        matches.sort(key=lambda pair: (not pair[0].startswith(q), pair[0], pair[1].student_id))
+        found = []
+        for name, s in matches:
+            if q not in name:
+                continue
+            enrolled = groups.keys() & memberships.get(s.student_id, [])
+            if enrolled:
+                found.append({"id": s.student_id, "name": s.name, "groups": [
+                    {"id": gid, "name": groups[gid]} for gid in sorted(enrolled, key=lambda gid: (groups[gid], gid))
+                ]})
+        return _json({"students": found[:20]})
+
     async def member_add(request: web.Request, user, teacher) -> web.Response:
         """«Добавить ученика» в свою группу: существующий ученик (`studentId`) или новая карточка (`name`)."""
         gid = request.match_info["gid"]
@@ -482,6 +508,7 @@ def student_routes(
         ("GET", "/groups", groups),
         ("GET", "/groups/{gid}", group),
         ("GET", "/students/search", students_search),      # раньше /students/{sid}: иначе «search» примут за id
+        ("GET", "/students/recalculation-search", recalculation_search),
         ("GET", "/students/{sid}", student),
         ("PATCH", "/students/{sid}", student_rename),
         ("PUT", "/students/{sid}/kgroup", student_kgroup),

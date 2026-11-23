@@ -1578,8 +1578,9 @@ async function render() {
     if (on && on !== strip.firstElementChild) strip.scrollLeft = Math.max(0, on.offsetLeft - 12);
   });
   content.querySelectorAll('img[data-file]').forEach(loadAuthImage);   // чеки — только с авторизацией
-  const q = document.getElementById('q') || document.getElementById('q2') || document.getElementById('q3') || document.getElementById('q4') || document.getElementById('q5') || document.getElementById('q6'); const qid = q ? q.id : null; const qkey = qid || 'q';
+  const q = content.querySelector('input.search[id^="q"]');
   if (q && !q.dataset.bound) {
+    const qkey = q.id;
     q.dataset.bound = '1';                               // поле живёт между перерисовками — слушатель один
     let t;
     q.addEventListener('input', e => {

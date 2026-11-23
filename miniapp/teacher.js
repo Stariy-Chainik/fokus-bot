@@ -51,7 +51,8 @@ SCREENS['t.home'] = async () => {
     <section class="teacher-day-summary" aria-labelledby="teacher-today-title">
       <h1 id="teacher-today-title">Сегодня</h1><p class="hint">${esc(fdate(h.today))}</p>
       ${today}
-      <div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>
+      <div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}
+        ${h.canRecalculate ? goBtn('Перерасчёт', 't.recalc', { ym: h.period }, 'ghost') : ''}</div>
       ${overview.unfinishedYesterday ? `<div class="teacher-yesterday">${goBtn('Вчера · есть незакрытое расписание', 't.schedule.drafts', { date: overview.unfinishedYesterday }, 'ghost')}</div>` : ''}
       ${h.schedulePilot && journal ? `<details class="acc teacher-journal"><summary>Журнал за сегодня · ${h.lessonsToday}</summary><div class="pad">${journal}</div></details>` : ''}
     </section>
@@ -1226,7 +1227,27 @@ ACT.tSubDo = async ({ sid, ym, gid }) => {
   finally { subSaving = false; }
 };
 
+SCREENS['t.recalc'] = async ({ ym }) => {
+  const q = state.ui['q-recalc'] || '';
+  let result = '';
+  if (q.trim()) {
+    try {
+      const { students } = await api(`/students/recalculation-search?q=${encodeURIComponent(q.trim())}`);
+      result = students.length ? list(students.flatMap(s => s.groups.map(g => cell({
+        lead: initials(s.name), t: esc(s.name), s: esc(g.name), act: 'tRecalcOpen',
+        p: { sid: s.id, ym, gid: g.id, student: s.name, group: g.name },
+      })))) : empty('По этой фамилии учеников в твоих абонементных группах нет');
+    } catch (e) {
+      result = empty(esc(errText(e)), btn('Повторить', 'retry', {}, 'sec'));
+    }
+  }
+  return { title: 'Перерасчёт', html: `
+    ${stickyFilters(searchBox('q-recalc', 'Фамилия ученика', q, 'enterkeyhint="search" aria-label="Фамилия ученика"'))}
+    ${result}` };
+};
+
 ACT.tRecalcOpen = p => {
+  document.getElementById('q-recalc')?.blur();
   closeSheet();
   sheet(`<h3>Перерасчёт по справке</h3><div class="hint">${esc(p.student)} · ${esc(p.group)}</div>
     ${field('recalc-start', 'Освобождение с', p.start, 'type="date" required')}
@@ -1277,7 +1298,7 @@ ACT.tRecalcApply = async ({ draft, quote }) => {
     const result = await requestSubscriptionRecalc(draft, quote);
     if (cur() === screen) {
       closeSheet();
-      screen.p = { ...screen.p, ym: draft.ym };
+      if (screen.n !== 't.recalc') screen.p = { ...screen.p, ym: draft.ym };
       state.ui.tbill = null;
       render();
     }
