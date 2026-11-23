@@ -572,6 +572,15 @@ def test_only_today_uncompleted_drafts_are_offered(monkeypatch, tmp_path):
     assert [d["date"] for d in view["drafts"]] == ["2026-11-23"]
     assert view["completedToday"] is False
     assert view["upcomingDates"] == ["2026-11-24"]
+    calendar_route = f"{route}?view=calendar"
+    calendar = call_teacher(app, "GET", calendar_route, tg_id=ADMIN_TG)[1]
+    assert calendar["yesterday"] == "2026-11-22" and calendar["tomorrow"] == "2026-11-24"
+    assert {d["date"] for d in calendar["drafts"]} == {"2026-11-21", "2026-11-23", "2026-11-24"}
+    tomorrow = next(d for d in calendar["drafts"] if d["date"] == calendar["tomorrow"])
+    assert tomorrow["slots"][0]["status"] == "planned"
+    assert tomorrow["sourceUpdatedAt"] == "2026-11-23T21:00:00+03:00"
+    overview = call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]["scheduleOverview"]
+    assert (overview["held"], overview["total"], overview["unfinishedYesterday"]) == (0, 1, None)
 
     # Вносим сегодняшнее занятие в журнал — расписание на понедельник исчезает.
     draft = view["drafts"][0]
@@ -581,6 +590,10 @@ def test_only_today_uncompleted_drafts_are_offered(monkeypatch, tmp_path):
     after = call_teacher(app, "GET", route, tg_id=ADMIN_TG)[1]
     assert after["drafts"] == [] and after["completedToday"] is True
     assert after["upcomingDates"] == ["2026-11-24"]
+    calendar = call_teacher(app, "GET", calendar_route, tg_id=ADMIN_TG)[1]
+    assert next(d for d in calendar["drafts"] if d["id"] == draft["id"])["slots"][0]["status"] == "held"
+    overview = call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]["scheduleOverview"]
+    assert (overview["held"], overview["total"], overview["next"]) == (1, 1, None)
 
     # Наступает вторник 24.11 — автоматически появляется расписание на вторник.
     today[0] = date(2026, 11, 24)

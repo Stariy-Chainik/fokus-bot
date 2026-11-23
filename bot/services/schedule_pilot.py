@@ -784,10 +784,16 @@ class SchedulePilot:
 
     async def today_summary(self, day: date) -> tuple[int, bool]:
         """Возвращает (сколько незаписанных занятий за сегодня/вчера, есть ли полностью внесённый черновик за сегодня)."""
+        pending, completed, _ = await self.today_overview(day)
+        return pending, completed
+
+    async def today_overview(self, day: date) -> tuple[int, bool, dict]:
         today_iso, yesterday_iso = active_draft_dates(day)
         rows, outcomes_by_mid = await asyncio.to_thread(self._latest_with_outcomes)
         pending = 0
         completed_today = False
+        today_slots: list[dict] = []
+        unfinished_yesterday = False
         empty_names = StudentNames([])
         for message_id, version, update_id, source, _revision, base, edit in rows:
             latest = self._source_revision(version, update_id)
@@ -801,15 +807,25 @@ class SchedulePilot:
                 slot["status"] = status
             if plan["sourceUpdated"] and source:
                 plan["telegram"] = self._view(_telegram_plan(source, source), empty_names)
+            slots = [slot for slot in plan["slots"] if slot["kind"] != "free"]
+            if plan["date"] == today_iso:
+                today_slots.extend(slot for slot in slots if slot["status"] != "cancelled")
             if is_draft_completed(plan):
                 if plan["date"] == today_iso:
                     completed_today = True
             else:
-                pending += sum(
-                    1 for slot in plan["slots"]
-                    if slot["kind"] != "free" and slot["status"] not in ("held", "cancelled")
-                )
-        return pending, completed_today and pending == 0
+                pending += sum(slot["status"] not in ("held", "cancelled") for slot in slots)
+                unfinished_yesterday |= plan["date"] == yesterday_iso
+        now = datetime.now(_MOSCOW).strftime("%H:%M")
+        next_slot = min((slot for slot in today_slots if slot["status"] == "planned" and slot["time"] >= now),
+                        key=lambda slot: slot["time"], default=None)
+        overview = {
+            "total": len(today_slots),
+            "held": sum(slot["status"] == "held" for slot in today_slots),
+            "next": {key: next_slot[key] for key in ("time", "end", "text", "duration", "kind")} if next_slot else None,
+            "unfinishedYesterday": yesterday_iso if unfinished_yesterday else None,
+        }
+        return pending, completed_today and pending == 0, overview
 
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)
@@ -821,7 +837,8 @@ class SchedulePilot:
             latest = self._source_revision(version, update_id)
             plan = self._view(_telegram_plan(edit or source, source), names)
             plan.update(id=message_id, revision=revision or 0, sourceRevision=base or latest,
-                        source=f"https://t.me/c/{chat_slug}/{source_id}", sourceUpdated=bool(edit and base != latest))
+                        source=f"https://t.me/c/{chat_slug}/{source_id}", sourceUpdated=bool(edit and base != latest),
+                        sourceUpdatedAt=datetime.fromtimestamp(version, _MOSCOW).isoformat())
             outcomes = outcomes_by_mid.get(message_id, {})
             for slot in plan["slots"]:
                 status, lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))

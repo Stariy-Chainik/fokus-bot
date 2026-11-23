@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from aiohttp import web
 
@@ -271,7 +271,8 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         pilot = schedule_for(user)
         if pilot is None:
             return _json({"error": "not_found"}, status=404)
-        today_iso, yesterday_iso = active_draft_dates(schedule_pilot.moscow_today())
+        today = schedule_pilot.moscow_today()
+        today_iso, yesterday_iso = active_draft_dates(today)
         all_drafts = await pilot.drafts(await schedule_students(user, teacher))
         active = sorted(
             (d for d in all_drafts if d["date"] in (today_iso, yesterday_iso) and not is_draft_completed(d)),
@@ -279,9 +280,11 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         )
         completed_today = not active and any(d["date"] == today_iso and is_draft_completed(d) for d in all_drafts)
         upcoming_dates = sorted({d["date"] for d in all_drafts if d["date"] > today_iso and not is_draft_completed(d)})
+        calendar = request.query.get("view") == "calendar"
         return _json({
-            "drafts": active,
+            "drafts": all_drafts if calendar else active,
             "today": today_iso,
+            **({"yesterday": yesterday_iso, "tomorrow": (today + timedelta(days=1)).isoformat()} if calendar else {}),
             "completedToday": completed_today,
             "upcomingDates": upcoming_dates,
             "acceptWeekday": pilot.accept_weekday,
@@ -365,11 +368,12 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         pilot = schedule_for(user)
         schedule_meta: dict = {}
         if pilot is not None:
-            pending_today, completed_today = await pilot.today_summary(schedule_pilot.moscow_today())
+            pending_today, completed_today, overview = await pilot.today_overview(schedule_pilot.moscow_today())
             schedule_meta = {
                 "schedulePilot": True,
                 "scheduleTodayPending": pending_today,
                 "scheduleCompletedToday": completed_today,
+                "scheduleOverview": overview,
             }
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,

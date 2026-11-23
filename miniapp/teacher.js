@@ -7,8 +7,6 @@ const teacherRecordButton = (label = '✏️ Отметить занятие', k
   goBtn(label, 'a.record.w', { tid: state.me.teacherId, name: state.me.name }, kind);
 
 /* ── Сводка ──────────────────────────────────────────────────────────── */
-/* Сводка — как у администратора, три блока по приоритету: что ждёт педагога → что было сегодня →
-   как идёт месяц. «Разделов» нет: занятия, группы и зарплата — это вкладки внизу. */
 SCREENS['t.home'] = async () => {
   const h = await api('/home');
   setBadges({
@@ -26,14 +24,20 @@ SCREENS['t.home'] = async () => {
     h.unrated ? cell({ lead: '📓', plain: true, t: 'Оценить тренировки', s: `${plural(h.unrated, ['запись', 'записи', 'записей'])} спортсменов без оценки`, r: pill(h.unrated, 'warn'), go: 't.diary' }) : '',
     h.periodSubmit && !h.prevSubmitted ? cell({ lead: '📤', plain: true, t: `${prevMon} не сдан`, s: 'сдайте период, чтобы счёт родителям стал окончательным', go: 't.money', p: { ym: h.prevPeriod } }) : '',
   ].filter(Boolean);
-  const recordLesson = teacherRecordButton();
-  const today = h.lessonsToday ? `
+  const journal = h.lessonsToday ? `
     <div class="kpis">${kpi(plural(h.lessonsToday, ['занятие', 'занятия', 'занятий']), 'отмечено сегодня', '', 't.lessons', { key: h.today })}${kpi(fmt(h.earnedToday), h.directToday ? `от школы · ещё ${fmt(h.directToday)} напрямую` : 'заработано сегодня', 'ok', 't.lessons', { key: h.today })}</div>
-    <div style="margin-top:10px">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>
-    <div style="margin-top:10px">${recordLesson}</div>` : `<div class="card pad">
-      <div class="hint">Занятий сегодня ещё не отмечено</div>
-      <div style="margin-top:10px">${recordLesson}</div>
-    </div>`;
+    <div class="teacher-today-journal">${list(h.todayLessons.map(x => tLessonCell(x)))}</div>` : '';
+  const overview = h.scheduleOverview || {};
+  const next = overview.next;
+  const today = h.schedulePilot ? `<div class="card teacher-today">
+      <div class="teacher-today-progress"><strong>${overview.total ? `${overview.held} из ${overview.total} в журнале` : 'На сегодня нет занятий в расписании'}</strong>
+        <span class="hint">Из Telegram</span></div>
+      ${overview.total ? `<progress max="${overview.total}" value="${overview.held}" aria-label="Занятия из Telegram, внесённые в журнал"></progress>` : ''}
+      ${next ? `<div class="teacher-next"><span class="hint">Ближайшее занятие</span>
+        <div class="teacher-next-lesson">${scheduleTime(next)}<div><strong>${esc(next.text)}</strong>
+          ${next.duration ? `<div class="hint">${next.duration} мин</div>` : ''}</div></div></div>` : ''}
+      ${goBtn('Открыть расписание', 't.schedule.drafts')}
+    </div>` : journal || '<div class="card pad hint">Занятий сегодня ещё не отмечено</div>';
   // Сдача периода отключена (periodSubmit=false): ни замка, ни напоминаний «не сдан».
   const lockNote = !h.periodSubmit ? '' : h.periodSubmitted ? ' · период сдан' : h.canSubmit ? ' · можно сдать период' : '';
   const monthLine = `${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}${h.groupLessonsMonth ? ` · 👥 ${h.groupLessonsMonth}` : ''}${h.individualLessonsMonth ? ` · 👤 ${h.individualLessonsMonth}` : ''}${lockNote}`;
@@ -43,21 +47,18 @@ SCREENS['t.home'] = async () => {
       ${kpi(fmt(h.earnedMonth), `зарплата за ${mon.toLowerCase()} · ${plural(h.lessonsMonth, ['занятие', 'занятия', 'занятий'])}`, 'ok', 't.money', { ym: h.period })}
     </div>` : '';
   return { title: 'Сводка', html: `
-    ${hero(`${esc(h.name)} · ${fdate(h.today)}`)}
-    ${tiles}
+    ${hero(esc(h.name))}
+    <section class="teacher-day-summary" aria-labelledby="teacher-today-title">
+      <h1 id="teacher-today-title">Сегодня</h1><p class="hint">${esc(fdate(h.today))}</p>
+      ${today}
+      <div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>
+      ${overview.unfinishedYesterday ? `<div class="teacher-yesterday">${goBtn('Вчера · есть незакрытое расписание', 't.schedule.drafts', { date: overview.unfinishedYesterday }, 'ghost')}</div>` : ''}
+      ${h.schedulePilot && journal ? `<details class="acc teacher-journal"><summary>Журнал за сегодня · ${h.lessonsToday}</summary><div class="pad">${journal}</div></details>` : ''}
+    </section>
     <div class="eyebrow">Требует внимания</div>
     ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
-    <div class="eyebrow">Сегодня</div>
-    ${today}
-    ${h.schedulePilot ? `<div style="margin-top:12px">${list([cell({
-      lead: '📋', plain: true, t: 'Расписание из Telegram',
-      s: h.scheduleTodayPending
-        ? `На сегодня · ${plural(h.scheduleTodayPending, ['занятие', 'занятия', 'занятий'])} не отмечено`
-        : h.scheduleCompletedToday ? 'На сегодня всё внесено' : 'На сегодня расписания нет',
-      r: h.scheduleTodayPending ? `<span class="pill warn">${h.scheduleTodayPending}</span>` : (h.scheduleCompletedToday ? '✅' : ''),
-      go: 't.schedule.drafts',
-    })])}</div>` : ''}
     <div class="eyebrow">${mon}</div>
+    ${tiles}
     ${list([
       cell({ lead: '💰', plain: true, t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
       ...(h.directMonth ? [cell({ lead: '🤝', plain: true, t: 'Напрямую от родителей', s: 'индивидуальные — платят вам лично', r: `<b class="direct">${fmt(h.directMonth)}</b>`, go: 't.money', p: { ym: h.period } })] : []),
@@ -85,15 +86,18 @@ function scheduleMarks(id, tid = '') {
   return days.get(key);
 }
 const scheduleMarkLabel = count => count ? `Отметить занятия · ${count}` : 'Отметить занятия';
+const scheduleJournalLabel = count => `Внести ${plural(count, ['занятие', 'занятия', 'занятий'])} в журнал`;
 const scheduleDurations = [45, 60, 90];
 const hasReadyScheduleMarks = marks => marks.size > 0 && ![...marks.values()].some(m => m.loading);
-const scheduleRows = (slots, id = null, tid = '') => slots.length ? `<ol class="schedule-list">${slots.map(s => {
+const scheduleRows = (slots, id = null, tid = '', { calendar = false, canEdit = true, canMark = true } = {}) => slots.length ? `<ol class="schedule-list">${slots.map(s => {
   const free = s.kind === 'free';
+  const title = calendar && s.kind === 'group' && s.text ? s.text : scheduleTitle(s);
   const type = !free && s.kind === 'individual' && !s.studentIds?.length ? 'Уточнить участников' :
-    s.kind === 'group' && !s.groupId ? 'Выбрать группу' : '';
+    s.kind === 'group' && !s.groupId ? 'Выбрать группу' : !calendar || free ? '' :
+      s.kind === 'group' ? 'Групповое' : s.studentIds.length > 1 ? 'Парное' : 'Индивидуальное';
   const duration = s.duration ? `${s.duration} мин${s.suggested ? ' по сетке' : ''}` : free ? '' : 'Уточнить длительность';
   const label = scheduleStatus[s.status];
-  const inner = `${scheduleTime(s)}<span class="schedule-slot-text"><strong>${esc(scheduleTitle(s))}</strong>
+  const inner = `${scheduleTime(s)}<span class="schedule-slot-text"><strong>${esc(title)}</strong>
     ${type || duration ? `<span class="hint">${esc([type, duration].filter(Boolean).join(' · '))}</span>` : ''}
     ${label ? `<span class="schedule-state ${esc(s.status)}">${label}</span>` : ''}</span>`;
   const style = `schedule-slot${free || s.status === 'cancelled' ? ' schedule-free' : ''}`;
@@ -101,11 +105,11 @@ const scheduleRows = (slots, id = null, tid = '') => slots.length ? `<ol class="
   const mark = scheduleMarks(id, tid).get(s.time);
   const tapPayload = tid ? { id, tid, time: s.time } : { id, time: s.time };
   return `<li data-schedule-time="${esc(s.time)}"><div class="schedule-mark-row">
-    ${free ? `<div class="${style}">${inner}</div>` :
+    ${free || (!canEdit && s.status !== 'held') ? `<div class="${style}">${inner}</div>` :
       `<button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify(tapPayload))}'>
-      ${inner}<span class="chev" aria-hidden="true">›</span></button>`}
-    ${canMarkSchedule(s) ? `<label class="schedule-check"><input type="checkbox" data-schedule-check
-      aria-label="${esc(`Отметить занятие в ${s.time} · ${scheduleTitle(s)}`)}"${mark ? ' checked' : ''}></label>` : ''}
+      ${inner}${calendar ? '' : '<span class="chev" aria-hidden="true">›</span>'}</button>`}
+    ${canMark && canMarkSchedule(s) ? `<label class="schedule-check"><input type="checkbox" data-schedule-check
+      aria-label="${esc(`Отметить занятие в ${s.time} · ${title}`)}"${mark ? ' checked' : ''}></label>` : ''}
     </div><div class="schedule-mark-extra" data-schedule-extra>${scheduleMarkDetails(id, s, mark, tid)}</div></li>`;
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
 
@@ -119,7 +123,7 @@ function syncScheduleMarks(drafts) {
 }
 
 async function loadSchedule() {
-  const { drafts, today, completedToday, upcomingDates, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts');
+  const { drafts, today, yesterday, tomorrow, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts?view=calendar');
   const titleExample = acceptOwnerInitials ? '«С.А. Понедельник» или «С.А. Пн»' :
     acceptPlainTitle ? '«Расписание на четверг»' :
     acceptWeekday !== false ? '«Четверг:»' : '«Расписание со мной на четверг»';
@@ -127,9 +131,8 @@ async function loadSchedule() {
     ? 'Опубликуй в группе пост со словом «Расписание». Для недели укажи каждый день отдельной строкой.'
     : `Опубликуй в группе расписание на сегодня с заголовком ${titleExample}.`;
   state.ui.scheduleToday = today || '';
-  state.ui.scheduleCompletedToday = !!completedToday;
-  state.ui.scheduleUpcomingDates = upcomingDates || [];
   syncScheduleMarks(drafts);
+  return { drafts, today, yesterday, tomorrow };
 }
 
 function renderScheduleCard(d) {
@@ -158,20 +161,59 @@ function renderScheduleCard(d) {
   </section>`;
 }
 
-SCREENS['t.schedule.drafts'] = async () => {
-  await loadSchedule();
-  const drafts = state.ui.scheduleDrafts;
-  const upcoming = state.ui.scheduleUpcomingDates || [];
-  const upcomingHint = upcoming.length
-    ? `<p class="hint" style="margin-top:8px">Загружено на ${esc(upcoming.map(fdate).join(', '))} — появится в этот день.</p>`
-    : '';
-  const emptyTitle = state.ui.scheduleCompletedToday ? 'На сегодня всё внесено' : 'На сегодня расписания нет';
-  const emptyText = state.ui.scheduleCompletedToday
-    ? `<p class="hint">Все занятия из сегодняшнего расписания уже в журнале.</p>${upcomingHint}`
-    : `<p class="hint">${state.ui.scheduleEmptyHint}</p>${upcomingHint}`;
-  const body = drafts.length ? drafts.map(renderScheduleCard).join('') : empty(emptyTitle, emptyText);
-  return { title: 'Расписание из Telegram', html: body +
-    `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
+function renderTeacherScheduleCard(plan, canEdit, canMark) {
+  const { id, slots, source, sourceUpdatedAt } = plan;
+  const published = sourceUpdatedAt ? ` · ${esc(fdate(sourceUpdatedAt.slice(0, 10)))} · ${esc(sourceUpdatedAt.slice(11, 16))}` : '';
+  const canChangeDate = canEdit && !slots.some(s => s.status && s.status !== 'planned');
+  return `<section class="card schedule-day" data-schedule-draft="${id}" data-schedule-tid="">
+    <div class="schedule-post">
+      <a href="${esc(source)}" target="_blank" rel="noopener">Из Telegram${published}</a>
+      ${canChangeDate ? btn('Изменить дату', 'scheduleChangeDate', { id }, 'ghost') : ''}
+    </div>
+    ${plan.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
+      ${canEdit && plan.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id }, 'sec') : ''}</div>` : ''}
+    ${scheduleRows(slots, id, '', { calendar: true, canEdit, canMark })}
+  </section>`;
+}
+
+SCREENS['t.schedule.drafts'] = async ({ date } = {}) => {
+  const { drafts, today, yesterday, tomorrow } = await loadSchedule();
+  date ||= today;
+  const plans = drafts.filter(d => d.date === date).sort((a, b) => (a.slots[0]?.time || '').localeCompare(b.slots[0]?.time || ''));
+  const tabs = [[today, 'Сегодня'], [tomorrow, 'Завтра']];
+  if (drafts.some(d => d.date === yesterday)) tabs.unshift([yesterday, 'Вчера']);
+  const slots = plans.flatMap(d => d.slots).filter(s => s.kind !== 'free' && s.status !== 'cancelled');
+  const canEdit = date >= yesterday, canMark = canEdit && date <= today;
+  return { title: 'Расписание', html: `<div class="schedule-calendar" data-schedule-calendar="${esc(date)}">
+    <nav class="schedule-days" aria-label="День расписания">
+      ${tabs.map(([day, label]) => `<button type="button" class="chip" aria-pressed="${day === date}"
+        data-act="scheduleChooseDay" data-p='${esc(JSON.stringify({ date: day }))}'>${label}</button>`).join('')}
+      <button type="button" class="chip" aria-pressed="${!tabs.some(([day]) => day === date)}" data-act="schedulePickDate">По датам</button>
+    </nav>
+    <div class="schedule-day-heading"><h1>${esc(fdate(date))}</h1>
+      ${slots.length ? `<span class="hint">${slots.filter(s => s.status === 'held').length} из ${slots.length} в журнале</span>` : ''}</div>
+    ${plans.length ? plans.map(d => renderTeacherScheduleCard(d, canEdit, canMark)).join('') :
+      empty('На эту дату расписания нет', date === today ? `<p class="hint">${esc(state.ui.scheduleEmptyHint)}</p>` : '')}
+    <div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>
+    ${canMark ? renderScheduleFooter(plans) : ''}
+  </div>` };
+};
+
+ACT.scheduleChooseDay = ({ date }) => {
+  if (state.ui.scheduleSubmitting || cur().n !== 't.schedule.drafts') return;
+  closeSheet();
+  cur().p = { date };
+  document.getElementById('content').scrollTop = 0;
+  render();
+};
+ACT.schedulePickDate = () => {
+  const days = [...new Set(state.ui.scheduleDrafts.map(d => d.date))].sort().reverse();
+  const date = cur().p?.date || state.ui.scheduleToday;
+  sheet(`<h3>Выбери дату</h3><div class="schedule-date-list">
+    ${days.length ? days.map(day => `<button type="button" class="btn ${day === date ? 'sec' : 'ghost'}"
+      ${day === date ? 'aria-current="date"' : ''} data-act="scheduleChooseDay"
+      data-p='${esc(JSON.stringify({ date: day }))}'>${esc(fdate(day))}${day.slice(0, 4) !== date.slice(0, 4) ? ` ${esc(day.slice(0, 4))}` : ''}</button>`).join('') :
+      '<p class="hint">Расписаний из Telegram пока нет.</p>'}</div>`);
 };
 
 SCREENS['a.schedule.drafts'] = async ({ tid } = {}) => {
@@ -218,17 +260,21 @@ async function scheduleOptions(tid = '') {
 
 ACT.scheduleTap = async ({ id, tid = '', time }) => {
   const plan = schedulePlan(id, tid);
-  if (!plan || state.ui.scheduleSaving || state.ui.scheduleOpening) return;
+  if (!plan || state.ui.scheduleSaving || state.ui.scheduleSubmitting || state.ui.scheduleOpening) return;
   const index = plan.slots.findIndex(s => s.time === time);
   const slot = plan.slots[index];
   if (!slot || slot.kind === 'free') return;
   if (slot?.status === 'held') return go(tid ? 'a.lesson' : 't.lesson', { id: slot.lessonId });
   if (slot?.status === 'cancelled') return sheet(`<h3>${esc(scheduleTitle(slot))}</h3>
     <p class="hint">${esc(time)} · Отменено</p>${btn('Вернуть в план', 'scheduleSingleStatus', { id, tid, time, status: 'planned' })}`);
-  if (slot?.status === 'pending') return toast('Поставь галочку и нажми «Отметить занятия», чтобы проверить запись');
+  if (slot?.status === 'pending') return toast(tid ? 'Поставь галочку и нажми «Отметить занятия», чтобы проверить запись' :
+    'Поставь галочку и внеси занятие в журнал, чтобы проверить запись');
   state.ui.scheduleOpening = true;
+  const screen = cur(), selectedDay = screen.p?.date;
   try {
-    state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })), options: await scheduleOptions(tid) };
+    const options = await scheduleOptions(tid);
+    if (cur() !== screen || screen.p?.date !== selectedDay) return;
+    state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })), options };
     scheduleSlotForm(index);
   } catch (e) { toast(errText(e)); } finally { state.ui.scheduleOpening = false; }
 };
@@ -244,7 +290,7 @@ function scheduleSlotForm(index) {
   const kinds = [{ id: 'individual', name: 'Индивидуальное или парное' },
     { id: 'group', name: 'Групповое' }];
   const externalDuration = s.duration && !scheduleDurations.includes(s.duration) ? ` · из поста ${s.duration} мин` : '';
-  sheet(`<h3>Занятие</h3>
+  sheet(`<h3>${d.teacherId ? 'Занятие' : `Занятие в ${esc(s.time)}`}</h3>
     ${field('schedule-time', 'Начало', s.time, 'type="time" required')}
     <div class="hint schedule-length-label">Длительность${externalDuration}</div>
     <div class="chips" id="schedule-duration-options" role="group" aria-label="Длительность занятия">
@@ -261,8 +307,8 @@ function scheduleSlotForm(index) {
       ${scheduleSelect('schedule-group', 'Группа', s.groupId, d.options.groups, 'Группа без уточнения')}
     </div>
     <div class="schedule-actions">
-      ${btn('Сохранить строку', 'scheduleSlotDone', { index })}
-      ${btn('Отменилось', 'scheduleSingleStatus', { id: d.id, tid: d.teacherId || '', time: s.time, status: 'cancelled' }, 'ghost')}
+      ${btn(d.teacherId ? 'Сохранить строку' : 'Сохранить занятие', 'scheduleSlotDone', { index })}
+      ${btn(d.teacherId ? 'Отменилось' : 'Отменить занятие', 'scheduleSingleStatus', { id: d.id, tid: d.teacherId || '', time: s.time, status: 'cancelled' }, 'ghost')}
     </div>`);
   const kind = document.getElementById('schedule-kind');
   const update = () => {
@@ -283,7 +329,7 @@ ACT.scheduleChooseDuration = ({ minutes }) => {
 };
 
 async function scheduleWrite(plan, fields) {
-  if (state.ui.scheduleSaving) return false;
+  if (state.ui.scheduleSaving || state.ui.scheduleSubmitting) return false;
   state.ui.scheduleSaving = true;
   try {
     const endpoint = plan.teacherId ? `/schedule-drafts/${encodeURIComponent(plan.teacherId)}/${plan.id}` : `/schedule-drafts/${plan.id}`;
@@ -329,6 +375,7 @@ ACT.scheduleDateDone = async ({ id, tid = '' }) => {
   if (!date) return toast('Укажи дату расписания');
   if (await saveScheduleRows(plan, plan.slots, date)) {
     closeSheet();
+    if (!tid && cur().n === 't.schedule.drafts') cur().p = { date };
     render();
   }
 };
@@ -366,7 +413,7 @@ async function sendScheduleActions(plan, actions) {
 
 ACT.scheduleSingleStatus = async ({ id, tid = '', time, status }) => {
   const plan = schedulePlan(id, tid);
-  if (!plan) return;
+  if (!plan || state.ui.scheduleSubmitting) return;
   const result = await sendScheduleActions(plan, [{ time, status }]);
   if (!result) return;
   const row = result.results[0];
@@ -396,7 +443,30 @@ function scheduleMarkDetails(id, slot, mark, tid = '') {
         'scheduleMarkResolve', { id, tid, time: slot.time, allowNew: true }, 'ghost') : ''}` : ''}`.trim();
 }
 
+const calendarPlans = date => (state.ui.scheduleDrafts || []).filter(d => !d.teacherId && d.date === date);
+const selectedForDay = plans => plans.map(plan => scheduleMarks(plan.id)).filter(marks => marks.size > 0);
+
+function renderScheduleFooter(plans) {
+  const selected = selectedForDay(plans);
+  const count = selected.reduce((n, marks) => n + marks.size, 0);
+  return `<div class="schedule-footer"${count ? '' : ' hidden'}>
+    <button type="button" class="btn" data-act="scheduleSaveDay" data-schedule-submit
+      ${count && selected.every(hasReadyScheduleMarks) ? '' : 'disabled'}>${scheduleJournalLabel(count)}</button></div>`;
+}
+
 function scheduleMarkButton(id, card, tid = '') {
+  const calendar = card.closest('[data-schedule-calendar]');
+  if (calendar) {
+    const footer = calendar.querySelector('.schedule-footer');
+    if (!footer || state.ui.scheduleSubmitting) return;
+    const selected = selectedForDay(calendarPlans(calendar.dataset.scheduleCalendar));
+    const count = selected.reduce((n, marks) => n + marks.size, 0);
+    const button = footer.querySelector('[data-schedule-submit]');
+    footer.hidden = !count;
+    button.disabled = !count || !selected.every(hasReadyScheduleMarks);
+    button.textContent = scheduleJournalLabel(count);
+    return;
+  }
   const button = card.querySelector('[data-schedule-submit]');
   if (!button) return;
   const marks = scheduleMarks(id, tid);
@@ -413,7 +483,7 @@ document.addEventListener('change', async event => {
   const marks = scheduleMarks(id, tid);
   if (el.matches('[data-schedule-check]')) {
     const plan = schedulePlan(id, tid), slot = plan?.slots.find(s => s.time === time);
-    if (!slot || !canMarkSchedule(slot)) return;
+    if (!slot || !canMarkSchedule(slot) || state.ui.scheduleSubmitting) return;
     const extra = row.querySelector('[data-schedule-extra]');
     if (!el.checked) {
       marks.delete(time);
@@ -451,38 +521,63 @@ const scheduleAction = (time, mark) => ({
   time, status: 'held', studentIds: mark.studentIds, tiers: mark.tiers, attendanceConfirmed: mark.studentIds.length > 0,
 });
 
-async function saveScheduleMarks(id, actions, tid = '') {
-  const plan = schedulePlan(id, tid);
-  if (!plan || !actions.length || state.ui.scheduleSaving) return;
-  const card = document.querySelector(`[data-schedule-draft="${id}"][data-schedule-tid="${tid}"]`);
-  const button = card?.querySelector('[data-schedule-submit]');
+async function saveScheduleBatches(batches, container) {
+  const ui = state.ui;
+  if (!batches.length || ui.scheduleSaving || ui.scheduleSubmitting) return;
+  ui.scheduleSubmitting = true;
+  const button = container?.querySelector('[data-schedule-submit]');
   if (button) {
     button.disabled = true;
     button.textContent = 'Записываю…';
   }
-  card?.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
-  const response = await sendScheduleActions(plan, actions);
-  if (response) {
-    const marks = scheduleMarks(id, tid);
-    let saved = 0;
-    for (const row of response.results) {
-      if (row.error) {
-        const mark = marks.get(row.time);
-        if (mark) mark.issue = row;
-      } else {
-        marks.delete(row.time);
-        saved++;
+  container?.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
+  let saved = 0;
+  const total = batches.reduce((n, batch) => n + batch.actions.length, 0);
+  try {
+    for (const { plan, actions } of batches) {
+      const response = await sendScheduleActions(plan, actions);
+      if (state.ui !== ui) return;
+      if (!response) break;
+      const marks = scheduleMarks(plan.id, plan.teacherId || '');
+      for (const row of response.results) {
+        if (row.error) {
+          const mark = marks.get(row.time);
+          if (mark) mark.issue = row;
+        } else {
+          marks.delete(row.time);
+          saved++;
+        }
       }
     }
-    if (saved) toast(`В журнале: ${saved}${saved < actions.length ? ' · проверь подсказки к остальным' : ''}`);
+    if (saved) toast(`В журнале: ${saved}${saved < total ? ' · проверь оставшиеся занятия' : ''}`);
+  } finally {
+    ui.scheduleSubmitting = false;
+    if (state.ui === ui) render();
   }
-  render();
 }
 
+function saveScheduleMarks(id, actions, tid = '') {
+  const plan = schedulePlan(id, tid);
+  if (!plan || !actions.length) return;
+  const card = document.querySelector(`[data-schedule-draft="${id}"][data-schedule-tid="${tid}"]`);
+  return saveScheduleBatches([{ plan, actions }], card?.closest('[data-schedule-calendar]') || card);
+}
+
+const markedScheduleActions = marks => [...marks].map(([time, mark]) => scheduleAction(time, mark));
+
+ACT.scheduleSaveDay = () => {
+  const calendar = document.querySelector('[data-schedule-calendar]');
+  if (!calendar) return;
+  const plans = calendarPlans(calendar.dataset.scheduleCalendar);
+  if (!selectedForDay(plans).every(hasReadyScheduleMarks)) return;
+  const batches = plans.map(plan => ({ plan, actions: markedScheduleActions(scheduleMarks(plan.id)) }))
+    .filter(batch => batch.actions.length);
+  return saveScheduleBatches(batches, calendar);
+};
 ACT.scheduleMarkSave = ({ id, tid = '' }) => {
   const marks = scheduleMarks(id, tid);
   if (!hasReadyScheduleMarks(marks)) return;
-  return saveScheduleMarks(id, [...marks].map(([time, mark]) => scheduleAction(time, mark)), tid);
+  return saveScheduleMarks(id, markedScheduleActions(marks), tid);
 };
 ACT.scheduleMarkResolve = ({ id, tid = '', time, lessonId, allowNew }) => {
   const mark = scheduleMarks(id, tid).get(time);

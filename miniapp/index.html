@@ -296,7 +296,49 @@
   .schedule-field { display: grid; gap: 4px; margin-top: 10px; }
   .schedule-field .search { margin: 0; }
   .schedule-empty { padding: 14px; margin: 0; }
+
+  .teacher-day-summary > h1, .schedule-day-heading h1 {
+    margin: 0; font-size: 25px; line-height: 1.2; font-weight: 800; letter-spacing: -.025em;
+  }
+  .teacher-day-summary > p { margin: 4px 0 14px; }
+  .teacher-today { display: grid; gap: 12px; padding: 16px; }
+  .teacher-today-progress { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; align-items: baseline; }
+  .teacher-today progress { display: block; width: 100%; height: 6px; border: 0; border-radius: 6px; overflow: hidden;
+    appearance: none; background: var(--accent-soft); color: var(--accent); }
+  .teacher-today progress::-webkit-progress-bar { background: var(--accent-soft); }
+  .teacher-today progress::-webkit-progress-value { background: var(--accent); }
+  .teacher-today progress::-moz-progress-bar { background: var(--accent); }
+  .teacher-next { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+  .teacher-next-lesson { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 10px;
+    margin-top: 6px; overflow-wrap: anywhere; }
+  .teacher-journal, .teacher-today-journal { margin-top: 10px; }
+  .teacher-yesterday .btn { min-height: 44px; border: 0; padding: 6px 0; color: var(--accent-deep); font-size: 13px; }
+  .schedule-days { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 3px;
+    padding: 3px; border-radius: 13px; background: var(--accent-soft); }
+  .schedule-days .chip { border: 0; border-radius: 10px; padding: 5px 3px; min-height: 44px; background: transparent;
+    line-height: 1.2; color: var(--accent-deep); }
+  .schedule-days .chip[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px #231b201a; }
+  .schedule-day-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+    gap: 4px 12px; margin: 17px 0 12px; }
+  .schedule-post { display: flex; justify-content: space-between; align-items: center; gap: 4px 8px; padding: 0 12px;
+    border-bottom: 1px solid var(--line); }
+  .schedule-post a { display: flex; align-items: center; min-height: 44px; padding: 5px 0; color: var(--accent-deep);
+    font-size: 13px; text-underline-offset: 3px; }
+  .schedule-post .btn { width: auto; flex: none; min-height: 44px; padding: 6px 0; border: 0; color: var(--accent-deep); font-size: 13px; }
+  .schedule-calendar .schedule-mark-row { grid-template-columns: minmax(0, 1fr); padding-right: 0; }
+  .schedule-calendar .schedule-mark-row:has(.schedule-check) { grid-template-columns: minmax(0, 1fr) 44px; padding-right: 4px; }
+  .schedule-calendar .schedule-slot { grid-template-columns: max-content minmax(0, 1fr); min-height: 62px;
+    gap: 10px; padding: 8px 10px 8px 12px; }
+  .schedule-calendar .schedule-time, .teacher-next .schedule-time { min-inline-size: calc(5ch + 16px); padding: 6px 8px;
+    font-size: 16px; line-height: 1.25; }
+  .schedule-calendar .schedule-time time { display: block; }
+  .schedule-calendar .schedule-state { padding: 0; background: none; }
+  .schedule-footer { position: sticky; z-index: 1; bottom: -24px; margin: 12px -14px 0; padding: 10px 14px 12px;
+    background: var(--bg); border-top: 1px solid var(--line); }
+  .schedule-date-list { display: grid; gap: 6px; margin-top: 12px; }
+  .schedule-date-list .btn + .btn { margin-top: 0; }
   .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-weight: 600; font-size: 13.5px; z-index: 6; box-shadow: var(--shadow); max-width: 88%; text-align: center; }
+  body:has(.schedule-footer:not([hidden])) .toast { bottom: calc(176px + env(safe-area-inset-bottom)); }
   .toast.ok { background: var(--ok); color: #fff; }
   .toast.bad { background: var(--bad); color: #fff; }
   .skeleton { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--line) 25%, var(--card) 50%, var(--line) 75%); background-size: 200% 100%; animation: sk 1.1s infinite; margin: 10px 0; }
