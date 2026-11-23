@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import logging
 import time
 from types import SimpleNamespace
@@ -27,7 +28,12 @@ from bot.services.payment_methods import ADMIN_MANUAL, CASH, RECEIPT_BANK
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX, payment_lock
 from bot.services.pending_queue import rest_for_keys, settle_actions
 from bot.services.rosters import group_members
+from bot.services.subscription_recalculation import (
+    LESSONS_PER_SUBSCRIPTION, Recalculation, RecalculationConflict, override_version, recalculated_amount,
+)
+from bot.utils import now_str
 from bot.utils.dates import current_period, last_periods, period_label, periods_since
+from bot.utils.format import format_money
 from bot.utils.notify import notify
 from config.settings import settings
 
@@ -57,6 +63,7 @@ class TeacherBillingHelpers:
     new_child_open: Callable
     held_cash: Callable
     sub_edit_group_ids: Callable
+    can_recalculate: Callable
     full_bill: Callable
 
 
@@ -86,6 +93,11 @@ def billing_routes(
                 return _json({"error": "forbidden"}, status=403)
             return await handler(request, user, teacher)
         return wrapped
+
+    def _can_recalculate(teacher) -> bool:
+        return payment_service.subscription_recalculations is not None and (
+            teacher.teacher_id in settings.subscription_recalc_teacher_id_set
+        )
 
     async def _sub_edit_group_ids(teacher) -> set:
         """Где педагог ставит ученику абонемент на месяц: педагог со счетами — во всех своих группах,
@@ -347,6 +359,7 @@ def billing_routes(
         _bills, summary, rows = await _bill_rows(sid, period, teacher, viewer_tg_id=user.tg_id)
         return _json({"student": {"id": sid, "name": s.name, "hasParent": bool(s.parent_addrs)},
                       "period": period, "rows": rows, **summary,
+                      "canRecalculate": _can_recalculate(teacher),
                       "groups": await _student_group_names(sid, student_group_repo, group_repo)})
 
     @billing_only
@@ -397,7 +410,7 @@ def billing_routes(
                 or gid not in await student_group_repo.get_groups_for_student(sid, include_left=True):
             return _json({"error": "not_found"}, status=404)
         key = f"{SUBSCRIPTION_KEY_PREFIX}{gid}"
-        from bot.utils.format import format_amount, format_money
+        from bot.utils.format import format_amount
         async with payment_lock(sid, period):
             led = (await payment_service.ledger_for(s, period)).get(key)
             old = led.accrued if led else group.price_full
@@ -419,6 +432,83 @@ def billing_routes(
             await notify(bot, [u.tg_id for u in await user_repo.get_admins()], text)
         logger.info("Mini App: педагог %s изменил абонемент %s %s %s: %d → %d", teacher.teacher_id, sid, gid, period, old, amount)
         return _json({"ok": True, "old": old, "amount": amount})
+
+    async def subscription_recalculate(request: web.Request, user, teacher) -> web.Response:
+        """Просмотр расчёта, затем подтверждение для того же состояния абонемента и оплаты."""
+        if not _can_recalculate(teacher):
+            return _json({"error": "forbidden"}, status=403)
+        sid = request.match_info["sid"]
+        try:
+            body = await request.json()
+            gid, period = body["groupId"], body["ym"]
+            start, end, missed = body["start"], body["end"], body["missed"]
+            if not isinstance(gid, str) or type(missed) is not int or not 1 <= missed <= LESSONS_PER_SUBSCRIPTION:
+                raise ValueError
+            if (date.fromisoformat(period + "-01").isoformat()[:7] != period
+                    or date.fromisoformat(start).isoformat() != start
+                    or date.fromisoformat(end).isoformat() != end or start > end):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return _json({"error": "bad_request", "message": "Проверь месяц, даты справки и число пропусков от 1 до 8"},
+                         status=400)
+        if gid not in await own_group_ids(teacher) or not await visibility.is_visible(teacher.teacher_id, sid):
+            return _json({"error": "not_found"}, status=404)
+        student = await student_repo.get_by_id(sid)
+        group = await group_repo.get_by_id(gid)
+        if student is None or group is None or group.billing_mode != GroupBillingMode.SUBSCRIPTION:
+            return _json({"error": "not_found"}, status=404)
+        store = payment_service.subscription_recalculations
+        key = f"{SUBSCRIPTION_KEY_PREFIX}{gid}"
+        async with payment_lock(sid, period):
+            history = [r for r in await store.rows() if r.group_id == gid and r.student_id == sid]
+            matching = next((r for r in history if start <= r.end and end >= r.start), None)
+            if matching is not None:
+                if (period, start, end, missed) != (matching.period, matching.start, matching.end, matching.missed):
+                    return _json({"error": "overlap", "message": f"Эти даты уже учтены за {period_label(matching.period).lower()}"},
+                                 status=409)
+                if "quote" in body:
+                    await payment_service.ledger_for(student, period, sync_key=key)
+                return _json({"applied": True, "duplicate": True, "amount": matching.amount})
+            ledger = (await payment_service.ledger_for(student, period, sync=False)).get(key)
+            if ledger is None:
+                return _json({"error": "no_subscription", "message": "За этот месяц у ученика нет абонемента этой группы"},
+                             status=409)
+            month = [r for r in history if r.period == period]
+            manual = next((r for r in await dp["subscription_override_repo"].get_for_group(gid)
+                           if r.period_month == period and r.student_id == sid), None)
+            version = override_version(manual)
+            active = [r for r in month if r.override_version == version]
+            base = active[-1].base if active else ledger.accrued
+            missed_total = missed + sum(r.missed for r in active)
+            if missed_total > LESSONS_PER_SUBSCRIPTION:
+                return _json({"error": "too_many", "message": "По справкам за один абонемент можно учесть до 8 пропусков"},
+                             status=409)
+            amount = recalculated_amount(base, missed_total)
+            if ledger.paid > amount:
+                return _json({"error": "paid_more", "message": f"Уже оплачено {format_money(ledger.paid)}, "
+                              f"а после перерасчёта было бы {format_money(amount)}. Выбери другой месяц"}, status=409)
+            quote = (
+                f"{sid}:{gid}:{period}:{start}:{end}:{missed}:{len(month)}:"
+                f"{version}:{base}:{ledger.accrued}:{ledger.paid}:{amount}"
+            )
+            result = {"base": base, "before": ledger.accrued, "amount": amount, "paid": ledger.paid,
+                      "missedTotal": missed_total, "rest": amount - ledger.paid, "quote": quote}
+            if "quote" not in body:
+                return _json(result)
+            if body["quote"] != quote:
+                return _json({"error": "conflict", "message": "Сумма абонемента или оплата изменилась. Рассчитай заново"},
+                             status=409)
+            try:
+                await store.add(Recalculation(gid, period, sid, start, end, missed, base, amount, version, user.tg_id,
+                                              now_str()), len(month))
+            except RecalculationConflict:
+                return _json({"error": "conflict", "message": "Справка или абонемент обновились. Рассчитай заново"}, status=409)
+            await payment_service.ledger_for(student, period, sync_key=key)
+        await activity.record(activity.PAYMENT,
+                              f"Перерасчёт абонемента {sid} в {gid} за {period}: {ledger.accrued} → {amount} ₽"
+                              f" · справка {start}–{end} · пропущено {missed} · педагог {teacher.name}",
+                              actor=user.tg_id, ref=sid)
+        return _json({**result, "applied": True})
 
     @billing_only
     async def bills_cancel(request: web.Request, user, teacher) -> web.Response:
@@ -667,6 +757,7 @@ def billing_routes(
         ("POST", "/bills/student/{sid}/receipt", bills_receipt),
         ("DELETE", "/payments/{pid}", bills_cancel),
         ("PUT", "/bills/student/{sid}/subscription", bills_sub_amount),
+        ("POST", "/bills/student/{sid}/subscription/recalculation", subscription_recalculate),
     ]
     helpers = TeacherBillingHelpers(
         bills_summary=_bills_summary,
@@ -676,6 +767,7 @@ def billing_routes(
         new_child_open=_new_child_open,
         held_cash=_held_cash,
         sub_edit_group_ids=_sub_edit_group_ids,
+        can_recalculate=_can_recalculate,
         full_bill=_full_bill,
     )
     return routes, helpers

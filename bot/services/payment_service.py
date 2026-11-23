@@ -19,6 +19,7 @@ from .payment_ledger import (
     mark_student_lessons, paid_lesson_ids,
 )
 from .payment_methods import ADMIN_MANUAL, YOOKASSA
+from .subscription_recalculation import SubscriptionRecalculations, override_version
 
 from . import activity, payment_events, payment_ledger
 logger = logging.getLogger(__name__)
@@ -218,6 +219,7 @@ class PaymentService:
         student_group_repo=None,
         subscription_override_repo=None,
         student_repo=None,
+        subscription_recalculations: SubscriptionRecalculations | None = None,
     ) -> None:
         # student_repo — чтобы долг удалённого ученика нигде не считался (compute_ledger_map); без него — как раньше
         self._student_repo = student_repo
@@ -229,8 +231,11 @@ class PaymentService:
         self._student_group_repo = student_group_repo
         self._sub_override_repo = subscription_override_repo
         self._sub_since: dict[tuple[str, str], str] = {}   # постоянное правило действует с этого месяца
+        self.subscription_recalculations = subscription_recalculations
 
-    async def _sub_override_map(self) -> dict[tuple[str, str, str], int]:
+    async def _sub_override_map(
+        self, recalculated_keys: set[tuple[str, str, str]] | None = None,
+    ) -> dict[tuple[str, str, str], int]:
         """(group_id, period|'*', student_id|'') → amount.
 
         ``period='*'`` — постоянное персональное правило; пустой student_id — вся группа.
@@ -244,7 +249,16 @@ class PaymentService:
             (o.group_id, o.student_id or ""): (o.created_at or "")[:7]
             for o in rows if o.period_month == "*"
         }
-        return {(o.group_id, o.period_month, o.student_id or ""): o.amount for o in rows}
+        keyed = {(o.group_id, o.period_month, o.student_id or ""): o for o in rows}
+        amounts = {key: o.amount for key, o in keyed.items()}
+        if self.subscription_recalculations is not None:
+            for row in await self.subscription_recalculations.rows():
+                # Новая ручная цена на месяц имеет приоритет над предыдущим перерасчётом.
+                if row.override_version == override_version(keyed.get(row.key)):
+                    amounts[row.key] = row.amount
+                    if recalculated_keys is not None:
+                        recalculated_keys.add(row.key)
+        return amounts
 
     async def subscription_revenue_breakdown(
         self, period_month: str,
@@ -421,7 +435,8 @@ class PaymentService:
                 for gid in ls.group_ids:            # объединённое занятие (MERGEABLE_GROUPS) — всем его группам
                     if gid in sub_ids:
                         lesson_months.setdefault(gid, set()).add(ls.date[:7])
-        overrides = await self._sub_override_map()
+        recalculated: set[tuple[str, str, str]] = set()
+        overrides = await self._sub_override_map(recalculated)
         membership = await self._student_group_repo.get_membership_map()
         result: dict[str, BillAggregate] = {}
         for group in sub_groups:
@@ -437,7 +452,7 @@ class PaymentService:
             amount = self._sub_amount(
                 overrides, group.group_id, period_month, student_id, group.price_full,
             )
-            if amount <= 0:  # 0 = освобождение в этом месяце
+            if amount <= 0 and (group.group_id, period_month, student_id) not in recalculated:
                 continue
             result[f"{SUBSCRIPTION_KEY_PREFIX}{group.group_id}"] = BillAggregate(
                 name="Абонемент",  # без названия группы — не влезает в счёт
@@ -491,11 +506,14 @@ class PaymentService:
             agg.name = ", ".join(names)
             agg.group = True
 
-    async def ledger_for(self, student: Student, period_month: str, sync: bool = True) -> dict:
+    async def ledger_for(
+        self, student: Student, period_month: str, sync: bool = True, *, sync_key: str | None = None,
+    ) -> dict:
         """Накопительный счёт по педагогам за месяц: teacher_id → TeacherLedger.
 
         Синхронизирует строку-остаток (pending) в листе: остаток = начислено − оплачено.
         Оплаченные строки не трогаются — их может быть несколько (оплата после каждого урока).
+        sync_key ограничивает запись одним начислением, например при перерасчёте абонемента.
         sync=False — только посчитать (экраны-списки): запись остатка по каждому ученику группы
         делала сводку педагога 11-секундной после новой отметки занятия.
         """
@@ -513,7 +531,7 @@ class PaymentService:
             pending = next((r for r in t_rows if r.status != PaymentStatus.PAID), None)
             paid = sum(r.total_amount for r in paid_rows)
             remainder = max(agg.total - paid, 0)
-            if not sync:
+            if not sync or (sync_key is not None and sync_key != teacher_id):
                 pass                                  # остаток считается из accrued − paid (TeacherLedger.remainder)
             elif pending is None:
                 if remainder > 0:
@@ -762,7 +780,8 @@ class PaymentService:
             if name is None:
                 return None
             gens.append((name, BaseRepository._gen.get(name, 0), id(BaseRepository._cache.get(name, (None,))[0])))
-        return (since_period or "", until_period or "", last_periods(1)[0], id(rate_history._rows), tuple(gens))
+        revision = self.subscription_recalculations.revision if self.subscription_recalculations is not None else 0
+        return (since_period or "", until_period or "", last_periods(1)[0], id(rate_history._rows), tuple(gens), revision)
 
     async def compute_ledger_map(
         self, since_period: str | None = None, until_period: str | None = None,

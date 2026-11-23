@@ -118,6 +118,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
 
     # ── Сервисы ──────────────────────────────────────────────────────────────
     from bot.services.salary_service import SalaryService
+    from bot.services.subscription_recalculation import SubscriptionRecalculations
     salary_service = SalaryService(lesson_repo, salary_override_repo, bonus_repo)
     lesson_service = LessonService(lesson_repo, submission_repo, teacher_repo, salary_service=salary_service)
     payment_service = PaymentService(
@@ -125,6 +126,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         group_repo=group_repo, student_group_repo=student_group_repo,
         subscription_override_repo=subscription_override_repo,
         student_repo=student_repo,              # долг удалённого ученика нигде не считается
+        subscription_recalculations=SubscriptionRecalculations(Path(settings.schedule_pilot_db))
+        if settings.schedule_pilot_db else None,
     )
     pending_queue.setup(payment_service)   # заявки родителей: снимок остатков на момент подачи
     # зарплата «процент от абонементов группы» (SUBSCRIPTION_SHARE_GROUPS) — начисления берёт из PaymentService

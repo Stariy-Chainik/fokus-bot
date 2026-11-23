@@ -173,8 +173,8 @@
   .search-x.on { display: grid; }
   .search-x:active { background: var(--line); color: var(--ink); }
   /* iOS: системный date-инпут не сжимается под контейнер и вылезает за правый край — снимаем нативный вид */
-  input[type="date"], input[type="time"], input[type="datetime-local"] { -webkit-appearance: none; appearance: none; display: block; height: 44px; }
-  input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+  input[type="date"], input[type="time"], input[type="datetime-local"], #recalc-month { -webkit-appearance: none; appearance: none; display: block; height: 44px; }
+  input[type="date"]::-webkit-date-and-time-value, #recalc-month::-webkit-date-and-time-value { text-align: left; margin: 0; }
   input[type="date"]::-webkit-calendar-picker-indicator { margin-left: auto; opacity: .6; }
   /* календарь посещений: сетка месяца с точками занятий */
   .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 2px 0 4px; }

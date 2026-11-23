@@ -870,6 +870,23 @@ const tDebtBlock = (d, sid) => `<div class="eyebrow">Оплата</div>
   <div class="card pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="font-weight:700">${d.total ? 'Не оплачено всего' : 'Всё оплачено'}</div><div class="money ${d.total ? 'bad' : ''}" style="font-size:20px;font-weight:800">${d.total ? fmt(d.total) : '✓'}</div></div>
   <div class="hint">по вашим направлениям за все месяцы · тап по месяцу — счёт</div></div>
   ${d.months.length ? list(d.months.map(m => cell({ lead: m.rest ? (m.paid ? '🟡' : '⬜') : '✅', plain: true, t: monthLabel(m.ym), s: `начислено ${fmt(m.total)}${m.paid ? ` · оплачено ${fmt(m.paid)}` : ''}`, r: m.rest ? `<b class="money bad">${fmt(m.rest)}</b>` : '', go: 't.bill', p: { sid, ym: m.ym } }))) : '<div class="empty">Начислений ещё нет</div>'}`;
+
+function tSubscriptionBlock(s) {
+  if (!s.subscriptions?.length) return '';
+  const cards = s.subscriptions.map(x => {
+    const p = { sid: s.id, ym: s.period, gid: x.groupId, total: x.total, paid: x.paid, student: s.name };
+    return `<div class="cell static"><span class="lead plain">💳</span><div>
+      <div class="t">${esc(x.name)}</div>
+      <div class="s">начислено ${fmt(x.total)}${x.paid ? ` · оплачено ${fmt(x.paid)}` : ''}</div>
+    </div><span class="r">${x.canEdit !== false ? `<button class="chip" style="padding:4px 10px"
+      data-act="tSubAsk" data-p='${esc(JSON.stringify(p))}' aria-label="Абонемент за этот месяц">✏️</button>` : ''}</span></div>
+    ${x.canRecalculate ? `<div class="pad">${btn('Перерасчёт по справке', 'tRecalcOpen', { sid: s.id, ym: s.period, gid: x.groupId, student: s.name, group: x.name }, 'sec')}</div>` : ''}`;
+  });
+  const manualHint = s.subscriptions.some(x => x.canEdit !== false)
+    ? '<p class="hint" style="margin-top:6px">Пришёл не с начала месяца — поставьте сумму за этот месяц. Месяц меняется чипами ниже.</p>' : '';
+  return `<div class="eyebrow">Абонемент за ${MON_NOM[+s.period.slice(5) - 1].toLowerCase()}</div>${list(cards)}${manualHint}`;
+}
+
 SCREENS['t.student'] = async ({ id, ym }) => {
   const s = await api(`/students/${id}${ym ? `?ym=${ym}` : ''}`);
   return { title: s.name, html: `
@@ -880,7 +897,7 @@ SCREENS['t.student'] = async ({ id, ym }) => {
     ${s.debt ? tDebtBlock(s.debt, id) : ''}
     ${(s.tariffs || []).length ? `<div class="eyebrow">Абонемент</div>${list(s.tariffs.map(g => `<div class="cell static"><span class="lead plain">💃</span><span><div class="t">${esc(g.name)}</div><div class="s">${fmt(g.freq.times === 2 ? g.freq.priceTwice : g.freq.priceThrice)} в месяц${g.freq.times === 2 && g.freq.since ? ` с ${monthLabel(g.freq.since).toLowerCase()}` : ''}</div>
       <div class="chips" style="margin:6px 0 0">${[2, 3].map(n => `<button class="chip" aria-pressed="${g.freq.times === n}" data-act="freqAsk" data-p='${esc(JSON.stringify({ sid: id, gid: g.id, times: n, name: g.name, price: n === 2 ? g.freq.priceTwice : g.freq.priceThrice, cur: g.freq.times }))}'>${n} раза в неделю</button>`).join('')}</div></span><span></span></div>`))}` : ''}
-    ${(s.subscriptions || []).length ? `<div class="eyebrow">Абонемент за ${MON_NOM[+s.period.slice(5) - 1].toLowerCase()}</div>${list(s.subscriptions.map(x => `<div class="cell static"><span class="lead plain">💳</span><span><div class="t">${esc(x.name)}</div><div class="s">начислено ${fmt(x.total)}${x.paid ? ` · оплачено ${fmt(x.paid)}` : ''}</div></span><span class="r"><button class="chip" style="padding:4px 10px" data-act="tSubAsk" data-p='${esc(JSON.stringify({ sid: id, ym: s.period, gid: x.groupId, total: x.total, paid: x.paid, student: s.name }))}' aria-label="Абонемент за этот месяц">✏️</button></span></div>`))}<p class="hint" style="margin-top:6px">Пришёл не с начала месяца — поставьте сумму за этот месяц. Месяц меняется чипами ниже.</p>` : ''}
+    ${tSubscriptionBlock(s)}
     ${compBlock(s.competitions)}
     <div style="margin-top:10px">${list([cell({ lead: '📅', plain: true, t: 'Все занятия ученика', s: state.me.canBill ? 'по месяцам: кто вёл, группа, сумма, оплата' : 'по месяцам: кто вёл, группа', go: 'a.student.lessons', p: { id, name: s.name } })])}</div>
     <div class="eyebrow">Мои занятия с учеником</div>
@@ -1174,7 +1191,9 @@ SCREENS['t.bill'] = async ({ sid, ym }) => {
       // оплаты по начислению; свою отметку педагог может снять («❌» — тот же лист, что у администратора)
       + (r.paidRows || []).map(p => `<div class="lesson-line">${mark(false, true)}<span class="hint">оплачено ${fdate(p.date)}${p.method ? ' · ' + (METHOD[p.method] || p.method) : ''}</span><span class="amt">${fmt(p.amount)}${p.mine ? ` <button class="chip" style="padding:2px 8px;margin-left:6px" data-act="cancelPayAsk" data-p='${esc(JSON.stringify({ pid: p.id, title: `${b.student.name} · ${r.name} · ${fmon(ym)}`, amount: p.amount }))}' aria-label="Убрать оплату">❌</button>` : ''}</span></div>`).join('');
     if (r.subscription) {
-      return head + (r.rest
+      const recalc = b.canRecalculate && r.ownGroup
+        ? `<div class="pad">${btn('Перерасчёт по справке', 'tRecalcOpen', { sid, ym, gid: r.key.split(':')[1], student: b.student.name, group: r.name }, 'sec')}</div>` : '';
+      return head + recalc + (r.rest
         ? `<button class="lesson-line pick" data-act="tbillSub" data-p='${esc(JSON.stringify({ key: r.key }))}'>${mark(!!sel.sub[r.key], false)}<span>абонемент за месяц · к оплате</span><span class="amt">${fmt(r.rest)}</span></button>`
         : `<div class="lesson-line">${mark(false, true)}<span class="hint">абонемент оплачен</span><span class="amt">${fmt(r.total)}</span></div>`);
     }
@@ -1206,6 +1225,69 @@ ACT.tSubDo = async ({ sid, ym, gid }) => {
   catch (e) { closeSheet(); toast(e.data && e.data.message ? e.data.message : errText(e)); }
   finally { subSaving = false; }
 };
+
+ACT.tRecalcOpen = p => {
+  closeSheet();
+  sheet(`<h3>Перерасчёт по справке</h3><div class="hint">${esc(p.student)} · ${esc(p.group)}</div>
+    ${field('recalc-start', 'Освобождение с', p.start, 'type="date" required')}
+    ${field('recalc-end', 'Освобождение по включительно', p.end, 'type="date" required')}
+    ${field('recalc-missed', 'Пропущено занятий из 8', p.missed, 'type="number" min="1" max="8" step="1" inputmode="numeric" required')}
+    ${field('recalc-month', 'Месяц счёта для перерасчёта', p.ym, 'type="month" required')}
+    <div style="margin-top:12px">${btn('Рассчитать', 'tRecalcPreview', p)}</div>`);
+};
+
+const requestSubscriptionRecalc = (p, quote) => api(`/bills/student/${encodeURIComponent(p.sid)}/subscription/recalculation`, {
+  method: 'POST',
+  body: { groupId: p.gid, start: p.start, end: p.end, missed: p.missed, ym: p.ym, ...(quote === undefined ? {} : { quote }) },
+});
+
+ACT.tRecalcPreview = async p => {
+  const monthField = document.getElementById('recalc-month');
+  const draft = { ...p, start: val('recalc-start'), end: val('recalc-end'), missed: Number(val('recalc-missed')), ym: val('recalc-month') };
+  if (!draft.start || !draft.end || draft.start > draft.end || !draft.ym ||
+      !Number.isInteger(draft.missed) || draft.missed < 1 || draft.missed > 8) {
+    toast('Проверь даты, месяц счёта и число пропусков от 1 до 8');
+    return;
+  }
+  try {
+    const preview = await requestSubscriptionRecalc(draft);
+    if (!monthField?.isConnected) return;
+    closeSheet();
+    const month = fmon(draft.ym).toLowerCase();
+    if (preview.duplicate) return toast(`Справка уже учтена за ${month}`);
+    sheet(`<h3>Перерасчёт за ${esc(month)}</h3>
+      <div class="hint">${esc(draft.student)} · ${esc(draft.group)}</div>
+      <p class="hint">${esc(fdate(draft.start))} – ${esc(fdate(draft.end))} · пропущено ${preview.missedTotal} из 8</p>
+      <div class="card pad">
+        <div>Было <strong>${fmt(preview.before)}</strong></div>
+        ${preview.paid ? `<div>После перерасчёта <strong>${fmt(preview.amount)}</strong></div>
+          <div class="hint">Уже оплачено ${fmt(preview.paid)}</div>` : ''}
+        <div style="margin-top:8px">К оплате <strong class="money">${fmt(preview.rest)}</strong></div>
+      </div>
+      <div style="margin-top:12px">
+        ${btn('Применить перерасчёт', 'tRecalcApply', { draft, quote: preview.quote })}
+        ${btn('Вернуться к справке', 'tRecalcOpen', draft, 'ghost')}
+      </div>`);
+  } catch (e) { toast(e.data?.message || errText(e)); }
+};
+
+ACT.tRecalcApply = async ({ draft, quote }) => {
+  const screen = cur();
+  try {
+    const result = await requestSubscriptionRecalc(draft, quote);
+    if (cur() === screen) {
+      closeSheet();
+      screen.p = { ...screen.p, ym: draft.ym };
+      state.ui.tbill = null;
+      render();
+    }
+    toast(result.duplicate ? 'Справка уже учтена' : `Перерасчёт сохранён · абонемент ${fmt(result.amount)}`, 'ok');
+  } catch (e) {
+    if (cur() === screen && e.code === 'conflict') ACT.tRecalcOpen(draft);
+    toast(e.data?.message || errText(e), 'bad');
+  }
+};
+
 function tbillTotal() {
   const a = state.ui.tbill; if (!a || !a.data) return 0;
   let t = 0;

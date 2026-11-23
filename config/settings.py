@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     schedule_pilot_teacher_id: str = Field(default="", alias="SCHEDULE_PILOT_TEACHER_ID")
     schedule_pilot_db: str = Field(default="", alias="SCHEDULE_PILOT_DB")
     schedule_pilot_accounts: list[SchedulePilotAccount] = Field(default_factory=list, alias="SCHEDULE_PILOT_ACCOUNTS")
+    subscription_recalc_teacher_ids: str | None = Field(default=None, alias="SUBSCRIPTION_RECALC_TEACHER_IDS")
     sheet_teacher_period_submissions: str = Field(
         default="teacher_period_submissions", alias="SHEET_TEACHER_PERIOD_SUBMISSIONS",
     )
@@ -265,6 +266,12 @@ class Settings(BaseSettings):
     @property
     def owner_teacher_id_set(self) -> set:
         return {t.strip() for t in self.owner_teacher_ids.replace("|", ",").split(",") if t.strip()}
+
+    @property
+    def subscription_recalc_teacher_id_set(self) -> set[str]:
+        if self.subscription_recalc_teacher_ids is None:
+            return {self.schedule_pilot_teacher_id} & self.owner_teacher_id_set
+        return {tid.strip() for tid in self.subscription_recalc_teacher_ids.split(",") if tid.strip()}
 
     # Аренда зала: педагог с прямой оплатой (DIRECT_PAY_TEACHER_IDS) перечисляет
     # школе фикс. сумму с каждого своего индивидуального занятия — это выручка

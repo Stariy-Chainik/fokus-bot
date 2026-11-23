@@ -450,13 +450,16 @@ def student_routes(
                     tariffs.append({"id": gid, "name": g.name, **info})
         subscriptions = []
         editable = await bill_ctx.sub_edit_group_ids(teacher)
-        if editable & set(gids):
+        recalc_groups = own_visible if bill_ctx.can_recalculate(teacher) else set()
+        subscription_groups = editable | recalc_groups
+        if subscription_groups & set(gids):
             ledgers = await payment_service.ledger_for(s, ym, sync=False)
             for gid in gids:
-                led = ledgers.get(f"{SUBSCRIPTION_KEY_PREFIX}{gid}") if gid in editable else None
+                led = ledgers.get(f"{SUBSCRIPTION_KEY_PREFIX}{gid}") if gid in subscription_groups else None
                 if led is not None:
                     subscriptions.append({"groupId": gid, "name": groups_map.get(gid, gid),
-                                          "total": led.accrued, "paid": led.paid})
+                                          "total": led.accrued, "paid": led.paid,
+                                          **({"canRecalculate": True, "canEdit": gid in editable} if gid in recalc_groups else {})})
         all_groups = {g.group_id: g for g in await group_repo.get_all(include_archived=True)}
         debt = await bill_ctx.student_debt(teacher, sid) if teacher.teacher_id in settings.billing_teacher_id_set else None
         ballroom = any(dance_rank.is_ballroom_group(all_groups.get(g)) for g in gids)
