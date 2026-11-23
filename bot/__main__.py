@@ -216,7 +216,7 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
                 accept_owner_initials=settings.schedule_pilot_teacher_id in settings.owner_teacher_id_set,
             ))
         if pilots:
-            schedule_pilots = SchedulePilots(pilots)
+            schedule_pilots = SchedulePilots(pilots, teacher_repo=teacher_repo)
             dp["schedule_pilots"] = schedule_pilots
     dp.update.outer_middleware(PrivateChatsOnlyMiddleware(schedule_pilots))
     dp.update.outer_middleware(DedupUpdateMiddleware())

@@ -186,6 +186,55 @@ _PROMPT = ("Это чек об оплате занятий в танцеваль
            "(пустая строка, если нет); confidence — high, если сумма читается однозначно, иначе low.")
 
 
+def _parse_receipt_json(parsed: dict[str, Any]) -> ReceiptInfo:
+    if not parsed.get("is_receipt") or parsed.get("confidence") != "high":
+        return ReceiptInfo(None, str(parsed.get("date") or ""))
+    amount = int(round(float(parsed.get("amount") or 0)))
+    return ReceiptInfo(amount if amount > 0 else None, str(parsed.get("date") or ""))
+
+
+async def recognize_openai(data: bytes, mime: str) -> Optional[ReceiptInfo]:
+    """Сумма и дата из чека через OpenAI GPT API (structured output). None — не чек или сумма не читается."""
+    import aiohttp
+
+    b64 = base64.standard_b64encode(data).decode("ascii")
+    if mime == "application/pdf":
+        attachment: dict[str, Any] = {
+            "type": "file",
+            "file": {"filename": "receipt.pdf", "file_data": f"data:{mime};base64,{b64}"},
+        }
+    else:
+        attachment = {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"}}
+    payload = {
+        "model": settings.openai_receipt_model,
+        "max_completion_tokens": 512,
+        "messages": [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": [attachment, {"type": "text", "text": _PROMPT}]},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "receipt_check", "strict": True, "schema": _SCHEMA},
+        },
+    }
+    url = f"{settings.openai_base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status >= 400:
+                body = (await resp.text())[:300]
+                raise RuntimeError(f"OpenAI receipt check HTTP {resp.status}: {body}")
+            result = await resp.json()
+    message = (result.get("choices") or [{}])[0].get("message") or {}
+    if message.get("refusal"):
+        logger.info("Сверка чека (OpenAI): модель отказалась читать файл")
+        return None
+    text = message.get("content") or ""
+    if not text:
+        return None
+    return _parse_receipt_json(json.loads(text))
+
+
 async def recognize_claude(data: bytes, mime: str) -> Optional[ReceiptInfo]:
     """Сумма и дата из чека через Claude API (structured output). None — не чек или сумма не читается."""
     global _client
@@ -206,14 +255,17 @@ async def recognize_claude(data: bytes, mime: str) -> Optional[ReceiptInfo]:
         logger.info("Сверка чека: модель отказалась читать файл")
         return None
     text = next((b.text for b in response.content if b.type == "text"), "")
-    parsed = json.loads(text)
-    if not parsed.get("is_receipt") or parsed.get("confidence") != "high":
-        return ReceiptInfo(None, str(parsed.get("date") or ""))
-    amount = int(round(float(parsed.get("amount") or 0)))
-    return ReceiptInfo(amount if amount > 0 else None, str(parsed.get("date") or ""))
+    return _parse_receipt_json(json.loads(text))
 
 
-_recognizer: Recognizer = recognize_claude
+async def recognize_auto(data: bytes, mime: str) -> Optional[ReceiptInfo]:
+    """Приоритет — OpenAI GPT (если задан OPENAI_API_KEY), иначе Claude."""
+    if settings.openai_api_key:
+        return await recognize_openai(data, mime)
+    return await recognize_claude(data, mime)
+
+
+_recognizer: Recognizer = recognize_auto
 
 
 async def _recipients(student_id: str) -> list[int]:

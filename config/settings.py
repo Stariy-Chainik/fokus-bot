@@ -76,14 +76,23 @@ class Settings(BaseSettings):
     # Бот в мессенджере MAX (кабинет родителя). Пусто — MAX не запускается.
     max_bot_token: str = Field(default="", alias="MAX_BOT_TOKEN")
 
-    # Сверка суммы в чеке с заявкой родителя (bot/services/receipt_check.py, решение владельца 06.11.2026):
-    # чек читает Claude API, сообщение только при расхождении. Пусто — сверка выключена.
+    # AI API (OpenAI GPT — приоритетный; Claude — запасной при отсутствии OPENAI_API_KEY):
+    # используется для сверки чеков (bot/services/receipt_check.py) и гибридного разбора расписаний
+    # (bot/services/schedule_ai.py). Если ключи пустые — бот работает полностью штатно без AI.
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
+    openai_receipt_model: str = Field(default="gpt-4o-mini", alias="OPENAI_RECEIPT_MODEL")
+    openai_schedule_model: str = Field(default="gpt-4o-mini", alias="OPENAI_SCHEDULE_MODEL")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     receipt_check_model: str = Field(default="claude-opus-5-5", alias="RECEIPT_CHECK_MODEL")
 
     @property
     def receipt_check_enabled(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return bool(self.openai_api_key or self.anthropic_api_key)
+
+    @property
+    def schedule_ai_enabled(self) -> bool:
+        return bool(self.openai_api_key)
 
     # Турниры ФТСАРР (решение владельца 10.11.2026, bot/services/competition_results.py): раз в день в
     # FTSARR_SYNC_TIME (МСК) обход результатов турниров текущего и прошлого месяца по регионам FTSARR_REGIONS

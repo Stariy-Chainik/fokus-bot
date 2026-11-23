@@ -11,11 +11,13 @@ from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from aiogram.types import Message
 
 from bot.models import Student, User
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
@@ -466,6 +468,50 @@ class SchedulePilot:
     def owns(self, user: User) -> bool:
         return user.tg_id == self.tg_id and user.teacher_id == self.teacher_id
 
+    def parse_local(self, text: str, published: date, message_id: int) -> dict[int, tuple[date, list[Slot]]]:
+        """Локальный бесплатный разбор дневного или недельного расписания."""
+        parsed = parse_schedule(
+            text, published, accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title,
+            accept_owner_initials=self.accept_owner_initials,
+        )
+        plans: dict[int, tuple[date, list[Slot]]] = {}
+        if parsed is not None:
+            plans[message_id] = parsed
+        elif self.accept_weekly:
+            for day, slots in _parse_week_schedule(text, published, accept_plain_title=self.accept_plain_title).items():
+                draft_id = -(message_id * _WEEK_DRAFT_STRIDE + day.weekday())
+                plans[draft_id] = (day, slots)
+        return plans
+
+    async def store_plans(
+        self, message_id: int, version: int, update_id: int, published: datetime,
+        plans: dict[int, tuple[date, list[Slot]]], *, source_label: str = "",
+    ) -> bool:
+        payloads = {
+            draft_id: json.dumps({"date": day.isoformat(), "published": published.isoformat(),
+                                  "slots": [asdict(slot) for slot in slots]}, ensure_ascii=False)
+            for draft_id, (day, slots) in plans.items()
+        }
+        stored = await asyncio.to_thread(self._save, message_id, version, update_id, payloads)
+        if stored and plans:
+            tag = f" ({source_label})" if source_label else ""
+            logger.info("Черновик расписания получен%s: чат %s, пост %s, педагог %s (%d дн.)",
+                        tag, self.chat_id, message_id, self.teacher_id, len(plans))
+        return stored
+
+    def _has_draft_for(self, message_id: int) -> bool:
+        week_key = -message_id * _WEEK_DRAFT_STRIDE
+        with closing(self._open()) as conn:
+            row = conn.execute("""SELECT 1 FROM drafts
+                WHERE chat_id=? AND sender_id=? AND teacher_id=?
+                  AND (message_id=? OR message_id BETWEEN ? AND ?)
+                  AND payload IS NOT NULL
+                LIMIT 1""", (self.chat_id, self.tg_id, self.teacher_id, message_id, week_key - 6, week_key)).fetchone()
+        return row is not None
+
+    async def has_draft_for(self, message_id: int) -> bool:
+        return await asyncio.to_thread(self._has_draft_for, message_id)
+
     async def receive(self, message: Message, update_id: int, *, edited: bool) -> None:
         """Проверяем реального отправителя и заголовок, даже если пост создан владельцем."""
         sender = message.from_user
@@ -473,31 +519,12 @@ class SchedulePilot:
                 or sender.is_bot or message.sender_chat is not None or message.forward_origin is not None):
             return
         published = message.date.astimezone(_MOSCOW)
-        text = message.text or ""
-        parsed = parse_schedule(
-            text, published.date(), accept_weekday=self.accept_weekday, accept_plain_title=self.accept_plain_title,
-            accept_owner_initials=self.accept_owner_initials,
-        )
-        plans: dict[int, tuple[date, list[Slot]]] = {}
-        if parsed is not None:
-            plans[message.message_id] = parsed
-        elif self.accept_weekly:
-            for day, slots in _parse_week_schedule(text, published.date(), accept_plain_title=self.accept_plain_title).items():
-                draft_id = -(message.message_id * _WEEK_DRAFT_STRIDE + day.weekday())
-                plans[draft_id] = (day, slots)
+        plans = self.parse_local(message.text or "", published.date(), message.message_id)
         if not plans and not edited:
             return
-        payloads = {
-            draft_id: json.dumps({"date": day.isoformat(), "published": published.isoformat(),
-                                  "slots": [asdict(slot) for slot in slots]}, ensure_ascii=False)
-            for draft_id, (day, slots) in plans.items()
-        }
         modified = message.edit_date
         version = int(modified.timestamp()) if isinstance(modified, datetime) else modified or int(message.date.timestamp())
-        stored = await asyncio.to_thread(self._save, message.message_id, version, update_id, payloads)
-        if stored and plans:
-            logger.info("Черновик расписания получен: чат %s, пост %s, педагог %s",
-                        self.chat_id, message.message_id, self.teacher_id)
+        await self.store_plans(message.message_id, version, update_id, published, plans)
 
     _INITIALIZED_DBS: set[Path] = set()
 
@@ -772,14 +799,27 @@ class SchedulePilot:
         return {"date": plan["date"], "slots": [names.row(slot) for slot in plan["slots"]]}
 
 
-class SchedulePilots:
-    """Изолированные черновики из одного источника на аккаунт педагога."""
+AIScheduleParser = Callable[[str, date, str, list[dict[str, str]]], Awaitable[dict[str, dict[date, list[Slot]]]]]
 
-    def __init__(self, accounts: list[SchedulePilot]):
+
+class SchedulePilots:
+    """Изолированные черновики из одного источника на аккаунт педагога (+ опциональный AI-разбор)."""
+
+    def __init__(
+        self,
+        accounts: list[SchedulePilot],
+        *,
+        teacher_repo: Any = None,
+        ai_parser: AIScheduleParser | None = None,
+    ):
         self.accounts = {pilot.tg_id: pilot for pilot in accounts}
         if len(self.accounts) != len(accounts):
             raise ValueError("У Telegram-аккаунта может быть один источник расписания")
+        self.by_teacher = {pilot.teacher_id: pilot for pilot in accounts}
         self._archive_pilot = accounts[0] if accounts else None
+        self._teacher_repo = teacher_repo
+        self._ai_parser = ai_parser
+        self._ai_tasks: set[asyncio.Task[Any]] = set()
 
     def for_user(self, user: User) -> SchedulePilot | None:
         pilot = self.accounts.get(user.tg_id)
@@ -788,13 +828,97 @@ class SchedulePilots:
     async def recent_messages(self, limit: int = 30) -> list[dict]:
         return await self._archive_pilot.recent_messages(limit) if self._archive_pilot else []
 
+    async def _teacher_catalog(self) -> list[dict[str, str]]:
+        names: dict[str, str] = {}
+        if self._teacher_repo is not None:
+            try:
+                for t in await self._teacher_repo.get_all():
+                    names[t.teacher_id] = t.name
+            except Exception as exc:
+                logger.warning("AI-разбор расписания: не удалось прочитать список педагогов: %s", exc)
+        out: list[dict[str, str]] = []
+        for tid, pilot in self.by_teacher.items():
+            entry: dict[str, str] = {"id": tid, "name": names.get(tid, tid)}
+            if pilot.accept_owner_initials:
+                entry["aliases"] = "С.А."
+            out.append(entry)
+        return out
+
+    async def _receive_via_ai(
+        self, sender_pilot: SchedulePilot, message_id: int, version: int, update_id: int,
+        published: datetime, text: str, *, edited: bool,
+    ) -> None:
+        from bot.services.schedule_ai import parse_schedule_openai
+
+        parser = self._ai_parser or parse_schedule_openai
+        try:
+            catalog = await self._teacher_catalog()
+            by_teacher = await parser(text, published.date(), sender_pilot.teacher_id, catalog)
+        except Exception as exc:
+            logger.warning("AI-разбор расписания (пост %s) не выполнен: %s", message_id, exc)
+            return
+
+        for tid, day_plans in by_teacher.items():
+            target = self.by_teacher.get(tid)
+            if target is None or not day_plans:
+                continue
+            if len(day_plans) == 1:
+                only_day, only_slots = next(iter(day_plans.items()))
+                mapped = {message_id: (only_day, only_slots)}
+            else:
+                mapped = {
+                    -(message_id * _WEEK_DRAFT_STRIDE + day.weekday()): (day, slots)
+                    for day, slots in day_plans.items()
+                }
+            await target.store_plans(message_id, version, update_id, published, mapped, source_label="GPT")
+
+        if edited:
+            for tid, target in self.by_teacher.items():
+                if tid not in by_teacher and await target.has_draft_for(message_id):
+                    await target.store_plans(message_id, version, update_id, published, {})
+
+    async def wait_ai(self) -> None:
+        """Дождаться фоновых задач AI-разбора (для тестов и корректного завершения)."""
+        if self._ai_tasks:
+            await asyncio.gather(*list(self._ai_tasks), return_exceptions=True)
+
     async def receive(self, message: Message, update_id: int, *, edited: bool) -> None:
         if self._archive_pilot and message.chat.id == self._archive_pilot.chat_id:
             try:
                 await self._archive_pilot.archive_message(message)
             except Exception:
                 logger.warning("Не удалось сохранить сообщение %s в архив чата", message.message_id, exc_info=True)
-        if message.from_user:
-            pilot = self.accounts.get(message.from_user.id)
-            if pilot:
-                await pilot.receive(message, update_id, edited=edited)
+        sender = message.from_user
+        if (sender is None or sender.is_bot or message.sender_chat is not None
+                or message.forward_origin is not None):
+            return
+        pilot = self.accounts.get(sender.id)
+        if pilot is None or message.chat.id != pilot.chat_id:
+            return
+
+        text = (message.text or "").strip()
+        published = message.date.astimezone(_MOSCOW)
+        modified = message.edit_date
+        version = int(modified.timestamp()) if isinstance(modified, datetime) else modified or int(message.date.timestamp())
+
+        local_plans = pilot.parse_local(text, published.date(), message.message_id)
+        if local_plans:
+            await pilot.store_plans(message.message_id, version, update_id, published, local_plans)
+            return
+
+        ai_active = self._ai_parser is not None or settings.schedule_ai_enabled
+        if ai_active:
+            from bot.services.schedule_ai import looks_like_schedule
+
+            if looks_like_schedule(text):
+                task = asyncio.create_task(
+                    self._receive_via_ai(pilot, message.message_id, version, update_id, published, text, edited=edited),
+                )
+                self._ai_tasks.add(task)
+                task.add_done_callback(self._ai_tasks.discard)
+                return
+
+        if edited:
+            for target in self.by_teacher.values():
+                if target is pilot or await target.has_draft_for(message.message_id):
+                    await target.store_plans(message.message_id, version, update_id, published, {})
