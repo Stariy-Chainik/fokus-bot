@@ -179,6 +179,10 @@ def test_ai_error_degrades_gracefully(tmp_path):
 def test_receipt_check_prefers_openai_over_claude(monkeypatch):
     called: list[str] = []
 
+    async def fake_vertex(data, mime):
+        called.append("vertex")
+        return rc.ReceiptInfo(5000, "23.11.2026")
+
     async def fake_openai(data, mime):
         called.append("openai")
         return rc.ReceiptInfo(5000, "23.11.2026")
@@ -187,12 +191,18 @@ def test_receipt_check_prefers_openai_over_claude(monkeypatch):
         called.append("claude")
         return rc.ReceiptInfo(5000, "23.11.2026")
 
+    monkeypatch.setattr(rc, "recognize_vertex_express", fake_vertex)
     monkeypatch.setattr(rc, "recognize_openai", fake_openai)
     monkeypatch.setattr(rc, "recognize_claude", fake_claude)
 
-    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "AQ.fake-express-key")
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
     assert settings.receipt_check_enabled is True
+    assert asyncio.run(rc.recognize_auto(b"img", "image/jpeg")) == rc.ReceiptInfo(5000, "23.11.2026")
+    assert called == ["vertex"]
+
+    called.clear()
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     assert asyncio.run(rc.recognize_auto(b"img", "image/jpeg")) == rc.ReceiptInfo(5000, "23.11.2026")
     assert called == ["openai"]
 
@@ -204,3 +214,32 @@ def test_receipt_check_prefers_openai_over_claude(monkeypatch):
 
     monkeypatch.setattr(settings, "anthropic_api_key", "")
     assert settings.receipt_check_enabled is False
+
+
+def test_schedule_ai_routes_aq_key_to_vertex_express(monkeypatch):
+    from bot.services import schedule_ai
+
+    seen: list[tuple[str, str]] = []
+
+    async def fake_vertex(api_key: str, model: str, user_prompt: str):
+        seen.append((api_key, model))
+        return {
+            "is_schedule": True,
+            "schedules": [{
+                "teacher_id": "TCH-0005",
+                "days": [{"date": "2026-11-23", "slots": [{"time": "17:00", "end": None, "duration": 60, "names": "Егор"}]}],
+            }],
+        }
+
+    monkeypatch.setattr(settings, "openai_api_key", "AQ.fake-express-key")
+    monkeypatch.setattr(settings, "openai_schedule_model", "gpt-4o-mini")
+    monkeypatch.setattr(schedule_ai, "_call_vertex_express", fake_vertex)
+
+    res = asyncio.run(schedule_ai.parse_schedule_openai(
+        "Влад Пн\n17:00 Егор 60",
+        date(2026, 11, 23),
+        "TCH-0001",
+        [{"id": "TCH-0005", "name": "Никишин Влад"}],
+    ))
+    assert seen == [("AQ.fake-express-key", "gemini-2.5-flash")]
+    assert "TCH-0005" in res and date(2026, 11, 23) in res["TCH-0005"]

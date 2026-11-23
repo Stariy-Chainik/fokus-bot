@@ -192,16 +192,125 @@ def validate_ai_schedule(
     return {tid: days for tid, days in by_teacher.items() if days}
 
 
+_GEMINI_SCHEDULE_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "is_schedule": {"type": "BOOLEAN"},
+        "schedules": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "teacher_id": {"type": "STRING"},
+                    "days": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "date": {"type": "STRING"},
+                                "slots": {
+                                    "type": "ARRAY",
+                                    "items": {
+                                        "type": "OBJECT",
+                                        "properties": {
+                                            "time": {"type": "STRING"},
+                                            "end": {"type": "STRING", "nullable": True},
+                                            "duration": {"type": "INTEGER", "nullable": True},
+                                            "names": {"type": "STRING"},
+                                        },
+                                        "required": ["time", "names"],
+                                    },
+                                },
+                            },
+                            "required": ["date", "slots"],
+                        },
+                    },
+                },
+                "required": ["teacher_id", "days"],
+            },
+        },
+    },
+    "required": ["is_schedule", "schedules"],
+}
+
+_VERTEX_EXPRESS_URL = "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent"
+
+
+def _effective_schedule_model(api_key: str) -> str:
+    model = settings.openai_schedule_model
+    if api_key.startswith(("AQ.", "AIza")) and model.startswith("gpt-"):
+        return "gemini-2.5-flash"
+    return model
+
+
+async def _call_vertex_express(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
+    import aiohttp
+
+    url = _VERTEX_EXPRESS_URL.format(model=model)
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+    payload = {
+        "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _GEMINI_SCHEDULE_SCHEMA,
+            "maxOutputTokens": 2048,
+        },
+    }
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status >= 400:
+                body = (await resp.text())[:300]
+                raise RuntimeError(f"Vertex Express schedule parse HTTP {resp.status}: {body}")
+            result = await resp.json()
+    parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
+    return json.loads(content) if content else {}
+
+
+async def _call_openai_compat(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
+    import aiohttp
+
+    base_url = settings.openai_base_url.rstrip("/")
+    if api_key.startswith("AIza") and base_url == "https://api.openai.com/v1":
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+    payload = {
+        "model": model,
+        "max_completion_tokens": 1500,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "schedule_parse", "strict": True, "schema": _SCHEDULE_SCHEMA},
+        },
+    }
+    url = f"{base_url}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status >= 400:
+                body = (await resp.text())[:300]
+                raise RuntimeError(f"OpenAI schedule parse HTTP {resp.status}: {body}")
+            result = await resp.json()
+    message = (result.get("choices") or [{}])[0].get("message") or {}
+    if message.get("refusal"):
+        return {}
+    content = message.get("content") or ""
+    return json.loads(content) if content else {}
+
+
 async def parse_schedule_openai(
     text: str,
     published: date,
     sender_teacher_id: str,
     teachers: list[dict[str, str]],
 ) -> dict[str, dict[date, list[Slot]]]:
-    """Разобрать сообщение через OpenAI Chat Completions API (structured JSON)."""
-    if not settings.openai_api_key or not looks_like_schedule(text):
+    """Разобрать сообщение через OpenAI / Gemini AI Studio / Vertex AI Express API (structured JSON)."""
+    api_key = settings.openai_api_key.strip()
+    if not api_key or not looks_like_schedule(text):
         return {}
-    import aiohttp
 
     weekday_ru = _WEEKDAY_RU[published.weekday()]
     teacher_lines = "\n".join(
@@ -214,32 +323,10 @@ async def parse_schedule_openai(
         f"Педагоги клуба:\n{teacher_lines}\n\n"
         f"Текст сообщения:\n{text}"
     )
-    payload = {
-        "model": settings.openai_schedule_model,
-        "max_completion_tokens": 1500,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {"name": "schedule_parse", "strict": True, "schema": _SCHEDULE_SCHEMA},
-        },
-    }
-    url = f"{settings.openai_base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status >= 400:
-                body = (await resp.text())[:300]
-                raise RuntimeError(f"OpenAI schedule parse HTTP {resp.status}: {body}")
-            result = await resp.json()
-    message = (result.get("choices") or [{}])[0].get("message") or {}
-    if message.get("refusal"):
-        return {}
-    content = message.get("content") or ""
-    if not content:
-        return {}
-    parsed = json.loads(content)
+    model = _effective_schedule_model(api_key)
+    if api_key.startswith("AQ."):
+        parsed = await _call_vertex_express(api_key, model, user_prompt)
+    else:
+        parsed = await _call_openai_compat(api_key, model, user_prompt)
     allowed = {t["id"] for t in teachers}
     return validate_ai_schedule(parsed, published, allowed)
