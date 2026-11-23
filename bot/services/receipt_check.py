@@ -203,18 +203,18 @@ _GEMINI_RECEIPT_SCHEMA: dict[str, Any] = {
     },
     "required": ["is_receipt", "amount", "date", "confidence"],
 }
-_VERTEX_EXPRESS_URL = "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent"
+_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
 def _effective_receipt_model(api_key: str) -> str:
     model = settings.openai_receipt_model
     if api_key.startswith(("AQ.", "AIza")) and model.startswith("gpt-"):
-        return "gemini-2.5-flash"
+        return "gemini-flash-latest"
     return model
 
 
-async def recognize_vertex_express(data: bytes, mime: str) -> Optional[ReceiptInfo]:
-    """Сумма и дата из чека (фото/PDF) через Google Vertex AI Express Mode (ключ AQ....)."""
+async def recognize_gemini(data: bytes, mime: str) -> Optional[ReceiptInfo]:
+    """Сумма и дата из чека (фото/PDF) через Google Gemini AI Studio (ключи AQ.* и AIza*)."""
     import aiohttp
 
     api_key = settings.openai_api_key.strip()
@@ -235,13 +235,13 @@ async def recognize_vertex_express(data: bytes, mime: str) -> Optional[ReceiptIn
             "maxOutputTokens": 512,
         },
     }
-    url = _VERTEX_EXPRESS_URL.format(model=model)
+    url = _GEMINI_API_URL.format(model=model)
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status >= 400:
                 body = (await resp.text())[:300]
-                raise RuntimeError(f"Vertex Express receipt check HTTP {resp.status}: {body}")
+                raise RuntimeError(f"Gemini receipt check HTTP {resp.status}: {body}")
             result = await resp.json()
     parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
     text = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
@@ -249,14 +249,12 @@ async def recognize_vertex_express(data: bytes, mime: str) -> Optional[ReceiptIn
 
 
 async def recognize_openai(data: bytes, mime: str) -> Optional[ReceiptInfo]:
-    """Сумма и дата из чека через OpenAI / Gemini AI Studio API (structured output)."""
+    """Сумма и дата из чека через OpenAI-совместимый API (structured output)."""
     import aiohttp
 
     api_key = settings.openai_api_key.strip()
     model = _effective_receipt_model(api_key)
     base_url = settings.openai_base_url.rstrip("/")
-    if api_key.startswith("AIza") and base_url == "https://api.openai.com/v1":
-        base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
     b64 = base64.standard_b64encode(data).decode("ascii")
     if mime == "application/pdf":
         attachment: dict[str, Any] = {
@@ -319,10 +317,10 @@ async def recognize_claude(data: bytes, mime: str) -> Optional[ReceiptInfo]:
 
 
 async def recognize_auto(data: bytes, mime: str) -> Optional[ReceiptInfo]:
-    """Приоритет — Vertex AI Express (AQ.*) / OpenAI / AI Studio (OPENAI_API_KEY), иначе Claude."""
+    """Приоритет — Google AI Studio (AQ.*/AIza*) или OpenAI (OPENAI_API_KEY), иначе Claude."""
     key = settings.openai_api_key.strip()
-    if key.startswith("AQ."):
-        return await recognize_vertex_express(data, mime)
+    if key.startswith(("AQ.", "AIza")):
+        return await recognize_gemini(data, mime)
     if key:
         return await recognize_openai(data, mime)
     return await recognize_claude(data, mime)

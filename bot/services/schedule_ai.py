@@ -233,20 +233,20 @@ _GEMINI_SCHEDULE_SCHEMA: dict[str, Any] = {
     "required": ["is_schedule", "schedules"],
 }
 
-_VERTEX_EXPRESS_URL = "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent"
+_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
 def _effective_schedule_model(api_key: str) -> str:
     model = settings.openai_schedule_model
     if api_key.startswith(("AQ.", "AIza")) and model.startswith("gpt-"):
-        return "gemini-2.5-flash"
+        return "gemini-flash-latest"
     return model
 
 
-async def _call_vertex_express(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
+async def _call_gemini_native(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
     import aiohttp
 
-    url = _VERTEX_EXPRESS_URL.format(model=model)
+    url = _GEMINI_API_URL.format(model=model)
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
@@ -261,7 +261,7 @@ async def _call_vertex_express(api_key: str, model: str, user_prompt: str) -> di
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status >= 400:
                 body = (await resp.text())[:300]
-                raise RuntimeError(f"Vertex Express schedule parse HTTP {resp.status}: {body}")
+                raise RuntimeError(f"Gemini schedule parse HTTP {resp.status}: {body}")
             result = await resp.json()
     parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
     content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
@@ -272,8 +272,6 @@ async def _call_openai_compat(api_key: str, model: str, user_prompt: str) -> dic
     import aiohttp
 
     base_url = settings.openai_base_url.rstrip("/")
-    if api_key.startswith("AIza") and base_url == "https://api.openai.com/v1":
-        base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
     payload = {
         "model": model,
         "max_completion_tokens": 1500,
@@ -307,7 +305,7 @@ async def parse_schedule_openai(
     sender_teacher_id: str,
     teachers: list[dict[str, str]],
 ) -> dict[str, dict[date, list[Slot]]]:
-    """Разобрать сообщение через OpenAI / Gemini AI Studio / Vertex AI Express API (structured JSON)."""
+    """Разобрать сообщение через Gemini AI Studio (AQ.*/AIza*) или OpenAI API (structured JSON)."""
     api_key = settings.openai_api_key.strip()
     if not api_key or not looks_like_schedule(text):
         return {}
@@ -324,8 +322,8 @@ async def parse_schedule_openai(
         f"Текст сообщения:\n{text}"
     )
     model = _effective_schedule_model(api_key)
-    if api_key.startswith("AQ."):
-        parsed = await _call_vertex_express(api_key, model, user_prompt)
+    if api_key.startswith(("AQ.", "AIza")):
+        parsed = await _call_gemini_native(api_key, model, user_prompt)
     else:
         parsed = await _call_openai_compat(api_key, model, user_prompt)
     allowed = {t["id"] for t in teachers}
