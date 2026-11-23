@@ -653,3 +653,46 @@ def test_sqlite_uses_wal_and_drafts_reads_in_single_connection(monkeypatch, tmp_
     assert len(drafts) == 3
     assert all(d["slots"][0]["status"] == "held" for d in drafts)
     assert opens == 1
+
+
+def test_schedule_pilots_archives_group_messages_and_prunes_old(tmp_path):
+    """SchedulePilots сохраняет тексты сообщений рабочей группы (в т.ч. нераспознанных) и чистит старше 30 дней."""
+    database = tmp_path / "archive.db"
+    pilots = SchedulePilots([SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", database)])
+
+    old_dt = datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc)
+    now_dt = datetime(2026, 11, 23, 11, 0, tzinfo=timezone.utc)
+
+    async def run():
+        # Старое сообщение (> 30 дней до now_dt)
+        m_old = _message("Старое сообщение", uid=999).model_copy(update={"message_id": 1, "date": old_dt})
+        await pilots.receive(m_old, 1, edited=False)
+        # Сообщение из другого чата — НЕ сохраняется
+        m_other = _message("Чужой чат", chat=-100999, uid=999).model_copy(update={"message_id": 2, "date": now_dt})
+        await pilots.receive(m_other, 2, edited=False)
+        # Сообщение от бота — НЕ сохраняется
+        m_bot = _message("Бот").model_copy(
+            update={"message_id": 3, "date": now_dt, "from_user": User(id=555, is_bot=True, first_name="Bot")},
+        )
+        await pilots.receive(m_bot, 3, edited=False)
+        # Нераспознанный пост другого педагога в нужной группе — сохраняется
+        m_ang = _message("Пн 17:00 Егор\nВт 18:00 Катя", uid=938080411).model_copy(
+            update={"message_id": 4, "date": now_dt, "from_user": User(id=938080411, is_bot=False, first_name="Ангелина")},
+        )
+        await pilots.receive(m_ang, 4, edited=False)
+        # Редактирование обновляет текст
+        m_ang_edit = m_ang.model_copy(
+            update={"text": "Пн 17:00 Егор 60\nВт 18:00 Катя", "edit_date": int(now_dt.timestamp()) + 120},
+        )
+        await pilots.receive(m_ang_edit, 5, edited=True)
+        # Повтор старой версии не затирает правку
+        await pilots.receive(m_ang, 6, edited=False)
+        return await pilots.recent_messages(10)
+
+    msgs = asyncio.run(run())
+    assert len(msgs) == 1
+    assert msgs[0]["messageId"] == 4
+    assert msgs[0]["senderId"] == 938080411
+    assert msgs[0]["senderName"] == "Ангелина"
+    assert msgs[0]["text"] == "Пн 17:00 Егор 60\nВт 18:00 Катя"
+    assert msgs[0]["editedAt"] is not None

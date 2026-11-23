@@ -20,6 +20,7 @@ from bot.models import Student, User
 logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
+_ARCHIVE_RETENTION_DAYS = 30
 _GREETING = re.compile(r"(?:доброе\s+утро|добрый\s+день|добрый\s+вечер|здравствуйте|всем\s+привет)[!.,]*")
 _HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:(?:на|в|во) )?(.+?))?[:.!]?")
 _PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:(?:на|в|во) )?(.+?))?[.!]?")
@@ -523,9 +524,65 @@ class SchedulePilot:
                 status TEXT NOT NULL, lesson_id TEXT NOT NULL, request TEXT,
                 PRIMARY KEY (chat_id, sender_id, teacher_id, message_id, time)
             )""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                sender_id INTEGER NOT NULL,
+                sender_name TEXT NOT NULL,
+                sent_at INTEGER NOT NULL,
+                edited_at INTEGER,
+                text TEXT NOT NULL,
+                PRIMARY KEY (chat_id, message_id)
+            )""")
+            conn.execute("""CREATE INDEX IF NOT EXISTS idx_chat_messages_sent
+                ON chat_messages (chat_id, sent_at DESC)""")
             conn.commit()
             self._INITIALIZED_DBS.add(resolved)
         return conn
+
+    def _save_chat_message(
+        self, message_id: int, sender_id: int, sender_name: str, sent_at: int, edited_at: int | None, text: str,
+    ) -> None:
+        cutoff = sent_at - _ARCHIVE_RETENTION_DAYS * 86400
+        with closing(self._open()) as conn, conn:
+            conn.execute("""INSERT INTO chat_messages VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    sender_name=excluded.sender_name,
+                    edited_at=excluded.edited_at,
+                    text=excluded.text
+                WHERE COALESCE(excluded.edited_at, excluded.sent_at) >= COALESCE(chat_messages.edited_at, chat_messages.sent_at)
+            """, (self.chat_id, message_id, sender_id, sender_name, sent_at, edited_at, text))
+            conn.execute("DELETE FROM chat_messages WHERE chat_id=? AND sent_at < ?", (self.chat_id, cutoff))
+
+    async def archive_message(self, message: Message) -> None:
+        """Сохранить текст/подпись сообщения из рабочей группы расписаний (срок хранения 30 дней)."""
+        sender = message.from_user
+        if message.chat.id != self.chat_id or sender is None or sender.is_bot:
+            return
+        text = (message.text or message.caption or "").strip()
+        if not text:
+            return
+        sender_name = " ".join(p for p in (sender.first_name, sender.last_name) if p).strip() or sender.username or str(sender.id)
+        sent_at = int(message.date.timestamp())
+        modified = message.edit_date
+        edited_at = int(modified.timestamp()) if isinstance(modified, datetime) else (int(modified) if modified else None)
+        await asyncio.to_thread(self._save_chat_message, message.message_id, sender.id, sender_name, sent_at, edited_at, text)
+
+    def _read_recent_messages(self, limit: int) -> list[dict]:
+        with closing(self._open()) as conn:
+            rows = conn.execute("""SELECT message_id, sender_id, sender_name, sent_at, edited_at, text
+                FROM chat_messages WHERE chat_id=? ORDER BY sent_at DESC, message_id DESC LIMIT ?""",
+                (self.chat_id, limit)).fetchall()
+        return [
+            {"messageId": mid, "senderId": sid, "senderName": name,
+             "sentAt": datetime.fromtimestamp(sent, _MOSCOW).isoformat(),
+             "editedAt": datetime.fromtimestamp(edited, _MOSCOW).isoformat() if edited else None,
+             "text": text}
+            for mid, sid, name, sent, edited, text in rows
+        ]
+
+    async def recent_messages(self, limit: int = 30) -> list[dict]:
+        return await asyncio.to_thread(self._read_recent_messages, limit)
 
     def _save(self, message_id: int, version: int, update_id: int, payloads: dict[int, str]) -> bool:
         account = (self.chat_id, self.tg_id, self.teacher_id)
@@ -722,12 +779,21 @@ class SchedulePilots:
         self.accounts = {pilot.tg_id: pilot for pilot in accounts}
         if len(self.accounts) != len(accounts):
             raise ValueError("У Telegram-аккаунта может быть один источник расписания")
+        self._archive_pilot = accounts[0] if accounts else None
 
     def for_user(self, user: User) -> SchedulePilot | None:
         pilot = self.accounts.get(user.tg_id)
         return pilot if pilot and pilot.owns(user) else None
 
+    async def recent_messages(self, limit: int = 30) -> list[dict]:
+        return await self._archive_pilot.recent_messages(limit) if self._archive_pilot else []
+
     async def receive(self, message: Message, update_id: int, *, edited: bool) -> None:
+        if self._archive_pilot and message.chat.id == self._archive_pilot.chat_id:
+            try:
+                await self._archive_pilot.archive_message(message)
+            except Exception:
+                logger.warning("Не удалось сохранить сообщение %s в архив чата", message.message_id, exc_info=True)
         if message.from_user:
             pilot = self.accounts.get(message.from_user.id)
             if pilot:
