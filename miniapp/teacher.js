@@ -67,8 +67,9 @@ SCREENS['t.home'] = async () => {
     ${state.me.isAdmin ? `<div style="margin-top:14px">${btn('🛠 Режим администратора', 'switchRole', { to: 'admin' }, 'ghost')}</div>` : ''}` };
 };
 
-/* ── Предварительное расписание ────────────────────────────────────── */
-const schedulePlan = id => state.ui.scheduleDrafts?.find(d => d.id === id);
+/* ── Предварительное расписание (кабинет педагога и админ «за педагогов») ── */
+const scheduleKey = (id, tid = '') => (tid ? `${tid}:${id}` : String(id));
+const schedulePlan = (id, tid = '') => state.ui.scheduleDrafts?.find(d => d.id === id && (tid ? d.teacherId === tid : !d.teacherId));
 const scheduleDraft = () => state.ui.scheduleEdit;
 const scheduleStatus = { held: 'В журнале', cancelled: 'Отменено', pending: 'Проверить запись' };
 const scheduleTitle = s => s.kind === 'free' ? 'Свободное окно' : s.kind === 'group' ?
@@ -76,16 +77,17 @@ const scheduleTitle = s => s.kind === 'free' ? 'Свободное окно' : s
 const scheduleTime = s => `<span class="schedule-time"><time>${esc(s.time)}</time>${s.end ? `<time class="schedule-end">${esc(s.end)}</time>` : ''}</span>`;
 const canMarkSchedule = s => s.status === 'pending' || ((!s.status || s.status === 'planned') && !!s.duration &&
   (s.kind === 'group' ? !!s.groupId : s.kind === 'individual' && !!s.studentIds?.length));
-const scheduleStamp = (d, s) => JSON.stringify([d.date, s.time, s.kind, s.duration, s.groupId, s.studentIds]);
-function scheduleMarks(id) {
+const scheduleStamp = (d, s) => JSON.stringify([d.teacherId || '', d.date, s.time, s.kind, s.duration, s.groupId, s.studentIds]);
+function scheduleMarks(id, tid = '') {
+  const key = scheduleKey(id, tid);
   const days = state.ui.scheduleMarks ||= new Map();
-  if (!days.has(id)) days.set(id, new Map());
-  return days.get(id);
+  if (!days.has(key)) days.set(key, new Map());
+  return days.get(key);
 }
 const scheduleMarkLabel = count => count ? `Отметить занятия · ${count}` : 'Отметить занятия';
 const scheduleDurations = [45, 60, 90];
 const hasReadyScheduleMarks = marks => marks.size > 0 && ![...marks.values()].some(m => m.loading);
-const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-list">${slots.map(s => {
+const scheduleRows = (slots, id = null, tid = '') => slots.length ? `<ol class="schedule-list">${slots.map(s => {
   const free = s.kind === 'free';
   const type = !free && s.kind === 'individual' && !s.studentIds?.length ? 'Уточнить участников' :
     s.kind === 'group' && !s.groupId ? 'Выбрать группу' : '';
@@ -96,15 +98,25 @@ const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-l
     ${label ? `<span class="schedule-state ${esc(s.status)}">${label}</span>` : ''}</span>`;
   const style = `schedule-slot${free || s.status === 'cancelled' ? ' schedule-free' : ''}`;
   if (id === null) return `<li><div class="${style}">${inner}</div></li>`;
-  const mark = scheduleMarks(id).get(s.time);
+  const mark = scheduleMarks(id, tid).get(s.time);
+  const tapPayload = tid ? { id, tid, time: s.time } : { id, time: s.time };
   return `<li data-schedule-time="${esc(s.time)}"><div class="schedule-mark-row">
     ${free ? `<div class="${style}">${inner}</div>` :
-      `<button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify({ id, time: s.time }))}'>
+      `<button type="button" class="${style}" data-act="scheduleTap" data-p='${esc(JSON.stringify(tapPayload))}'>
       ${inner}<span class="chev" aria-hidden="true">›</span></button>`}
     ${canMarkSchedule(s) ? `<label class="schedule-check"><input type="checkbox" data-schedule-check
       aria-label="${esc(`Отметить занятие в ${s.time} · ${scheduleTitle(s)}`)}"${mark ? ' checked' : ''}></label>` : ''}
-    </div><div class="schedule-mark-extra" data-schedule-extra>${scheduleMarkDetails(id, s, mark)}</div></li>`;
+    </div><div class="schedule-mark-extra" data-schedule-extra>${scheduleMarkDetails(id, s, mark, tid)}</div></li>`;
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
+
+function syncScheduleMarks(drafts) {
+  for (const plan of drafts) {
+    const marks = scheduleMarks(plan.id, plan.teacherId || '');
+    const eligible = new Map(plan.slots.filter(canMarkSchedule).map(s => [s.time, scheduleStamp(plan, s)]));
+    for (const [time, mark] of marks) if (eligible.get(time) !== mark.stamp) marks.delete(time);
+  }
+  state.ui.scheduleDrafts = drafts;
+}
 
 async function loadSchedule() {
   const { drafts, completedToday, upcomingDates, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts');
@@ -116,12 +128,31 @@ async function loadSchedule() {
     : `Опубликуй в группе расписание на сегодня с заголовком ${titleExample}.`;
   state.ui.scheduleCompletedToday = !!completedToday;
   state.ui.scheduleUpcomingDates = upcomingDates || [];
-  for (const plan of drafts) {
-    const marks = scheduleMarks(plan.id);
-    const eligible = new Map(plan.slots.filter(canMarkSchedule).map(s => [s.time, scheduleStamp(plan, s)]));
-    for (const [time, mark] of marks) if (eligible.get(time) !== mark.stamp) marks.delete(time);
-  }
-  state.ui.scheduleDrafts = drafts;
+  syncScheduleMarks(drafts);
+}
+
+function renderScheduleCard(d) {
+  const tid = d.teacherId || '';
+  const hasMarks = d.slots.some(s => s.status && s.status !== 'planned');
+  const date = esc(fdate(d.date));
+  const toMark = d.slots.some(canMarkSchedule);
+  const marks = scheduleMarks(d.id, tid);
+  const pRef = tid ? { id: d.id, tid } : { id: d.id };
+  const heading = tid
+    ? `<h2>${esc(d.teacherName || tid)}</h2><div class="hint">${date} · расписание на сегодня</div>`
+    : `<h2>${hasMarks ? date :
+        `<button type="button" class="schedule-date-link" data-act="scheduleChangeDate" data-p='${esc(JSON.stringify(pRef))}'>${date}</button>`}</h2>
+        <div class="hint">Расписание на сегодня</div>`;
+  return `<section class="card schedule-day" data-schedule-draft="${d.id}" data-schedule-tid="${esc(tid)}">
+    <div class="schedule-head"><div>${heading}</div></div>
+    ${toMark ? '<p class="hint schedule-mark-guide">Поставь галочки у проведённых занятий, чтобы внести их в журнал.</p>' : ''}
+    ${scheduleRows(d.slots, d.id, tid)}
+    ${toMark ? `<div class="schedule-notice"><button type="button" class="btn" data-act="scheduleMarkSave" data-p='${esc(JSON.stringify(pRef))}'
+      data-schedule-submit ${hasReadyScheduleMarks(marks) ? '' : 'disabled'}>${scheduleMarkLabel(marks.size)}</button></div>` : ''}
+    ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
+      ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', pRef, 'sec') : ''}</div>` : ''}
+    <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
+  </section>`;
 }
 
 SCREENS['t.schedule.drafts'] = async () => {
@@ -131,43 +162,39 @@ SCREENS['t.schedule.drafts'] = async () => {
   const upcomingHint = upcoming.length
     ? `<p class="hint" style="margin-top:8px">Загружено на ${esc(upcoming.map(fdate).join(', '))} — появится в этот день.</p>`
     : '';
-  const day = d => {
-    const hasMarks = d.slots.some(s => s.status && s.status !== 'planned');
-    const date = esc(fdate(d.date));
-    const toMark = d.slots.some(canMarkSchedule);
-    const marks = scheduleMarks(d.id);
-    return `<section class="card schedule-day" data-schedule-draft="${d.id}">
-      <div class="schedule-head"><div><h2>${hasMarks ? date :
-        `<button type="button" class="schedule-date-link" data-act="scheduleChangeDate" data-p='{"id":${d.id}}'>${date}</button>`}</h2>
-        <div class="hint">Расписание на сегодня</div></div></div>
-      ${toMark ? '<p class="hint schedule-mark-guide">Поставь галочки у проведённых занятий, чтобы внести их в журнал.</p>' : ''}
-      ${scheduleRows(d.slots, d.id)}
-      ${toMark ? `<div class="schedule-notice"><button type="button" class="btn" data-act="scheduleMarkSave" data-p='{"id":${d.id}}'
-        data-schedule-submit ${hasReadyScheduleMarks(marks) ? '' : 'disabled'}>${scheduleMarkLabel(marks.size)}</button></div>` : ''}
-      ${d.sourceUpdated ? `<div class="schedule-notice"><div class="hint">Пост в Telegram изменился. Твои правки и отметки сохранены.</div>
-        ${d.telegram ? btn('Посмотреть новую версию', 'scheduleSource', { id: d.id }, 'sec') : ''}</div>` : ''}
-      <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
-    </section>`;
-  };
   const emptyTitle = state.ui.scheduleCompletedToday ? 'На сегодня всё внесено' : 'На сегодня расписания нет';
   const emptyText = state.ui.scheduleCompletedToday
     ? `<p class="hint">Все занятия из сегодняшнего расписания уже в журнале.</p>${upcomingHint}`
     : `<p class="hint">${state.ui.scheduleEmptyHint}</p>${upcomingHint}`;
-  const body = drafts.length ? drafts.map(day).join('') : empty(emptyTitle, emptyText);
+  const body = drafts.length ? drafts.map(renderScheduleCard).join('') : empty(emptyTitle, emptyText);
   return { title: 'Расписание из Telegram', html: body +
     `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
 };
 
-SCREENS['t.schedule.source'] = async ({ id }) => {
-  const source = schedulePlan(id)?.telegram;
+SCREENS['a.schedule.drafts'] = async ({ tid } = {}) => {
+  const { drafts, upcoming } = await api(tid ? `/schedule-drafts?tid=${encodeURIComponent(tid)}` : '/schedule-drafts');
+  syncScheduleMarks(drafts);
+  const upLines = (upcoming || []).map(u => `${esc(u.teacherName)}: ${esc(u.dates.map(fdate).join(', '))}`);
+  const upHint = upLines.length
+    ? `<p class="hint" style="margin-top:8px">Загружено на ближайшие дни: ${upLines.join(' · ')}</p>`
+    : '';
+  const body = drafts.length
+    ? drafts.map(renderScheduleCard).join('')
+    : empty('На сегодня расписаний нет', `<p class="hint">Все сегодняшние расписания педагогов уже внесены в журнал или ещё не опубликованы в группе.</p>${upHint}`);
+  return { title: 'Расписание из Telegram', html: body +
+    `<div class="schedule-actions">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
+};
+
+SCREENS['t.schedule.source'] = async ({ id, tid = '' }) => {
+  const source = schedulePlan(id, tid)?.telegram;
   return { title: 'Новая версия из Telegram', html: source ? `
     <section class="card schedule-day"><div class="schedule-head"><h2>${esc(fdate(source.date))}</h2></div>
       ${scheduleRows(source.slots)}</section>
-    <div class="schedule-actions">${btn('Применить версию из Telegram', 'scheduleUseSource', { id })}</div>` :
+    <div class="schedule-actions">${btn('Применить версию из Telegram', 'scheduleUseSource', tid ? { id, tid } : { id })}</div>` :
     '<div class="card pad hint">Новой версии пока нет</div>' };
 };
 
-ACT.scheduleSource = ({ id }) => go('t.schedule.source', { id });
+ACT.scheduleSource = ({ id, tid = '' }) => go('t.schedule.source', tid ? { id, tid } : { id });
 
 function scheduleSelect(id, label, selected, options, none) {
   const choices = options.map(o => `<option value="${esc(o.id)}"${o.id === selected ? ' selected' : ''}>${esc(o.name)}</option>`);
@@ -175,24 +202,29 @@ function scheduleSelect(id, label, selected, options, none) {
     <select class="search" id="${id}"><option value="">${none}</option>${choices.join('')}</select></label>`;
 }
 
-async function scheduleOptions() {
+async function scheduleOptions(tid = '') {
+  if (tid) {
+    const cache = state.ui.scheduleOptionsByTeacher ||= {};
+    if (!cache[tid]) cache[tid] = await api(`/record/options?teacher=${encodeURIComponent(tid)}`);
+    return cache[tid];
+  }
   if (!state.ui.scheduleOptions) state.ui.scheduleOptions = await api('/record/options');
   return state.ui.scheduleOptions;
 }
 
-ACT.scheduleTap = async ({ id, time }) => {
-  const plan = schedulePlan(id);
+ACT.scheduleTap = async ({ id, tid = '', time }) => {
+  const plan = schedulePlan(id, tid);
   if (!plan || state.ui.scheduleSaving || state.ui.scheduleOpening) return;
   const index = plan.slots.findIndex(s => s.time === time);
   const slot = plan.slots[index];
   if (!slot || slot.kind === 'free') return;
-  if (slot?.status === 'held') return go('t.lesson', { id: slot.lessonId });
+  if (slot?.status === 'held') return go(tid ? 'a.lesson' : 't.lesson', { id: slot.lessonId });
   if (slot?.status === 'cancelled') return sheet(`<h3>${esc(scheduleTitle(slot))}</h3>
-    <p class="hint">${esc(time)} · Отменено</p>${btn('Вернуть в план', 'scheduleSingleStatus', { id, time, status: 'planned' })}`);
+    <p class="hint">${esc(time)} · Отменено</p>${btn('Вернуть в план', 'scheduleSingleStatus', { id, tid, time, status: 'planned' })}`);
   if (slot?.status === 'pending') return toast('Поставь галочку и нажми «Отметить занятия», чтобы проверить запись');
   state.ui.scheduleOpening = true;
   try {
-    state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })), options: await scheduleOptions() };
+    state.ui.scheduleEdit = { ...plan, slots: plan.slots.map(s => ({ ...s })), options: await scheduleOptions(tid) };
     scheduleSlotForm(index);
   } catch (e) { toast(errText(e)); } finally { state.ui.scheduleOpening = false; }
 };
@@ -226,7 +258,7 @@ function scheduleSlotForm(index) {
     </div>
     <div class="schedule-actions">
       ${btn('Сохранить строку', 'scheduleSlotDone', { index })}
-      ${btn('Отменилось', 'scheduleSingleStatus', { id: d.id, time: s.time, status: 'cancelled' }, 'ghost')}
+      ${btn('Отменилось', 'scheduleSingleStatus', { id: d.id, tid: d.teacherId || '', time: s.time, status: 'cancelled' }, 'ghost')}
     </div>`);
   const kind = document.getElementById('schedule-kind');
   const update = () => {
@@ -250,7 +282,8 @@ async function scheduleWrite(plan, fields) {
   if (state.ui.scheduleSaving) return false;
   state.ui.scheduleSaving = true;
   try {
-    await api(`/schedule-drafts/${plan.id}`, { method: 'PUT', body: { revision: plan.revision, ...fields } });
+    const endpoint = plan.teacherId ? `/schedule-drafts/${encodeURIComponent(plan.teacherId)}/${plan.id}` : `/schedule-drafts/${plan.id}`;
+    await api(endpoint, { method: 'PUT', body: { revision: plan.revision, ...fields } });
     return true;
   } catch (e) {
     toast(e.data?.message || errText(e));
@@ -282,13 +315,13 @@ ACT.scheduleSlotDone = async ({ index }) => {
   render();
 };
 
-ACT.scheduleChangeDate = ({ id }) => {
-  const plan = schedulePlan(id);
+ACT.scheduleChangeDate = ({ id, tid = '' }) => {
+  const plan = schedulePlan(id, tid);
   sheet(`<h3>Дата расписания</h3>${field('schedule-date', 'Дата', plan.date, 'type="date" required')}
-    <div class="schedule-actions">${btn('Сохранить', 'scheduleDateDone', { id })}</div>`);
+    <div class="schedule-actions">${btn('Сохранить', 'scheduleDateDone', { id, tid })}</div>`);
 };
-ACT.scheduleDateDone = async ({ id }) => {
-  const plan = schedulePlan(id), date = val('schedule-date');
+ACT.scheduleDateDone = async ({ id, tid = '' }) => {
+  const plan = schedulePlan(id, tid), date = val('schedule-date');
   if (!date) return toast('Укажи дату расписания');
   if (await saveScheduleRows(plan, plan.slots, date)) {
     closeSheet();
@@ -296,8 +329,8 @@ ACT.scheduleDateDone = async ({ id }) => {
   }
 };
 
-ACT.scheduleUseSource = ({ id }) => {
-  const d = schedulePlan(id);
+ACT.scheduleUseSource = ({ id, tid = '' }) => {
+  const d = schedulePlan(id, tid);
   if (!d?.telegram) return;
   confirmSheet({
     title: 'Применить версию Telegram?',
@@ -316,7 +349,10 @@ async function sendScheduleActions(plan, actions) {
   if (state.ui.scheduleSaving) return null;
   state.ui.scheduleSaving = true;
   try {
-    return await api(`/schedule-drafts/${plan.id}/attendance`, { method: 'POST',
+    const endpoint = plan.teacherId
+      ? `/schedule-drafts/${encodeURIComponent(plan.teacherId)}/${plan.id}/attendance`
+      : `/schedule-drafts/${plan.id}/attendance`;
+    return await api(endpoint, { method: 'POST',
       body: { revision: plan.revision, sourceRevision: plan.sourceRevision, actions } });
   } catch (e) {
     toast(e.data?.message || errText(e));
@@ -324,8 +360,8 @@ async function sendScheduleActions(plan, actions) {
   } finally { state.ui.scheduleSaving = false; }
 }
 
-ACT.scheduleSingleStatus = async ({ id, time, status }) => {
-  const plan = schedulePlan(id);
+ACT.scheduleSingleStatus = async ({ id, tid = '', time, status }) => {
+  const plan = schedulePlan(id, tid);
   if (!plan) return;
   const result = await sendScheduleActions(plan, [{ time, status }]);
   if (!result) return;
@@ -336,9 +372,10 @@ ACT.scheduleSingleStatus = async ({ id, time, status }) => {
   render();
 };
 
-function scheduleMarkDetails(id, slot, mark) {
+function scheduleMarkDetails(id, slot, mark, tid = '') {
   if (!mark) return '';
-  const group = slot.status !== 'pending' && state.ui.scheduleOptions?.groups.find(g => g.id === slot.groupId);
+  const opts = tid ? state.ui.scheduleOptionsByTeacher?.[tid] : state.ui.scheduleOptions;
+  const group = slot.status !== 'pending' && opts?.groups.find(g => g.id === slot.groupId);
   const attendees = group?.attendance ? `<fieldset class="schedule-attendees" data-schedule-attendees><legend>Кто был</legend>
     ${group.roster.map(s => `<div class="schedule-attendee"><label>
       <input type="checkbox" data-schedule-present value="${esc(s.id)}"${mark.studentIds.includes(s.id) ? ' checked' : ''}> ${esc(s.name)}</label>
@@ -350,15 +387,15 @@ function scheduleMarkDetails(id, slot, mark) {
   return `${mark.loading ? '<p class="hint" role="status">Загружаю состав группы…</p>' : ''}${attendees}
     ${issue ? `<p class="hint schedule-review-error" role="alert">${esc(issue.error)}</p>
       ${(issue.matches || []).map(m => btn(`Связать · ${m.durationMin} мин · внесено в ${esc(m.recordedAt.slice(-8,-3))}`,
-        'scheduleMarkResolve', { id, time: slot.time, lessonId: m.id }, 'sec')).join('')}
+        'scheduleMarkResolve', { id, tid, time: slot.time, lessonId: m.id }, 'sec')).join('')}
       ${['existing','same_day'].includes(issue.code) ? btn('Записать отдельное занятие',
-        'scheduleMarkResolve', { id, time: slot.time, allowNew: true }, 'ghost') : ''}` : ''}`.trim();
+        'scheduleMarkResolve', { id, tid, time: slot.time, allowNew: true }, 'ghost') : ''}` : ''}`.trim();
 }
 
-function scheduleMarkButton(id, card) {
+function scheduleMarkButton(id, card, tid = '') {
   const button = card.querySelector('[data-schedule-submit]');
   if (!button) return;
-  const marks = scheduleMarks(id);
+  const marks = scheduleMarks(id, tid);
   button.disabled = !hasReadyScheduleMarks(marks);
   button.textContent = scheduleMarkLabel(marks.size);
 }
@@ -368,32 +405,33 @@ document.addEventListener('change', async event => {
   const row = el.closest?.('[data-schedule-time]');
   const card = row?.closest('[data-schedule-draft]');
   if (!card) return;
-  const id = Number(card.dataset.scheduleDraft), time = row.dataset.scheduleTime;
-  const marks = scheduleMarks(id);
+  const id = Number(card.dataset.scheduleDraft), tid = card.dataset.scheduleTid || '', time = row.dataset.scheduleTime;
+  const marks = scheduleMarks(id, tid);
   if (el.matches('[data-schedule-check]')) {
-    const plan = schedulePlan(id), slot = plan?.slots.find(s => s.time === time);
+    const plan = schedulePlan(id, tid), slot = plan?.slots.find(s => s.time === time);
     if (!slot || !canMarkSchedule(slot)) return;
     const extra = row.querySelector('[data-schedule-extra]');
     if (!el.checked) {
       marks.delete(time);
       extra.replaceChildren();
-      scheduleMarkButton(id, card);
+      scheduleMarkButton(id, card, tid);
       return;
     }
-    const loading = slot.kind === 'group' && slot.status !== 'pending' && !state.ui.scheduleOptions;
+    const cachedOpts = tid ? state.ui.scheduleOptionsByTeacher?.[tid] : state.ui.scheduleOptions;
+    const loading = slot.kind === 'group' && slot.status !== 'pending' && !cachedOpts;
     const mark = { stamp: scheduleStamp(plan, slot), studentIds: [], tiers: {}, loading };
     marks.set(time, mark);
-    extra.innerHTML = scheduleMarkDetails(id, slot, mark);
-    scheduleMarkButton(id, card);
+    extra.innerHTML = scheduleMarkDetails(id, slot, mark, tid);
+    scheduleMarkButton(id, card, tid);
     if (!loading) return;
     try {
-      await scheduleOptions();
+      await scheduleOptions(tid);
     } catch {
       mark.issue = { error: 'Список группы не загрузился. Сними галочку и поставь её снова.' };
     } finally {
       mark.loading = false;
-      if (marks.get(time) === mark && extra.isConnected) extra.innerHTML = scheduleMarkDetails(id, slot, mark);
-      if (card.isConnected) scheduleMarkButton(id, card);
+      if (marks.get(time) === mark && extra.isConnected) extra.innerHTML = scheduleMarkDetails(id, slot, mark, tid);
+      if (card.isConnected) scheduleMarkButton(id, card, tid);
     }
     return;
   }
@@ -409,10 +447,10 @@ const scheduleAction = (time, mark) => ({
   time, status: 'held', studentIds: mark.studentIds, tiers: mark.tiers, attendanceConfirmed: mark.studentIds.length > 0,
 });
 
-async function saveScheduleMarks(id, actions) {
-  const plan = schedulePlan(id);
+async function saveScheduleMarks(id, actions, tid = '') {
+  const plan = schedulePlan(id, tid);
   if (!plan || !actions.length || state.ui.scheduleSaving) return;
-  const card = document.querySelector(`[data-schedule-draft="${id}"]`);
+  const card = document.querySelector(`[data-schedule-draft="${id}"][data-schedule-tid="${tid}"]`);
   const button = card?.querySelector('[data-schedule-submit]');
   if (button) {
     button.disabled = true;
@@ -421,7 +459,7 @@ async function saveScheduleMarks(id, actions) {
   card?.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
   const response = await sendScheduleActions(plan, actions);
   if (response) {
-    const marks = scheduleMarks(id);
+    const marks = scheduleMarks(id, tid);
     let saved = 0;
     for (const row of response.results) {
       if (row.error) {
@@ -437,15 +475,15 @@ async function saveScheduleMarks(id, actions) {
   render();
 }
 
-ACT.scheduleMarkSave = ({ id }) => {
-  const marks = scheduleMarks(id);
+ACT.scheduleMarkSave = ({ id, tid = '' }) => {
+  const marks = scheduleMarks(id, tid);
   if (!hasReadyScheduleMarks(marks)) return;
-  return saveScheduleMarks(id, [...marks].map(([time, mark]) => scheduleAction(time, mark)));
+  return saveScheduleMarks(id, [...marks].map(([time, mark]) => scheduleAction(time, mark)), tid);
 };
-ACT.scheduleMarkResolve = ({ id, time, lessonId, allowNew }) => {
-  const mark = scheduleMarks(id).get(time);
+ACT.scheduleMarkResolve = ({ id, tid = '', time, lessonId, allowNew }) => {
+  const mark = scheduleMarks(id, tid).get(time);
   if (!mark) return;
-  return saveScheduleMarks(id, [{ ...scheduleAction(time, mark), lessonId, allowNew }]);
+  return saveScheduleMarks(id, [{ ...scheduleAction(time, mark), lessonId, allowNew }], tid);
 };
 
 /* Оплаты месяца по моим группам — как «не оплатили за …» у администратора: группы раскрываются до учеников. */

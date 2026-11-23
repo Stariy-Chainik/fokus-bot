@@ -696,3 +696,49 @@ def test_schedule_pilots_archives_group_messages_and_prunes_old(tmp_path):
     assert msgs[0]["senderName"] == "Ангелина"
     assert msgs[0]["text"] == "Пн 17:00 Егор 60\nВт 18:00 Катя"
     assert msgs[0]["editedAt"] is not None
+
+
+def test_admin_can_view_edit_and_record_teacher_schedule_drafts(monkeypatch, tmp_path):
+    """Администратор видит сегодняшние расписания педагогов (Влад, Кирилл и др.), правит и отмечает за них."""
+    today = date(2026, 11, 23)
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: today)
+    app, dp = make_api(monkeypatch)
+    vlad_tg = 1359735228
+    dp["teacher_repo"].items.append(mk_teacher("TCH-0005", "Никишин Влад"))
+    dp["user_repo"].items.append(mk_user(tg_id=vlad_tg, teacher_id="TCH-0005"))
+    db = tmp_path / "admin-sched.db"
+    vlad_pilot = SchedulePilot(CHAT, vlad_tg, "TCH-0005", db, accept_weekday=False, accept_plain_title=True)
+    dp["schedule_pilots"] = SchedulePilots([vlad_pilot])
+    published = datetime(2026, 11, 23, 8, 0, tzinfo=timezone.utc)
+    msg = _message("Расписание:\n17:00 Иванов Иван 45", uid=vlad_tg).model_copy(update={"message_id": 77, "date": published})
+    asyncio.run(vlad_pilot.receive(msg, 1, edited=False))
+
+    # На сводке админа появляется счётчик на сегодня (без ключа schedulePilot)
+    status, home = _call(app, "GET", "/api/admin/home")
+    assert status == 200 and "schedulePilot" not in home
+    assert home["scheduleToday"] == {"pending": 1, "teachers": ["Никишин Влад"]}
+
+    # Список сегодняшних расписаний педагогов
+    status, data = _call(app, "GET", "/api/admin/schedule-drafts")
+    assert status == 200 and len(data["drafts"]) == 1
+    draft = data["drafts"][0]
+    assert draft["teacherId"] == "TCH-0005" and draft["teacherName"] == "Никишин Влад"
+
+    # Админ меняет длительность 45 → 60
+    draft["slots"][0]["duration"] = 60
+    assert _call(app, "PUT", f"/api/admin/schedule-drafts/TCH-0005/{draft['id']}", json=draft)[0] == 200
+    updated = _call(app, "GET", "/api/admin/schedule-drafts")[1]["drafts"][0]
+    assert updated["slots"][0]["duration"] == 60
+
+    # Админ отмечает занятие за Влада — оно пишется на TCH-0005, а черновик исчезает
+    dp["lesson_repo"].items.clear()
+    body = {"revision": updated["revision"], "sourceRevision": updated["sourceRevision"],
+            "actions": [{"time": "17:00", "status": "held"}]}
+    st, res = _call(app, "POST", f"/api/admin/schedule-drafts/TCH-0005/{updated['id']}/attendance", json=body)
+    assert st == 200 and res["results"][0]["status"] == "held"
+    assert len(dp["lesson_repo"].items) == 1
+    assert dp["lesson_repo"].items[0].teacher_id == "TCH-0005"
+    assert dp["lesson_repo"].items[0].duration_min == 60
+    assert _call(app, "GET", "/api/admin/schedule-drafts")[1]["drafts"] == []
+    assert call_teacher(app, "GET", "/api/teacher/schedule-drafts", tg_id=vlad_tg)[1]["drafts"] == []
+    assert _call(app, "GET", "/api/admin/home")[1]["scheduleToday"] == {"pending": 0, "teachers": []}

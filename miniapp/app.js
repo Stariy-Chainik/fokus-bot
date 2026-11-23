@@ -409,6 +409,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
     ${attention.length ? '' : '<div class="eyebrow">Требует внимания</div><div class="calm">✓ Решений не ждёт, долгов за прошлые месяцы нет</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
+    ${h.scheduleToday && h.scheduleToday.pending ? `<div style="margin-top:10px">${list([cell({ lead: '📋', plain: true, t: 'Расписание из Telegram', s: h.scheduleToday.teachers.map(surname).join(', '), r: pill(h.scheduleToday.pending, 'warn'), go: 'a.schedule.drafts' })])}</div>` : ''}
     <div style="margin-top:10px">${list([cell({ lead: '🔔', plain: true, t: 'События', s: h.activityNew ? 'новые с прошлого просмотра' : `сегодня · ${plural(h.activityToday, ['событие', 'события', 'событий'])}`, r: h.activityNew ? pill(h.activityNew, 'bad') : '', go: 'a.activity' }), cell({ lead: '🏆', plain: true, t: 'Турниры', s: h.competitions && h.competitions.count ? `${fmon(h.period).toLowerCase()}: ${plural(h.competitions.count, ['турнир', 'турнира', 'турниров'])} · ${plural(h.competitions.pairs, ['выступление', 'выступления', 'выступлений'])}` : 'результаты наших пар из базы ФТСАРР', go: 'a.competitions', p: { ym: h.period } })])}</div>
     <div style="margin-top:10px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>
     ${state.me && state.me.teacherId ? `<div style="margin-top:14px">${btn('🎓 Режим педагога', 'switchRole', { to: 'teacher' }, 'ghost')}</div>` : ''}` };
@@ -1104,7 +1105,7 @@ SCREENS['a.lessons.day'] = async ({ date, ym, tid }) => {
     ? `<div class="empty">${ym ? 'В этом месяце занятий не отмечено' : 'В этот день занятий не отмечено'}</div>`
     : ym ? lessonsByDay(shown) + `<div style="margin-top:10px">${lessonsTotal(shown)}</div>`
       : list(shown.map(lessonCell)) + `<div style="margin-top:10px">${lessonsTotal(shown)}</div>`;
-  return { title: 'Занятия', html: `${stickyFilters(monthChipsRow + dayChips + teacherChips)}<div class="h2">${ym ? fmon(ym) : fdate(d)}</div>${body}<div style="margin-top:12px">${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
+  return { title: 'Занятия', html: `${stickyFilters(monthChipsRow + dayChips + teacherChips)}<div class="h2">${ym ? fmon(ym) : fdate(d)}</div>${body}<div style="margin-top:12px;display:grid;gap:8px">${goBtn('📋 Расписание из Telegram', 'a.schedule.drafts', {}, 'sec')}${goBtn('📝 Отметить занятие за педагога', 'a.record', {}, 'sec')}</div>` };
 };
 /* Экономика занятия (решение владельца 06.10.2026): выручка − зарплата = прибыль школы прямо в карточке */
 const lessonEconomy = e => {

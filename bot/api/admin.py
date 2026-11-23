@@ -21,7 +21,7 @@ from bot.handlers.admin.bills.helpers import _send_bill_to_parents, _student_gro
 from bot.models.enums import LessonType, PaymentStatus
 from bot.services import payment_ledger
 from bot.services.kindergarten import is_kindergarten_group
-from bot.services import birthdays
+from bot.services import birthdays, schedule_pilot
 from bot.services.dance_rank import is_ballroom_group, profile as dance_profile
 from bot.services.payment_methods import ADMIN_MANUAL
 from bot.services.payment_service import (
@@ -184,8 +184,21 @@ def register_admin_api(app: web.Application, dp, bot=None) -> None:
         lessons_today = [ls for ls in await lesson_repo.get_all() if ls.date == today]
         day = await profit_service.get_lesson_summary(today)      # только занятия дня
         month = await profit_service.get_month_summary(period)    # как экран «Прибыль»
+        pilots = _dp_get(dp, "schedule_pilots")
+        schedule_today = None
+        if pilots is not None:
+            m_today = schedule_pilot.moscow_today()
+            pending_total = 0
+            pending_teachers: list[str] = []
+            for tid, pilot in pilots.by_teacher.items():
+                p_cnt, _ = await pilot.today_summary(m_today)
+                if p_cnt:
+                    pending_total += p_cnt
+                    pending_teachers.append(teacher_names.get(tid, tid))
+            schedule_today = {"pending": pending_total, "teachers": sorted(pending_teachers)}
         return _json({
             "today": today, "period": period, "currentPeriod": current, "prevPeriod": prev,
+            "scheduleToday": schedule_today,
             "debtorsCount": debtors_count, "debtorsTotal": debtors_total,
             "lessonsToday": len(lessons_today), "todayTeachers": await _today_by_teacher(lessons_today),
             "incomeToday": day.total_income, "profitToday": day.profit,

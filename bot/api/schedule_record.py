@@ -24,7 +24,10 @@ def _journal_match(lesson, slot: dict, day: str) -> bool:
     return lesson.type == LessonType.INDIVIDUAL and bool(participants) and participants == set(slot["studentIds"])
 
 
-async def draft_day(dp, teacher, pilot: SchedulePilot, mid: int, body: dict, students: list[Student]) -> list[dict]:
+async def draft_day(
+    dp, teacher, pilot: SchedulePilot, mid: int, body: dict, students: list[Student],
+    *, bypass_period_lock: bool = False,
+) -> list[dict]:
     actions = body.get("actions")
     if (not isinstance(actions, list) or not 1 <= len(actions) <= 100
             or any(not isinstance(a, dict) or not isinstance(a.get("time"), str)
@@ -51,7 +54,10 @@ async def draft_day(dp, teacher, pilot: SchedulePilot, mid: int, body: dict, stu
             slot = by_time[action["time"]]
             if slot["kind"] == "group" and action["status"] == "held" and options is None:
                 options = await record_options(dp, teacher.teacher_id)
-            result = await _slot_outcome(dp, teacher, pilot, mid, plan["date"], slot, action, statuses, options)
+            result = await _slot_outcome(
+                dp, teacher, pilot, mid, plan["date"], slot, action, statuses, options,
+                bypass_period_lock=bypass_period_lock,
+            )
             results.append({"time": slot["time"], **result})
         return results
 
@@ -86,7 +92,9 @@ def _record_body(slot: dict, day: str, action: dict, options: dict | None) -> di
     return {"kind": "group", "date": day, "groupId": group["id"], "studentIds": ids, "tiers": tiers, "durationMin": duration}
 
 
-async def _slot_outcome(dp, teacher, pilot, mid, day, slot, action, statuses, options) -> dict:
+async def _slot_outcome(
+    dp, teacher, pilot, mid, day, slot, action, statuses, options, *, bypass_period_lock: bool = False,
+) -> dict:
     time, target = slot["time"], action["status"]
     status, lesson_id, pending_body = statuses.get(time, ("planned", "", None))
     if status == "held":
@@ -132,7 +140,7 @@ async def _slot_outcome(dp, teacher, pilot, mid, day, slot, action, statuses, op
             body["requestId"] = lesson_id
             await pilot.set_outcome(mid, time, "pending", lesson_id, body)
             statuses[time] = ("pending", lesson_id, json.dumps(body))
-        result = await record_create(dp, teacher, body, bypass_period_lock=False, lesson_id=lesson_id)
+        result = await record_create(dp, teacher, body, bypass_period_lock=bypass_period_lock, lesson_id=lesson_id)
     except RecordError as exc:
         if statuses.get(time, ("", "", None))[0] == "pending":
             await pilot.set_outcome(mid, time, "planned")

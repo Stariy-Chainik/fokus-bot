@@ -2,19 +2,31 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 from aiohttp import web
 
-from bot.utils.groups import lesson_group_title
-from bot.models.enums import LessonType
-from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.api.record import RecordError, record_create, record_options
+from bot.api.schedule_record import draft_day
+from bot.models.enums import LessonType
+from bot.services import schedule_pilot
+from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.profit_service import is_owner, lesson_rent
+from bot.services.schedule_pilot import DraftConflict, edited_schedule, is_draft_completed
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
+from bot.utils.groups import lesson_group_title
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+_SCHEDULE_DRAFT_ID = re.compile(r"-?\d{1,12}")
+
+
+def _dp_get(dp, key: str):
+    try:
+        return dp[key]
+    except KeyError:
+        return None
 
 
 def _json(data, status: int = 200) -> web.Response:
@@ -171,8 +183,101 @@ def register_lesson_routes(app: web.Application, dp, guard, prefix: str) -> None
         logger.info("Mini App: админ %s отметил занятие за %s: %s", user.tg_id, teacher.teacher_id, result["lessons"])
         return _json(result)
 
-    routes = [("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
-              ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view)]
+    # ── расписания педагогов из Telegram (сегодняшние невнесённые, отметка за педагога) ──
+    teacher_group_repo = dp["teacher_group_repo"]
+
+    def _pilots():
+        return _dp_get(dp, "schedule_pilots")
+
+    async def schedule_drafts_view(request: web.Request, user) -> web.Response:
+        today_iso = schedule_pilot.moscow_today().isoformat()
+        pilots = _pilots()
+        if pilots is None:
+            return _json({"drafts": [], "today": today_iso, "upcoming": []})
+        tid_filter = request.query.get("tid") or ""
+        teachers = {t.teacher_id: t.name for t in await teacher_repo.get_all()}
+        students = await student_repo.get_all()
+        active_today: list[dict] = []
+        upcoming: list[dict] = []
+        ordered = sorted(
+            pilots.by_teacher.values(),
+            key=lambda p: (0 if p.teacher_id == user.teacher_id else 1, teachers.get(p.teacher_id, p.teacher_id)),
+        )
+        for pilot in ordered:
+            if tid_filter and pilot.teacher_id != tid_filter:
+                continue
+            tname = teachers.get(pilot.teacher_id, pilot.teacher_id)
+            all_drafts = await pilot.drafts(students)
+            for d in all_drafts:
+                if d["date"] == today_iso and not is_draft_completed(d):
+                    active_today.append({**d, "teacherId": pilot.teacher_id, "teacherName": tname})
+            future_dates = sorted({d["date"] for d in all_drafts if d["date"] > today_iso and not is_draft_completed(d)})
+            if future_dates:
+                upcoming.append({"teacherId": pilot.teacher_id, "teacherName": tname, "dates": future_dates})
+        return _json({"drafts": active_today, "today": today_iso, "upcoming": upcoming})
+
+    async def schedule_save_view(request: web.Request, user) -> web.Response:
+        pilots = _pilots()
+        tid, mid = request.match_info["tid"], request.match_info["mid"]
+        pilot = pilots.by_teacher.get(tid) if pilots else None
+        if pilot is None or not _SCHEDULE_DRAFT_ID.fullmatch(mid):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+        except ValueError:
+            return _json({"error": "bad_request"}, status=400)
+        if not isinstance(body, dict):
+            return _json({"error": "bad_request"}, status=400)
+        revision, base = body.get("revision"), body.get("sourceRevision")
+        if type(revision) is not int or revision < 0 or not isinstance(base, str) or not re.fullmatch(r"\d{1,20}:\d{1,20}", base):
+            return _json({"error": "bad_request"}, status=400)
+        try:
+            plan = None
+            if body.get("useTelegram") is not True:
+                group_ids = set(await teacher_group_repo.get_groups_for_teacher(tid))
+                groups = {g.group_id: g.name for g in await group_repo.get_all() if g.group_id in group_ids}
+                plan = edited_schedule(body, await student_repo.get_all(), groups)
+            async with pilot.lock:
+                await pilot.save_edit(int(mid), revision, base, plan)
+        except ValueError as exc:
+            return _json({"error": "bad_request", "message": str(exc)}, status=400)
+        except KeyError:
+            return _json({"error": "not_found"}, status=404)
+        except DraftConflict:
+            return _json({"error": "conflict", "message": "Черновик обновился. Открой последнюю версию и проверь изменения."},
+                         status=409)
+        return _json({"ok": True})
+
+    async def schedule_attendance_view(request: web.Request, user) -> web.Response:
+        pilots = _pilots()
+        tid, mid = request.match_info["tid"], request.match_info["mid"]
+        pilot = pilots.by_teacher.get(tid) if pilots else None
+        teacher = await teacher_repo.get_by_id(tid) if pilot else None
+        if pilot is None or teacher is None or not _SCHEDULE_DRAFT_ID.fullmatch(mid):
+            return _json({"error": "not_found"}, status=404)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Проверь выбранные занятия")
+            results = await draft_day(
+                dp, teacher, pilot, int(mid), body, await student_repo.get_all(), bypass_period_lock=True,
+            )
+        except ValueError as exc:
+            return _json({"error": "bad_request", "message": str(exc)}, status=400)
+        except KeyError:
+            return _json({"error": "not_found"}, status=404)
+        except DraftConflict:
+            return _json({"error": "conflict", "message": "Черновик обновился. Проверь текущую версию."}, status=409)
+        logger.info("Mini App: админ %s отметил расписание из Telegram за %s (пост %s)", user.tg_id, tid, mid)
+        return _json({"results": results})
+
+    routes = [
+        ("GET", "/lessons", lessons), ("GET", "/lessons/{lid}", lesson), ("DELETE", "/lessons/{lid}", lesson_delete),
+        ("GET", "/record/options", record_options_view), ("POST", "/record", record_create_view),
+        ("GET", "/schedule-drafts", schedule_drafts_view),
+        ("PUT", "/schedule-drafts/{tid}/{mid}", schedule_save_view),
+        ("POST", "/schedule-drafts/{tid}/{mid}/attendance", schedule_attendance_view),
+    ]
     for method, path, handler in routes:
         app.router.add_route(method, prefix + path, guard(handler))
     logger.info("Admin API (занятия): %d маршрутов", len(routes))
