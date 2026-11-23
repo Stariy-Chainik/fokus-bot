@@ -24,8 +24,8 @@ _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
 _ARCHIVE_RETENTION_DAYS = 30
 _GREETING = re.compile(r"(?:доброе\s+утро|добрый\s+день|добрый\s+вечер|здравствуйте|всем\s+привет)[!.,]*")
-_HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:(?:на|в|во) )?(.+?))?[:.!]?")
-_PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:(?:на|в|во) )?(.+?))?[.!]?")
+_HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:(?:на|в|во) )?(.+?))?\s*[:.!]?")
+_PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:(?:на|в|во) )?(.+?))?\s*[.!]?")
 _WEEK = re.compile(r"(?:на )?(?:(эту|текущую|следующую) )?неделю")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _SHORT_DAYS = dict(zip(("пн", "вт", "ср", "чт", "пт", "сб", "вс"), _DAYS, strict=True))
@@ -151,13 +151,29 @@ def _parse_slot(line: str) -> Slot | None:
     return Slot(time, at, names, duration, end=end)
 
 
+def _is_greeting_line(line: str) -> bool:
+    cleaned = re.sub(r"[^а-яa-z0-9\s]", " ", _plain(line))
+    return bool(_GREETING.fullmatch(" ".join(cleaned.split())))
+
+
+def _strip_header_note(line: str) -> str:
+    """Снимает пояснение в скобках в конце строки-дня («Понедельник: (если нет Власова)»), сохраняя даты и дни."""
+    match = re.search(r"\s*\(([^)]+)\)\s*$", line)
+    if not match:
+        return line
+    inside = _plain(match.group(1)).strip(" :.,!—–-")
+    if inside in _WEEKDAYS or re.fullmatch(r"\d{1,2}[./]\d{1,2}(?:[./]\d{4})?", inside):
+        return line
+    return line[:match.start()].strip()
+
+
 def _schedule_lines(text: str) -> tuple[str, list[str]]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if lines and _GREETING.fullmatch(_plain(lines[0])):
+    while lines and _is_greeting_line(lines[0]):
         lines = lines[1:]
     if not lines:
         return "", []
-    title = lines[0].rstrip(":").strip()
+    title = lines[0].rstrip(": ").strip()
     greeting = _GREETING.match(title.casefold())
     if greeting and title[greeting.end():greeting.end() + 1].isspace():
         title = title[greeting.end():].strip()
@@ -193,12 +209,12 @@ def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tupl
             if rest and _SLOT.fullmatch(rest):
                 intro_and_slots[index] = rest
                 break
-            plain_rest = _plain(rest).rstrip(":.!")
+            plain_rest = _plain(_strip_header_note(rest)).rstrip(":.! ")
             header = _HEADER.fullmatch(plain_rest) or _PLAIN_HEADER.fullmatch(plain_rest)
             label = (header[1] or "") if header else plain_rest
         else:
-            line = _plain(cleaned).rstrip(":.!")
-            if _GREETING.fullmatch(line):
+            line = _plain(_strip_header_note(cleaned)).rstrip(":.! ")
+            if _is_greeting_line(cleaned):
                 continue
             header = _HEADER.fullmatch(line) or _PLAIN_HEADER.fullmatch(line)
             if header:
@@ -281,7 +297,11 @@ def _parse_week_schedule(text: str, published: date, *, accept_plain_title: bool
     if not sections or (week is None and len(sections) < 2):
         return {}
     plans: dict[date, list[Slot]] = {}
+    last_day = list(sections)[-1]
     for day, rows in sections.items():
+        if day == last_day:
+            while rows and _parse_slot(rows[-1]) is None and not re.search(_TIME, rows[-1]):
+                rows = rows[:-1]
         slots = _parse_slots(rows)
         if slots is None:
             return {}
@@ -855,7 +875,7 @@ class SchedulePilots:
             catalog = await self._teacher_catalog()
             by_teacher = await parser(text, published.date(), sender_pilot.teacher_id, catalog)
         except Exception as exc:
-            logger.warning("AI-разбор расписания (пост %s) не выполнен: %s", message_id, exc)
+            logger.warning("AI-разбор расписания (пост %s) не выполнен: %s: %s", message_id, type(exc).__name__, exc)
             return
 
         for tid, day_plans in by_teacher.items():

@@ -245,6 +245,8 @@ def _effective_schedule_model(api_key: str) -> str:
 
 
 async def _call_gemini_native(api_key: str, model: str, user_prompt: str) -> dict[str, Any]:
+    import asyncio
+
     import aiohttp
 
     candidates = list(dict.fromkeys([model, *_GEMINI_SCHEDULE_FALLBACKS]))
@@ -259,20 +261,28 @@ async def _call_gemini_native(api_key: str, model: str, user_prompt: str) -> dic
         },
     }
     last_err = ""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+    async with aiohttp.ClientSession() as session:
         for idx, candidate in enumerate(candidates):
             url = _GEMINI_API_URL.format(model=candidate)
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status in (404, 429, 503) and idx + 1 < len(candidates):
-                    last_err = f"{candidate}: HTTP {resp.status}"
+            try:
+                async with session.post(
+                    url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=12),
+                ) as resp:
+                    if resp.status in (404, 429, 503) and idx + 1 < len(candidates):
+                        last_err = f"{candidate}: HTTP {resp.status}"
+                        continue
+                    if resp.status >= 400:
+                        body = (await resp.text())[:300]
+                        raise RuntimeError(f"Gemini schedule parse ({candidate}) HTTP {resp.status}: {body}")
+                    result = await resp.json()
+                    parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+                    content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
+                    return json.loads(content) if content else {}
+            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+                last_err = f"{candidate}: {type(exc).__name__}"
+                if idx + 1 < len(candidates):
                     continue
-                if resp.status >= 400:
-                    body = (await resp.text())[:300]
-                    raise RuntimeError(f"Gemini schedule parse ({candidate}) HTTP {resp.status}: {body}")
-                result = await resp.json()
-                parts = (((result.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
-                content = next((p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")), "")
-                return json.loads(content) if content else {}
+                raise RuntimeError(f"Gemini schedule parse failed ({last_err})") from exc
     raise RuntimeError(f"Gemini schedule parse unavailable ({last_err})")
 
 

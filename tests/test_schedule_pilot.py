@@ -157,6 +157,8 @@ def test_duration_inference_uses_next_row_and_keeps_explicit_values():
         ("C.A. пн 23.11\n17:00 Иванов Иван", 23, ["17:00"]),
         ("С.А\nПн.\n17:00 Иванов Иван", 23, ["17:00"]),
         ("📋 С.А. (пн)\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("С.А.: \nПонедельник: (если нет Власова) \n\n♦️ 16.00 Иванов Иван\n♦️ 16.45 Саша и Эмили", 23,
+         ["16:00", "16:45"]),
     ],
 )
 def test_owner_initials_mark_personal_schedule(text, day, times):
@@ -742,3 +744,29 @@ def test_admin_can_view_edit_and_record_teacher_schedule_drafts(monkeypatch, tmp
     assert _call(app, "GET", "/api/admin/schedule-drafts")[1]["drafts"] == []
     assert call_teacher(app, "GET", "/api/teacher/schedule-drafts", tg_id=vlad_tg)[1]["drafts"] == []
     assert _call(app, "GET", "/api/admin/home")[1]["scheduleToday"] == {"pending": 0, "teachers": []}
+
+
+def test_real_angelina_weekly_post_with_emoji_greeting_and_trailing_note():
+    """Реальный недельный пост Ангелины Клецовой с эмодзи в приветствии, « :» и сноской про субботу."""
+    post = (
+        "Доброе утро! ☀️ \n"
+        "Расписание со мной на эту неделю : \n\n"
+        "ВТОРНИК \n"
+        "16:00\n"
+        "16:45 Мирослава Моргунова\n"
+        "17:30 София хореография \n"
+        "20:30 \n\n"
+        "СРЕДА \n"
+        "17:00 Бухтоярова Кристина (60) \n"
+        "18:00 группа (начинающие) \n\n"
+        "ПЯТНИЦА \n"
+        "12:00 Бискуп Маша \n"
+        "19:30 Шабанова Алиса 60\n"
+        "20:30 \n\n\n"
+        "Суббота пока под вопросом, скорее всего буду на турнире."
+    )
+    plans = schedule_pilot._parse_week_schedule(post, date(2026, 11, 23), accept_plain_title=True)
+    assert sorted(plans) == [date(2026, 11, 24), date(2026, 11, 25), date(2026, 11, 27)]
+    assert [s.time for s in plans[date(2026, 11, 24)]] == ["16:00", "16:45", "17:30", "20:30"]
+    assert plans[date(2026, 11, 25)][0].duration == 60
+    assert [s.time for s in plans[date(2026, 11, 27)]] == ["12:00", "19:30", "20:30"]
