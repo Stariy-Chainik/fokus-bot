@@ -21,17 +21,22 @@ logger = logging.getLogger(__name__)
 _MOSCOW = ZoneInfo("Europe/Moscow")
 DRAFT_DURATIONS = (45, 60, 90)
 _GREETING = re.compile(r"(?:доброе\s+утро|добрый\s+день|добрый\s+вечер|здравствуйте|всем\s+привет)[!.,]*")
-_HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:на )?(.+?))?[:.!]?")
-_PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:на )?(.+?))?[.!]?")
+_HEADER = re.compile(r"расписание\b(?: занятий)? со мной(?: (?:(?:на|в|во) )?(.+?))?[:.!]?")
+_PLAIN_HEADER = re.compile(r"(?:мое )?расписание\b(?: занятий)?(?:(?: *: *| )(?:(?:на|в|во) )?(.+?))?[.!]?")
 _WEEK = re.compile(r"(?:на )?(?:(эту|текущую|следующую) )?неделю")
 _DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
-_WEEKDAYS = {**{day: index for index, day in enumerate(_DAYS)}, "среду": 2, "пятницу": 4, "субботу": 5}
-_DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
-_OWNER_INITIALS = re.compile(r"с\.\s*а\.(?:(?:\s*:\s*|\s+)(.+))?", re.IGNORECASE)
 _SHORT_DAYS = dict(zip(("пн", "вт", "ср", "чт", "пт", "сб", "вс"), _DAYS, strict=True))
+_WEEKDAYS = {
+    **{day: index for index, day in enumerate(_DAYS)},
+    "среду": 2, "пятницу": 4, "субботу": 5,
+    **{short: index for index, short in enumerate(_SHORT_DAYS)},
+}
+_DAY_HEADER = re.compile(rf"(?:{'|'.join(_DAYS)})(?: \d{{1,2}}[./]\d{{1,2}}(?:[./]\d{{4}})?)?")
+_INITIALS_TOKEN = re.compile(r"(?<![а-яa-z0-9])[сc]\.\s*[аa](?:\.|(?![а-яa-z0-9]))", re.IGNORECASE)
+_HEADER_BULLET = re.compile(r"^(?:[♦🔶🔷🔸🔹◆▪▫•*—–\-📋🗓📅📌⚡]+\ufe0f?\s*)+")
 _WEEK_DRAFT_STRIDE = 8  # семь отрицательных ключей на сообщение, по одному для каждого дня
 _TIME = r"(?:[01]?\d|2[0-3])[:.][0-5]\d"
-_SLOT_BULLET = r"[♦🔶🔷🔸🔹◆▪•-]\ufe0f?"
+_SLOT_BULLET = r"[♦🔶🔷🔸🔹◆▪▫•*—–-]\ufe0f?"
 _SLOT = re.compile(
     rf"(?:{_SLOT_BULLET}\s*)?(?P<start>{_TIME})"
     rf"(?:\s*[-–—]\s*(?P<end>{_TIME}))?(?:(?:\s*[-–—]\s*|\s+)(?P<names>.+))?",
@@ -43,6 +48,25 @@ _NICKNAMES = {
     "екатерина": ("катя",), "николай": ("коля",), "софия": ("соня",), "софья": ("соня",),
     "ирина": ("ира",), "александр": ("саша",), "александра": ("саша",), "эмилия": ("эмили",),
 }
+
+
+def moscow_today() -> date:
+    return datetime.now(_MOSCOW).date()
+
+
+def is_draft_completed(plan: dict) -> bool:
+    """True, если все рабочие занятия черновика уже внесены в журнал или отменены."""
+    active = [slot for slot in plan["slots"] if slot["kind"] != "free"]
+    if not active:
+        return True
+    if any(slot.get("status") not in ("held", "cancelled") for slot in active):
+        return False
+    if plan.get("sourceUpdated") and plan.get("telegram"):
+        done_origins = {slot["telegramTime"] for slot in active}
+        tg_active = [slot for slot in plan["telegram"]["slots"] if slot["kind"] != "free"]
+        if any(slot["telegramTime"] not in done_origins for slot in tg_active):
+            return False
+    return True
 
 
 def _plain(text: str) -> str:
@@ -59,7 +83,20 @@ class Slot:
     end: str | None = None
 
 
+def _clean_day_label(label: str) -> str:
+    text = _plain(label)
+    text = re.sub(r"[()]", " ", text)
+    text = re.sub(r"\s*,\s*", " ", text)
+    text = " ".join(text.split()).strip(" :.,!—–-")
+    for prefix in ("на ", "во ", "в "):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+    return text.rstrip(".!:")
+
+
 def _plan_day(label: str, published: date) -> date | None:
+    label = _clean_day_label(label)
     if label in ("", "сегодня"):
         return published
     if label == "завтра":
@@ -106,7 +143,7 @@ def _parse_slot(line: str) -> Slot | None:
         if interval <= 0 or (duration is not None and duration != interval):
             return None
         duration = interval
-    if _plain(names).rstrip(".!") == "свободно":
+    if not names.strip(" -–—") or _plain(names).rstrip(".!") == "свободно":
         names = ""
     return Slot(time, at, names, duration, end=end)
 
@@ -143,24 +180,32 @@ def _parse_owner_schedule(title: str, lines: list[str], published: date) -> tupl
     day = None
     intro_and_slots = [title, *lines]
     for index, raw_line in enumerate(intro_and_slots):
-        line = _plain(raw_line).rstrip(":")
-        initials = _OWNER_INITIALS.fullmatch(raw_line.rstrip(":").strip())
-        header = _HEADER.fullmatch(line) or _PLAIN_HEADER.fullmatch(line)
-        if initials:
-            has_initials = True
-            tail = initials[1] or ""
-            if _SLOT.fullmatch(tail):
-                intro_and_slots[index] = tail
-                break
-            label = _plain(tail).removeprefix("на ")
-        elif header:
-            label = header[1] or ""
-        elif _DAY_HEADER.fullmatch(line) or line in _SHORT_DAYS:
-            label = line
-        else:
+        if _SLOT.fullmatch(raw_line):
             break
+        cleaned = _HEADER_BULLET.sub("", raw_line).strip()
+        if _INITIALS_TOKEN.search(cleaned):
+            has_initials = True
+            rest = _INITIALS_TOKEN.sub(" ", cleaned)
+            rest = re.sub(r"\(\s*\)", "", rest).strip(" :.,!—–-")
+            if rest and _SLOT.fullmatch(rest):
+                intro_and_slots[index] = rest
+                break
+            plain_rest = _plain(rest).rstrip(":.!")
+            header = _HEADER.fullmatch(plain_rest) or _PLAIN_HEADER.fullmatch(plain_rest)
+            label = (header[1] or "") if header else plain_rest
+        else:
+            line = _plain(cleaned).rstrip(":.!")
+            if _GREETING.fullmatch(line):
+                continue
+            header = _HEADER.fullmatch(line) or _PLAIN_HEADER.fullmatch(line)
+            if header:
+                label = header[1] or ""
+            elif line and _plan_day(line, published) is not None:
+                label = line
+            else:
+                break
         if label:
-            candidate = _plan_day(_SHORT_DAYS.get(label, label), published)
+            candidate = _plan_day(label, published)
             if candidate is None or (day and day != candidate):
                 return None
             day = candidate
@@ -597,14 +642,14 @@ class SchedulePilot:
         await asyncio.to_thread(self._change_outcome, message_id, time, status, lesson_id, raw)
 
     def _latest_with_outcomes(self) -> tuple[list[tuple], dict[int, dict[str, tuple[str, str, str | None]]]]:
-        """Одним подключением читаем последние 10 черновиков и все их результаты (без N+1)."""
+        """Одним подключением читаем последние 20 черновиков и все их результаты (без N+1)."""
         with closing(self._open()) as conn:
             rows = list(conn.execute("""SELECT message_id, d.version, d.update_id, d.payload,
                     e.revision, e.source_revision, e.payload
                 FROM drafts AS d LEFT JOIN draft_edits AS e USING (chat_id, sender_id, teacher_id, message_id)
                 WHERE chat_id=? AND sender_id=? AND teacher_id=? AND (d.payload IS NOT NULL OR e.payload IS NOT NULL)
                 ORDER BY CASE WHEN message_id < 0 THEN -message_id / ? ELSE message_id END DESC, message_id DESC
-                LIMIT 10""", (self.chat_id, self.tg_id, self.teacher_id, _WEEK_DRAFT_STRIDE)))
+                LIMIT 20""", (self.chat_id, self.tg_id, self.teacher_id, _WEEK_DRAFT_STRIDE)))
             outcomes_by_mid: dict[int, dict[str, tuple[str, str, str | None]]] = {}
             if rows:
                 mids = [r[0] for r in rows]
@@ -616,6 +661,34 @@ class SchedulePilot:
                 ):
                     outcomes_by_mid.setdefault(mid, {})[slot_time] = (status, lesson, body)
             return rows, outcomes_by_mid
+
+    async def today_summary(self, day: date) -> tuple[int, bool]:
+        """Возвращает (сколько незаписанных занятий на день, есть ли полностью внесённый черновик на этот день)."""
+        day_iso = day.isoformat()
+        rows, outcomes_by_mid = await asyncio.to_thread(self._latest_with_outcomes)
+        pending = 0
+        completed = False
+        empty_names = StudentNames([])
+        for message_id, version, update_id, source, _revision, base, edit in rows:
+            latest = self._source_revision(version, update_id)
+            plan = self._view(_telegram_plan(edit or source, source), empty_names)
+            if plan["date"] != day_iso:
+                continue
+            plan["sourceUpdated"] = bool(edit and base != latest)
+            outcomes = outcomes_by_mid.get(message_id, {})
+            for slot in plan["slots"]:
+                status, _lesson_id, _ = outcomes.get(slot["time"], ("planned", "", None))
+                slot["status"] = status
+            if plan["sourceUpdated"] and source:
+                plan["telegram"] = self._view(_telegram_plan(source, source), empty_names)
+            if is_draft_completed(plan):
+                completed = True
+            else:
+                pending += sum(
+                    1 for slot in plan["slots"]
+                    if slot["kind"] != "free" and slot["status"] not in ("held", "cancelled")
+                )
+        return pending, completed
 
     async def drafts(self, students: list[Student]) -> list[dict]:
         names = StudentNames(students)

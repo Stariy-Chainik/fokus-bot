@@ -206,7 +206,8 @@ def _build_dispatcher(storage, tg_bot=None) -> Dispatcher:
         pilots = [
             SchedulePilot(chat, account.tg_id, account.teacher_id, path,
                           accept_weekday=account.accept_weekday, accept_plain_title=account.accept_plain_title,
-                          accept_weekly=account.accept_weekly)
+                          accept_weekly=account.accept_weekly,
+                          accept_owner_initials=account.teacher_id in settings.owner_teacher_id_set)
             for account in settings.schedule_pilot_accounts
         ]
         if settings.schedule_pilot_tg_id and settings.schedule_pilot_teacher_id:

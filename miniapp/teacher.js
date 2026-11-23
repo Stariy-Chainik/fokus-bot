@@ -49,7 +49,14 @@ SCREENS['t.home'] = async () => {
     ${attention.length ? list(attention) : '<div class="calm">✓ Оценок и решений не ждёт</div>'}
     <div class="eyebrow">Сегодня</div>
     ${today}
-    ${h.schedulePilot ? `<div style="margin-top:12px">${list([cell({ lead: '📋', plain: true, t: 'Расписание из Telegram', go: 't.schedule.drafts' })])}</div>` : ''}
+    ${h.schedulePilot ? `<div style="margin-top:12px">${list([cell({
+      lead: '📋', plain: true, t: 'Расписание из Telegram',
+      s: h.scheduleTodayPending
+        ? `На сегодня · ${plural(h.scheduleTodayPending, ['занятие', 'занятия', 'занятий'])} не отмечено`
+        : h.scheduleCompletedToday ? 'На сегодня всё внесено' : 'На сегодня расписания нет',
+      r: h.scheduleTodayPending ? `<span class="pill warn">${h.scheduleTodayPending}</span>` : (h.scheduleCompletedToday ? '✅' : ''),
+      go: 't.schedule.drafts',
+    })])}</div>` : ''}
     <div class="eyebrow">${mon}</div>
     ${list([
       cell({ lead: '💰', plain: true, t: 'Зарплата', s: `${monthLine}${h.paidMonth ? ` · выплачено ${fmt(h.paidMonth)}` : ''}`, r: `<b>${fmt(h.earnedMonth)}</b>`, go: 't.money', p: { ym: h.period } }),
@@ -100,12 +107,15 @@ const scheduleRows = (slots, id = null) => slots.length ? `<ol class="schedule-l
 }).join('')}</ol>` : '<p class="hint schedule-empty">В черновике пока нет строк.</p>';
 
 async function loadSchedule() {
-  const { drafts, acceptWeekday, acceptPlainTitle, acceptWeekly } = await api('/schedule-drafts');
-  const titleExample = acceptPlainTitle ? '«Расписание на четверг»' :
+  const { drafts, completedToday, upcomingDates, acceptWeekday, acceptPlainTitle, acceptWeekly, acceptOwnerInitials } = await api('/schedule-drafts');
+  const titleExample = acceptOwnerInitials ? '«С.А. Понедельник» или «С.А. Пн»' :
+    acceptPlainTitle ? '«Расписание на четверг»' :
     acceptWeekday !== false ? '«Четверг:»' : '«Расписание со мной на четверг»';
   state.ui.scheduleEmptyHint = acceptWeekly
     ? 'Опубликуй в группе пост со словом «Расписание». Для недели укажи каждый день отдельной строкой.'
-    : `Опубликуй в группе расписание одного дня с заголовком ${titleExample}.`;
+    : `Опубликуй в группе расписание на сегодня с заголовком ${titleExample}.`;
+  state.ui.scheduleCompletedToday = !!completedToday;
+  state.ui.scheduleUpcomingDates = upcomingDates || [];
   for (const plan of drafts) {
     const marks = scheduleMarks(plan.id);
     const eligible = new Map(plan.slots.filter(canMarkSchedule).map(s => [s.time, scheduleStamp(plan, s)]));
@@ -117,6 +127,10 @@ async function loadSchedule() {
 SCREENS['t.schedule.drafts'] = async () => {
   await loadSchedule();
   const drafts = state.ui.scheduleDrafts;
+  const upcoming = state.ui.scheduleUpcomingDates || [];
+  const upcomingHint = upcoming.length
+    ? `<p class="hint" style="margin-top:8px">Загружено на ${esc(upcoming.map(fdate).join(', '))} — появится в этот день.</p>`
+    : '';
   const day = d => {
     const hasMarks = d.slots.some(s => s.status && s.status !== 'planned');
     const date = esc(fdate(d.date));
@@ -125,7 +139,7 @@ SCREENS['t.schedule.drafts'] = async () => {
     return `<section class="card schedule-day" data-schedule-draft="${d.id}">
       <div class="schedule-head"><div><h2>${hasMarks ? date :
         `<button type="button" class="schedule-date-link" data-act="scheduleChangeDate" data-p='{"id":${d.id}}'>${date}</button>`}</h2>
-        <div class="hint">Черновик</div></div></div>
+        <div class="hint">Расписание на сегодня</div></div></div>
       ${toMark ? '<p class="hint schedule-mark-guide">Поставь галочки у проведённых занятий, чтобы внести их в журнал.</p>' : ''}
       ${scheduleRows(d.slots, d.id)}
       ${toMark ? `<div class="schedule-notice"><button type="button" class="btn" data-act="scheduleMarkSave" data-p='{"id":${d.id}}'
@@ -135,8 +149,11 @@ SCREENS['t.schedule.drafts'] = async () => {
       <a class="schedule-source" href="${esc(d.source)}" target="_blank" rel="noopener">Открыть пост в Telegram</a>
     </section>`;
   };
-  const body = drafts.length ? drafts.map(day).join('') :
-    empty('Черновиков пока нет', `<p class="hint">${state.ui.scheduleEmptyHint}</p>`);
+  const emptyTitle = state.ui.scheduleCompletedToday ? 'На сегодня всё внесено' : 'На сегодня расписания нет';
+  const emptyText = state.ui.scheduleCompletedToday
+    ? `<p class="hint">Все занятия из сегодняшнего расписания уже в журнале.</p>${upcomingHint}`
+    : `<p class="hint">${state.ui.scheduleEmptyHint}</p>${upcomingHint}`;
+  const body = drafts.length ? drafts.map(day).join('') : empty(emptyTitle, emptyText);
   return { title: 'Расписание из Telegram', html: body +
     `<div class="schedule-actions">${teacherRecordButton('Добавить занятие', 'sec')}</div>` };
 };

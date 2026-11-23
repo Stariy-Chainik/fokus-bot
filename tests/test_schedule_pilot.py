@@ -10,6 +10,7 @@ from aiogram.types import Chat, Message, Update, User
 
 from bot.middlewares.private_only import PrivateChatsOnlyMiddleware
 from bot.models import Student
+from bot.services import schedule_pilot
 from bot.services.billing_service import build_billing_rows
 from bot.services.schedule_pilot import SchedulePilot, SchedulePilots, StudentNames, parse_schedule
 from tests.fakes import mk_lesson, mk_teacher, mk_user
@@ -145,6 +146,17 @@ def test_duration_inference_uses_next_row_and_keeps_explicit_values():
         ("С.А. 17:00 Иванов Иван", 19, ["17:00"]),
         ("Пятница:\nС.А.\nРасписание со мной пт\n♦️ 17:00 Иванов Иван\n♦️\n♦️ 19:15 Анна", 20,
          ["17:00", "19:15"]),
+        ("С.А. Понедельник\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("С.А. Пн\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("С.А. - пн.\n17:00 Иванов Иван\n18:00 -", 23, ["17:00", "18:00"]),
+        ("Понедельник, С.А.\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("Пн С.А.\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("Понедельник (С.А.)\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("Расписание С.А. на пн\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("С.А. в понедельник 23.11\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("C.A. пн 23.11\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("С.А\nПн.\n17:00 Иванов Иван", 23, ["17:00"]),
+        ("📋 С.А. (пн)\n17:00 Иванов Иван", 23, ["17:00"]),
     ],
 )
 def test_owner_initials_mark_personal_schedule(text, day, times):
@@ -163,8 +175,10 @@ def test_owner_initials_do_not_override_author_or_conflicting_date():
     for text in (
         "10.30 Иванов Иван\n15.15 Анна",
         "С.А.\nВлад\n17:00 Иванов Иван",
+        "С.А. Влад\n17:00 Иванов Иван",
         "Расписание Владa на субботу\nС.А.\n17:00 Иванов Иван",
         "С.А. на субботу\nПятница\n17:00 Иванов Иван",
+        "С.А. вт 23.11\n17:00 Иванов Иван",
     ):
         assert parse_schedule(text, published, accept_owner_initials=True) is None
 
@@ -230,6 +244,7 @@ def test_only_pilot_posts_are_stored_and_edits_replace_them(tmp_path, caplog):
 
 
 def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: date(2026, 11, 24))
     app, dp = make_api(monkeypatch)
     lessons_before = list(dp["lesson_repo"].items)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "drafts.db")
@@ -239,7 +254,9 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
     dp["user_repo"].items.append(mk_user(tg_id=123, is_admin=True, teacher_id="TCH-0001"))
     route = "/api/teacher/schedule-drafts"
     assert "schedulePilot" not in _call(app, "GET", "/api/admin/home")[1]
-    assert call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]["schedulePilot"] is True
+    home = call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]
+    assert home["schedulePilot"] is True
+    assert home["scheduleTodayPending"] == 5 and home["scheduleCompletedToday"] is False
     assert "schedulePilot" not in call_teacher(app, "GET", "/api/teacher/home", tg_id=123)[1]
     assert call_teacher(app, "GET", route, headers={})[0] == 401
     assert call_teacher(app, "GET", route, tg_id=PARENT_TG)[0] == 403
@@ -254,6 +271,7 @@ def test_drafts_visible_only_in_owner_cabinet(monkeypatch, tmp_path):
 
 
 def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monkeypatch, tmp_path):
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: date(2026, 11, 19))
     app, dp = make_api(monkeypatch)
     database = tmp_path / "teacher-sources.db"
     nazar, ivan = 222, 333
@@ -280,7 +298,10 @@ def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monke
     asyncio.run(unrelated())
     for teacher in (nazar, ivan):
         assert call_teacher(app, "GET", route, tg_id=teacher) == (
-            200, {"drafts": [], "acceptWeekday": False, "acceptPlainTitle": True, "acceptWeekly": False},
+            200, {
+                "drafts": [], "today": "2026-11-19", "completedToday": False, "upcomingDates": [],
+                "acceptWeekday": False, "acceptPlainTitle": True, "acceptWeekly": False, "acceptOwnerInitials": False,
+            },
         )
     asyncio.run(incoming())
     view_nazar = call_teacher(app, "GET", route, tg_id=nazar)[1]["drafts"][0]
@@ -305,6 +326,8 @@ def test_linked_teachers_see_only_their_posts_and_resolve_visible_students(monke
 
 
 def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, tmp_path):
+    today = [date(2026, 11, 17)]
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: today[0])
     app, dp = make_api(monkeypatch)
     db = tmp_path / "week.db"
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", db, accept_plain_title=True, accept_weekly=True)
@@ -316,12 +339,18 @@ def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, 
             "СРЕДА\n17:15 Петрова Анна\n18:00 группа (начинающие)\n18:45")
 
     def current():
-        return call_teacher(app, "GET", path, tg_id=ADMIN_TG)[1]["drafts"]
+        return call_teacher(app, "GET", path, tg_id=ADMIN_TG)[1]
 
     asyncio.run(pilot.receive(_message(post.replace("со мной", "Леры")), 1, edited=False))
-    assert current() == []
+    assert current()["drafts"] == []
     asyncio.run(pilot.receive(_message(post), 2, edited=False))
-    tuesday, wednesday = current()
+    tue_resp = current()
+    assert len(tue_resp["drafts"]) == 1 and tue_resp["upcomingDates"] == ["2026-11-18"]
+    tuesday = tue_resp["drafts"][0]
+    today[0] = date(2026, 11, 18)
+    wed_resp = current()
+    assert len(wed_resp["drafts"]) == 1 and wed_resp["upcomingDates"] == []
+    wednesday = wed_resp["drafts"][0]
     assert (tuesday["date"], wednesday["date"]) == ("2026-11-17", "2026-11-18")
     assert tuesday["id"] != wednesday["id"]
     assert tuesday["source"] == wednesday["source"] == "https://t.me/c/1111111111/17"
@@ -341,7 +370,10 @@ def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, 
     revised = post.replace("17:15 Иванов", "17:00 Иванов").split("СРЕДА")[0]
     asyncio.run(pilot.receive(_message(revised, edited=True), 3, edited=True))
     asyncio.run(pilot.receive(_message(post), 2, edited=False))
-    tuesday, wednesday = current()
+    today[0] = date(2026, 11, 17)
+    tuesday = current()["drafts"][0]
+    today[0] = date(2026, 11, 18)
+    wednesday = current()["drafts"][0]
     assert tuesday["slots"][0]["time"] == "17:15" and tuesday["slots"][0]["duration"] == 90
     assert tuesday["sourceUpdated"] and tuesday["telegram"]["slots"][0]["time"] == "17:00"
     assert wednesday["sourceUpdated"] and "telegram" not in wednesday
@@ -349,6 +381,8 @@ def test_weekly_post_keeps_each_days_edits_and_attendance_separate(monkeypatch, 
 
 
 def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkeypatch, tmp_path):
+    today = [date(2026, 11, 24)]
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: today[0])
     app, dp = make_api(monkeypatch)
     lessons_before = list(dp["lesson_repo"].items)
     database = tmp_path / "drafts.db"
@@ -370,6 +404,7 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
     save["slots"][3].update(time="19:30", groupId="GRP-0001")
     assert call_teacher(app, "PUT", route + "/17", tg_id=123, json=save)[0] == 404
     assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=save)[0] == 200
+    today[0] = date(2026, 11, 25)
 
     updated = TUESDAY.replace("16.15 - Ира М.", "16.30 - Ира М.")
     asyncio.run(pilot.receive(_message(updated, edited=True), 2, edited=True))
@@ -391,6 +426,7 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
     assert current()["slots"][0]["time"] == "16:55"
     adopt["sourceRevision"] = current()["telegram"]["sourceRevision"]
     assert call_teacher(app, "PUT", route + "/17", tg_id=ADMIN_TG, json=adopt)[0] == 200
+    today[0] = date(2026, 11, 24)
     assert current()["slots"][0]["time"] == "16:45" and not current()["sourceUpdated"]
 
     asyncio.run(pilot.receive(_message("Влад\n16:45 Егор и Катя", edited=True), 4, edited=True))
@@ -399,6 +435,7 @@ def test_saved_teacher_draft_survives_telegram_edit_and_explicit_adoption(monkey
 
 
 def test_draft_does_not_accept_new_rows_or_convert_free_slot(monkeypatch, tmp_path):
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: date(2026, 11, 24))
     app, dp = make_api(monkeypatch)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "only-telegram.db")
     dp["schedule_pilots"] = SchedulePilots([pilot])
@@ -436,12 +473,13 @@ def test_draft_does_not_accept_new_rows_or_convert_free_slot(monkeypatch, tmp_pa
 
 
 def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(monkeypatch, tmp_path):
+    day = date.today()
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: day)
     app, dp = make_api(monkeypatch)
     pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "day.db")
     dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
     dp["user_repo"].items.append(mk_user(tg_id=123, teacher_id="TCH-0001"))
-    day = date.today() - timedelta(days=1)
     published = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
     text = "Расписание со мной\n17:00 Иванов Иван 45\n18:00 Петрова Анна 60\n19:00 группа 90\n20:30 Свободно"
 
@@ -487,6 +525,13 @@ def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(mo
     assert actions(held)[1]["results"][0]["lessonId"] == group["lessonId"]
     linked = actions({"time": "17:00", "status": "held", "lessonId": "LES-098877"})[1]["results"][0]
     assert linked["lessonId"] == "LES-098877" and len(journal) == 2
+    # Все занятия черновика внесены или отменены → черновик исчезает из активного списка.
+    done_view = call("GET")[1]
+    assert done_view["drafts"] == [] and done_view["completedToday"] is True
+    home = call_teacher(app, "GET", "/api/teacher/home", tg_id=ADMIN_TG)[1]
+    assert home["scheduleTodayPending"] == 0 and home["scheduleCompletedToday"] is True
+
+    # Если пост в Telegram отредактировали и появилось новое время — черновик возвращается с пометкой обновления.
     receive(text.replace("17:00", "17:15"), 2)
     p = plan()
     assert p["sourceUpdated"] and p["slots"][0]["time"] == "17:00" and p["slots"][0]["status"] == "held"
@@ -497,13 +542,60 @@ def test_day_result_records_group_bills_skips_cancelled_and_can_link_existing(mo
     assert len(journal) == 2
 
 
+def test_only_today_uncompleted_drafts_are_offered(monkeypatch, tmp_path):
+    """Прошлые и будущие дни не предлагаются к сохранению; сегодняшний исчезает сразу после внесения."""
+    today = [date(2026, 11, 23)]  # понедельник
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: today[0])
+    app, dp = make_api(monkeypatch)
+    pilot = SchedulePilot(CHAT, ADMIN_TG, "TCH-0001", tmp_path / "today.db", accept_owner_initials=True)
+    dp["schedule_pilots"] = SchedulePilots([pilot])
+    asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
+
+    # Пост за прошлую субботу (21.11), за сегодня (Пн 23.11) и за завтра (Вт 24.11)
+    sat_msg = _message("С.А. Сб\n10:30 Иванов Иван 60").model_copy(
+        update={"message_id": 10, "date": datetime(2026, 11, 21, 7, tzinfo=timezone.utc)},
+    )
+    mon_msg = _message("С.А. Пн\n17:00 Иванов Иван 45").model_copy(
+        update={"message_id": 11, "date": datetime(2026, 11, 22, 19, tzinfo=timezone.utc)},
+    )
+    tue_msg = _message("С.А. Вт\n18:00 Петрова Анна 60").model_copy(
+        update={"message_id": 12, "date": datetime(2026, 11, 23, 18, tzinfo=timezone.utc)},
+    )
+    asyncio.run(pilot.receive(sat_msg, 1, edited=False))
+    asyncio.run(pilot.receive(mon_msg, 2, edited=False))
+    asyncio.run(pilot.receive(tue_msg, 3, edited=False))
+
+    route = "/api/teacher/schedule-drafts"
+    view = call_teacher(app, "GET", route, tg_id=ADMIN_TG)[1]
+    assert [d["date"] for d in view["drafts"]] == ["2026-11-23"]
+    assert view["completedToday"] is False
+    assert view["upcomingDates"] == ["2026-11-24"]
+
+    # Вносим сегодняшнее занятие в журнал — расписание на понедельник исчезает.
+    draft = view["drafts"][0]
+    body = {"revision": draft["revision"], "sourceRevision": draft["sourceRevision"],
+            "actions": [{"time": "17:00", "status": "held"}]}
+    assert call_teacher(app, "POST", f"{route}/{draft['id']}/attendance", tg_id=ADMIN_TG, json=body)[0] == 200
+    after = call_teacher(app, "GET", route, tg_id=ADMIN_TG)[1]
+    assert after["drafts"] == [] and after["completedToday"] is True
+    assert after["upcomingDates"] == ["2026-11-24"]
+
+    # Наступает вторник 24.11 — автоматически появляется расписание на вторник.
+    today[0] = date(2026, 11, 24)
+    tue_view = call_teacher(app, "GET", route, tg_id=ADMIN_TG)[1]
+    assert [d["date"] for d in tue_view["drafts"]] == ["2026-11-24"]
+    assert tue_view["completedToday"] is False
+    assert tue_view["upcomingDates"] == []
+
+
 def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, tmp_path):
+    day = date.today()
+    monkeypatch.setattr(schedule_pilot, "moscow_today", lambda: day)
     app, dp = make_api(monkeypatch)
     database = tmp_path / "retry.db"
     pilot = SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)
     dp["schedule_pilots"] = SchedulePilots([pilot])
     asyncio.run(dp["user_repo"].update_teacher_id(ADMIN_TG, "TCH-0001"))
-    day = date.today() - timedelta(days=1)
     published = datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc)
     msg = _message("Расписание со мной\n17:00 Иванов Иван 45", chat=CHAT + 1).model_copy(update={"date": published})
     asyncio.run(pilot.receive(msg, 1, edited=False))
@@ -530,6 +622,7 @@ def test_retry_after_journal_write_and_lost_reply_has_no_duplicate(monkeypatch, 
     dp["schedule_pilots"] = SchedulePilots([SchedulePilot(CHAT + 1, ADMIN_TG, "TCH-0001", database)])
     assert mark_held()["lessonId"] == repo.items[0].lesson_id
     assert len(repo.items) == 1
+    assert call_teacher(app, "GET", route, tg_id=ADMIN_TG)[1]["drafts"] == []
 
 
 def test_sqlite_uses_wal_and_drafts_reads_in_single_connection(monkeypatch, tmp_path):

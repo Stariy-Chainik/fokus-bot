@@ -4,17 +4,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from bot.api.record import RecordError, record_create, record_options
 from bot.models import Student
 from bot.models.enums import LessonType
+from bot.services import schedule_pilot
 from bot.services.schedule_pilot import DraftConflict, SchedulePilot
 from bot.utils.attendees import TRIAL_TIER
 
 logger = logging.getLogger(__name__)
-_MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 def _journal_match(lesson, slot: dict, day: str) -> bool:
@@ -62,7 +60,7 @@ def _record_body(slot: dict, day: str, action: dict, options: dict | None) -> di
     duration = slot["duration"]
     if not duration:
         raise RecordError("duration", "Укажи длительность занятия")
-    if day > datetime.now(_MOSCOW).date().isoformat():
+    if day > schedule_pilot.moscow_today().isoformat():
         raise RecordError("future_date", "Занятие можно отметить в день проведения или позже")
     if slot["kind"] == "individual":
         ids = slot["studentIds"]

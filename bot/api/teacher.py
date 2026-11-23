@@ -29,10 +29,10 @@ from bot.models.enums import GroupBillingMode, LessonType
 from bot.services import LessonService
 from bot.services.billing_service import build_billing_rows, calc_earned
 from bot.services.payment_service import SUBSCRIPTION_KEY_PREFIX
-from bot.services import hall_rent
+from bot.services import hall_rent, schedule_pilot
 from bot.services.profit_service import lesson_rent
 from bot.services.rosters import group_members
-from bot.services.schedule_pilot import DraftConflict, edited_schedule
+from bot.services.schedule_pilot import DraftConflict, edited_schedule, is_draft_completed
 from bot.services.salary_summary import summarize, summary_dicts
 from bot.utils.attendees import free_attendee_label, has_amount_snapshots, parse_attendees
 from bot.utils.dates import current_period, last_periods, now_str
@@ -271,9 +271,21 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         pilot = schedule_for(user)
         if pilot is None:
             return _json({"error": "not_found"}, status=404)
-        drafts = await pilot.drafts(await schedule_students(user, teacher))
-        return _json({"drafts": drafts, "acceptWeekday": pilot.accept_weekday,
-                      "acceptPlainTitle": pilot.accept_plain_title, "acceptWeekly": pilot.accept_weekly})
+        today_iso = schedule_pilot.moscow_today().isoformat()
+        all_drafts = await pilot.drafts(await schedule_students(user, teacher))
+        active_today = [d for d in all_drafts if d["date"] == today_iso and not is_draft_completed(d)]
+        completed_today = any(d["date"] == today_iso and is_draft_completed(d) for d in all_drafts)
+        upcoming_dates = sorted({d["date"] for d in all_drafts if d["date"] > today_iso and not is_draft_completed(d)})
+        return _json({
+            "drafts": active_today,
+            "today": today_iso,
+            "completedToday": completed_today,
+            "upcomingDates": upcoming_dates,
+            "acceptWeekday": pilot.accept_weekday,
+            "acceptPlainTitle": pilot.accept_plain_title,
+            "acceptWeekly": pilot.accept_weekly,
+            "acceptOwnerInitials": pilot.accept_owner_initials,
+        })
 
     async def schedule_save(request: web.Request, user, teacher) -> web.Response:
         pilot = schedule_for(user)
@@ -347,9 +359,18 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
         prev_rent = await _rent(teacher, prev) if rent is not None and hall_rent.settled(prev) else None
         earned_month = await salary_service.total_for(teacher, period)
         payouts = await _payouts(teacher, period, earned_month)
+        pilot = schedule_for(user)
+        schedule_meta: dict = {}
+        if pilot is not None:
+            pending_today, completed_today = await pilot.today_summary(schedule_pilot.moscow_today())
+            schedule_meta = {
+                "schedulePilot": True,
+                "scheduleTodayPending": pending_today,
+                "scheduleCompletedToday": completed_today,
+            }
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
-            **({"schedulePilot": True} if schedule_for(user) is not None else {}),
+            **schedule_meta,
             # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
             "rentMonth": rent["accrued"] if rent else 0,
             "rentDue": {"period": prev, "rest": prev_rent["rest"]} if prev_rent and prev_rent["rest"] else None,
