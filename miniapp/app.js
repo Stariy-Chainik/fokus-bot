@@ -401,6 +401,7 @@ SCREENS['a.home'] = async ({ ym } = {}) => {
   return { title: 'Сводка', html: `
     ${hero(`Кабинет администратора · ${fdate(h.today)}`)}
     ${attention.length ? `<div class="eyebrow" style="margin-top:2px">Требует внимания</div><div class="list attn" style="margin-bottom:12px">${attention.join('')}</div>` : ''}
+    ${h.canRecalculate ? `<div style="margin-bottom:12px">${goBtn('Перерасчёт', 'a.recalc', { ym: h.period }, 'sec')}</div>` : ''}
     ${monthChips('a.home', h.period, {})}
     ${tiles}
     ${flowTiles}
@@ -1540,6 +1541,89 @@ Object.assign(ACT, {
   // по подтверждению (решение владельца 10.10.2026)
   rwSave: async ({ confirmSameDay, confirmZero } = {}) => { const w = rw(); if (w.saving) return; const amounts = {}; if (w.kind === 'rshare') { document.querySelectorAll('[data-amt]').forEach(el => { const v = el.value.trim(); if (v !== '') { amounts[el.dataset.amt] = +v; w.amounts[el.dataset.amt] = +v; } }); } if (Object.values(amounts).some(v => !Number.isInteger(v) || v < 0)) { toast('Сумма — целое число рублей', 'bad'); return; } if (!confirmZero && Object.values(amounts).some(v => v === 0)) { confirmSheet({ title: 'Сохранить с суммой 0 ₽?', text: 'Занятие будет бесплатным для ученицы и без оплаты педагогу.', okText: 'Сохранить', onOk: () => ACT.rwSave({ confirmSameDay, confirmZero: true }) }); return; } w.saving = true; render(); const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; const body = { teacherId: w.tid, kind: w.kind, date: w.date, durationMin: w.dur, groupId: w.gid, mergeGroupIds: [...(w.merge || [])], studentIds: [...w.ids], tiers: w.tiers, amounts, requestId, confirmSameDay: !!confirmSameDay }; try { const r = await api('/record', { method: 'POST', body }); const keep = { date: w.date, opts: w.opts }; rwReset(w.tid, w.name, keep); rw().step = 1; render(); toast(r.repeat ? 'Уже сохранено — второй раз не записываю' : r.created > 1 ? `Создано занятий: ${r.created}` : `Записано: ${r.label}`, 'ok'); } catch (e) { w.saving = false; render(); if (e instanceof ApiError && e.code === 'same_day') { confirmSheet({ title: 'Записать ещё одно?', text: e.data && e.data.message ? e.data.message : 'В этот день уже есть такое занятие.', okText: 'Записать ещё одно', onOk: () => ACT.rwSave({ confirmSameDay: true, confirmZero }) }); return; } toast(e instanceof ApiError && e.code === 'conflict' ? (e.data && e.data.message) || 'Такое занятие уже записано' : errText(e), 'bad'); } },
   confirmOk: () => { const fn = _confirmFn; _confirmFn = null; closeSheet(); if (fn) fn(); },
+});
+
+/* ── Перерасчёт абонемента ────────────────────────────────────────── */
+SCREENS['a.recalc'] = async ({ ym }) => {
+  const q = state.ui['q-recalc'] || '';
+  let result = '';
+  if (q.trim()) {
+    try {
+      const { students } = await api(`/recalculation/search?q=${encodeURIComponent(q.trim())}`);
+      result = students.length ? list(students.flatMap(s => {
+        const lead = initials(s.name), name = esc(s.name), archive = s.archived ? 'Архив · ' : '';
+        if (!s.groups.length) return [`<div class="cell static"><span class="lead">${lead}</span>
+          <span><div class="t">${name}</div><div class="s">${archive}Нет абонементной группы</div></span></div>`];
+        return s.groups.map(g => cell({
+          lead, t: name, s: archive + esc(g.name), act: 'aRecalcOpen',
+          p: { sid: s.id, ym, gid: g.id, student: s.name, group: g.name },
+        }));
+      })) : empty('По этой фамилии никого не нашли');
+    } catch (e) {
+      result = empty(esc(errText(e)), btn('Повторить', 'retry', {}, 'sec'));
+    }
+  }
+  return { title: 'Перерасчёт', html: `
+    ${stickyFilters(searchBox('q-recalc', 'Фамилия ученика', q, 'enterkeyhint="search" aria-label="Фамилия ученика"'))}
+    ${result}` };
+};
+
+const requestSubscriptionRecalc = (p, quote) => api(`/recalculation/${encodeURIComponent(p.sid)}`, {
+  method: 'POST',
+  body: { groupId: p.gid, start: p.start, end: p.end, missed: p.missed, ym: p.ym, ...(quote === undefined ? {} : { quote }) },
+});
+
+Object.assign(ACT, {
+  aRecalcOpen(p) {
+    document.getElementById('q-recalc')?.blur();
+    closeSheet();
+    sheet(`<h3>Перерасчёт по справке</h3><div class="hint">${esc(p.student)} · ${esc(p.group)}</div>
+      ${field('recalc-start', 'Освобождение с', p.start, 'type="date" required')}
+      ${field('recalc-end', 'Освобождение по включительно', p.end, 'type="date" required')}
+      ${field('recalc-missed', 'Пропущено занятий из 8', p.missed, 'type="number" min="1" max="8" step="1" inputmode="numeric" required')}
+      ${field('recalc-month', 'Месяц счёта для перерасчёта', p.ym, 'type="month" required')}
+      <div style="margin-top:12px">${btn('Рассчитать', 'aRecalcPreview', p)}</div>`);
+  },
+  async aRecalcPreview(p) {
+    const monthField = document.getElementById('recalc-month');
+    const draft = { ...p, start: val('recalc-start'), end: val('recalc-end'), missed: Number(val('recalc-missed')), ym: val('recalc-month') };
+    if (!draft.start || !draft.end || draft.start > draft.end || !draft.ym ||
+        !Number.isInteger(draft.missed) || draft.missed < 1 || draft.missed > 8) {
+      toast('Проверь даты, месяц счёта и число пропусков от 1 до 8');
+      return;
+    }
+    try {
+      const preview = await requestSubscriptionRecalc(draft);
+      if (!monthField?.isConnected) return;
+      closeSheet();
+      const month = fmon(draft.ym).toLowerCase();
+      if (preview.duplicate) return toast(`Справка уже учтена за ${month}`);
+      sheet(`<h3>Перерасчёт за ${esc(month)}</h3>
+        <div class="hint">${esc(draft.student)} · ${esc(draft.group)}</div>
+        <p class="hint">${esc(fdate(draft.start))} – ${esc(fdate(draft.end))} · пропущено ${preview.missedTotal} из 8</p>
+        <div class="card pad">
+          <div>Было <strong>${fmt(preview.before)}</strong></div>
+          ${preview.paid ? `<div>После перерасчёта <strong>${fmt(preview.amount)}</strong></div>
+            <div class="hint">Уже оплачено ${fmt(preview.paid)}</div>` : ''}
+          <div style="margin-top:8px">К оплате <strong class="money">${fmt(preview.rest)}</strong></div>
+        </div>
+        <div style="margin-top:12px">
+          ${btn('Применить перерасчёт', 'aRecalcApply', { draft, quote: preview.quote })}
+          ${btn('Вернуться к справке', 'aRecalcOpen', draft, 'ghost')}
+        </div>`);
+    } catch (e) { toast(e.data?.message || errText(e)); }
+  },
+  async aRecalcApply({ draft, quote }) {
+    const screen = cur();
+    try {
+      const result = await requestSubscriptionRecalc(draft, quote);
+      if (cur() === screen) closeSheet();
+      toast(result.duplicate ? 'Справка уже учтена' : `Перерасчёт сохранён · абонемент ${fmt(result.amount)}`, 'ok');
+    } catch (e) {
+      if (cur() === screen && e.code === 'conflict') ACT.aRecalcOpen(draft);
+      toast(e.data?.message || errText(e), 'bad');
+    }
+  },
 });
 
 /* ── рендер ─────────────────────────────────────────────────────────── */

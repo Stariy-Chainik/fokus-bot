@@ -377,7 +377,6 @@ def register_teacher_api(app: web.Application, dp, bot=None) -> None:
             }
         return _json({
             "name": teacher.name, "today": today, "period": period, "prevPeriod": prev,
-            "canRecalculate": bill_ctx.can_recalculate(teacher),
             **schedule_meta,
             # аренда зала (прямая оплата): сумма месяца рядом с зарплатой и напоминание за прошлый месяц
             "rentMonth": rent["accrued"] if rent else 0,
